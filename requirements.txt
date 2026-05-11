@@ -1,0 +1,5 @@
+mcp==1.27.1
+numpy==2.4.4
+sqlite-vec==0.1.9
+pytest==9.0.3
+pytest-timeout==2.4.0

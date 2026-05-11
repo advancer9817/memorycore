@@ -44,6 +44,29 @@
 /home/advancer/.agent-memory/local-memory-mcp/run_curator.sh
 ```
 
+## 本地测试与 CI
+
+安装依赖：
+
+```bash
+cd local-memory-mcp
+python -m pip install -r requirements.txt
+```
+
+如果使用 uv，也可以运行：
+
+```bash
+uv pip install -r requirements.txt
+```
+
+运行测试：
+
+```bash
+.venv/bin/python -m pytest tests/ -q
+```
+
+测试会通过 `LOCAL_MEMORY_DB` 指向 pytest 的临时 SQLite 文件，并在每个测试前清空初始化缓存，避免读写生产 `memory.sqlite3`。GitHub Actions CI 使用 Python 3.11，安装 `requirements.txt` 后执行同一组 pytest；CI 中 `LOCAL_MEMORY_DB=/tmp/ci_test_memory.sqlite3`。
+
 ## MCP configs
 
 Hermes `~/.hermes/config.yaml`、Codex `~/.codex/config.toml`、Claude Code `~/.claude.json` 已增加 `local_memory` server。
