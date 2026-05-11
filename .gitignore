@@ -1,0 +1,19 @@
+# Runtime / local data
+memory.sqlite3
+memory.sqlite3-*
+*.sqlite3
+*.sqlite3-*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Generated artifacts
+/dashboard.html
+/reports/*.json
+/reports/claude-review-*.md
+
+# Local env / secrets
+.env
+*.env
