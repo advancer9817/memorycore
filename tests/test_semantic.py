@@ -31,7 +31,9 @@ def test_hashing_embedding_dimension_determinism_and_normalization():
     assert math.isclose(float(lm.np.linalg.norm(vector)), 1.0, rel_tol=1e-6)
 
 
-def test_semantic_index_and_search_when_available():
+def test_semantic_index_and_search_when_available(monkeypatch):
+    monkeypatch.setenv("LOCAL_MEMORY_EMBEDDING_PROVIDER", "hashing")
+    monkeypatch.setenv("LOCAL_MEMORY_EMBEDDING_DIM", "384")
     lm.add_memory_record("project_memory", "Vector Search", "alpha vector memory", memory_id="semantic-1")
 
     if not lm.semantic_available():
@@ -47,3 +49,61 @@ def test_semantic_index_and_search_when_available():
     assert results
     assert results[0]["id"] == "semantic-1"
     assert isinstance(results[0]["semantic_distance"], float)
+
+
+def test_ollama_embedding_provider_returns_768_float32_bytes(monkeypatch):
+    if lm.np is None:
+        pytest.skip("numpy is not available")
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b'{"embeddings": [[0.5, 0.5, 0.0, 0.0]]}'
+
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["body"] = request.data.decode("utf-8")
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(lm.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("LOCAL_MEMORY_OLLAMA_URL", "http://127.0.0.1:11434")
+    monkeypatch.setenv("LOCAL_MEMORY_EMBEDDING_MODEL", "nomic-embed-text")
+    monkeypatch.setenv("LOCAL_MEMORY_EMBEDDING_DIM", "4")
+
+    raw = lm.embed_text_ollama("hello memory")
+
+    assert captured["url"] == "http://127.0.0.1:11434/api/embed"
+    assert '"model": "nomic-embed-text"' in captured["body"]
+    vector = lm.np.frombuffer(raw, dtype=lm.np.float32)
+    assert vector.shape == (4,)
+    assert math.isclose(float(lm.np.linalg.norm(vector)), 1.0, rel_tol=1e-6)
+
+
+def test_vector_schema_migrates_from_hashing_384_to_ollama_768(monkeypatch):
+    if not lm.semantic_available():
+        pytest.skip("sqlite-vec/numpy not available")
+
+    monkeypatch.setenv("LOCAL_MEMORY_EMBEDDING_PROVIDER", "hashing")
+    monkeypatch.setenv("LOCAL_MEMORY_EMBEDDING_DIM", "384")
+    with lm.managed_conn() as conn:
+        original = conn.execute("SELECT sql FROM sqlite_master WHERE name='memory_vec'").fetchone()[0]
+        assert "float[384]" in original
+
+    lm._INITIALIZED_DB_PATHS.clear()
+    monkeypatch.setenv("LOCAL_MEMORY_EMBEDDING_PROVIDER", "ollama")
+    monkeypatch.setenv("LOCAL_MEMORY_EMBEDDING_MODEL", "nomic-embed-text")
+    monkeypatch.setenv("LOCAL_MEMORY_EMBEDDING_DIM", "768")
+    with lm.managed_conn() as conn:
+        migrated = conn.execute("SELECT sql FROM sqlite_master WHERE name='memory_vec'").fetchone()[0]
+        indexed = conn.execute("SELECT COUNT(*) FROM memory_embedding_index").fetchone()[0]
+
+    assert "float[768]" in migrated
+    assert indexed == 0

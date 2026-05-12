@@ -1,24 +1,20 @@
-# Runtime / local data
-memory.sqlite3
-memory.sqlite3-*
-*.sqlite3
-*.sqlite3-*
-
 # Python
 __pycache__/
 *.py[cod]
+.pytest_cache/
 .venv/
 .venv*/
-.pytest_cache/
 
-# Generated artifacts
-/dashboard.html
-/reports/*.json
-/reports/claude-review-*.md
+# Local runtime state
+memory.sqlite3
+memory.sqlite3-*
+memory_ops.sqlite3
+memory_ops.sqlite3-*
+dashboard.html
+dashboard.log
+backups/
 
-# IDE
+# Editor/OS
 .idea/
-
-# Local env / secrets
-.env
-*.env
+.DS_Store
+Thumbs.db

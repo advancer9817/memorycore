@@ -11,6 +11,9 @@ def test_export_html_writes_dashboard_with_records_and_escaped_json(tmp_path):
     text = out.read_text(encoding="utf-8")
     assert text.startswith("<!doctype html>")
     assert '<script id="memory-data" type="application/json">' in text
+    assert "https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" in text
+    assert "x-data=\"memoryDashboard()\"" in text
+    assert "Operations Console" in text
     assert "Safe Title" in text
     assert "Visible content" in text
     assert "<script>alert(1)</script>" not in text

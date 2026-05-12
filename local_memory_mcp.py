@@ -16,8 +16,11 @@ import sys
 import hashlib
 import math
 import textwrap
+import urllib.error
+import urllib.request
 import uuid
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -36,6 +39,22 @@ except Exception:
 DEFAULT_ROOT = Path(__file__).resolve().parent
 DEFAULT_DB = Path(os.environ.get("LOCAL_MEMORY_DB", Path.home() / ".agent-memory" / "local-memory-mcp" / "memory.sqlite3"))
 _INITIALIZED_DB_PATHS: set[str] = set()
+
+DEFAULT_CONFIG: dict[str, Any] = {
+    "backend": {"primary": "sqlite", "fallback": "sqlite"},
+    "openmemory": {"url": "http://127.0.0.1:8765", "user_id": "local-user", "timeout": 30},
+    "qdrant": {"url": "http://127.0.0.1:6333", "collection": "agent_memory", "timeout": 30},
+    "embedding": {
+        "provider": "ollama",
+        "model": "nomic-embed-text",
+        "dim": 768,
+        "ollama_url": "http://127.0.0.1:11434",
+        "timeout": 30,
+    },
+    "context_pack": {"default_token_budget": 2000, "include_stale_warnings": True, "max_records_per_group": 6},
+    "temporal": {"enabled": False, "contradiction_detection": "heuristic", "auto_supersede_user_corrections": True},
+    "ops_db": {"path": str(DEFAULT_ROOT / "memory_ops.sqlite3")},
+}
 
 MEMORY_TYPES = {
     "user_profile",
@@ -69,6 +88,82 @@ def from_json(value: str | None, default: Any) -> Any:
         return json.loads(value)
     except Exception:
         return default
+
+
+def config_path() -> Path:
+    return Path(os.environ.get("LOCAL_MEMORY_CONFIG", str(DEFAULT_ROOT / "config.yaml"))).expanduser()
+
+
+def _parse_yaml_scalar(value: str) -> Any:
+    raw = value.strip()
+    lowered = raw.lower()
+    if lowered in {"true", "false"}:
+        return lowered == "true"
+    if lowered in {"null", "none", "~"}:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        pass
+    try:
+        return float(raw)
+    except ValueError:
+        pass
+    if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith("'") and raw.endswith("'")):
+        return raw[1:-1]
+    return raw
+
+
+def _parse_simple_yaml(text: str) -> dict[str, Any]:
+    """Parse the small nested config.yaml subset used by this adapter.
+
+    This intentionally avoids adding PyYAML as a runtime dependency. Supported
+    syntax is enough for config.yaml: top-level sections with two-space indented
+    scalar key/value pairs.
+    """
+    data: dict[str, Any] = {}
+    current: dict[str, Any] | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not line.startswith(" ") and stripped.endswith(":"):
+            section = stripped[:-1].strip()
+            current = data.setdefault(section, {})
+            continue
+        if ":" not in stripped:
+            continue
+        key, value = stripped.split(":", 1)
+        target = current if line.startswith(" ") and current is not None else data
+        target[key.strip()] = _parse_yaml_scalar(value)
+    return data
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for key, value in base.items():
+        if isinstance(value, dict):
+            merged[key] = _deep_merge(value, {})
+        else:
+            merged[key] = value
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def load_config() -> dict[str, Any]:
+    path = config_path()
+    if not path.exists():
+        config = _deep_merge(DEFAULT_CONFIG, {})
+    else:
+        config = _deep_merge(DEFAULT_CONFIG, _parse_simple_yaml(path.read_text(encoding="utf-8")))
+    openmemory = config.setdefault("openmemory", {})
+    if openmemory.get("user_id") == "local-user" and os.environ.get("USER"):
+        openmemory["user_id"] = os.environ["USER"]
+    return config
 
 
 def db_path() -> Path:
@@ -121,6 +216,71 @@ def managed_conn():
         raise
     finally:
         conn.close()
+
+
+@dataclass(frozen=True)
+class SemanticConfig:
+    provider: str
+    model: str
+    dim: int
+    ollama_url: str
+    timeout: float
+
+
+def semantic_config() -> SemanticConfig:
+    config = load_config().get("embedding", {})
+    provider = os.environ.get("LOCAL_MEMORY_EMBEDDING_PROVIDER", str(config.get("provider", "ollama"))).strip().lower() or "ollama"
+    default_model = str(config.get("model") or ("nomic-embed-text" if provider == "ollama" else "hashing-384"))
+    model = os.environ.get("LOCAL_MEMORY_EMBEDDING_MODEL", default_model).strip() or default_model
+    default_dim = str(config.get("dim") or (768 if provider == "ollama" else 384))
+    try:
+        dim = int(os.environ.get("LOCAL_MEMORY_EMBEDDING_DIM", default_dim))
+    except ValueError:
+        dim = int(default_dim)
+    dim = max(1, dim)
+    ollama_url = os.environ.get("LOCAL_MEMORY_OLLAMA_URL", str(config.get("ollama_url", "http://127.0.0.1:11434"))).rstrip("/")
+    default_timeout = str(config.get("timeout", 30))
+    try:
+        timeout = float(os.environ.get("LOCAL_MEMORY_OLLAMA_TIMEOUT", default_timeout))
+    except ValueError:
+        timeout = float(default_timeout)
+    return SemanticConfig(provider=provider, model=model, dim=dim, ollama_url=ollama_url, timeout=max(1.0, timeout))
+
+
+def vector_schema_dim(conn: sqlite3.Connection) -> int | None:
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='memory_vec'").fetchone()
+    if not row or not row[0]:
+        return None
+    match = re.search(r"float\[(\d+)\]", row[0])
+    return int(match.group(1)) if match else None
+
+
+def ensure_vector_schema(conn: sqlite3.Connection) -> None:
+    config = semantic_config()
+    existing_dim = vector_schema_dim(conn)
+    if existing_dim is not None and existing_dim != config.dim:
+        conn.executescript(
+            """
+            DROP TABLE IF EXISTS memory_vec;
+            DROP TABLE IF EXISTS memory_embedding_index;
+            """
+        )
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS memory_embedding_index (
+          rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+          memory_id TEXT NOT NULL UNIQUE,
+          provider TEXT NOT NULL DEFAULT 'hashing',
+          model TEXT NOT NULL DEFAULT 'hashing-384',
+          dim INTEGER NOT NULL DEFAULT 384,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY(memory_id) REFERENCES memories(id) ON DELETE CASCADE
+        );
+        """
+    )
+    safe_dim = int(config.dim)
+    create_vec_sql = "CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec USING vec0(embedding float[%d])" % safe_dim
+    conn.execute(create_vec_sql)
 
 
 def init_db(conn: sqlite3.Connection) -> None:
@@ -222,20 +382,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             [(r["id"], r["title"], r["content"], r["tags_json"], r["type"], r["scope"]) for r in rows],
         )
     if SQLITE_VEC_AVAILABLE:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS memory_embedding_index (
-              rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-              memory_id TEXT NOT NULL UNIQUE,
-              provider TEXT NOT NULL DEFAULT 'hashing',
-              model TEXT NOT NULL DEFAULT 'hashing-384',
-              dim INTEGER NOT NULL DEFAULT 384,
-              updated_at TEXT NOT NULL,
-              FOREIGN KEY(memory_id) REFERENCES memories(id) ON DELETE CASCADE
-            );
-            CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec USING vec0(embedding float[384]);
-            """
-        )
+        ensure_vector_schema(conn)
     conn.commit()
 
 
@@ -500,26 +647,33 @@ def timeline(query: str = "", scope: str = "", limit: int = 20) -> list[dict[str
     return sorted(rows, key=lambda r: r.get("created_at", ""))
 
 
-SEMANTIC_DIM = 384
-SEMANTIC_PROVIDER = "hashing"
-SEMANTIC_MODEL = "hashing-384"
+DEFAULT_SEMANTIC_CONFIG = semantic_config()
+SEMANTIC_DIM = DEFAULT_SEMANTIC_CONFIG.dim
+SEMANTIC_PROVIDER = DEFAULT_SEMANTIC_CONFIG.provider
+SEMANTIC_MODEL = DEFAULT_SEMANTIC_CONFIG.model
+
+
+def _vector_to_bytes(values: list[float], dim: int) -> bytes:
+    if np is None:
+        raise RuntimeError("numpy is required for semantic embeddings")
+    if len(values) != dim:
+        raise RuntimeError(f"embedding dimension mismatch: expected {dim}, got {len(values)}")
+    vec = np.asarray(values, dtype=np.float32)
+    norm = float(np.linalg.norm(vec))
+    if norm > 0:
+        vec = vec / norm
+    return vec.astype(np.float32).tobytes()
 
 
 def semantic_available() -> bool:
     return bool(SQLITE_VEC_AVAILABLE and np is not None)
 
 
-def embed_text_hashing(text: str, dim: int = SEMANTIC_DIM) -> bytes:
-    """Deterministic local embedding fallback.
-
-    This is a lightweight hashed bag-of-words vector. It is not a deep semantic
-    model, but it exercises the sqlite-vec plumbing locally and gives a better
-    fuzzy recall fallback than exact FTS when no Ollama/sentence model is
-    available. Future providers can replace only this embedding function while
-    keeping the same vector index/query surface.
-    """
+def embed_text_hashing(text: str, dim: int | None = None) -> bytes:
+    """Deterministic local embedding fallback used only when explicitly configured."""
     if np is None:
         raise RuntimeError("numpy is required for semantic hashing embeddings")
+    dim = int(dim or semantic_config().dim)
     vec = np.zeros(dim, dtype=np.float32)
     tokens = re.findall(r"[\w\u4e00-\u9fff]+", text.lower(), flags=re.UNICODE)
     for tok in tokens:
@@ -533,25 +687,62 @@ def embed_text_hashing(text: str, dim: int = SEMANTIC_DIM) -> bytes:
     return vec.astype(np.float32).tobytes()
 
 
+def embed_text_ollama(text: str, config: SemanticConfig | None = None) -> bytes:
+    config = config or semantic_config()
+    payload = json.dumps({"model": config.model, "input": text}, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        f"{config.ollama_url}/api/embed",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=config.timeout) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Ollama embedding request failed: {exc}") from exc
+    embeddings = data.get("embeddings") or []
+    if not embeddings:
+        raise RuntimeError("Ollama embedding response did not include embeddings")
+    return _vector_to_bytes([float(x) for x in embeddings[0]], config.dim)
+
+
+def embed_text(text: str, config: SemanticConfig | None = None) -> bytes:
+    config = config or semantic_config()
+    if config.provider == "ollama":
+        return embed_text_ollama(text, config)
+    if config.provider == "hashing":
+        return embed_text_hashing(text, config.dim)
+    raise RuntimeError(f"unsupported embedding provider: {config.provider}")
+
+
 def semantic_index(limit: int = 1000, force: bool = False) -> dict[str, Any]:
     if not semantic_available():
         return {"available": False, "reason": "sqlite-vec/numpy not available", "indexed": 0, "skipped": 0}
+    config = semantic_config()
     indexed = 0
     skipped = 0
+    errors: list[dict[str, str]] = []
     with managed_conn() as conn:
+        ensure_vector_schema(conn)
         rows = conn.execute(
             """
             SELECT m.* FROM memories m
             LEFT JOIN memory_embedding_index e ON e.memory_id = m.id
-            WHERE (? OR e.memory_id IS NULL OR e.updated_at < m.updated_at)
+            WHERE (? OR e.memory_id IS NULL OR e.updated_at < m.updated_at OR e.provider != ? OR e.model != ? OR e.dim != ?)
             ORDER BY m.updated_at DESC LIMIT ?
             """,
-            (1 if force else 0, max(1, min(int(limit), 5000))),
+            (1 if force else 0, config.provider, config.model, config.dim, max(1, min(int(limit), 5000))),
         ).fetchall()
         for row in rows:
             r = row_to_dict(row)
             text = f"{r['type']} {r['scope']} {r['title']} {' '.join(r.get('tags', []))}\n{r['content']}"
-            emb = embed_text_hashing(text)
+            try:
+                emb = embed_text(text, config)
+            except RuntimeError as exc:
+                skipped += 1
+                errors.append({"id": r["id"], "error": str(exc)})
+                continue
             existing = conn.execute("SELECT rowid FROM memory_embedding_index WHERE memory_id=?", (r["id"],)).fetchone()
             ts = now()
             if existing:
@@ -559,25 +750,32 @@ def semantic_index(limit: int = 1000, force: bool = False) -> dict[str, Any]:
                 conn.execute("UPDATE memory_vec SET embedding=? WHERE rowid=?", (emb, rid))
                 conn.execute(
                     "UPDATE memory_embedding_index SET provider=?, model=?, dim=?, updated_at=? WHERE memory_id=?",
-                    (SEMANTIC_PROVIDER, SEMANTIC_MODEL, SEMANTIC_DIM, ts, r["id"]),
+                    (config.provider, config.model, config.dim, ts, r["id"]),
                 )
             else:
                 cur = conn.execute(
                     "INSERT INTO memory_embedding_index(memory_id,provider,model,dim,updated_at) VALUES (?,?,?,?,?)",
-                    (r["id"], SEMANTIC_PROVIDER, SEMANTIC_MODEL, SEMANTIC_DIM, ts),
+                    (r["id"], config.provider, config.model, config.dim, ts),
                 )
                 rid = int(cur.lastrowid)
                 conn.execute("INSERT INTO memory_vec(rowid, embedding) VALUES (?, ?)", (rid, emb))
             indexed += 1
-    return {"available": True, "provider": SEMANTIC_PROVIDER, "model": SEMANTIC_MODEL, "dim": SEMANTIC_DIM, "indexed": indexed, "skipped": skipped}
+    return {"available": True, "provider": config.provider, "model": config.model, "dim": config.dim, "indexed": indexed, "skipped": skipped, "errors": errors[:5]}
 
 
 def semantic_search(query: str, limit: int = 10, status: str = "active") -> list[dict[str, Any]]:
     if not semantic_available():
         return []
-    semantic_index(limit=1000, force=False)
-    emb = embed_text_hashing(query)
+    config = semantic_config()
+    index_result = semantic_index(limit=1000, force=False)
+    if index_result.get("indexed", 0) == 0 and index_result.get("skipped", 0) > 0:
+        return []
+    try:
+        emb = embed_text(query, config)
+    except RuntimeError:
+        return []
     with managed_conn() as conn:
+        ensure_vector_schema(conn)
         rows = conn.execute(
             """
             SELECT m.*, v.distance AS semantic_distance
@@ -598,19 +796,24 @@ def semantic_search(query: str, limit: int = 10, status: str = "active") -> list
 
 
 def semantic_status() -> dict[str, Any]:
+    config = semantic_config()
     with managed_conn() as conn:
+        ensure_vector_schema(conn) if semantic_available() else None
         total = conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
         indexed = 0
+        schema_dim = None
         if semantic_available():
-            indexed = conn.execute("SELECT COUNT(*) FROM memory_embedding_index").fetchone()[0]
+            indexed = conn.execute("SELECT COUNT(*) FROM memory_embedding_index WHERE provider=? AND model=? AND dim=?", (config.provider, config.model, config.dim)).fetchone()[0]
+            schema_dim = vector_schema_dim(conn)
     return {
         "available": semantic_available(),
-        "provider": SEMANTIC_PROVIDER if semantic_available() else None,
-        "model": SEMANTIC_MODEL if semantic_available() else None,
-        "dim": SEMANTIC_DIM if semantic_available() else None,
+        "provider": config.provider if semantic_available() else None,
+        "model": config.model if semantic_available() else None,
+        "dim": config.dim if semantic_available() else None,
+        "schema_dim": schema_dim,
         "total_records": total,
         "indexed_records": indexed,
-        "note": "hashing fallback is local/vector plumbing, not a deep embedding model; switch provider to Ollama/sentence-transformers later when available",
+        "note": "Ollama nomic-embed-text is the default local embedding provider; set LOCAL_MEMORY_EMBEDDING_PROVIDER=hashing for the legacy hashing fallback",
     }
 
 
@@ -867,71 +1070,126 @@ def export_html(path: Path) -> None:
         "timeline_rows": timeline_rows,
     }
     data_json = json.dumps(payload, ensure_ascii=True).replace("<", "\\u003c")
-    doc = f"""<!doctype html>
+    db_label = html.escape(str(db_path()))
+    doc = """<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Local Memory MCP Dashboard</title>
+<title>Local Memory Operations Console</title>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
 <style>
-:root{{--bg:#07111f;--panel:#0f1b2e;--panel2:#13223a;--text:#e6edf3;--muted:#9aa4b2;--line:#28405f;--accent:#7dd3fc;--good:#86efac;--warn:#fbbf24;--bad:#fb7185;--violet:#c4b5fd;}}
-*{{box-sizing:border-box}} body{{margin:0;background:radial-gradient(circle at 20% 0%,#162a4a,#07111f 42%,#050912);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;}}
-header{{position:sticky;top:0;z-index:10;background:rgba(7,17,31,.88);backdrop-filter:blur(14px);border-bottom:1px solid var(--line);padding:18px clamp(16px,4vw,36px)}}
-h1{{margin:0;font-size:clamp(24px,3vw,36px)}} .sub{{color:var(--muted);margin-top:6px}} main{{max-width:1320px;margin:auto;padding:26px clamp(16px,4vw,36px) 80px}}
-.hero{{display:grid;grid-template-columns:1.4fr .8fr;gap:18px;align-items:stretch}} .card,.panel{{background:linear-gradient(180deg,rgba(19,34,58,.86),rgba(15,27,46,.76));border:1px solid var(--line);border-radius:20px;padding:18px;box-shadow:0 14px 40px rgba(0,0,0,.22)}}
-.metrics{{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:12px;margin:18px 0}} .metric{{padding:16px;border-radius:16px;background:rgba(125,211,252,.08);border:1px solid rgba(125,211,252,.22)}} .metric b{{display:block;font-size:26px}} .metric span{{color:var(--muted);font-size:13px}}
-.controls{{display:grid;grid-template-columns:2fr repeat(3,1fr);gap:10px;margin:18px 0;position:sticky;top:86px;z-index:8;background:rgba(7,17,31,.82);backdrop-filter:blur(10px);padding:12px;border:1px solid var(--line);border-radius:18px}} input,select,button{{background:#09182a;color:var(--text);border:1px solid var(--line);border-radius:12px;padding:10px 12px}} button{{cursor:pointer}} button:hover{{border-color:var(--accent)}}
-.tabs{{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0}} .tab{{border-radius:999px}} .tab.active{{background:var(--accent);color:#03101f;border-color:var(--accent)}}
-.view{{display:none}} .view.active{{display:block}} .records{{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}} article{{border:1px solid var(--line);border-radius:16px;padding:14px;background:rgba(15,27,46,.66)}} article h3{{margin:0 0 8px;font-size:17px}} article p{{line-height:1.55;color:#d7dee8;max-height:9.2em;overflow:auto}} .meta{{color:var(--muted);font-size:12px;display:flex;gap:8px;flex-wrap:wrap}} .chip,.tags span{{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:3px 8px;margin:6px 6px 0 0;color:var(--violet);font-size:12px}} code{{display:block;color:var(--good);font-size:12px;margin-top:8px;word-break:break-all}}
-.timeline{{position:relative;margin-left:8px}} .timeline:before{{content:"";position:absolute;left:12px;top:0;bottom:0;width:2px;background:var(--line)}} .event{{position:relative;margin:0 0 14px 34px}} .event:before{{content:"";position:absolute;left:-28px;top:8px;width:12px;height:12px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 5px rgba(125,211,252,.12)}}
-.bars{{display:grid;gap:10px}} .bar{{display:grid;grid-template-columns:150px 1fr 44px;gap:10px;align-items:center}} .track{{height:10px;background:#09182a;border-radius:999px;overflow:hidden;border:1px solid var(--line)}} .fill{{height:100%;background:linear-gradient(90deg,var(--accent),var(--violet))}} .curator-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}} .warn{{color:var(--warn)}} .bad{{color:var(--bad)}} .good{{color:var(--good)}}
-@media (max-width:800px){{.hero{{grid-template-columns:1fr}}.metrics{{grid-template-columns:repeat(2,1fr)}}.controls{{position:static;grid-template-columns:1fr}}}}
-@media print{{header,.controls,.tabs{{display:none}} body{{background:white;color:#111}} .card,.panel,article{{break-inside:avoid;border-color:#ccc;background:white;color:#111}}}}
+:root{--bg:#0b0d10;--bg2:#11151b;--panel:#151a21;--panel2:#10141a;--ink:#f3f4f6;--muted:#9ca3af;--soft:#cbd5e1;--line:#2a313b;--line2:#3b4451;--accent:#7dd3fc;--accent2:#a7f3d0;--warn:#fbbf24;--bad:#fb7185;--good:#86efac;--violet:#c4b5fd;--shadow:0 18px 55px rgba(0,0,0,.28);--radius:18px}
+*{box-sizing:border-box} [x-cloak]{display:none!important}
+html{background:var(--bg)} body{margin:0;min-height:100vh;color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:linear-gradient(180deg,#0b0d10 0%,#0f141b 55%,#0b0d10 100%)}
+body:before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at 10% 0%,rgba(125,211,252,.12),transparent 34%),radial-gradient(circle at 90% 10%,rgba(167,243,208,.08),transparent 30%);opacity:.95}
+a{color:var(--accent)} button,input,select{font:inherit} button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.shell{position:relative;display:grid;grid-template-columns:280px minmax(0,1fr);min-height:100vh}.sidebar{position:sticky;top:0;height:100vh;padding:22px;border-right:1px solid var(--line);background:rgba(11,13,16,.84);backdrop-filter:blur(18px)}
+.brand{display:grid;gap:7px;margin-bottom:28px}.eyebrow{color:var(--accent2);font:700 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.16em;text-transform:uppercase}.brand h1{margin:0;font-size:24px;letter-spacing:-.04em}.brand p{margin:0;color:var(--muted);font-size:13px;line-height:1.5;word-break:break-word}
+.nav{display:grid;gap:8px}.nav button{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:44px;padding:10px 12px;border:1px solid transparent;border-radius:12px;background:transparent;color:var(--soft);cursor:pointer;text-align:left}.nav button:hover{background:#131922;border-color:var(--line)}.nav button.active{background:#17212c;border-color:#335167;color:var(--ink)}.pill{display:inline-flex;align-items:center;justify-content:center;min-width:28px;padding:3px 8px;border-radius:999px;background:#0e141b;border:1px solid var(--line);color:var(--muted);font:700 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace}
+.side-card{margin-top:24px;padding:14px;border:1px solid var(--line);border-radius:16px;background:rgba(21,26,33,.72)}.side-card h2{margin:0 0 10px;font-size:13px;color:var(--soft)}.side-card .row{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid rgba(42,49,59,.6);font-size:12px;color:var(--muted)}.side-card .row:first-of-type{border-top:0}.status-dot{width:8px;height:8px;border-radius:999px;background:var(--good);box-shadow:0 0 0 4px rgba(134,239,172,.12)}
+.main{padding:26px clamp(18px,4vw,44px) 70px;min-width:0}.hero{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(280px,.7fr);gap:18px;margin-bottom:18px}.panel{border:1px solid var(--line);border-radius:var(--radius);background:linear-gradient(180deg,rgba(21,26,33,.94),rgba(16,20,26,.92));box-shadow:var(--shadow)}.hero-main{padding:26px}.hero-main h2{margin:0 0 10px;font-size:clamp(30px,4vw,54px);line-height:.98;letter-spacing:-.07em}.hero-main p{max-width:760px;margin:0;color:var(--muted);line-height:1.7}.hero-aside{padding:18px;display:grid;gap:12px}.inline-status{display:flex;align-items:center;gap:10px;color:var(--soft)}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:18px 0}.metric{padding:16px;border:1px solid var(--line);border-radius:16px;background:rgba(21,26,33,.72)}.metric b{display:block;font-size:28px;letter-spacing:-.04em}.metric span{display:block;margin-top:4px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em}.metric.good b{color:var(--good)}.metric.bad b{color:var(--bad)}
+.toolbar{position:sticky;top:12px;z-index:8;display:grid;grid-template-columns:minmax(220px,2fr) repeat(3,minmax(130px,1fr));gap:10px;padding:12px;margin:18px 0;border:1px solid var(--line);border-radius:16px;background:rgba(11,13,16,.82);backdrop-filter:blur(18px)}input,select{width:100%;min-height:42px;border:1px solid var(--line2);border-radius:12px;background:#0b1016;color:var(--ink);padding:9px 12px}select{cursor:pointer}.content-head{display:flex;align-items:end;justify-content:space-between;gap:14px;margin:24px 0 12px}.content-head h2{margin:0;font-size:22px;letter-spacing:-.03em}.content-head p{margin:4px 0 0;color:var(--muted);font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px}.record{padding:15px;border:1px solid var(--line);border-radius:16px;background:rgba(21,26,33,.78)}.record h3{margin:0 0 9px;font-size:16px;line-height:1.25}.record p{margin:10px 0;color:#d8dee7;line-height:1.58;max-height:9.5em;overflow:auto}.meta{display:flex;gap:7px;flex-wrap:wrap;color:var(--muted);font-size:12px}.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:4px 8px;background:#0d1218;color:var(--soft);font-size:12px}.chip.type{color:var(--violet)}.chip.active{color:var(--good)}.chip.archived,.chip.stale{color:var(--warn)}.chip.contradicted{color:var(--bad)}.record code{display:block;margin-top:10px;color:var(--muted);font-size:11px;word-break:break-all}.empty{padding:28px;border:1px dashed var(--line2);border-radius:16px;color:var(--muted);text-align:center}
+.timeline{position:relative;display:grid;gap:14px}.event{position:relative;padding:15px 16px 15px 44px;border:1px solid var(--line);border-radius:16px;background:rgba(21,26,33,.7)}.event:before{content:"";position:absolute;left:18px;top:22px;width:10px;height:10px;border-radius:999px;background:var(--accent);box-shadow:0 0 0 5px rgba(125,211,252,.11)}.event h3{margin:0 0 7px;font-size:16px}.event p{margin:9px 0 0;color:#d8dee7;line-height:1.6}.bars{display:grid;gap:10px}.bar{display:grid;grid-template-columns:150px minmax(0,1fr) 48px;gap:10px;align-items:center}.bar span{color:var(--soft);font-size:13px;overflow:hidden;text-overflow:ellipsis}.track{height:10px;border:1px solid var(--line);border-radius:999px;background:#0a0f15;overflow:hidden}.fill{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--accent),var(--accent2))}.split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.curator-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px}.curator-card{padding:15px;border:1px solid var(--line);border-radius:16px;background:rgba(21,26,33,.72)}.curator-card h3{display:flex;justify-content:space-between;gap:10px;margin:0 0 12px;font-size:15px}.curator-card p{margin:8px 0;color:var(--soft);line-height:1.4}.fallback{margin:12px 0;padding:12px;border:1px solid rgba(251,191,36,.35);border-radius:12px;color:var(--warn);background:rgba(251,191,36,.08)}
+@media (max-width:980px){.shell{grid-template-columns:1fr}.sidebar{position:relative;height:auto}.nav{grid-template-columns:repeat(2,minmax(0,1fr))}.hero,.split{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.toolbar{position:relative;top:auto;grid-template-columns:1fr 1fr}}
+@media (max-width:620px){.main,.sidebar{padding:16px}.toolbar,.metrics,.nav{grid-template-columns:1fr}.bar{grid-template-columns:1fr}.hero-main h2{font-size:34px}}
+@media (prefers-reduced-motion:no-preference){.record,.panel,.curator-card,.event{transition:transform .16s ease,border-color .16s ease}.record:hover,.curator-card:hover{transform:translateY(-2px);border-color:#3f5367}}
+@media print{body{background:white;color:#111}.sidebar,.toolbar{display:none}.shell{display:block}.panel,.record,.curator-card,.event{box-shadow:none;background:white;color:#111;break-inside:avoid}.main{padding:0}.chip{border-color:#bbb;color:#111}}
 </style>
 </head>
 <body>
-<header><h1>Local Memory MCP Dashboard</h1><div class="sub">SQLite/FTS5 · {len(rows)} records · {html.escape(str(db_path()))}</div></header>
-<main>
-  <section class="hero">
-    <div class="card"><h2>记忆层健康总览</h2><p>这是本地/自托管多 agent 共享记忆层的可视化面板：支持记录过滤、时间线视图、反馈健康报告、curator 候选项检查。数据来自本地 SQLite，不依赖云端托管。</p></div>
-    <div class="card"><h2>Curator 摘要</h2><div id="curatorSummary"></div><h2>Semantic</h2><div id="semanticSummary"></div></div>
-  </section>
-  <section class="metrics">
-    <div class="metric"><b>{len(rows)}</b><span>records</span></div>
-    <div class="metric"><b>{len(type_counts)}</b><span>memory types</span></div>
-    <div class="metric"><b>{feedback_positive}</b><span>positive feedback</span></div>
-    <div class="metric"><b>{feedback_negative}</b><span>negative feedback</span></div>
-  </section>
-  <section class="controls">
-    <input id="q" placeholder="搜索 title/content/tags/id...">
-    <select id="typeFilter"><option value="">全部类型</option></select>
-    <select id="statusFilter"><option value="">全部状态</option></select>
-    <select id="sortBy"><option value="updated_at">按更新时间</option><option value="importance">按重要性</option><option value="feedback_score">按反馈</option><option value="type">按类型</option></select>
-  </section>
-  <nav class="tabs"><button class="tab active" data-view="recordsView">Records</button><button class="tab" data-view="timelineView">Timeline</button><button class="tab" data-view="healthView">Feedback Health</button><button class="tab" data-view="curatorView">Curator</button></nav>
-  <section id="recordsView" class="view active panel"><h2>Records <span id="count"></span></h2><div id="records" class="records"></div></section>
-  <section id="timelineView" class="view panel"><h2>决策 / 时间线</h2><div id="timeline" class="timeline"></div></section>
-  <section id="healthView" class="view panel"><h2>反馈健康报告</h2><div class="curator-grid"><div><h3>Type distribution</h3><div id="typeBars" class="bars"></div></div><div><h3>Status distribution</h3><div id="statusBars" class="bars"></div></div></div></section>
-  <section id="curatorView" class="view panel"><h2>Curator candidates</h2><div id="curator" class="curator-grid"></div></section>
-</main>
-<script id="memory-data" type="application/json">{data_json}</script>
+<div class="shell" x-data="memoryDashboard()" x-cloak>
+  <aside class="sidebar">
+    <div class="brand"><div class="eyebrow">Local Memory MCP</div><h1>Operations Console</h1><p>SQLite/FTS5 · __RECORD_COUNT__ records<br>__DB_PATH__</p></div>
+    <nav class="nav" aria-label="Dashboard views">
+      <button type="button" :class="{active:view==='records'}" @click="view='records'"><span>Records</span><span class="pill" x-text="filteredRows.length"></span></button>
+      <button type="button" :class="{active:view==='timeline'}" @click="view='timeline'"><span>Timeline</span><span class="pill" x-text="timelineRows.length"></span></button>
+      <button type="button" :class="{active:view==='health'}" @click="view='health'"><span>Health</span><span class="pill" x-text="Object.keys(typeCounts).length"></span></button>
+      <button type="button" :class="{active:view==='curator'}" @click="view='curator'"><span>Curator</span><span class="pill" x-text="curatorTotal"></span></button>
+    </nav>
+    <div class="side-card">
+      <h2>Runtime</h2>
+      <div class="row"><span>Semantic</span><strong x-text="semantic.available ? 'available' : 'offline'"></strong></div>
+      <div class="row"><span>Provider</span><strong x-text="semantic.provider || 'none'"></strong></div>
+      <div class="row"><span>Indexed</span><strong x-text="`${semantic.indexed_records || 0}/${semantic.total_records || 0}`"></strong></div>
+    </div>
+  </aside>
+  <main class="main">
+    <noscript><div class="fallback">此 dashboard 需要 JavaScript 才能启用过滤、时间线和 curator 视图。</div></noscript>
+    <div id="alpine-fallback" class="fallback">正在加载 Alpine.js；如果离线环境无法访问 CDN，静态 JSON 数据仍保留在页面中。</div>
+    <section class="hero">
+      <div class="panel hero-main"><div class="eyebrow">Structured agent memory</div><h2>把长期记忆变成可治理的本地数据层。</h2><p>面向 Hermes、Codex、Claude Code 的共享记忆控制台。重点展示可行动信号：记录覆盖、反馈健康、curator 候选、时间线和语义索引状态。</p></div>
+      <div class="panel hero-aside"><div class="inline-status"><span class="status-dot"></span><strong>Local-only dashboard</strong></div><p style="margin:0;color:var(--muted);line-height:1.6">数据由 Python CLI 注入到页面 JSON；Alpine.js 只负责本地交互状态，不向外部发送记忆内容。</p><div><span class="chip">no build step</span> <span class="chip">Alpine 3.14.8</span></div></div>
+    </section>
+    <section class="metrics" aria-label="Memory health metrics">
+      <div class="metric"><b>__RECORD_COUNT__</b><span>records</span></div>
+      <div class="metric"><b>__TYPE_COUNT__</b><span>memory types</span></div>
+      <div class="metric good"><b>__POSITIVE_FEEDBACK__</b><span>positive feedback</span></div>
+      <div class="metric bad"><b>__NEGATIVE_FEEDBACK__</b><span>negative feedback</span></div>
+    </section>
+    <section class="toolbar" aria-label="Record filters">
+      <input x-model.debounce.120ms="query" type="search" placeholder="搜索 title / content / tags / id..." aria-label="Search records">
+      <select x-model="typeFilter" aria-label="Filter by type"><option value="">全部类型</option><template x-for="type in typeOptions" :key="type"><option :value="type" x-text="type"></option></template></select>
+      <select x-model="statusFilter" aria-label="Filter by status"><option value="">全部状态</option><template x-for="status in statusOptions" :key="status"><option :value="status" x-text="status"></option></template></select>
+      <select x-model="sortBy" aria-label="Sort records"><option value="updated_at">按更新时间</option><option value="importance">按重要性</option><option value="feedback_score">按反馈</option><option value="type">按类型</option></select>
+    </section>
+    <section x-show="view==='records'">
+      <div class="content-head"><div><h2>Records <span class="pill" x-text="filteredRows.length"></span></h2><p>结构化长期记忆，支持搜索、类型、状态和排序。</p></div></div>
+      <div class="grid"><template x-for="record in filteredRows" :key="record.id"><article class="record"><h3 x-text="record.title"></h3><div class="meta"><span class="chip type" x-text="record.type"></span><span class="chip" :class="record.status" x-text="record.status"></span><span class="chip" x-text="`importance ${record.importance ?? 0}`"></span><span class="chip" x-text="`feedback ${record.feedback_score ?? 0}`"></span></div><p x-text="record.content"></p><div class="meta"><template x-for="tag in (record.tags || [])" :key="tag"><span class="chip" x-text="tag"></span></template></div><code x-text="record.id"></code></article></template></div>
+      <div class="empty" x-show="filteredRows.length === 0">无匹配记录</div>
+    </section>
+    <section x-show="view==='timeline'">
+      <div class="content-head"><div><h2>Decision timeline</h2><p>仅展示 timeline_event / decision / feedback 相关记录。</p></div></div>
+      <div class="timeline"><template x-for="event in timelineRows" :key="event.id"><article class="event"><h3 x-text="event.title"></h3><div class="meta"><span x-text="event.created_at"></span><span x-text="event.type"></span><span x-text="event.status"></span></div><p x-text="event.content"></p></article></template></div>
+      <div class="empty" x-show="timelineRows.length === 0">暂无 timeline / decision / feedback 记录</div>
+    </section>
+    <section x-show="view==='health'">
+      <div class="content-head"><div><h2>Feedback health</h2><p>分布视图帮助判断记忆库是否偏科、陈旧或反馈不足。</p></div></div>
+      <div class="split"><div class="panel" style="padding:16px"><h3>Type distribution</h3><div class="bars"><template x-for="item in bars(typeCounts)" :key="item.key"><div class="bar"><span x-text="item.key"></span><div class="track"><div class="fill" :style="`width:${item.width}%`"></div></div><strong x-text="item.value"></strong></div></template></div></div><div class="panel" style="padding:16px"><h3>Status distribution</h3><div class="bars"><template x-for="item in bars(statusCounts)" :key="item.key"><div class="bar"><span x-text="item.key"></span><div class="track"><div class="fill" :style="`width:${item.width}%`"></div></div><strong x-text="item.value"></strong></div></template></div></div></div>
+    </section>
+    <section x-show="view==='curator'">
+      <div class="content-head"><div><h2>Curator candidates</h2><p>面向去重、归档、矛盾检测和 skill 推广的候选摘要。</p></div></div>
+      <div class="curator-grid"><template x-for="group in curatorGroups" :key="group.key"><article class="curator-card"><h3><span x-text="group.label"></span><span class="pill" x-text="group.items.length"></span></h3><template x-for="item in group.items.slice(0, 12)" :key="itemKey(item)"><p x-text="itemLabel(item)"></p></template><p x-show="group.items.length === 0" style="color:var(--good)">无</p></article></template></div>
+    </section>
+  </main>
+</div>
+<script id="memory-data" type="application/json">__DATA_JSON__</script>
 <script>
-const DATA = JSON.parse(document.getElementById('memory-data').textContent);
-const rows = DATA.rows || [];
-const $ = (id) => document.getElementById(id);
-function esc(s) {{ return String(s ?? '').replace(/[&<>"']/g, m => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[m])); }}
-function fillSelect(id, values) {{ const el=$(id); [...values].sort().forEach(v=>{{ const o=document.createElement('option'); o.value=v; o.textContent=v; el.appendChild(o); }}); }}
-fillSelect('typeFilter', new Set(rows.map(r=>r.type))); fillSelect('statusFilter', new Set(rows.map(r=>r.status)));
-function renderBars(target, counts) {{ const max=Math.max(1,...Object.values(counts)); $(target).innerHTML=Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="bar"><span>${{esc(k)}}</span><div class="track"><div class="fill" style="width:${{Math.round(v/max*100)}}%"></div></div><b>${{v}}</b></div>`).join(''); }}
-function filtered() {{ const q=$('q').value.toLowerCase(); const typ=$('typeFilter').value; const st=$('statusFilter').value; const sort=$('sortBy').value; return rows.filter(r=>{{ const hay=[r.id,r.type,r.status,r.title,r.content,(r.tags||[]).join(' ')].join(' ').toLowerCase(); return (!q||hay.includes(q)) && (!typ||r.type===typ) && (!st||r.status===st); }}).sort((a,b)=>{{ if(sort==='type') return String(a.type).localeCompare(String(b.type)); if(sort==='importance'||sort==='feedback_score') return Number(b[sort]||0)-Number(a[sort]||0); return String(b.updated_at||'').localeCompare(String(a.updated_at||'')); }}); }}
-function renderRecords() {{ const items=filtered(); $('count').textContent=`(${{items.length}})`; $('records').innerHTML=items.map(r=>`<article><h3>${{esc(r.title)}}</h3><div class="meta"><span>${{esc(r.type)}}</span><span>${{esc(r.status)}}</span><span>importance ${{esc(r.importance)}}</span><span>feedback ${{esc(r.feedback_score)}}</span></div><p>${{esc(r.content)}}</p><div class="tags">${{(r.tags||[]).map(t=>`<span>${{esc(t)}}</span>`).join('')}}</div><code>${{esc(r.id)}}</code></article>`).join('') || '<p class="warn">无匹配记录</p>'; }}
-function renderTimeline() {{ const items=(DATA.timeline_rows||[]).slice().sort((a,b)=>String(a.created_at||'').localeCompare(String(b.created_at||''))); $('timeline').innerHTML=items.map(r=>`<div class="event"><h3>${{esc(r.title)}}</h3><div class="meta">${{esc(r.created_at)}} · ${{esc(r.type)}} · ${{esc(r.status)}}</div><p>${{esc(r.content)}}</p></div>`).join('') || '<p class="warn">暂无 timeline/decision/feedback 记录</p>'; }}
-function renderCurator() {{ const r=DATA.report||{{}}; const sem=DATA.semantic||{{}}; const groups=[['duplicate_title_groups','重复标题组'],['low_feedback_candidates','低反馈候选'],['stale_candidates','可标记 stale'],['archive_candidates','可归档'],['contradiction_candidates','矛盾候选'],['skill_promotion_candidates','skill_candidate 推广']]; $('curatorSummary').innerHTML=Object.entries(r.summary||{{}}).map(([k,v])=>`<span class="chip">${{esc(k)}}: ${{v}}</span>`).join(''); $('semanticSummary').innerHTML=`<span class="chip">available: ${{esc(sem.available)}}</span><span class="chip">provider: ${{esc(sem.provider||'none')}}</span><span class="chip">indexed: ${{esc(sem.indexed_records||0)}}/${{esc(sem.total_records||0)}}</span>`; $('curator').innerHTML=groups.map(([key,label])=>{{ const arr=r[key]||[]; return `<div class="card"><h3>${{label}} <span class="chip">${{arr.length}}</span></h3>${{arr.slice(0,12).map(x=>Array.isArray(x)?`<p>${{x.map(i=>esc(i.title)).join(' / ')}}</p>`:`<p>${{esc(x.title||x.title_key||x.id)}}</p>`).join('') || '<p class="good">无</p>'}}</div>`; }}).join(''); }}
-document.querySelectorAll('.tab').forEach(btn=>btn.addEventListener('click',()=>{{ document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active')); document.querySelectorAll('.view').forEach(v=>v.classList.remove('active')); btn.classList.add('active'); $(btn.dataset.view).classList.add('active'); }}));
-['q','typeFilter','statusFilter','sortBy'].forEach(id=>$(id).addEventListener('input',renderRecords));
-renderRecords(); renderTimeline(); renderBars('typeBars', DATA.type_counts||{{}}); renderBars('statusBars', DATA.status_counts||{{}}); renderCurator();
+document.addEventListener('alpine:init', () => { document.getElementById('alpine-fallback')?.remove(); });
+function memoryDashboard(){
+  const data = JSON.parse(document.getElementById('memory-data').textContent);
+  const rows = data.rows || [];
+  const report = data.report || {};
+  const semantic = data.semantic || {};
+  const unique = (values) => [...new Set(values.filter(Boolean))].sort();
+  return {
+    data, rows, report, semantic, view:'records', query:'', typeFilter:'', statusFilter:'', sortBy:'updated_at',
+    typeCounts: data.type_counts || {}, statusCounts: data.status_counts || {},
+    get typeOptions(){ return unique(this.rows.map(r => r.type)); },
+    get statusOptions(){ return unique(this.rows.map(r => r.status)); },
+    get filteredRows(){ const q=this.query.trim().toLowerCase(); return this.rows.filter(r => { const hay=[r.id,r.type,r.status,r.title,r.content,(r.tags||[]).join(' ')].join(' ').toLowerCase(); return (!q || hay.includes(q)) && (!this.typeFilter || r.type===this.typeFilter) && (!this.statusFilter || r.status===this.statusFilter); }).sort((a,b)=>{ if(this.sortBy==='type') return String(a.type||'').localeCompare(String(b.type||'')); if(this.sortBy==='importance'||this.sortBy==='feedback_score') return Number(b[this.sortBy]||0)-Number(a[this.sortBy]||0); return String(b.updated_at||'').localeCompare(String(a.updated_at||'')); }); },
+    get timelineRows(){ return (data.timeline_rows || []).slice().sort((a,b)=>String(a.created_at||'').localeCompare(String(b.created_at||''))); },
+    get curatorGroups(){ return [['duplicate_title_groups','重复标题组'],['low_feedback_candidates','低反馈候选'],['stale_candidates','可标记 stale'],['archive_candidates','可归档'],['contradiction_candidates','矛盾候选'],['skill_promotion_candidates','skill_candidate 推广']].map(([key,label]) => ({key,label,items:report[key]||[]})); },
+    get curatorTotal(){ return this.curatorGroups.reduce((n,g)=>n+g.items.length,0); },
+    bars(counts){ const entries=Object.entries(counts).sort((a,b)=>b[1]-a[1]); const max=Math.max(1,...entries.map(([,v])=>Number(v)||0)); return entries.map(([key,value])=>({key,value,width:Math.round((Number(value)||0)/max*100)})); },
+    itemLabel(item){ if(Array.isArray(item)) return item.map(x=>x.title || x.id || 'item').join(' / '); return item.title || item.title_key || item.id || JSON.stringify(item); },
+    itemKey(item){ return Array.isArray(item) ? item.map(x=>x.id || x.title).join('|') : (item.id || item.title || item.title_key || JSON.stringify(item)); }
+  };
+}
 </script>
 </body></html>"""
+    replacements = {
+        "__DATA_JSON__": data_json,
+        "__RECORD_COUNT__": str(len(rows)),
+        "__TYPE_COUNT__": str(len(type_counts)),
+        "__POSITIVE_FEEDBACK__": str(feedback_positive),
+        "__NEGATIVE_FEEDBACK__": str(feedback_negative),
+        "__DB_PATH__": db_label,
+    }
+    for key, value in replacements.items():
+        doc = doc.replace(key, value)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(doc, encoding="utf-8")
     print(path)

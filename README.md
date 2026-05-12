@@ -18,14 +18,22 @@ MEM_ROOT="${LOCAL_MEMORY_ROOT:-$HOME/.agent-memory/local-memory-mcp}"
 ```
 
 - Server: `$MEM_ROOT/local_memory_mcp.py`
+- Config: `$MEM_ROOT/config.yaml`
 - Python runtime: `$MEM_ROOT/.venv/bin/python`
 - SQLite DB: `$MEM_ROOT/memory.sqlite3`
 - Dashboard: `$MEM_ROOT/dashboard.html`
 - Protocol probe: `$MEM_ROOT/probe_mcp.py`
 
-代码默认也使用 `Path.home() / ".agent-memory" / "local-memory-mcp"`，可用 `LOCAL_MEMORY_DB` 覆盖数据库路径。
+代码默认也使用 `Path.home() / ".agent-memory" / "local-memory-mcp"`，可用 `LOCAL_MEMORY_DB` 覆盖数据库路径；可用 `LOCAL_MEMORY_CONFIG` 覆盖配置文件路径。
 
 ## CLI
+
+`config.yaml` 已作为 Adapter 化的第一步加入仓库。当前默认仍以 SQLite 为 primary/fallback，OpenMemory 与 Qdrant 只记录未来接入地址；不要在服务未启动且 backend abstraction 未完成前切换 primary。
+
+```bash
+MEM_ROOT="${LOCAL_MEMORY_ROOT:-$HOME/.agent-memory/local-memory-mcp}"
+cat "$MEM_ROOT/config.yaml"
+```
 
 ```bash
 MEM_ROOT="${LOCAL_MEMORY_ROOT:-$HOME/.agent-memory/local-memory-mcp}"
@@ -41,6 +49,17 @@ SERVER="$MEM_ROOT/local_memory_mcp.py"
 "$PY" "$SERVER" semantic-search "delegate_task memory_context"
 "$MEM_ROOT/run_curator.sh"
 ```
+
+## 部署复用
+
+这份项目可以部署到其他项目电脑，但不要只复制当前机器的绝对路径配置。推荐在目标机器运行初始化脚本：
+
+```bash
+cd /path/to/local-memory-mcp
+scripts/init_local_memory.sh
+```
+
+初始化脚本会创建 `.venv`、安装依赖、生成目标机器专用 `config.yaml`、初始化 SQLite、生成 dashboard，并打印 Hermes/Codex/Claude Code 可复用的 MCP stdio 命令。完整说明见 [`docs/deployment.md`](docs/deployment.md)。
 
 ## 本地测试与 CI
 
@@ -89,8 +108,8 @@ v0 解决“统一结构化存储 + MCP 工具 + context pack”问题；它还�
 
 1. Hermes `delegate_task` 已增加可选的 `delegation.memory_context` 前置检索：对子 agent 构造 prompt 时调用 `local_memory.memory_context`，把小型 context pack 注入子 agent 的 ephemeral system prompt；主 agent 的基础 MEMORY.md / USER.md 与 prompt caching 面不变。
 2. `curator` CLI/MCP 报告已支持重复标题、低反馈、stale、archive、矛盾候选、`skill_candidate` 推广候选；`run_curator.sh` 会输出 JSON 报告并刷新 dashboard。
-3. `dashboard.html` 已增强为本地交互式面板：记录搜索/类型/状态/排序过滤、决策时间线、反馈健康分布、curator 候选摘要、semantic index 状态。
-4. 已落地最小 sqlite-vec 向量层：安装 `sqlite-vec` + `numpy`，新增 `semantic-index/status/search` CLI 与 `memory_semantic_*` MCP 工具。当前 provider 是本地 `hashing-384` fallback，用于验证 vector plumbing 和轻量 fuzzy recall；它不是深度语义 embedding，后续可替换为 Ollama/sentence-transformers。
+3. `dashboard.html` 已增强为本地交互式面板：记录搜索/类型/状态/排序过滤、决策时间线、反馈健康分布、curator 候选摘要、semantic index 状态。前端采用 Alpine.js 3.14.8（CDN、无构建步骤）做轻量状态管理，数据仍由 Python 注入本地 JSON。
+4. 已落地最小 sqlite-vec 向量层：安装 `sqlite-vec` + `numpy`，新增 `semantic-index/status/search` CLI 与 `memory_semantic_*` MCP 工具。当前默认 provider 是本地 Ollama `nomic-embed-text`（768 维），用于真实本地语义 embedding；可通过 `LOCAL_MEMORY_EMBEDDING_PROVIDER=hashing` 切回 legacy `hashing-384` fallback。
 
 当前 Hermes 配置片段：
 
