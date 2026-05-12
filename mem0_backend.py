@@ -68,13 +68,23 @@ class Mem0Config:
 
 def mem0_config_from_dict(cfg: dict[str, Any]) -> Mem0Config:
     """Build Mem0Config from config.yaml 'mem0' section."""
+    # Load .env if present (for API keys)
+    env_path = Path(__file__).resolve().parent / ".env"
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip())
+
     mem0_section = cfg.get("mem0", {})
     return Mem0Config(
         enabled=mem0_section.get("enabled", False),
         llm_provider=mem0_section.get("llm_provider", "ollama"),
         llm_model=mem0_section.get("llm_model", "qwen2.5:3b"),
-        llm_api_key=mem0_section.get("llm_api_key",
-                                      os.environ.get("MEM0_LLM_API_KEY", "")),
+        llm_api_key=mem0_section.get("llm_api_key", "")
+                     or os.environ.get("MEM0_LLM_API_KEY", "")
+                     or os.environ.get("DEEPSEEK_API_KEY", ""),
         llm_base_url=mem0_section.get("llm_base_url",
                                        os.environ.get("MEM0_LLM_BASE_URL", "")),
         ollama_url=mem0_section.get("ollama_url",
