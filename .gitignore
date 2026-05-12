@@ -8,11 +8,16 @@ memory.sqlite3-*
 __pycache__/
 *.py[cod]
 .venv/
+.venv*/
+.pytest_cache/
 
 # Generated artifacts
 /dashboard.html
 /reports/*.json
 /reports/claude-review-*.md
+
+# IDE
+.idea/
 
 # Local env / secrets
 .env

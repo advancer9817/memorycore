@@ -11,45 +11,47 @@
 
 ## 路径
 
-- Server: `/home/advancer/.agent-memory/local-memory-mcp/local_memory_mcp.py`
-- Python runtime: `/home/advancer/.agent-memory/local-memory-mcp/.venv/bin/python`
-- SQLite DB: `/home/advancer/.agent-memory/local-memory-mcp/memory.sqlite3`
-- Dashboard: `/home/advancer/.agent-memory/local-memory-mcp/dashboard.html`
-- Protocol probe: `/home/advancer/.agent-memory/local-memory-mcp/probe_mcp.py`
+不要写死某个用户名路径；运行时从当前用户主目录推导：
+
+```bash
+MEM_ROOT="${LOCAL_MEMORY_ROOT:-$HOME/.agent-memory/local-memory-mcp}"
+```
+
+- Server: `$MEM_ROOT/local_memory_mcp.py`
+- Python runtime: `$MEM_ROOT/.venv/bin/python`
+- SQLite DB: `$MEM_ROOT/memory.sqlite3`
+- Dashboard: `$MEM_ROOT/dashboard.html`
+- Protocol probe: `$MEM_ROOT/probe_mcp.py`
+
+代码默认也使用 `Path.home() / ".agent-memory" / "local-memory-mcp"`，可用 `LOCAL_MEMORY_DB` 覆盖数据库路径。
 
 ## CLI
 
 ```bash
-/home/advancer/.agent-memory/local-memory-mcp/.venv/bin/python \
-  /home/advancer/.agent-memory/local-memory-mcp/local_memory_mcp.py init
+MEM_ROOT="${LOCAL_MEMORY_ROOT:-$HOME/.agent-memory/local-memory-mcp}"
+PY="$MEM_ROOT/.venv/bin/python"
+SERVER="$MEM_ROOT/local_memory_mcp.py"
 
-/home/advancer/.agent-memory/local-memory-mcp/.venv/bin/python \
-  /home/advancer/.agent-memory/local-memory-mcp/local_memory_mcp.py search memory
-
-/home/advancer/.agent-memory/local-memory-mcp/.venv/bin/python \
-  /home/advancer/.agent-memory/local-memory-mcp/local_memory_mcp.py context "继续实现多 agent 记忆架构"
-
-/home/advancer/.agent-memory/local-memory-mcp/.venv/bin/python \
-  /home/advancer/.agent-memory/local-memory-mcp/local_memory_mcp.py html
-
-/home/advancer/.agent-memory/local-memory-mcp/.venv/bin/python \
-  /home/advancer/.agent-memory/local-memory-mcp/local_memory_mcp.py curator --summary-only
-
-/home/advancer/.agent-memory/local-memory-mcp/.venv/bin/python \
-  /home/advancer/.agent-memory/local-memory-mcp/local_memory_mcp.py semantic-index --force
-
-/home/advancer/.agent-memory/local-memory-mcp/.venv/bin/python \
-  /home/advancer/.agent-memory/local-memory-mcp/local_memory_mcp.py semantic-search "delegate_task memory_context"
-
-/home/advancer/.agent-memory/local-memory-mcp/run_curator.sh
+"$PY" "$SERVER" init
+"$PY" "$SERVER" search memory
+"$PY" "$SERVER" context "继续实现多 agent 记忆架构"
+"$PY" "$SERVER" html
+"$PY" "$SERVER" curator --summary-only
+"$PY" "$SERVER" semantic-index --force
+"$PY" "$SERVER" semantic-search "delegate_task memory_context"
+"$MEM_ROOT/run_curator.sh"
 ```
 
 ## 本地测试与 CI
 
-安装依赖：
+安装依赖（需要 Python 3.11+；`numpy==2.4.4` 不支持 Python 3.10）：
 
 ```bash
-cd local-memory-mcp
+MEM_ROOT="${LOCAL_MEMORY_ROOT:-$HOME/.agent-memory/local-memory-mcp}"
+cd "$MEM_ROOT"
+python3.11 -m venv .venv
+. .venv/bin/activate
+python -m pip install -U pip
 python -m pip install -r requirements.txt
 ```
 
@@ -62,10 +64,10 @@ uv pip install -r requirements.txt
 运行测试：
 
 ```bash
-.venv/bin/python -m pytest tests/ -q
+.venv/bin/python -m pytest -q
 ```
 
-测试会通过 `LOCAL_MEMORY_DB` 指向 pytest 的临时 SQLite 文件，并在每个测试前清空初始化缓存，避免读写生产 `memory.sqlite3`。GitHub Actions CI 使用 Python 3.11，安装 `requirements.txt` 后执行同一组 pytest；CI 中 `LOCAL_MEMORY_DB=/tmp/ci_test_memory.sqlite3`。
+`pytest.ini` 已配置 `pythonpath = .`，所以不需要手动设置 `PYTHONPATH`。测试会通过 `LOCAL_MEMORY_DB` 指向 pytest 的临时 SQLite 文件，并在每个测试前清空初始化缓存，避免读写生产 `memory.sqlite3`。GitHub Actions CI 使用 Python 3.11，安装 `requirements.txt` 后执行同一组 pytest；CI 中 `LOCAL_MEMORY_DB=/tmp/ci_test_memory.sqlite3`。
 
 ## MCP configs
 
