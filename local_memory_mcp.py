@@ -257,6 +257,24 @@ def init_db(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope);
         CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project_path);
         CREATE INDEX IF NOT EXISTS idx_memories_updated ON memories(updated_at);
+
+        CREATE TABLE IF NOT EXISTS memory_links (
+          id TEXT PRIMARY KEY,
+          source_id TEXT NOT NULL,
+          target_id TEXT NOT NULL,
+          relation_type TEXT NOT NULL DEFAULT 'related_to',
+          weight REAL NOT NULL DEFAULT 1.0,
+          note TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          source_agent TEXT NOT NULL DEFAULT 'unknown',
+          FOREIGN KEY(source_id) REFERENCES memories(id) ON DELETE CASCADE,
+          FOREIGN KEY(target_id) REFERENCES memories(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_links_source ON memory_links(source_id);
+        CREATE INDEX IF NOT EXISTS idx_links_target ON memory_links(target_id);
+        CREATE INDEX IF NOT EXISTS idx_links_relation ON memory_links(relation_type);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_links_unique ON memory_links(source_id, target_id, relation_type);
         """
     )
     # If an earlier contentless FTS table exists, stored columns read back as NULL;
@@ -560,6 +578,93 @@ def timeline(query: str = "", scope: str = "", limit: int = 20) -> list[dict[str
 
 
 
+# ─── memory_links helpers ─────────────────────────────────────────────────────
+
+VALID_RELATION_TYPES = frozenset({
+    "related_to",
+    "supersedes",
+    "contradicts",
+    "supports",
+    "part_of",
+})
+
+
+def add_link(
+    source_id: str,
+    target_id: str,
+    relation_type: str = "related_to",
+    weight: float = 1.0,
+    note: str = "",
+    source_agent: str = "unknown",
+) -> dict[str, Any]:
+    """Create a directed link between two memories. Upserts on (source, target, relation)."""
+    if relation_type not in VALID_RELATION_TYPES:
+        raise ValueError(f"relation_type must be one of {sorted(VALID_RELATION_TYPES)}, got {relation_type!r}")
+    weight = max(0.0, min(float(weight), 1.0))
+    link_id = str(uuid.uuid4())
+    ts = now()
+    with managed_conn() as conn:
+        # Verify both memories exist
+        for mid in (source_id, target_id):
+            if not conn.execute("SELECT 1 FROM memories WHERE id=?", (mid,)).fetchone():
+                raise ValueError(f"memory id not found: {mid!r}")
+        conn.execute(
+            """
+            INSERT INTO memory_links(id, source_id, target_id, relation_type, weight, note, created_at, source_agent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET
+              weight=excluded.weight, note=excluded.note, source_agent=excluded.source_agent
+            """,
+            (link_id, source_id, target_id, relation_type, weight, note, ts, source_agent),
+        )
+        row = conn.execute("SELECT * FROM memory_links WHERE source_id=? AND target_id=? AND relation_type=?",
+                           (source_id, target_id, relation_type)).fetchone()
+    return dict(row)
+
+
+def query_links(
+    memory_id: str,
+    direction: str = "both",
+    relation_type: str = "",
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Return all links connected to a memory.
+
+    direction: 'outgoing' (source=memory_id), 'incoming' (target=memory_id), 'both'
+    """
+    direction = direction.lower()
+    if direction not in ("outgoing", "incoming", "both"):
+        raise ValueError("direction must be 'outgoing', 'incoming', or 'both'")
+    limit = max(1, min(int(limit), 500))
+    rel_filter = " AND relation_type=?" if relation_type else ""
+    params_base = [relation_type] if relation_type else []
+
+    with managed_conn() as conn:
+        outgoing: list[dict] = []
+        incoming: list[dict] = []
+
+        if direction in ("outgoing", "both"):
+            rows = conn.execute(
+                f"SELECT * FROM memory_links WHERE source_id=?{rel_filter} ORDER BY created_at DESC LIMIT ?",
+                [memory_id] + params_base + [limit],
+            ).fetchall()
+            outgoing = [dict(r) for r in rows]
+
+        if direction in ("incoming", "both"):
+            rows = conn.execute(
+                f"SELECT * FROM memory_links WHERE target_id=?{rel_filter} ORDER BY created_at DESC LIMIT ?",
+                [memory_id] + params_base + [limit],
+            ).fetchall()
+            incoming = [dict(r) for r in rows]
+
+    return {
+        "memory_id": memory_id,
+        "outgoing": outgoing,
+        "incoming": incoming,
+        "total": len(outgoing) + len(incoming),
+    }
+
+
 def consolidate(dry_run: bool = True, limit: int = 50) -> dict[str, Any]:
     # v0 heuristic: duplicate-ish titles and stale candidates. No destructive action unless future version.
     rows = list_recent(limit)
@@ -831,6 +936,70 @@ def memory_vector_status() -> dict[str, Any]:
     from vector_store import get_vector_store
     vs = get_vector_store(load_config())
     return vs.status()
+
+
+# ─── memory_links MCP tools ───────────────────────────────────────────────────
+
+@mcp.tool()
+def memory_link_add(
+    source_id: str,
+    target_id: str,
+    relation_type: str = "related_to",
+    weight: float = 1.0,
+    note: str = "",
+    source_agent: str = "hermes",
+) -> dict[str, Any]:
+    """Create a directed link between two memories.
+
+    Relation types:
+      related_to  — general association (default)
+      supersedes  — source replaces/updates target (newer fact)
+      contradicts — source conflicts with target
+      supports    — source provides evidence for target
+      part_of     — source is a component of target
+
+    Upserts on (source_id, target_id, relation_type) — safe to call repeatedly.
+
+    Args:
+        source_id: ID of the source memory
+        target_id: ID of the target memory
+        relation_type: One of the 5 valid types above
+        weight: Link strength 0.0–1.0 (default 1.0)
+        note: Optional human-readable annotation
+        source_agent: Agent creating the link
+
+    Returns:
+        The created/updated link record.
+    """
+    try:
+        return add_link(source_id, target_id, relation_type, weight, note, source_agent)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+def memory_link_query(
+    memory_id: str,
+    direction: str = "both",
+    relation_type: str = "",
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Return all links connected to a memory.
+
+    Args:
+        memory_id: The memory to query links for
+        direction: 'outgoing' (links from this memory), 'incoming' (links to this memory), 'both'
+        relation_type: Filter by relation type (empty = all types)
+        limit: Max links per direction (default 50)
+
+    Returns:
+        {"memory_id": str, "outgoing": [...], "incoming": [...], "total": int}
+    """
+    try:
+        return query_links(memory_id, direction, relation_type, limit)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
 
 def export_html(path: Path) -> None:
     rows = list_recent(1000)
