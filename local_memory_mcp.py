@@ -1043,6 +1043,110 @@ def memory_semantic_search(query: str, limit: int = 10, status: str = "active") 
     return semantic_search(query, limit, status)
 
 
+# ─── Mem0 Integration Tools ───────────────────────────────────────────────────
+
+@mcp.tool()
+def memory_extract(
+    messages: list[dict[str, str]],
+    user_id: str = "",
+    agent_id: str = "hermes",
+    promote: bool = False,
+) -> dict[str, Any]:
+    """Extract memories from a conversation using Mem0's LLM pipeline.
+
+    Mem0 uses an LLM to identify facts, preferences, and decisions from
+    conversation messages and stores them in a vector store for semantic recall.
+
+    Args:
+        messages: Conversation as [{"role": "user"|"assistant", "content": "..."}]
+        user_id: User scope (default: config default_user_id)
+        agent_id: Which agent produced/consumed the conversation
+        promote: If True, also add extracted memories to the structured SQLite layer
+
+    Returns:
+        {"results": [...], "elapsed_s": float, "promoted": int}
+    """
+    from mem0_backend import get_mem0_backend
+    backend = get_mem0_backend(load_config())
+    result = backend.extract_memories(messages, user_id=user_id or None, agent_id=agent_id)
+
+    promoted_count = 0
+    if promote and result.get("results"):
+        for mem in result["results"]:
+            mem_text = mem.get("memory", mem.get("text", ""))
+            if mem_text:
+                add_memory_record(
+                    type="episodic_memory",
+                    title=mem_text[:80],
+                    content=mem_text,
+                    scope="global",
+                    tags=["mem0-extracted", f"agent:{agent_id}"],
+                    source="mem0",
+                    source_agent=agent_id,
+                    confidence=0.6,
+                    importance=0.4,
+                    status="candidate",
+                    decay_policy="review",
+                )
+                promoted_count += 1
+
+    result["promoted"] = promoted_count
+    return result
+
+
+@mcp.tool()
+def memory_smart_search(
+    query: str,
+    user_id: str = "",
+    limit: int = 10,
+    include_fts: bool = True,
+    include_mem0: bool = True,
+    include_semantic: bool = True,
+) -> dict[str, Any]:
+    """Hybrid search across all memory layers: FTS5, sqlite-vec semantic, and Mem0.
+
+    Combines results from up to 3 sources for maximum recall:
+    - FTS5: exact keyword matching (fast, precise)
+    - sqlite-vec: local embedding similarity (nomic-embed-text)
+    - Mem0: LLM-extracted memory search (Qdrant vector store)
+
+    Returns:
+        {"fts_results": [...], "semantic_results": [...], "mem0_results": [...],
+         "merged_count": int}
+    """
+    output: dict[str, Any] = {"merged_count": 0}
+
+    if include_fts:
+        fts_results = search_memory_records(query, limit=limit)
+        output["fts_results"] = fts_results
+        output["merged_count"] += len(fts_results)
+
+    if include_semantic and SQLITE_VEC_AVAILABLE:
+        sem_results = semantic_search(query, limit=limit)
+        output["semantic_results"] = sem_results
+        output["merged_count"] += len(sem_results)
+
+    if include_mem0:
+        from mem0_backend import get_mem0_backend
+        backend = get_mem0_backend(load_config())
+        mem0_result = backend.search(query, user_id=user_id or None, limit=limit)
+        output["mem0_results"] = mem0_result.get("results", [])
+        output["mem0_elapsed_s"] = mem0_result.get("elapsed_s", 0)
+        output["merged_count"] += len(output["mem0_results"])
+        if mem0_result.get("error"):
+            output["mem0_error"] = mem0_result["error"]
+
+    return output
+
+
+@mcp.tool()
+def memory_mem0_status() -> dict[str, Any]:
+    """Return Mem0 backend status (availability, config, model info)."""
+    from mem0_backend import get_mem0_backend
+    backend = get_mem0_backend(load_config())
+    return backend.status()
+
+
 def export_html(path: Path) -> None:
     rows = list_recent(1000)
     report = curator_report(dry_run=True, limit=1000)

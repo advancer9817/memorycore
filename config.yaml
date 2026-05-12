@@ -29,5 +29,19 @@ temporal:
   contradiction_detection: heuristic
   auto_supersede_user_corrections: true
 
+mem0:
+  enabled: true
+  llm_provider: ollama
+  llm_model: qwen2.5:3b
+  ollama_url: http://127.0.0.1:12434
+  embedder_model: nomic-embed-text
+  embedder_dim: 768
+  vector_store_path: ""
+  collection_name: agent_memory
+  default_user_id: advancer
+  temperature: 0.1
+  max_tokens: 2000
+  timeout: 60
+
 ops_db:
   path: memory_ops.sqlite3
