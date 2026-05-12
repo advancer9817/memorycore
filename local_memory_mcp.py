@@ -13,7 +13,6 @@ import os
 import re
 import sqlite3
 import sys
-import hashlib
 import math
 import textwrap
 import urllib.error
@@ -27,14 +26,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-try:
-    import numpy as np
-    import sqlite_vec
-    SQLITE_VEC_AVAILABLE = True
-except Exception:
-    np = None
-    sqlite_vec = None
-    SQLITE_VEC_AVAILABLE = False
+SQLITE_VEC_AVAILABLE = False  # removed; vector search now via vector_store.py (Qdrant)
 
 DEFAULT_ROOT = Path(__file__).resolve().parent
 DEFAULT_DB = Path(os.environ.get("LOCAL_MEMORY_DB", Path.home() / ".agent-memory" / "local-memory-mcp" / "memory.sqlite3"))
@@ -178,26 +170,12 @@ def connect() -> sqlite3.Connection:
     Kept as a public helper for external scripts. Internal code should prefer
     managed_conn() so connections are explicitly closed.
     """
-    global SQLITE_VEC_AVAILABLE
     path = db_path()
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=5000")
-    if SQLITE_VEC_AVAILABLE:
-        try:
-            conn.enable_load_extension(True)
-            sqlite_vec.load(conn)
-        except Exception:
-            # Vector search is optional. Keep core SQLite/FTS memory tools alive
-            # if the extension is installed but cannot be loaded at runtime.
-            SQLITE_VEC_AVAILABLE = False
-        finally:
-            try:
-                conn.enable_load_extension(False)
-            except Exception:
-                pass
     key = str(path.resolve())
     if key not in _INITIALIZED_DB_PATHS:
         init_db(conn)
@@ -216,71 +194,6 @@ def managed_conn():
         raise
     finally:
         conn.close()
-
-
-@dataclass(frozen=True)
-class SemanticConfig:
-    provider: str
-    model: str
-    dim: int
-    ollama_url: str
-    timeout: float
-
-
-def semantic_config() -> SemanticConfig:
-    config = load_config().get("embedding", {})
-    provider = os.environ.get("LOCAL_MEMORY_EMBEDDING_PROVIDER", str(config.get("provider", "ollama"))).strip().lower() or "ollama"
-    default_model = str(config.get("model") or ("nomic-embed-text" if provider == "ollama" else "hashing-384"))
-    model = os.environ.get("LOCAL_MEMORY_EMBEDDING_MODEL", default_model).strip() or default_model
-    default_dim = str(config.get("dim") or (768 if provider == "ollama" else 384))
-    try:
-        dim = int(os.environ.get("LOCAL_MEMORY_EMBEDDING_DIM", default_dim))
-    except ValueError:
-        dim = int(default_dim)
-    dim = max(1, dim)
-    ollama_url = os.environ.get("LOCAL_MEMORY_OLLAMA_URL", str(config.get("ollama_url", "http://127.0.0.1:11434"))).rstrip("/")
-    default_timeout = str(config.get("timeout", 30))
-    try:
-        timeout = float(os.environ.get("LOCAL_MEMORY_OLLAMA_TIMEOUT", default_timeout))
-    except ValueError:
-        timeout = float(default_timeout)
-    return SemanticConfig(provider=provider, model=model, dim=dim, ollama_url=ollama_url, timeout=max(1.0, timeout))
-
-
-def vector_schema_dim(conn: sqlite3.Connection) -> int | None:
-    row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='memory_vec'").fetchone()
-    if not row or not row[0]:
-        return None
-    match = re.search(r"float\[(\d+)\]", row[0])
-    return int(match.group(1)) if match else None
-
-
-def ensure_vector_schema(conn: sqlite3.Connection) -> None:
-    config = semantic_config()
-    existing_dim = vector_schema_dim(conn)
-    if existing_dim is not None and existing_dim != config.dim:
-        conn.executescript(
-            """
-            DROP TABLE IF EXISTS memory_vec;
-            DROP TABLE IF EXISTS memory_embedding_index;
-            """
-        )
-    conn.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS memory_embedding_index (
-          rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-          memory_id TEXT NOT NULL UNIQUE,
-          provider TEXT NOT NULL DEFAULT 'hashing',
-          model TEXT NOT NULL DEFAULT 'hashing-384',
-          dim INTEGER NOT NULL DEFAULT 384,
-          updated_at TEXT NOT NULL,
-          FOREIGN KEY(memory_id) REFERENCES memories(id) ON DELETE CASCADE
-        );
-        """
-    )
-    safe_dim = int(config.dim)
-    create_vec_sql = "CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec USING vec0(embedding float[%d])" % safe_dim
-    conn.execute(create_vec_sql)
 
 
 def init_db(conn: sqlite3.Connection) -> None:
@@ -381,8 +294,6 @@ def init_db(conn: sqlite3.Connection) -> None:
             "INSERT INTO memories_fts(id,title,content,tags,type,scope) VALUES (?,?,?,?,?,?)",
             [(r["id"], r["title"], r["content"], r["tags_json"], r["type"], r["scope"]) for r in rows],
         )
-    if SQLITE_VEC_AVAILABLE:
-        ensure_vector_schema(conn)
     conn.commit()
 
 
@@ -647,174 +558,6 @@ def timeline(query: str = "", scope: str = "", limit: int = 20) -> list[dict[str
     return sorted(rows, key=lambda r: r.get("created_at", ""))
 
 
-DEFAULT_SEMANTIC_CONFIG = semantic_config()
-SEMANTIC_DIM = DEFAULT_SEMANTIC_CONFIG.dim
-SEMANTIC_PROVIDER = DEFAULT_SEMANTIC_CONFIG.provider
-SEMANTIC_MODEL = DEFAULT_SEMANTIC_CONFIG.model
-
-
-def _vector_to_bytes(values: list[float], dim: int) -> bytes:
-    if np is None:
-        raise RuntimeError("numpy is required for semantic embeddings")
-    if len(values) != dim:
-        raise RuntimeError(f"embedding dimension mismatch: expected {dim}, got {len(values)}")
-    vec = np.asarray(values, dtype=np.float32)
-    norm = float(np.linalg.norm(vec))
-    if norm > 0:
-        vec = vec / norm
-    return vec.astype(np.float32).tobytes()
-
-
-def semantic_available() -> bool:
-    return bool(SQLITE_VEC_AVAILABLE and np is not None)
-
-
-def embed_text_hashing(text: str, dim: int | None = None) -> bytes:
-    """Deterministic local embedding fallback used only when explicitly configured."""
-    if np is None:
-        raise RuntimeError("numpy is required for semantic hashing embeddings")
-    dim = int(dim or semantic_config().dim)
-    vec = np.zeros(dim, dtype=np.float32)
-    tokens = re.findall(r"[\w\u4e00-\u9fff]+", text.lower(), flags=re.UNICODE)
-    for tok in tokens:
-        digest = hashlib.blake2b(tok.encode("utf-8"), digest_size=8).digest()
-        bucket = int.from_bytes(digest[:4], "little") % dim
-        sign = 1.0 if digest[4] & 1 else -1.0
-        vec[bucket] += sign
-    norm = float(np.linalg.norm(vec))
-    if norm > 0:
-        vec /= norm
-    return vec.astype(np.float32).tobytes()
-
-
-def embed_text_ollama(text: str, config: SemanticConfig | None = None) -> bytes:
-    config = config or semantic_config()
-    payload = json.dumps({"model": config.model, "input": text}, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(
-        f"{config.ollama_url}/api/embed",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=config.timeout) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"Ollama embedding request failed: {exc}") from exc
-    embeddings = data.get("embeddings") or []
-    if not embeddings:
-        raise RuntimeError("Ollama embedding response did not include embeddings")
-    return _vector_to_bytes([float(x) for x in embeddings[0]], config.dim)
-
-
-def embed_text(text: str, config: SemanticConfig | None = None) -> bytes:
-    config = config or semantic_config()
-    if config.provider == "ollama":
-        return embed_text_ollama(text, config)
-    if config.provider == "hashing":
-        return embed_text_hashing(text, config.dim)
-    raise RuntimeError(f"unsupported embedding provider: {config.provider}")
-
-
-def semantic_index(limit: int = 1000, force: bool = False) -> dict[str, Any]:
-    if not semantic_available():
-        return {"available": False, "reason": "sqlite-vec/numpy not available", "indexed": 0, "skipped": 0}
-    config = semantic_config()
-    indexed = 0
-    skipped = 0
-    errors: list[dict[str, str]] = []
-    with managed_conn() as conn:
-        ensure_vector_schema(conn)
-        rows = conn.execute(
-            """
-            SELECT m.* FROM memories m
-            LEFT JOIN memory_embedding_index e ON e.memory_id = m.id
-            WHERE (? OR e.memory_id IS NULL OR e.updated_at < m.updated_at OR e.provider != ? OR e.model != ? OR e.dim != ?)
-            ORDER BY m.updated_at DESC LIMIT ?
-            """,
-            (1 if force else 0, config.provider, config.model, config.dim, max(1, min(int(limit), 5000))),
-        ).fetchall()
-        for row in rows:
-            r = row_to_dict(row)
-            text = f"{r['type']} {r['scope']} {r['title']} {' '.join(r.get('tags', []))}\n{r['content']}"
-            try:
-                emb = embed_text(text, config)
-            except RuntimeError as exc:
-                skipped += 1
-                errors.append({"id": r["id"], "error": str(exc)})
-                continue
-            existing = conn.execute("SELECT rowid FROM memory_embedding_index WHERE memory_id=?", (r["id"],)).fetchone()
-            ts = now()
-            if existing:
-                rid = int(existing["rowid"])
-                conn.execute("UPDATE memory_vec SET embedding=? WHERE rowid=?", (emb, rid))
-                conn.execute(
-                    "UPDATE memory_embedding_index SET provider=?, model=?, dim=?, updated_at=? WHERE memory_id=?",
-                    (config.provider, config.model, config.dim, ts, r["id"]),
-                )
-            else:
-                cur = conn.execute(
-                    "INSERT INTO memory_embedding_index(memory_id,provider,model,dim,updated_at) VALUES (?,?,?,?,?)",
-                    (r["id"], config.provider, config.model, config.dim, ts),
-                )
-                rid = int(cur.lastrowid)
-                conn.execute("INSERT INTO memory_vec(rowid, embedding) VALUES (?, ?)", (rid, emb))
-            indexed += 1
-    return {"available": True, "provider": config.provider, "model": config.model, "dim": config.dim, "indexed": indexed, "skipped": skipped, "errors": errors[:5]}
-
-
-def semantic_search(query: str, limit: int = 10, status: str = "active") -> list[dict[str, Any]]:
-    if not semantic_available():
-        return []
-    config = semantic_config()
-    index_result = semantic_index(limit=1000, force=False)
-    if index_result.get("indexed", 0) == 0 and index_result.get("skipped", 0) > 0:
-        return []
-    try:
-        emb = embed_text(query, config)
-    except RuntimeError:
-        return []
-    with managed_conn() as conn:
-        ensure_vector_schema(conn)
-        rows = conn.execute(
-            """
-            SELECT m.*, v.distance AS semantic_distance
-            FROM memory_vec v
-            JOIN memory_embedding_index e ON e.rowid = v.rowid
-            JOIN memories m ON m.id = e.memory_id
-            WHERE v.embedding MATCH ? AND k = ? AND (? = '' OR m.status = ?)
-            ORDER BY v.distance
-            """,
-            (emb, max(1, min(int(limit), 100)), status or "", status or ""),
-        ).fetchall()
-    out = []
-    for row in rows:
-        d = row_to_dict(row)
-        d["semantic_distance"] = float(row["semantic_distance"])
-        out.append(d)
-    return out
-
-
-def semantic_status() -> dict[str, Any]:
-    config = semantic_config()
-    with managed_conn() as conn:
-        ensure_vector_schema(conn) if semantic_available() else None
-        total = conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
-        indexed = 0
-        schema_dim = None
-        if semantic_available():
-            indexed = conn.execute("SELECT COUNT(*) FROM memory_embedding_index WHERE provider=? AND model=? AND dim=?", (config.provider, config.model, config.dim)).fetchone()[0]
-            schema_dim = vector_schema_dim(conn)
-    return {
-        "available": semantic_available(),
-        "provider": config.provider if semantic_available() else None,
-        "model": config.model if semantic_available() else None,
-        "dim": config.dim if semantic_available() else None,
-        "schema_dim": schema_dim,
-        "total_records": total,
-        "indexed_records": indexed,
-        "note": "Ollama nomic-embed-text is the default local embedding provider; set LOCAL_MEMORY_EMBEDDING_PROVIDER=hashing for the legacy hashing fallback",
-    }
 
 
 def consolidate(dry_run: bool = True, limit: int = 50) -> dict[str, Any]:
@@ -1025,127 +768,69 @@ def memory_curator_report(dry_run: bool = True, limit: int = 500, stale_after_da
     return curator_report(dry_run, limit, stale_after_days, archive_after_days)
 
 
-@mcp.tool()
-def memory_semantic_status() -> dict[str, Any]:
-    """Return local vector/semantic index status."""
-    return semantic_status()
-
+# ─── New unified tools (extraction.py + vector_store.py + dedup.py) ──────────
 
 @mcp.tool()
-def memory_semantic_index(limit: int = 1000, force: bool = False) -> dict[str, Any]:
-    """Build/update the local sqlite-vec memory vector index."""
-    return semantic_index(limit, force)
-
-
-@mcp.tool()
-def memory_semantic_search(query: str, limit: int = 10, status: str = "active") -> list[dict[str, Any]]:
-    """Search memories through the local sqlite-vec vector index."""
-    return semantic_search(query, limit, status)
-
-
-# ─── Mem0 Integration Tools ───────────────────────────────────────────────────
-
-@mcp.tool()
-def memory_extract(
+def memory_ingest(
     messages: list[dict[str, str]],
-    user_id: str = "",
+    user_id: str = "advancer",
     agent_id: str = "hermes",
-    promote: bool = False,
 ) -> dict[str, Any]:
-    """Extract memories from a conversation using Mem0's LLM pipeline.
+    """Extract facts from a conversation and write deduplicated candidates to SQLite.
 
-    Mem0 uses an LLM to identify facts, preferences, and decisions from
-    conversation messages and stores them in a vector store for semantic recall.
+    Full pipeline: DeepSeek LLM extraction → Qdrant dedup → SQLite candidate.
 
     Args:
         messages: Conversation as [{"role": "user"|"assistant", "content": "..."}]
-        user_id: User scope (default: config default_user_id)
-        agent_id: Which agent produced/consumed the conversation
-        promote: If True, also add extracted memories to the structured SQLite layer
+        user_id: User scope for vector search filters
+        agent_id: Which agent produced the conversation
 
     Returns:
-        {"results": [...], "elapsed_s": float, "promoted": int}
+        {"added": int, "updated": int, "skipped": int, "errors": int, "elapsed_s": float}
     """
-    from mem0_backend import get_mem0_backend
-    backend = get_mem0_backend(load_config())
-    result = backend.extract_memories(messages, user_id=user_id or None, agent_id=agent_id)
-
-    promoted_count = 0
-    if promote and result.get("results"):
-        for mem in result["results"]:
-            mem_text = mem.get("memory", mem.get("text", ""))
-            if mem_text:
-                add_memory_record(
-                    type="episodic_memory",
-                    title=mem_text[:80],
-                    content=mem_text,
-                    scope="global",
-                    tags=["mem0-extracted", f"agent:{agent_id}"],
-                    source="mem0",
-                    source_agent=agent_id,
-                    confidence=0.6,
-                    importance=0.4,
-                    status="candidate",
-                    decay_policy="review",
-                )
-                promoted_count += 1
-
-    result["promoted"] = promoted_count
-    return result
+    from dedup import ingest
+    result = ingest(messages, user_id=user_id, agent_id=agent_id, cfg=load_config())
+    return {
+        "added": result.added,
+        "updated": result.updated,
+        "skipped": result.skipped,
+        "errors": result.errors,
+        "elapsed_s": result.elapsed_s,
+        "extraction_elapsed_s": result.extraction_elapsed_s,
+    }
 
 
 @mcp.tool()
-def memory_smart_search(
+def memory_vector_search(
     query: str,
-    user_id: str = "",
-    limit: int = 10,
-    include_fts: bool = True,
-    include_mem0: bool = True,
-    include_semantic: bool = True,
-) -> dict[str, Any]:
-    """Hybrid search across all memory layers: FTS5, sqlite-vec semantic, and Mem0.
+    top_k: int = 10,
+    score_threshold: float = 0.0,
+) -> list[dict[str, Any]]:
+    """Semantic search via Qdrant vector store (nomic-embed-text embeddings).
 
-    Combines results from up to 3 sources for maximum recall:
-    - FTS5: exact keyword matching (fast, precise)
-    - sqlite-vec: local embedding similarity (nomic-embed-text)
-    - Mem0: LLM-extracted memory search (Qdrant vector store)
+    Args:
+        query: Natural language search query
+        top_k: Maximum results to return
+        score_threshold: Minimum cosine similarity (0.0 = no filter)
 
     Returns:
-        {"fts_results": [...], "semantic_results": [...], "mem0_results": [...],
-         "merged_count": int}
+        List of {"id", "score", "text", "payload"} dicts, sorted by score desc.
     """
-    output: dict[str, Any] = {"merged_count": 0}
-
-    if include_fts:
-        fts_results = search_memory_records(query, limit=limit)
-        output["fts_results"] = fts_results
-        output["merged_count"] += len(fts_results)
-
-    if include_semantic and SQLITE_VEC_AVAILABLE:
-        sem_results = semantic_search(query, limit=limit)
-        output["semantic_results"] = sem_results
-        output["merged_count"] += len(sem_results)
-
-    if include_mem0:
-        from mem0_backend import get_mem0_backend
-        backend = get_mem0_backend(load_config())
-        mem0_result = backend.search(query, user_id=user_id or None, limit=limit)
-        output["mem0_results"] = mem0_result.get("results", [])
-        output["mem0_elapsed_s"] = mem0_result.get("elapsed_s", 0)
-        output["merged_count"] += len(output["mem0_results"])
-        if mem0_result.get("error"):
-            output["mem0_error"] = mem0_result["error"]
-
-    return output
+    from vector_store import get_vector_store
+    vs = get_vector_store(load_config())
+    results = vs.search(query, top_k=top_k, score_threshold=score_threshold)
+    return [
+        {"id": r.id, "score": round(r.score, 4), "text": r.text, "payload": r.payload}
+        for r in results
+    ]
 
 
 @mcp.tool()
-def memory_mem0_status() -> dict[str, Any]:
-    """Return Mem0 backend status (availability, config, model info)."""
-    from mem0_backend import get_mem0_backend
-    backend = get_mem0_backend(load_config())
-    return backend.status()
-
+def memory_vector_status() -> dict[str, Any]:
+    """Return Qdrant vector store status (availability, collection, count)."""
+    from vector_store import get_vector_store
+    vs = get_vector_store(load_config())
+    return vs.status()
 
 def export_html(path: Path) -> None:
     rows = list_recent(1000)
@@ -1168,7 +853,7 @@ def export_html(path: Path) -> None:
     payload = {
         "rows": rows,
         "report": report,
-        "semantic": semantic_status(),
+        "semantic": {"available": False, "note": "vector search via Qdrant (vector_store.py)"},
         "type_counts": type_counts,
         "status_counts": status_counts,
         "timeline_rows": timeline_rows,
@@ -1359,12 +1044,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         payload = report["summary"] if args.summary_only else report
         print(json.dumps(payload, ensure_ascii=False, indent=2))
-    elif args.cmd == "semantic-status":
-        print(json.dumps(semantic_status(), ensure_ascii=False, indent=2))
-    elif args.cmd == "semantic-index":
-        print(json.dumps(semantic_index(limit=args.limit, force=args.force), ensure_ascii=False, indent=2))
-    elif args.cmd == "semantic-search":
-        print(json.dumps(semantic_search(args.query, limit=args.limit, status=args.status), ensure_ascii=False, indent=2))
+    elif args.cmd in ("semantic-status", "semantic-index", "semantic-search"):
+        print(json.dumps({"error": "sqlite-vec removed; use memory_vector_search / memory_vector_status MCP tools"}, indent=2))
     elif args.cmd == "html":
         export_html(Path(args.out))
     elif args.cmd == "serve":

@@ -1,0 +1,21 @@
+{
+  "dry_run": true,
+  "generated_at": "2026-05-11T15:47:01+00:00",
+  "scanned": 4,
+  "duplicate_title_groups": [],
+  "low_feedback_candidates": [],
+  "stale_candidates": [],
+  "archive_candidates": [],
+  "contradiction_candidates": [],
+  "skill_promotion_candidates": [],
+  "actions": [],
+  "summary": {
+    "duplicates": 0,
+    "low_feedback": 0,
+    "stale": 0,
+    "archive": 0,
+    "contradictions": 0,
+    "skill_promotions": 0,
+    "actions": 0
+  }
+}

@@ -7,7 +7,7 @@ def read_json(capsys):
     return json.loads(capsys.readouterr().out)
 
 
-def test_main_init_add_search_context_curator_semantic_status_and_html(tmp_path, capsys):
+def test_main_init_add_search_context_curator_and_html(tmp_path, capsys):
     assert lm.main(["init"]) == 0
     init_out = capsys.readouterr().out.strip()
     assert init_out.endswith("test_memory.sqlite3")
@@ -29,9 +29,10 @@ def test_main_init_add_search_context_curator_semantic_status_and_html(tmp_path,
     summary = read_json(capsys)
     assert "duplicates" in summary
 
+    # semantic-status now returns a deprecation notice (sqlite-vec removed)
     assert lm.main(["semantic-status"]) == 0
     semantic = read_json(capsys)
-    assert semantic["total_records"] == 1
+    assert "error" in semantic
 
     out = tmp_path / "cli-dashboard.html"
     assert lm.main(["html", str(out)]) == 0

@@ -1,8 +1,4 @@
 mcp==1.27.1
-numpy==2.4.4
-sqlite-vec==0.1.9
+qdrant-client==1.14.3
 pytest==9.0.3
 pytest-timeout==2.4.0
-# Mem0 integration (optional — gracefully degrades if not installed)
-mem0ai==2.0.2
-ollama==0.6.2
