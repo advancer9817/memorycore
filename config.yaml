@@ -31,8 +31,10 @@ temporal:
 
 mem0:
   enabled: true
-  llm_provider: ollama
-  llm_model: qwen2.5:3b
+  llm_provider: deepseek
+  llm_model: deepseek-v4-flash
+  llm_api_key: sk-9ab672c32bc94f3baab68741ee333f43
+  llm_base_url: https://api.deepseek.com/v1
   ollama_url: http://127.0.0.1:12434
   embedder_model: nomic-embed-text
   embedder_dim: 768

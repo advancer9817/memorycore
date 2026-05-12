@@ -47,6 +47,8 @@ class Mem0Config:
     enabled: bool = False
     llm_provider: str = "ollama"
     llm_model: str = "qwen2.5:3b"
+    llm_api_key: str = ""
+    llm_base_url: str = ""
     ollama_url: str = "http://127.0.0.1:12434"
     embedder_model: str = "nomic-embed-text"
     embedder_dim: int = 768
@@ -71,6 +73,10 @@ def mem0_config_from_dict(cfg: dict[str, Any]) -> Mem0Config:
         enabled=mem0_section.get("enabled", False),
         llm_provider=mem0_section.get("llm_provider", "ollama"),
         llm_model=mem0_section.get("llm_model", "qwen2.5:3b"),
+        llm_api_key=mem0_section.get("llm_api_key",
+                                      os.environ.get("MEM0_LLM_API_KEY", "")),
+        llm_base_url=mem0_section.get("llm_base_url",
+                                       os.environ.get("MEM0_LLM_BASE_URL", "")),
         ollama_url=mem0_section.get("ollama_url",
                                      os.environ.get("OLLAMA_HOST", "http://127.0.0.1:12434")),
         embedder_model=mem0_section.get("embedder_model", "nomic-embed-text"),
@@ -107,15 +113,30 @@ class Mem0Backend:
             return False
 
         try:
+            # Build LLM config based on provider
+            llm_config: dict[str, Any] = {
+                "model": self.config.llm_model,
+                "temperature": self.config.temperature,
+                "max_tokens": self.config.max_tokens,
+            }
+            if self.config.llm_provider == "ollama":
+                llm_config["ollama_base_url"] = self.config.ollama_url
+            elif self.config.llm_provider == "deepseek":
+                if self.config.llm_api_key:
+                    llm_config["api_key"] = self.config.llm_api_key
+                if self.config.llm_base_url:
+                    llm_config["deepseek_base_url"] = self.config.llm_base_url
+            else:
+                # Generic OpenAI-compatible providers
+                if self.config.llm_api_key:
+                    llm_config["api_key"] = self.config.llm_api_key
+                if self.config.llm_base_url:
+                    llm_config["openai_base_url"] = self.config.llm_base_url
+
             mem0_config = {
                 "llm": {
                     "provider": self.config.llm_provider,
-                    "config": {
-                        "model": self.config.llm_model,
-                        "ollama_base_url": self.config.ollama_url,
-                        "temperature": self.config.temperature,
-                        "max_tokens": self.config.max_tokens,
-                    }
+                    "config": llm_config,
                 },
                 "embedder": {
                     "provider": "ollama",
