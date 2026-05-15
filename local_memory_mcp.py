@@ -429,6 +429,57 @@ def add_memory_record(
     return row_to_dict(row)
 
 
+def update_memory_content(
+    memory_id: str,
+    new_content: str | None = None,
+    new_title: str | None = None,
+    new_status: str | None = None,
+    new_confidence: float | None = None,
+    new_importance: float | None = None,
+) -> dict[str, Any]:
+    """Update an existing memory record's content/title/status.
+
+    Only provided (non-None) fields are updated. Returns updated row as dict.
+    Used by the dedup pipeline to update existing memories in-place when
+    new information refines an existing fact.
+    """
+    rows = managed_query("SELECT id FROM memories WHERE id=? LIMIT 1", (memory_id,))
+    if not rows:
+        raise ValueError(f"Memory not found: {memory_id}")
+
+    ts = now()
+    updates: list[str] = ["updated_at=?"]
+    params: list[Any] = [ts]
+
+    if new_content is not None:
+        updates.append("content=?")
+        params.append(new_content.strip())
+    if new_title is not None:
+        updates.append("title=?")
+        params.append(new_title.strip())
+    if new_status is not None:
+        validate_status(new_status)
+        updates.append("status=?")
+        params.append(new_status)
+    if new_confidence is not None:
+        confidence_value = finite_float(new_confidence, "confidence", 0.0, 1.0)
+        updates.append("confidence=?")
+        params.append(confidence_value)
+    if new_importance is not None:
+        importance_value = finite_float(new_importance, "importance", 0.0, 1.0)
+        updates.append("importance=?")
+        params.append(importance_value)
+
+    params.append(memory_id)
+    with managed_conn() as conn:
+        conn.execute(
+            f"UPDATE memories SET {', '.join(updates)} WHERE id=?",
+            params,
+        )
+        row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
+    return row_to_dict(row)
+
+
 def search_memory_records(
     query: str = "",
     types: Any = None,
@@ -894,7 +945,14 @@ def memory_ingest(
         {"added": int, "updated": int, "skipped": int, "errors": int, "elapsed_s": float}
     """
     from dedup import ingest
-    result = ingest(messages, user_id=user_id, agent_id=agent_id, cfg=load_config())
+    result = ingest(
+        messages,
+        user_id=user_id,
+        agent_id=agent_id,
+        cfg=load_config(),
+        _add_memory_fn=add_memory_record,
+        _update_memory_fn=update_memory_content,
+    )
     return {
         "added": result.added,
         "updated": result.updated,

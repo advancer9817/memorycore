@@ -163,9 +163,17 @@ def ingest(
 
     # Default SQLite write functions (imported lazily to avoid circular imports)
     if _add_memory_fn is None:
-        from local_memory_mcp import add_memory_record as _add_memory_fn  # type: ignore
+        try:
+            from local_memory_mcp import add_memory_record as _add_memory_fn  # type: ignore
+        except ImportError:
+            import __main__ as _main  # type: ignore
+            _add_memory_fn = _main.add_memory_record  # pragma: no cover
     if _update_memory_fn is None:
-        from local_memory_mcp import update_memory_content as _update_memory_fn  # type: ignore[attr-defined]
+        try:
+            from local_memory_mcp import update_memory_content as _update_memory_fn  # type: ignore[attr-defined]
+        except ImportError:
+            import __main__ as _main2  # type: ignore
+            _update_memory_fn = _main2.update_memory_content  # pragma: no cover
 
     result = IngestResult()
 
@@ -224,7 +232,7 @@ def ingest(
                 # Write new candidate that supersedes the existing one
                 new_id = str(uuid.uuid4())
                 _add_memory_fn(
-                    type="episodic_memory",
+                    memory_type="episodic_memory",
                     title=fact.text[:80],
                     content=fact.text,
                     scope="global",
@@ -252,7 +260,7 @@ def ingest(
             else:  # add
                 new_id = str(uuid.uuid4())
                 _add_memory_fn(
-                    type="episodic_memory",
+                    memory_type="episodic_memory",
                     title=fact.text[:80],
                     content=fact.text,
                     scope="global",

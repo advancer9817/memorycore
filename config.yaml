@@ -2,11 +2,6 @@ backend:
   primary: sqlite
   fallback: sqlite
 
-openmemory:
-  url: http://127.0.0.1:8765
-  user_id: local-user
-  timeout: 30
-
 qdrant:
   url: http://127.0.0.1:6333
   collection: agent_memory
@@ -35,7 +30,7 @@ mem0:
   llm_model: deepseek-v4-flash
   # API key loaded from .env file (MEM0_LLM_API_KEY / DEEPSEEK_API_KEY)
   llm_api_key: ""
-  llm_base_url: https://api.deepseek.com
+  llm_base_url: https://api.deepseek.com/v1
   ollama_url: http://127.0.0.1:12434
   embedder_model: nomic-embed-text
   embedder_dim: 768
