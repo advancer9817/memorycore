@@ -9,7 +9,7 @@ Initialize local-memory-mcp on a new project computer.
 
 Options:
   --root PATH       Install/runtime root. Default: $LOCAL_MEMORY_ROOT or
-                    $HOME/.agent-memory/local-memory-mcp
+                    the current local-memory-mcp checkout.
   --force-config   Rewrite config.yaml even if it already exists.
   --skip-install   Do not run pip install; useful when dependencies are already installed.
   -h, --help       Show this help.
@@ -20,7 +20,9 @@ edit Hermes/Codex/Claude configs automatically.
 USAGE
 }
 
-ROOT="${LOCAL_MEMORY_ROOT:-$HOME/.agent-memory/local-memory-mcp}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ROOT="${LOCAL_MEMORY_ROOT:-$SOURCE_DIR}"
 FORCE_CONFIG=0
 SKIP_INSTALL=0
 
@@ -50,8 +52,6 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SOURCE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 mkdir -p "$ROOT"
 ROOT="$(cd "$ROOT" && pwd -P)"
 
@@ -151,13 +151,13 @@ else
 fi
 
 echo "[init] Initializing SQLite DB"
-LOCAL_MEMORY_CONFIG="$CONFIG_PATH" LOCAL_MEMORY_DB="${LOCAL_MEMORY_DB:-$ROOT/memory.sqlite3}" "$PY" local_memory_mcp.py init
+LOCAL_MEMORY_CONFIG="$CONFIG_PATH" LOCAL_MEMORY_DB="${LOCAL_MEMORY_DB:-$ROOT/memory.sqlite3}" "$PY" -m local_memory_mcp init
 
 echo "[html] Rendering dashboard.html"
-LOCAL_MEMORY_CONFIG="$CONFIG_PATH" LOCAL_MEMORY_DB="${LOCAL_MEMORY_DB:-$ROOT/memory.sqlite3}" "$PY" local_memory_mcp.py html "$ROOT/dashboard.html"
+LOCAL_MEMORY_CONFIG="$CONFIG_PATH" LOCAL_MEMORY_DB="${LOCAL_MEMORY_DB:-$ROOT/memory.sqlite3}" "$PY" -m local_memory_mcp html "$ROOT/dashboard.html"
 
 echo "[status] Semantic status"
-LOCAL_MEMORY_CONFIG="$CONFIG_PATH" LOCAL_MEMORY_DB="${LOCAL_MEMORY_DB:-$ROOT/memory.sqlite3}" "$PY" local_memory_mcp.py semantic-status || true
+LOCAL_MEMORY_CONFIG="$CONFIG_PATH" LOCAL_MEMORY_DB="${LOCAL_MEMORY_DB:-$ROOT/memory.sqlite3}" "$PY" -m local_memory_mcp semantic-status || true
 
 cat <<EOF
 
@@ -165,13 +165,14 @@ cat <<EOF
   $ROOT
 
 Use this server command in MCP clients:
-  $ROOT/.venv/bin/python $ROOT/local_memory_mcp.py serve
+  $ROOT/.venv/bin/python -m local_memory_mcp serve --port 8318
 
-Hermes example:
-  hermes mcp add local_memory --command "$ROOT/.venv/bin/python $ROOT/local_memory_mcp.py serve"
+HTTP MCP endpoint:
+  http://127.0.0.1:8318/mcp
 
-Codex/Claude Code should use the same stdio command. If Ollama is not installed
-on the target computer, either install/pull nomic-embed-text or set:
+Hermes/Codex/Claude Code/Gemini/OpenCode should point to that HTTP endpoint.
+If Ollama is not installed on the target computer, either install/pull
+nomic-embed-text or set:
   LOCAL_MEMORY_EMBEDDING_PROVIDER=hashing
   LOCAL_MEMORY_EMBEDDING_DIM=384
 EOF

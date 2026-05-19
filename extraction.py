@@ -131,7 +131,7 @@ def extraction_config_from_dict(cfg: dict[str, Any]) -> ExtractionConfig:
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
                 k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip())
+                os.environ[k.strip()] = v.strip()
 
     mem0 = cfg.get("mem0", {})
     extraction = cfg.get("extraction", {})

@@ -1,8 +1,10 @@
 # local-memory-mcp
 
+作者：advancer9817-crypto <advancer9817-crypto@users.noreply.github.com>
+
 本地优先、MCP 暴露的多 agent 共享记忆与协作适配层。
 
-给 Hermes、Codex、Claude Code 提供统一的长期记忆总线，替代把所有内容塞进 USER.md / MEMORY.md 的方式。
+给任何支持 MCP 的本地 agent/client 提供统一的长期记忆总线，替代把所有内容塞进某个单一客户端的记忆文件。
 
 ## 定位
 
@@ -18,22 +20,22 @@
 
 ## 路径
 
-运行时根目录由环境变量控制，不写死用户名：
+运行时根目录默认就是本项目 checkout；也可由环境变量控制：
 
 ```bash
-MEM_ROOT="${LOCAL_MEMORY_ROOT:-$HOME/.agent-memory/local-memory-mcp}"
+MEM_ROOT="${LOCAL_MEMORY_ROOT:-/home/advancer/project/local-memory-mcp}"
 ```
 
 | 文件 | 路径 |
 |---|---|
-| MCP server | `$MEM_ROOT/local_memory_mcp.py` |
+| MCP server | `$MEM_ROOT/local_memory_mcp/` |
 | 配置 | `$MEM_ROOT/config.yaml` |
 | Python venv | `$MEM_ROOT/.venv/bin/python` |
 | SQLite DB | `$MEM_ROOT/memory.sqlite3` |
 | Dashboard | `$MEM_ROOT/dashboard.html` |
 | MCP probe | `$MEM_ROOT/probe_mcp.py` |
 
-代码默认使用 `Path.home() / ".agent-memory" / "local-memory-mcp"`，可用 `LOCAL_MEMORY_DB` 覆盖数据库路径，`LOCAL_MEMORY_CONFIG` 覆盖配置文件路径。
+代码默认使用项目目录内的 `memory.sqlite3`，可用 `LOCAL_MEMORY_DB` 覆盖数据库路径，`LOCAL_MEMORY_CONFIG` 覆盖配置文件路径。
 
 ## 当前状态
 
@@ -46,8 +48,8 @@ MEM_ROOT="${LOCAL_MEMORY_ROOT:-$HOME/.agent-memory/local-memory-mcp}"
 5. **Dashboard**：本地交互式 HTML 面板，Alpine.js，无构建步骤；支持搜索/类型/状态/排序过滤、决策时间线、反馈健康分布、curator 候选摘要、semantic index 状态。
 6. **sqlite-vec 语义层**：本地 Ollama `nomic-embed-text`（768 维）embedding，`memory_semantic_*` MCP 工具；可用 `LOCAL_MEMORY_EMBEDDING_PROVIDER=hashing` 切回 hashing-384 fallback。
 7. **Mem0 SDK 集成**：`memory_extract`（从对话抽取记忆）、`memory_smart_search`（FTS5 + sqlite-vec + Mem0 混合检索）、`memory_mem0_status`；LLM 使用 DeepSeek v4-flash，当前 Ollama 502 时 Mem0 自动降级，不影响主流程。
-8. **Hermes delegate_task 集成**：子 agent 构造 prompt 时自动调用 `local_memory.memory_context`，把 context pack 注入 ephemeral system prompt；主 agent MEMORY.md / USER.md 与 prompt caching 面不变。
-9. **三 agent MCP 接入验证**：Hermes / Codex / Claude Code 均指向 `~/.agent-memory/local-memory-mcp`，smoke test 通过（写入、搜索、context pack、状态更新）。
+8. **HTTP MCP 服务**：可通过 `python -m local_memory_mcp serve --port 8318` 独立启动，客户端只需指向 `http://127.0.0.1:8318/mcp`。
+9. **多客户端接入验证**：Hermes / Codex / Claude Code / Gemini / OpenCode 可作为普通 MCP 客户端接入；lmmcp 不依赖任一客户端配置仓库。
 
 ## MCP 工具列表
 
@@ -73,56 +75,49 @@ MEM_ROOT="${LOCAL_MEMORY_ROOT:-$HOME/.agent-memory/local-memory-mcp}"
 ## CLI
 
 ```bash
-MEM_ROOT="${LOCAL_MEMORY_ROOT:-$HOME/.agent-memory/local-memory-mcp}"
+MEM_ROOT="${LOCAL_MEMORY_ROOT:-/home/advancer/project/local-memory-mcp}"
 PY="$MEM_ROOT/.venv/bin/python"
-SERVER="$MEM_ROOT/local_memory_mcp.py"
 
-"$PY" "$SERVER" init
-"$PY" "$SERVER" search memory
-"$PY" "$SERVER" context "继续实现多 agent 记忆架构"
-"$PY" "$SERVER" html
-"$PY" "$SERVER" curator --summary-only
-"$PY" "$SERVER" semantic-index --force
-"$PY" "$SERVER" semantic-search "delegate_task memory_context"
+"$PY" -m local_memory_mcp init
+"$PY" -m local_memory_mcp search memory
+"$PY" -m local_memory_mcp context "继续实现多 agent 记忆架构"
+"$PY" -m local_memory_mcp html
+"$PY" -m local_memory_mcp curator --summary-only
+"$PY" -m local_memory_mcp semantic-index --force
+"$PY" -m local_memory_mcp semantic-search "memory_context"
 "$MEM_ROOT/run_curator.sh"
 ```
 
 ## MCP 接入配置
 
-三个 agent 均已配置，指向同一个 runtime 目录：
+推荐独立运行 HTTP MCP 服务，然后让各客户端只指向同一个 URL：
 
 ```bash
-hermes mcp test local_memory
-codex mcp get local_memory
-claude mcp get local_memory
+"$PY" -m local_memory_mcp serve --port 8318
 ```
 
-Hermes `~/.hermes/config.yaml`：
+HTTP endpoint:
+
+```text
+http://127.0.0.1:8318/mcp
+```
+
+Hermes 作为普通 MCP 客户端时可使用：
 
 ```yaml
 mcp_servers:
   local_memory:
     enabled: true
-    command: ~/.agent-memory/local-memory-mcp/.venv/bin/python
-    args:
-      - ~/.agent-memory/local-memory-mcp/local_memory_mcp.py
-      - serve
-
-delegation:
-  memory_context:
-    enabled: true
-    server: local_memory
-    tool: memory_context
-    scope: global
-    token_budget: 4000
+    type: http
+    url: http://127.0.0.1:8318/mcp
 ```
 
 Codex `~/.codex/config.toml`：
 
 ```toml
 [mcp_servers.local_memory]
-command = "~/.agent-memory/local-memory-mcp/.venv/bin/python"
-args = ["~/.agent-memory/local-memory-mcp/local_memory_mcp.py", "serve"]
+type = "http"
+url = "http://127.0.0.1:8318/mcp"
 ```
 
 Claude Code `~/.claude.json`（user scope，全局可用）：
@@ -130,9 +125,8 @@ Claude Code `~/.claude.json`（user scope，全局可用）：
 ```json
 "mcpServers": {
   "local_memory": {
-    "type": "stdio",
-    "command": "~/.agent-memory/local-memory-mcp/.venv/bin/python",
-    "args": ["~/.agent-memory/local-memory-mcp/local_memory_mcp.py", "serve"]
+    "type": "http",
+    "url": "http://127.0.0.1:8318/mcp"
   }
 }
 ```
@@ -142,7 +136,7 @@ Claude Code `~/.claude.json`（user scope，全局可用）：
 需要 Python 3.11+（`numpy==2.4.4` 不支持 Python 3.10）。
 
 ```bash
-MEM_ROOT="${LOCAL_MEMORY_ROOT:-$HOME/.agent-memory/local-memory-mcp}"
+MEM_ROOT="${LOCAL_MEMORY_ROOT:-/home/advancer/project/local-memory-mcp}"
 cd "$MEM_ROOT"
 python3.11 -m venv .venv
 .venv/bin/python -m pip install -U pip

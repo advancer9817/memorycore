@@ -20,7 +20,7 @@ except ModuleNotFoundError:
     raise
 
 PY = str(VENV_PY)
-SERVER = str(ROOT / 'local_memory_mcp.py')
+SERVER = str(ROOT / 'local_memory_mcp' / '__main__.py')
 PRODUCTION_DB = str(ROOT / 'memory.sqlite3')
 
 

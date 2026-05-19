@@ -16,7 +16,7 @@ The output is not a production app. It is a designed explanatory artifact / inte
 
 Use the project book at:
 
-`/home/advancer/.agent-memory/local-memory-mcp/docs/plans/2026-05-12-openmemory-qdrant-memory-platform-project-book.md`
+`/home/advancer/project/local-memory-mcp/docs/plans/2026-05-12-openmemory-qdrant-memory-platform-project-book.md`
 
 Do not invent strategic claims beyond that content. You may compress and reorganize it visually.
 
@@ -24,7 +24,7 @@ Do not invent strategic claims beyond that content. You may compress and reorgan
 
 Create a folder:
 
-`/home/advancer/.agent-memory/local-memory-mcp/docs/memory-platform-briefing/`
+`/home/advancer/project/local-memory-mcp/docs/memory-platform-briefing/`
 
 Required files:
 

@@ -1,174 +1,71 @@
-#!/usr/bin/env python3
-"""Local/self-hosted memory MCP v0 for multi-agent shared memory.
+"""SQLite storage layer for local-memory-mcp.
 
-Design goal: structured SQLite + FTS5 memory layer with a compact `memory_context`
-retrieval surface for Hermes, Codex, Claude Code, and other agents.
+Contains all database operations (CRUD, FTS search, curator, memory_links)
+and the export_html dashboard generator.
+
+This module has NO dependency on the MCP framework — it is pure SQLite +
+business logic, so both server.py and dedup.py can import it cleanly
+without circular import issues.
 """
 from __future__ import annotations
 
-import argparse
 import html
 import json
-import os
 import re
 import sqlite3
-import sys
-import math
-import textwrap
-import urllib.error
-import urllib.request
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from local_memory_mcp.models import (
+    DEFAULT_CONFIG,
+    DEFAULT_DB,
+    _INITIALIZED_DB_PATHS,
+    MEMORY_TYPES,
+    STATUSES,
+    VALID_RELATION_TYPES,
+    as_json,
+    db_path,
+    finite_float,
+    from_json,
+    fts_phrase,
+    normalize_list,
+    normalize_title_key,
+    now,
+    parse_ts,
+    row_to_dict,
+    validate_status,
+    validate_type,
+)
 
-SQLITE_VEC_AVAILABLE = False  # removed; vector search now via vector_store.py (Qdrant)
-
-DEFAULT_ROOT = Path(__file__).resolve().parent
-DEFAULT_DB = Path(os.environ.get("LOCAL_MEMORY_DB", Path.home() / ".agent-memory" / "local-memory-mcp" / "memory.sqlite3"))
-_INITIALIZED_DB_PATHS: set[str] = set()
-
-DEFAULT_CONFIG: dict[str, Any] = {
-    "backend": {"primary": "sqlite", "fallback": "sqlite"},
-    "openmemory": {"url": "http://127.0.0.1:8765", "user_id": "local-user", "timeout": 30},
-    "qdrant": {"url": "http://127.0.0.1:6333", "collection": "agent_memory", "timeout": 30},
-    "embedding": {
-        "provider": "ollama",
-        "model": "nomic-embed-text",
-        "dim": 768,
-        "ollama_url": "http://127.0.0.1:11434",
-        "timeout": 30,
-    },
-    "context_pack": {"default_token_budget": 2000, "include_stale_warnings": True, "max_records_per_group": 6},
-    "temporal": {"enabled": False, "contradiction_detection": "heuristic", "auto_supersede_user_corrections": True},
-    "ops_db": {"path": str(DEFAULT_ROOT / "memory_ops.sqlite3")},
-}
-
-MEMORY_TYPES = {
-    "user_profile",
-    "environment_fact",
-    "agent_architecture",
-    "project_memory",
-    "episodic_memory",
-    "timeline_event",
-    "decision",
-    "feedback",
-    "skill_candidate",
-    "raw_event",
-}
-STATUSES = {"active", "stale", "archived", "contradicted", "promoted", "candidate"}
-
-
-def now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-def as_json(value: Any) -> str:
-    if value is None:
-        value = []
-    return json.dumps(value, ensure_ascii=False)
-
-
-def from_json(value: str | None, default: Any) -> Any:
-    if not value:
-        return default
-    try:
-        return json.loads(value)
-    except Exception:
-        return default
-
-
-def config_path() -> Path:
-    return Path(os.environ.get("LOCAL_MEMORY_CONFIG", str(DEFAULT_ROOT / "config.yaml"))).expanduser()
-
-
-def _parse_yaml_scalar(value: str) -> Any:
-    raw = value.strip()
-    lowered = raw.lower()
-    if lowered in {"true", "false"}:
-        return lowered == "true"
-    if lowered in {"null", "none", "~"}:
-        return None
-    try:
-        return int(raw)
-    except ValueError:
-        pass
-    try:
-        return float(raw)
-    except ValueError:
-        pass
-    if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith("'") and raw.endswith("'")):
-        return raw[1:-1]
-    return raw
-
-
-def _parse_simple_yaml(text: str) -> dict[str, Any]:
-    """Parse the small nested config.yaml subset used by this adapter.
-
-    This intentionally avoids adding PyYAML as a runtime dependency. Supported
-    syntax is enough for config.yaml: top-level sections with two-space indented
-    scalar key/value pairs.
-    """
-    data: dict[str, Any] = {}
-    current: dict[str, Any] | None = None
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if not line.startswith(" ") and stripped.endswith(":"):
-            section = stripped[:-1].strip()
-            current = data.setdefault(section, {})
-            continue
-        if ":" not in stripped:
-            continue
-        key, value = stripped.split(":", 1)
-        target = current if line.startswith(" ") and current is not None else data
-        target[key.strip()] = _parse_yaml_scalar(value)
-    return data
-
-
-def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    merged: dict[str, Any] = {}
-    for key, value in base.items():
-        if isinstance(value, dict):
-            merged[key] = _deep_merge(value, {})
-        else:
-            merged[key] = value
-    for key, value in override.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = _deep_merge(merged[key], value)
-        else:
-            merged[key] = value
-    return merged
-
-
-def load_config() -> dict[str, Any]:
-    path = config_path()
-    if not path.exists():
-        config = _deep_merge(DEFAULT_CONFIG, {})
-    else:
-        config = _deep_merge(DEFAULT_CONFIG, _parse_simple_yaml(path.read_text(encoding="utf-8")))
-    openmemory = config.setdefault("openmemory", {})
-    if openmemory.get("user_id") == "local-user" and os.environ.get("USER"):
-        openmemory["user_id"] = os.environ["USER"]
-    return config
-
-
-def db_path() -> Path:
-    path = Path(os.environ.get("LOCAL_MEMORY_DB", str(DEFAULT_DB))).expanduser()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
+__all__ = [
+    "connect",
+    "managed_conn",
+    "init_db",
+    "add_memory_record",
+    "update_memory_content",
+    "search_memory_records",
+    "build_context_pack",
+    "update_status",
+    "add_feedback",
+    "list_recent",
+    "get_record",
+    "timeline",
+    "add_link",
+    "query_links",
+    "consolidate",
+    "curator_report",
+    "export_html",
+]
 
 
 def connect() -> sqlite3.Connection:
     """Open a SQLite connection and ensure the schema exists for its DB path.
 
-    Kept as a public helper for external scripts. Internal code should prefer
-    managed_conn() so connections are explicitly closed.
+    Internal code should prefer managed_conn() so connections are explicitly
+    closed.
     """
     path = db_path()
     conn = sqlite3.connect(path)
@@ -315,60 +212,9 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def normalize_list(value: Any) -> list[str]:
-    if value is None or value == "":
-        return []
-    if isinstance(value, str):
-        # Accept JSON list or comma-separated text.
-        v = value.strip()
-        if v.startswith("["):
-            try:
-                parsed = json.loads(v)
-                return [str(x).strip() for x in parsed if str(x).strip()]
-            except Exception:
-                pass
-        return [x.strip() for x in v.split(",") if x.strip()]
-    if isinstance(value, (list, tuple, set)):
-        return [str(x).strip() for x in value if str(x).strip()]
-    return [str(value).strip()]
-
-
-def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
-    d = dict(row)
-    d["tags"] = from_json(d.pop("tags_json", "[]"), [])
-    d["related_ids"] = from_json(d.pop("related_ids_json", "[]"), [])
-    d["metadata"] = from_json(d.pop("metadata_json", "{}"), {})
-    return d
-
-
-def validate_type(memory_type: str) -> str:
-    if memory_type not in MEMORY_TYPES:
-        raise ValueError(f"type must be one of {sorted(MEMORY_TYPES)}")
-    return memory_type
-
-
-def validate_status(status: str) -> str:
-    if status not in STATUSES:
-        raise ValueError(f"status must be one of {sorted(STATUSES)}")
-    return status
-
-
-def finite_float(value: Any, name: str, min_value: float | None = None, max_value: float | None = None) -> float:
-    try:
-        x = float(value)
-    except Exception as exc:
-        raise ValueError(f"{name} must be a finite number") from exc
-    if not math.isfinite(x):
-        raise ValueError(f"{name} must be finite")
-    if min_value is not None and x < min_value:
-        raise ValueError(f"{name} must be >= {min_value}")
-    if max_value is not None and x > max_value:
-        raise ValueError(f"{name} must be <= {max_value}")
-    return x
-
-
-def fts_phrase(term: str) -> str:
-    return '"' + term.replace('"', '""') + '"'
+# ---------------------------------------------------------------------------
+# CRUD
+# ---------------------------------------------------------------------------
 
 
 def add_memory_record(
@@ -378,7 +224,7 @@ def add_memory_record(
     scope: str = "global",
     tags: Any = None,
     source: str = "manual",
-    source_agent: str = "hermes",
+    source_agent: str = "agent",
     project_path: str = "",
     confidence: float = 0.70,
     importance: float = 0.50,
@@ -429,6 +275,57 @@ def add_memory_record(
     return row_to_dict(row)
 
 
+def update_memory_content(
+    memory_id: str,
+    new_content: str | None = None,
+    new_title: str | None = None,
+    new_status: str | None = None,
+    new_confidence: float | None = None,
+    new_importance: float | None = None,
+) -> dict[str, Any]:
+    """Update an existing memory record's content/title/status.
+
+    Only provided (non-None) fields are updated. Returns updated row as dict.
+    Used by the dedup pipeline to update existing memories in-place when
+    new information refines an existing fact.
+    """
+    rows = _managed_query("SELECT id FROM memories WHERE id=? LIMIT 1", (memory_id,))
+    if not rows:
+        raise ValueError(f"Memory not found: {memory_id}")
+
+    ts = now()
+    updates: list[str] = ["updated_at=?"]
+    params: list[Any] = [ts]
+
+    if new_content is not None:
+        updates.append("content=?")
+        params.append(new_content.strip())
+    if new_title is not None:
+        updates.append("title=?")
+        params.append(new_title.strip())
+    if new_status is not None:
+        validate_status(new_status)
+        updates.append("status=?")
+        params.append(new_status)
+    if new_confidence is not None:
+        confidence_value = finite_float(new_confidence, "confidence", 0.0, 1.0)
+        updates.append("confidence=?")
+        params.append(confidence_value)
+    if new_importance is not None:
+        importance_value = finite_float(new_importance, "importance", 0.0, 1.0)
+        updates.append("importance=?")
+        params.append(importance_value)
+
+    params.append(memory_id)
+    with managed_conn() as conn:
+        conn.execute(
+            f"UPDATE memories SET {', '.join(updates)} WHERE id=?",
+            params,
+        )
+        row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
+    return row_to_dict(row)
+
+
 def search_memory_records(
     query: str = "",
     types: Any = None,
@@ -444,10 +341,6 @@ def search_memory_records(
     params: list[Any] = []
     base = "SELECT m.* FROM memories m"
     if query.strip():
-        # FTS MATCH is brittle with punctuation/operators. Tokenize to safe
-        # word-ish terms, quote each term as a phrase so reserved words like
-        # OR/NOT are searched literally, and return no matches for punctuation-
-        # only queries instead of passing malformed raw syntax to FTS5.
         terms = re.findall(r"[\w\u4e00-\u9fff]+", query, flags=re.UNICODE)
         if not terms:
             return []
@@ -465,7 +358,10 @@ def search_memory_records(
         clauses.append("(m.project_path = ? OR m.project_path = '')")
         params.append(project_path)
     if tags_list:
-        clauses.append("EXISTS (SELECT 1 FROM json_each(m.tags_json) WHERE lower(json_each.value) IN (%s))" % ",".join("?" for _ in tags_list))
+        clauses.append(
+            "EXISTS (SELECT 1 FROM json_each(m.tags_json) WHERE lower(json_each.value) IN (%s))"
+            % ",".join("?" for _ in tags_list)
+        )
         params.extend(tags_list)
     if status:
         clauses.append("m.status = ?")
@@ -478,12 +374,20 @@ def search_memory_records(
     with managed_conn() as conn:
         rows = [row_to_dict(r) for r in conn.execute(sql, params).fetchall()]
         if rows:
-            conn.executemany("UPDATE memories SET last_accessed_at=? WHERE id=?", [(now(), r["id"]) for r in rows])
+            conn.executemany(
+                "UPDATE memories SET last_accessed_at=? WHERE id=?",
+                [(now(), r["id"]) for r in rows],
+            )
     return rows
 
 
-def build_context_pack(task: str, agent: str = "hermes", project_path: str = "", scope: str = "global", token_budget: int = 2000) -> dict[str, Any]:
-    # Retrieve broadly, then group. Approximate budget by chars = tokens*4.
+def build_context_pack(
+    task: str,
+    agent: str = "agent",
+    project_path: str = "",
+    scope: str = "global",
+    token_budget: int = 2000,
+) -> dict[str, Any]:
     max_chars = max(800, int(token_budget) * 4)
     records = search_memory_records(task, scope=scope, project_path=project_path, status="active", limit=40)
     if not records:
@@ -539,7 +443,9 @@ def update_status(memory_id: str, status: str) -> dict[str, Any]:
     return row_to_dict(row)
 
 
-def add_feedback(memory_id: str, score: float, note: str = "", source_agent: str = "hermes") -> dict[str, Any]:
+def add_feedback(
+    memory_id: str, score: float, note: str = "", source_agent: str = "agent"
+) -> dict[str, Any]:
     score_value = finite_float(score, "score", -10.0, 10.0)
     event_id = str(uuid.uuid4())
     ts = now()
@@ -550,7 +456,10 @@ def add_feedback(memory_id: str, score: float, note: str = "", source_agent: str
             "INSERT INTO feedback_events(id,memory_id,score,note,source_agent,created_at) VALUES (?,?,?,?,?,?)",
             (event_id, memory_id, score_value, note or "", source_agent or "unknown", ts),
         )
-        avg = conn.execute("SELECT AVG(score) FROM feedback_events WHERE memory_id=?", (memory_id,)).fetchone()[0] or 0
+        avg = (
+            conn.execute("SELECT AVG(score) FROM feedback_events WHERE memory_id=?", (memory_id,)).fetchone()[0]
+            or 0
+        )
         conn.execute("UPDATE memories SET feedback_score=?, updated_at=? WHERE id=?", (float(avg), ts, memory_id))
         row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
     return {"feedback_id": event_id, "memory": row_to_dict(row)}
@@ -576,17 +485,9 @@ def timeline(query: str = "", scope: str = "", limit: int = 20) -> list[dict[str
     return sorted(rows, key=lambda r: r.get("created_at", ""))
 
 
-
-
-# ─── memory_links helpers ─────────────────────────────────────────────────────
-
-VALID_RELATION_TYPES = frozenset({
-    "related_to",
-    "supersedes",
-    "contradicts",
-    "supports",
-    "part_of",
-})
+# ---------------------------------------------------------------------------
+# memory_links
+# ---------------------------------------------------------------------------
 
 
 def add_link(
@@ -604,7 +505,6 @@ def add_link(
     link_id = str(uuid.uuid4())
     ts = now()
     with managed_conn() as conn:
-        # Verify both memories exist
         for mid in (source_id, target_id):
             if not conn.execute("SELECT 1 FROM memories WHERE id=?", (mid,)).fetchone():
                 raise ValueError(f"memory id not found: {mid!r}")
@@ -617,8 +517,10 @@ def add_link(
             """,
             (link_id, source_id, target_id, relation_type, weight, note, ts, source_agent),
         )
-        row = conn.execute("SELECT * FROM memory_links WHERE source_id=? AND target_id=? AND relation_type=?",
-                           (source_id, target_id, relation_type)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM memory_links WHERE source_id=? AND target_id=? AND relation_type=?",
+            (source_id, target_id, relation_type),
+        ).fetchone()
     return dict(row)
 
 
@@ -628,10 +530,6 @@ def query_links(
     relation_type: str = "",
     limit: int = 50,
 ) -> dict[str, Any]:
-    """Return all links connected to a memory.
-
-    direction: 'outgoing' (source=memory_id), 'incoming' (target=memory_id), 'both'
-    """
     direction = direction.lower()
     if direction not in ("outgoing", "incoming", "both"):
         raise ValueError("direction must be 'outgoing', 'incoming', or 'both'")
@@ -665,8 +563,12 @@ def query_links(
     }
 
 
+# ---------------------------------------------------------------------------
+# Curator
+# ---------------------------------------------------------------------------
+
+
 def consolidate(dry_run: bool = True, limit: int = 50) -> dict[str, Any]:
-    # v0 heuristic: duplicate-ish titles and stale candidates. No destructive action unless future version.
     rows = list_recent(limit)
     seen: dict[str, list[dict[str, Any]]] = {}
     for r in rows:
@@ -674,24 +576,13 @@ def consolidate(dry_run: bool = True, limit: int = 50) -> dict[str, Any]:
         seen.setdefault(key, []).append(r)
     duplicates = [v for v in seen.values() if len(v) > 1]
     low_feedback = [r for r in rows if float(r.get("feedback_score", 0)) < -0.5]
-    return {"dry_run": dry_run, "applied": False, "reason": "v0 consolidate is report-only; use memory_curator_report(dry_run=False) for low-risk lifecycle status changes", "duplicate_title_groups": duplicates, "low_feedback_candidates": low_feedback}
-
-
-def parse_ts(value: str | None) -> datetime:
-    if not value:
-        return datetime.fromtimestamp(0, timezone.utc)
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed
-    except Exception:
-        return datetime.fromtimestamp(0, timezone.utc)
-
-
-def normalize_title_key(title: str) -> str:
-    tokens = re.findall(r"[\w\u4e00-\u9fff]+", (title or "").lower(), flags=re.UNICODE)
-    return " ".join(tokens)[:120]
+    return {
+        "dry_run": dry_run,
+        "applied": False,
+        "reason": "v0 consolidate is report-only; use memory_curator_report(dry_run=False) for low-risk lifecycle status changes",
+        "duplicate_title_groups": duplicates,
+        "low_feedback_candidates": low_feedback,
+    }
 
 
 def curator_report(
@@ -700,14 +591,6 @@ def curator_report(
     stale_after_days: int = 60,
     archive_after_days: int = 120,
 ) -> dict[str, Any]:
-    """Heuristic curator report for local memory maintenance.
-
-    Safe defaults:
-    - dry_run=True only reports candidates.
-    - dry_run=False only changes status for low-risk lifecycle transitions:
-      active/candidate -> stale, stale -> archived. It does NOT delete records
-      and does NOT auto-create skills from skill_candidate memories.
-    """
     rows = list_recent(limit)
     now_dt = datetime.now(timezone.utc)
     stale_cutoff = now_dt - timedelta(days=max(1, int(stale_after_days)))
@@ -795,210 +678,9 @@ def curator_report(
     }
 
 
-mcp = FastMCP("local-memory-mcp")
-
-
-@mcp.tool()
-def memory_add(
-    type: str,
-    title: str,
-    content: str,
-    scope: str = "global",
-    tags: list[str] | str | None = None,
-    source: str = "manual",
-    source_agent: str = "hermes",
-    project_path: str = "",
-    confidence: float = 0.70,
-    importance: float = 0.50,
-    status: str = "active",
-    decay_policy: str = "review",
-    related_ids: list[str] | str | None = None,
-    metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Add a structured memory record to local SQLite memory."""
-    return add_memory_record(type, title, content, scope, tags, source, source_agent, project_path, confidence, importance, status, decay_policy, related_ids, metadata)
-
-
-@mcp.tool()
-def memory_search(query: str = "", types: list[str] | str | None = None, scope: str = "", project_path: str = "", tags: list[str] | str | None = None, status: str = "active", limit: int = 10) -> list[dict[str, Any]]:
-    """Search structured memory with SQLite FTS5 plus filters."""
-    return search_memory_records(query, types, scope, project_path, tags, status, limit)
-
-
-@mcp.tool()
-def memory_context(task: str, agent: str = "hermes", project_path: str = "", scope: str = "global", token_budget: int = 2000) -> dict[str, Any]:
-    """Return a compact context pack for a task, grouped by memory class."""
-    return build_context_pack(task, agent, project_path, scope, token_budget)
-
-
-@mcp.tool()
-def memory_get(id: str) -> dict[str, Any] | None:
-    """Get one memory record by id."""
-    return get_record(id)
-
-
-@mcp.tool()
-def memory_list_recent(limit: int = 10) -> list[dict[str, Any]]:
-    """List recently updated memory records."""
-    return list_recent(limit, cap=100)
-
-
-@mcp.tool()
-def memory_update_status(id: str, status: str) -> dict[str, Any]:
-    """Mark a memory active/stale/archived/contradicted/promoted/candidate."""
-    return update_status(id, status)
-
-
-@mcp.tool()
-def memory_feedback(id: str, score: float, note: str = "", source_agent: str = "hermes") -> dict[str, Any]:
-    """Record whether a retrieved memory helped. Score can be negative or positive."""
-    return add_feedback(id, score, note, source_agent)
-
-
-@mcp.tool()
-def memory_timeline(query: str = "", scope: str = "", limit: int = 20) -> list[dict[str, Any]]:
-    """Return decision/timeline/feedback memories in chronological order."""
-    return timeline(query, scope, limit)
-
-
-@mcp.tool()
-def memory_consolidate(dry_run: bool = True, limit: int = 50) -> dict[str, Any]:
-    """Curator helper: detect duplicate/stale candidates. v0 is dry-run oriented."""
-    return consolidate(dry_run, limit)
-
-
-@mcp.tool()
-def memory_curator_report(dry_run: bool = True, limit: int = 500, stale_after_days: int = 60, archive_after_days: int = 120) -> dict[str, Any]:
-    """Return memory curator candidates; optionally mark stale/archive records without deleting."""
-    return curator_report(dry_run, limit, stale_after_days, archive_after_days)
-
-
-# ─── New unified tools (extraction.py + vector_store.py + dedup.py) ──────────
-
-@mcp.tool()
-def memory_ingest(
-    messages: list[dict[str, str]],
-    user_id: str = "advancer",
-    agent_id: str = "hermes",
-) -> dict[str, Any]:
-    """Extract facts from a conversation and write deduplicated candidates to SQLite.
-
-    Full pipeline: DeepSeek LLM extraction → Qdrant dedup → SQLite candidate.
-
-    Args:
-        messages: Conversation as [{"role": "user"|"assistant", "content": "..."}]
-        user_id: User scope for vector search filters
-        agent_id: Which agent produced the conversation
-
-    Returns:
-        {"added": int, "updated": int, "skipped": int, "errors": int, "elapsed_s": float}
-    """
-    from dedup import ingest
-    result = ingest(messages, user_id=user_id, agent_id=agent_id, cfg=load_config())
-    return {
-        "added": result.added,
-        "updated": result.updated,
-        "skipped": result.skipped,
-        "errors": result.errors,
-        "elapsed_s": result.elapsed_s,
-        "extraction_elapsed_s": result.extraction_elapsed_s,
-    }
-
-
-@mcp.tool()
-def memory_vector_search(
-    query: str,
-    top_k: int = 10,
-    score_threshold: float = 0.0,
-) -> list[dict[str, Any]]:
-    """Semantic search via Qdrant vector store (nomic-embed-text embeddings).
-
-    Args:
-        query: Natural language search query
-        top_k: Maximum results to return
-        score_threshold: Minimum cosine similarity (0.0 = no filter)
-
-    Returns:
-        List of {"id", "score", "text", "payload"} dicts, sorted by score desc.
-    """
-    from vector_store import get_vector_store
-    vs = get_vector_store(load_config())
-    results = vs.search(query, top_k=top_k, score_threshold=score_threshold)
-    return [
-        {"id": r.id, "score": round(r.score, 4), "text": r.text, "payload": r.payload}
-        for r in results
-    ]
-
-
-@mcp.tool()
-def memory_vector_status() -> dict[str, Any]:
-    """Return Qdrant vector store status (availability, collection, count)."""
-    from vector_store import get_vector_store
-    vs = get_vector_store(load_config())
-    return vs.status()
-
-
-# ─── memory_links MCP tools ───────────────────────────────────────────────────
-
-@mcp.tool()
-def memory_link_add(
-    source_id: str,
-    target_id: str,
-    relation_type: str = "related_to",
-    weight: float = 1.0,
-    note: str = "",
-    source_agent: str = "hermes",
-) -> dict[str, Any]:
-    """Create a directed link between two memories.
-
-    Relation types:
-      related_to  — general association (default)
-      supersedes  — source replaces/updates target (newer fact)
-      contradicts — source conflicts with target
-      supports    — source provides evidence for target
-      part_of     — source is a component of target
-
-    Upserts on (source_id, target_id, relation_type) — safe to call repeatedly.
-
-    Args:
-        source_id: ID of the source memory
-        target_id: ID of the target memory
-        relation_type: One of the 5 valid types above
-        weight: Link strength 0.0–1.0 (default 1.0)
-        note: Optional human-readable annotation
-        source_agent: Agent creating the link
-
-    Returns:
-        The created/updated link record.
-    """
-    try:
-        return add_link(source_id, target_id, relation_type, weight, note, source_agent)
-    except ValueError as exc:
-        return {"error": str(exc)}
-
-
-@mcp.tool()
-def memory_link_query(
-    memory_id: str,
-    direction: str = "both",
-    relation_type: str = "",
-    limit: int = 50,
-) -> dict[str, Any]:
-    """Return all links connected to a memory.
-
-    Args:
-        memory_id: The memory to query links for
-        direction: 'outgoing' (links from this memory), 'incoming' (links to this memory), 'both'
-        relation_type: Filter by relation type (empty = all types)
-        limit: Max links per direction (default 50)
-
-    Returns:
-        {"memory_id": str, "outgoing": [...], "incoming": [...], "total": int}
-    """
-    try:
-        return query_links(memory_id, direction, relation_type, limit)
-    except ValueError as exc:
-        return {"error": str(exc)}
+# ---------------------------------------------------------------------------
+# HTML dashboard
+# ---------------------------------------------------------------------------
 
 
 def export_html(path: Path) -> None:
@@ -1029,7 +711,27 @@ def export_html(path: Path) -> None:
     }
     data_json = json.dumps(payload, ensure_ascii=True).replace("<", "\\u003c")
     db_label = html.escape(str(db_path()))
-    doc = """<!doctype html>
+    doc = _DASHBOARD_HTML_TEMPLATE()
+    replacements = {
+        "__DATA_JSON__": data_json,
+        "__RECORD_COUNT__": str(len(rows)),
+        "__TYPE_COUNT__": str(len(type_counts)),
+        "__POSITIVE_FEEDBACK__": str(feedback_positive),
+        "__NEGATIVE_FEEDBACK__": str(feedback_negative),
+        "__DB_PATH__": db_label,
+    }
+    for key, value in replacements.items():
+        doc = doc.replace(key, value)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(doc, encoding="utf-8")
+    print(path)
+
+
+def _DASHBOARD_HTML_TEMPLATE() -> str:
+    # The full HTML template (extracted from the original monolith).
+    # It's defined as a function to keep storage.py from having a massive string
+    # literal at module level.
+    return """<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -1060,7 +762,7 @@ a{color:var(--accent)} button,input,select{font:inherit} button:focus-visible,in
 <body>
 <div class="shell" x-data="memoryDashboard()" x-cloak>
   <aside class="sidebar">
-    <div class="brand"><div class="eyebrow">Local Memory MCP</div><h1>Operations Console</h1><p>SQLite/FTS5 · __RECORD_COUNT__ records<br>__DB_PATH__</p></div>
+    <div class="brand"><div class="eyebrow">Local Memory MCP</div><h1>Operations Console</h1><p>SQLite/FTS5 &middot; __RECORD_COUNT__ records<br>__DB_PATH__</p></div>
     <nav class="nav" aria-label="Dashboard views">
       <button type="button" :class="{active:view==='records'}" @click="view='records'"><span>Records</span><span class="pill" x-text="filteredRows.length"></span></button>
       <button type="button" :class="{active:view==='timeline'}" @click="view='timeline'"><span>Timeline</span><span class="pill" x-text="timelineRows.length"></span></button>
@@ -1075,11 +777,11 @@ a{color:var(--accent)} button,input,select{font:inherit} button:focus-visible,in
     </div>
   </aside>
   <main class="main">
-    <noscript><div class="fallback">此 dashboard 需要 JavaScript 才能启用过滤、时间线和 curator 视图。</div></noscript>
-    <div id="alpine-fallback" class="fallback">正在加载 Alpine.js；如果离线环境无法访问 CDN，静态 JSON 数据仍保留在页面中。</div>
+    <noscript><div class="fallback">&#x6B64; dashboard &#x9700;&#x8981; JavaScript &#x624D;&#x80FD;&#x542F;&#x7528;&#x8FC7;&#x6EE4;&#x3001;&#x65F6;&#x95F4;&#x7EBF;&#x548C; curator &#x89C6;&#x56FE;&#x3002;</div></noscript>
+    <div id="alpine-fallback" class="fallback">&#x6B63;&#x5728;&#x52A0;&#x8F7D; Alpine.js&#xFF1B;&#x5982;&#x679C;&#x79BB;&#x7EBF;&#x73AF;&#x5883;&#x65E0;&#x6CD5;&#x8BBF;&#x95EE; CDN&#xFF0C;&#x9759;&#x6001; JSON &#x6570;&#x636E;&#x4ECD;&#x4FDD;&#x7559;&#x5728;&#x9875;&#x9762;&#x4E2D;&#x3002;</div>
     <section class="hero">
-      <div class="panel hero-main"><div class="eyebrow">Structured agent memory</div><h2>把长期记忆变成可治理的本地数据层。</h2><p>面向 Hermes、Codex、Claude Code 的共享记忆控制台。重点展示可行动信号：记录覆盖、反馈健康、curator 候选、时间线和语义索引状态。</p></div>
-      <div class="panel hero-aside"><div class="inline-status"><span class="status-dot"></span><strong>Local-only dashboard</strong></div><p style="margin:0;color:var(--muted);line-height:1.6">数据由 Python CLI 注入到页面 JSON；Alpine.js 只负责本地交互状态，不向外部发送记忆内容。</p><div><span class="chip">no build step</span> <span class="chip">Alpine 3.14.8</span></div></div>
+      <div class="panel hero-main"><div class="eyebrow">Structured agent memory</div><h2>&#x628A;&#x957F;&#x671F;&#x8BB0;&#x5FC6;&#x53D8;&#x6210;&#x53EF;&#x6CBB;&#x7406;&#x7684;&#x672C;&#x5730;&#x6570;&#x636E;&#x5C42;&#x3002;</h2><p>&#x9762;&#x5411; Hermes&#x3001;Codex&#x3001;Claude Code &#x7684;&#x5171;&#x4EAB;&#x8BB0;&#x5FC6;&#x63A7;&#x5236;&#x53F0;&#x3002;&#x91CD;&#x70B9;&#x5C55;&#x793A;&#x53EF;&#x884C;&#x52A8;&#x4FE1;&#x53F7;&#xFF1A;&#x8BB0;&#x5F55;&#x8986;&#x76D6;&#x3001;&#x53CD;&#x9988;&#x5065;&#x5EB7;&#x3001;curator &#x5019;&#x9009;&#x3001;&#x65F6;&#x95F4;&#x7EBF;&#x548C;&#x8BED;&#x4E49;&#x7D22;&#x5F15;&#x72B6;&#x6001;&#x3002;</p></div>
+      <div class="panel hero-aside"><div class="inline-status"><span class="status-dot"></span><strong>Local-only dashboard</strong></div><p style="margin:0;color:var(--muted);line-height:1.6">&#x6570;&#x636E;&#x7531; Python CLI &#x6CE8;&#x5165;&#x5230;&#x9875;&#x9762; JSON&#xFF1B;Alpine.js &#x53EA;&#x8D1F;&#x8D23;&#x672C;&#x5730;&#x4EA4;&#x4E92;&#x72B6;&#x6001;&#xFF0C;&#x4E0D;&#x5411;&#x5916;&#x90E8;&#x53D1;&#x9001;&#x8BB0;&#x5FC6;&#x5185;&#x5BB9;&#x3002;</p><div><span class="chip">no build step</span> <span class="chip">Alpine 3.14.8</span></div></div>
     </section>
     <section class="metrics" aria-label="Memory health metrics">
       <div class="metric"><b>__RECORD_COUNT__</b><span>records</span></div>
@@ -1088,28 +790,28 @@ a{color:var(--accent)} button,input,select{font:inherit} button:focus-visible,in
       <div class="metric bad"><b>__NEGATIVE_FEEDBACK__</b><span>negative feedback</span></div>
     </section>
     <section class="toolbar" aria-label="Record filters">
-      <input x-model.debounce.120ms="query" type="search" placeholder="搜索 title / content / tags / id..." aria-label="Search records">
-      <select x-model="typeFilter" aria-label="Filter by type"><option value="">全部类型</option><template x-for="type in typeOptions" :key="type"><option :value="type" x-text="type"></option></template></select>
-      <select x-model="statusFilter" aria-label="Filter by status"><option value="">全部状态</option><template x-for="status in statusOptions" :key="status"><option :value="status" x-text="status"></option></template></select>
-      <select x-model="sortBy" aria-label="Sort records"><option value="updated_at">按更新时间</option><option value="importance">按重要性</option><option value="feedback_score">按反馈</option><option value="type">按类型</option></select>
+      <input x-model.debounce.120ms="query" type="search" placeholder="&#x641C;&#x7D22; title / content / tags / id..." aria-label="Search records">
+      <select x-model="typeFilter" aria-label="Filter by type"><option value="">&#x5168;&#x90E8;&#x7C7B;&#x578B;</option><template x-for="type in typeOptions" :key="type"><option :value="type" x-text="type"></option></template></select>
+      <select x-model="statusFilter" aria-label="Filter by status"><option value="">&#x5168;&#x90E8;&#x72B6;&#x6001;</option><template x-for="status in statusOptions" :key="status"><option :value="status" x-text="status"></option></template></select>
+      <select x-model="sortBy" aria-label="Sort records"><option value="updated_at">&#x6309;&#x66F4;&#x65B0;&#x65F6;&#x95F4;</option><option value="importance">&#x6309;&#x91CD;&#x8981;&#x6027;</option><option value="feedback_score">&#x6309;&#x53CD;&#x9988;</option><option value="type">&#x6309;&#x7C7B;&#x578B;</option></select>
     </section>
     <section x-show="view==='records'">
-      <div class="content-head"><div><h2>Records <span class="pill" x-text="filteredRows.length"></span></h2><p>结构化长期记忆，支持搜索、类型、状态和排序。</p></div></div>
+      <div class="content-head"><div><h2>Records <span class="pill" x-text="filteredRows.length"></span></h2><p>&#x7ED3;&#x6784;&#x5316;&#x957F;&#x671F;&#x8BB0;&#x5FC6;&#xFF0C;&#x652F;&#x6301;&#x641C;&#x7D22;&#x3001;&#x7C7B;&#x578B;&#x3001;&#x72B6;&#x6001;&#x548C;&#x6392;&#x5E8F;&#x3002;</p></div></div>
       <div class="grid"><template x-for="record in filteredRows" :key="record.id"><article class="record"><h3 x-text="record.title"></h3><div class="meta"><span class="chip type" x-text="record.type"></span><span class="chip" :class="record.status" x-text="record.status"></span><span class="chip" x-text="`importance ${record.importance ?? 0}`"></span><span class="chip" x-text="`feedback ${record.feedback_score ?? 0}`"></span></div><p x-text="record.content"></p><div class="meta"><template x-for="tag in (record.tags || [])" :key="tag"><span class="chip" x-text="tag"></span></template></div><code x-text="record.id"></code></article></template></div>
-      <div class="empty" x-show="filteredRows.length === 0">无匹配记录</div>
+      <div class="empty" x-show="filteredRows.length === 0">&#x65E0;&#x5339;&#x914D;&#x8BB0;&#x5F55;</div>
     </section>
     <section x-show="view==='timeline'">
-      <div class="content-head"><div><h2>Decision timeline</h2><p>仅展示 timeline_event / decision / feedback 相关记录。</p></div></div>
+      <div class="content-head"><div><h2>Decision timeline</h2><p>&#x4EC5;&#x5C55;&#x793A; timeline_event / decision / feedback &#x76F8;&#x5173;&#x8BB0;&#x5F55;&#x3002;</p></div></div>
       <div class="timeline"><template x-for="event in timelineRows" :key="event.id"><article class="event"><h3 x-text="event.title"></h3><div class="meta"><span x-text="event.created_at"></span><span x-text="event.type"></span><span x-text="event.status"></span></div><p x-text="event.content"></p></article></template></div>
-      <div class="empty" x-show="timelineRows.length === 0">暂无 timeline / decision / feedback 记录</div>
+      <div class="empty" x-show="timelineRows.length === 0">&#x6682;&#x65E0; timeline / decision / feedback &#x8BB0;&#x5F55;</div>
     </section>
     <section x-show="view==='health'">
-      <div class="content-head"><div><h2>Feedback health</h2><p>分布视图帮助判断记忆库是否偏科、陈旧或反馈不足。</p></div></div>
+      <div class="content-head"><div><h2>Feedback health</h2><p>&#x5206;&#x5E03;&#x89C6;&#x56FE;&#x5E2E;&#x52A9;&#x5224;&#x65AD;&#x8BB0;&#x5FC6;&#x5E93;&#x662F;&#x5426;&#x504F;&#x79D1;&#x3001;&#x9648;&#x65E7;&#x6216;&#x53CD;&#x9988;&#x4E0D;&#x8DB3;&#x3002;</p></div></div>
       <div class="split"><div class="panel" style="padding:16px"><h3>Type distribution</h3><div class="bars"><template x-for="item in bars(typeCounts)" :key="item.key"><div class="bar"><span x-text="item.key"></span><div class="track"><div class="fill" :style="`width:${item.width}%`"></div></div><strong x-text="item.value"></strong></div></template></div></div><div class="panel" style="padding:16px"><h3>Status distribution</h3><div class="bars"><template x-for="item in bars(statusCounts)" :key="item.key"><div class="bar"><span x-text="item.key"></span><div class="track"><div class="fill" :style="`width:${item.width}%`"></div></div><strong x-text="item.value"></strong></div></template></div></div></div>
     </section>
     <section x-show="view==='curator'">
-      <div class="content-head"><div><h2>Curator candidates</h2><p>面向去重、归档、矛盾检测和 skill 推广的候选摘要。</p></div></div>
-      <div class="curator-grid"><template x-for="group in curatorGroups" :key="group.key"><article class="curator-card"><h3><span x-text="group.label"></span><span class="pill" x-text="group.items.length"></span></h3><template x-for="item in group.items.slice(0, 12)" :key="itemKey(item)"><p x-text="itemLabel(item)"></p></template><p x-show="group.items.length === 0" style="color:var(--good)">无</p></article></template></div>
+      <div class="content-head"><div><h2>Curator candidates</h2><p>&#x9762;&#x5411;&#x53BB;&#x91CD;&#x3001;&#x5F52;&#x6863;&#x3001;&#x77DB;&#x76FE;&#x68C0;&#x6D4B;&#x548C; skill &#x63A8;&#x5E7F;&#x7684;&#x5019;&#x9009;&#x6458;&#x8981;&#x3002;</p></div></div>
+      <div class="curator-grid"><template x-for="group in curatorGroups" :key="group.key"><article class="curator-card"><h3><span x-text="group.label"></span><span class="pill" x-text="group.items.length"></span></h3><template x-for="item in group.items.slice(0, 12)" :key="itemKey(item)"><p x-text="itemLabel(item)"></p></template><p x-show="group.items.length === 0" style="color:var(--good)">&#x65E0;</p></article></template></div>
     </section>
   </main>
 </div>
@@ -1129,7 +831,7 @@ function memoryDashboard(){
     get statusOptions(){ return unique(this.rows.map(r => r.status)); },
     get filteredRows(){ const q=this.query.trim().toLowerCase(); return this.rows.filter(r => { const hay=[r.id,r.type,r.status,r.title,r.content,(r.tags||[]).join(' ')].join(' ').toLowerCase(); return (!q || hay.includes(q)) && (!this.typeFilter || r.type===this.typeFilter) && (!this.statusFilter || r.status===this.statusFilter); }).sort((a,b)=>{ if(this.sortBy==='type') return String(a.type||'').localeCompare(String(b.type||'')); if(this.sortBy==='importance'||this.sortBy==='feedback_score') return Number(b[this.sortBy]||0)-Number(a[this.sortBy]||0); return String(b.updated_at||'').localeCompare(String(a.updated_at||'')); }); },
     get timelineRows(){ return (data.timeline_rows || []).slice().sort((a,b)=>String(a.created_at||'').localeCompare(String(b.created_at||''))); },
-    get curatorGroups(){ return [['duplicate_title_groups','重复标题组'],['low_feedback_candidates','低反馈候选'],['stale_candidates','可标记 stale'],['archive_candidates','可归档'],['contradiction_candidates','矛盾候选'],['skill_promotion_candidates','skill_candidate 推广']].map(([key,label]) => ({key,label,items:report[key]||[]})); },
+    get curatorGroups(){ return [['duplicate_title_groups','&#x91CD;&#x590D;&#x6807;&#x9898;&#x7EC4;'],['low_feedback_candidates','&#x4F4E;&#x53CD;&#x9988;&#x5019;&#x9009;'],['stale_candidates','&#x53EF;&#x6807;&#x8BB0; stale'],['archive_candidates','&#x53EF;&#x5F52;&#x6863;'],['contradiction_candidates','&#x77DB;&#x76FE;&#x5019;&#x9009;'],['skill_promotion_candidates','skill_candidate &#x63A8;&#x5E7F;']].map(([key,label]) => ({key,label,items:report[key]||[]})); },
     get curatorTotal(){ return this.curatorGroups.reduce((n,g)=>n+g.items.length,0); },
     bars(counts){ const entries=Object.entries(counts).sort((a,b)=>b[1]-a[1]); const max=Math.max(1,...entries.map(([,v])=>Number(v)||0)); return entries.map(([key,value])=>({key,value,width:Math.round((Number(value)||0)/max*100)})); },
     itemLabel(item){ if(Array.isArray(item)) return item.map(x=>x.title || x.id || 'item').join(' / '); return item.title || item.title_key || item.id || JSON.stringify(item); },
@@ -1138,89 +840,9 @@ function memoryDashboard(){
 }
 </script>
 </body></html>"""
-    replacements = {
-        "__DATA_JSON__": data_json,
-        "__RECORD_COUNT__": str(len(rows)),
-        "__TYPE_COUNT__": str(len(type_counts)),
-        "__POSITIVE_FEEDBACK__": str(feedback_positive),
-        "__NEGATIVE_FEEDBACK__": str(feedback_negative),
-        "__DB_PATH__": db_label,
-    }
-    for key, value in replacements.items():
-        doc = doc.replace(key, value)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(doc, encoding="utf-8")
-    print(path)
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="local-memory-mcp server and CLI")
-    sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("init")
-    p_add = sub.add_parser("add")
-    p_add.add_argument("type")
-    p_add.add_argument("title")
-    p_add.add_argument("content")
-    p_add.add_argument("--scope", default="global")
-    p_add.add_argument("--tags", default="")
-    p_add.add_argument("--source", default="manual")
-    p_add.add_argument("--source-agent", default="hermes")
-    p_add.add_argument("--importance", type=float, default=0.5)
-    p_search = sub.add_parser("search")
-    p_search.add_argument("query", nargs="?", default="")
-    p_search.add_argument("--type", dest="types", action="append")
-    p_search.add_argument("--limit", type=int, default=10)
-    p_ctx = sub.add_parser("context")
-    p_ctx.add_argument("task")
-    p_ctx.add_argument("--agent", default="hermes")
-    p_ctx.add_argument("--scope", default="global")
-    p_ctx.add_argument("--project-path", default="")
-    p_ctx.add_argument("--budget", type=int, default=2000)
-    p_curator = sub.add_parser("curator")
-    p_curator.add_argument("--apply", action="store_true", help="mark low-risk stale/archive transitions")
-    p_curator.add_argument("--limit", type=int, default=500)
-    p_curator.add_argument("--stale-after-days", type=int, default=60)
-    p_curator.add_argument("--archive-after-days", type=int, default=120)
-    p_curator.add_argument("--summary-only", action="store_true")
-    p_sem_index = sub.add_parser("semantic-index")
-    p_sem_index.add_argument("--limit", type=int, default=1000)
-    p_sem_index.add_argument("--force", action="store_true")
-    p_sem_search = sub.add_parser("semantic-search")
-    p_sem_search.add_argument("query")
-    p_sem_search.add_argument("--limit", type=int, default=10)
-    p_sem_search.add_argument("--status", default="active")
-    sub.add_parser("semantic-status")
-    p_html = sub.add_parser("html")
-    p_html.add_argument("out", nargs="?", default=str(DEFAULT_ROOT / "dashboard.html"))
-    sub.add_parser("serve")
-    args = parser.parse_args(argv)
-    if args.cmd == "init":
-        with managed_conn():
-            pass
-        print(db_path())
-    elif args.cmd == "add":
-        print(json.dumps(add_memory_record(args.type, args.title, args.content, scope=args.scope, tags=args.tags, source=args.source, source_agent=args.source_agent, importance=args.importance), ensure_ascii=False, indent=2))
-    elif args.cmd == "search":
-        print(json.dumps(search_memory_records(args.query, types=args.types, limit=args.limit), ensure_ascii=False, indent=2))
-    elif args.cmd == "context":
-        print(build_context_pack(args.task, args.agent, project_path=args.project_path, scope=args.scope, token_budget=args.budget)["context"])
-    elif args.cmd == "curator":
-        report = curator_report(
-            dry_run=not args.apply,
-            limit=args.limit,
-            stale_after_days=args.stale_after_days,
-            archive_after_days=args.archive_after_days,
-        )
-        payload = report["summary"] if args.summary_only else report
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
-    elif args.cmd in ("semantic-status", "semantic-index", "semantic-search"):
-        print(json.dumps({"error": "sqlite-vec removed; use memory_vector_search / memory_vector_status MCP tools"}, indent=2))
-    elif args.cmd == "html":
-        export_html(Path(args.out))
-    elif args.cmd == "serve":
-        mcp.run(transport="stdio")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+# Internal helper: run a query without connection lifecycle in the caller
+def _managed_query(sql: str, params: tuple = ()) -> list[dict[str, Any]]:
+    with managed_conn() as conn:
+        return [row_to_dict(r) for r in conn.execute(sql, params).fetchall()]

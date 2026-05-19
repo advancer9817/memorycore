@@ -1,5 +1,41 @@
 # local-memory-mcp 迭代日志
 
+## [迭代 7] 2026-05-18 — 模块重构 + MCP 循环导入彻底修复
+
+**提交**: `Phase 7`（`git log --oneline --grep="Phase 7"` 可查具体 hash）
+
+### 变更
+- `local_memory_mcp/` 包结构: 将 1284 行的单文件拆分为 `models.py`/`storage.py`/`server.py`/`__init__.py`/`__main__.py`
+- `local_memory_mcp/models.py`: 抽取常量、YAML 配置解析、类型验证、工具函数（无 MCP 依赖）
+- `local_memory_mcp/storage.py`: 抽取 SQLite CRUD、FTS 搜索、curator、memory_links、dashboard 生成
+- `local_memory_mcp/server.py`: FastMCP 实例、15 个 @mcp.tool() 注册、CLI main() 入口
+- `local_memory_mcp/__main__.py`: 新增 `python -m local_memory_mcp` 入口
+- `scripts/init_local_memory.sh`: 更新命令为 `python -m local_memory_mcp`
+- `run_curator.sh`: 更新 SERVER 路径
+- `probe_mcp.py`: 更新 MCP server 路径
+
+### 修复
+- `dedup.py`: 消除 `__main__` fallback 循环导入 → 改为直接从 `local_memory_mcp.storage` 导入（storage.py 无 MCP 依赖，彻底断绝循环链）
+- **MCP 通道 `memory_ingest`**：此前即使显式传入函数引用，写入阶段仍因模块状态不一致失败。重构后 MCP 全链路验证通过（initialize → tools/list → memory_add → memory_ingest，全部正常返回）
+
+### 验证
+- 测试: **105/105 pass** (0 skipped)
+- MCP 协议初始化: 正常握手，返回 `serverInfo: {"name": "local-memory-mcp", "version": "1.27.1"}`
+- MCP tools/list: 返回 15 个工具（含 memory_ingest、memory_vector_search 等）
+- MCP memory_add: 正常写入并返回记录
+- CLI: `python -m local_memory_mcp init` 正常
+- 导入验证: `from local_memory_mcp.storage import add_memory_record` + `from dedup import ingest` 无循环导入
+
+### 已知问题
+- （无新增已知问题；Phase 6 的 MCP 循环导入已修复）
+
+### 下一步
+1. curator cron job（定期去重/归档/矛盾检测）
+2. 实体/关系迁移（从官方 server-memory，按需）
+3. 多 Agent 集成增强
+
+---
+
 ## 日志格式规范
 
 每次提交必须在本文件顶部追加一条迭代记录，格式如下：

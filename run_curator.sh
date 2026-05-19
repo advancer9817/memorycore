@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="$ROOT/.venv/bin/python"
-SERVER="$ROOT/local_memory_mcp.py"
+SERVER="$ROOT/local_memory_mcp"
 OUT_DIR="$ROOT/reports"
 mkdir -p "$OUT_DIR"
 TS="$(date -u +%Y%m%dT%H%M%SZ)"

@@ -1,4 +1,4 @@
-"""Vector store layer — Qdrant local file mode.
+"""Vector store layer — Qdrant (local file or server URL mode).
 
 Single vector backend for both semantic search and dedup comparison.
 No sqlite-vec, no Mem0 Qdrant instance — one store, one source of truth.
@@ -125,6 +125,7 @@ def _embed_hashing(text: str, dim: int = 768) -> list[float]:
 @dataclass
 class VectorStoreConfig:
     path: str = ""                    # local file path; "" → ~/.agent-memory/qdrant
+    url: str = ""                     # server URL; e.g. "http://127.0.0.1:6333"
     collection: str = "agent_memory"
     dim: int = 768
     embed: EmbedConfig = field(default_factory=EmbedConfig)
@@ -139,6 +140,7 @@ def vector_store_config_from_dict(cfg: dict[str, Any]) -> VectorStoreConfig:
     embed_cfg = embed_config_from_dict(cfg)
     return VectorStoreConfig(
         path=qs.get("path", ""),
+        url=qs.get("url", ""),
         collection=qs.get("collection", "agent_memory"),
         dim=embed_cfg.dim,
         embed=embed_cfg,
@@ -154,7 +156,7 @@ class SearchResult:
 
 
 class VectorStore:
-    """Thin wrapper around qdrant-client local file mode."""
+    """Thin wrapper around qdrant-client (local file or server URL mode)."""
 
     def __init__(self, config: VectorStoreConfig | None = None):
         self.config = config or VectorStoreConfig()
@@ -174,8 +176,14 @@ class VectorStore:
             from qdrant_client import QdrantClient
             from qdrant_client.models import Distance, VectorParams
 
-            Path(self.config.path).mkdir(parents=True, exist_ok=True)
-            self._client = QdrantClient(path=self.config.path)
+            # Prefer server URL mode; fall back to local file mode
+            if self.config.url:
+                self._client = QdrantClient(url=self.config.url, timeout=30)
+                logger.info("vector_store: connected to Qdrant server at %s", self.config.url)
+            else:
+                Path(self.config.path).mkdir(parents=True, exist_ok=True)
+                self._client = QdrantClient(path=self.config.path)
+                logger.info("vector_store: using local file mode at %s", self.config.path)
 
             # Create collection if it doesn't exist
             existing = [c.name for c in self._client.get_collections().collections]

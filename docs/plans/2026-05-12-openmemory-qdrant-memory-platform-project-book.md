@@ -12,7 +12,7 @@
 
 ## 1. 背景与问题
 
-当前项目路径：`/home/advancer/.agent-memory/local-memory-mcp`
+当前项目路径：`/home/advancer/project/local-memory-mcp`
 
 现状能力：
 
@@ -97,7 +97,7 @@ OpenMemory / mem0               Qdrant Vector DB   SQLite Ops DB
 
 #### Adapter / Router 层
 
-路径：`/home/advancer/.agent-memory/local-memory-mcp`
+路径：`/home/advancer/project/local-memory-mcp`
 
 职责：
 
@@ -647,7 +647,7 @@ fallback SQLite legacy records
 
 建议新增配置文件：
 
-`/home/advancer/.agent-memory/local-memory-mcp/config.yaml`
+`/home/advancer/project/local-memory-mcp/config.yaml`
 
 示例：
 
@@ -682,7 +682,7 @@ temporal:
   auto_supersede_user_corrections: true
 
 ops_db:
-  path: /home/advancer/.agent-memory/local-memory-mcp/memory_ops.sqlite3
+  path: /home/advancer/project/local-memory-mcp/memory_ops.sqlite3
 ```
 
 ---
@@ -734,15 +734,15 @@ ops_db:
 **Objective:** 新增 adapter 配置，不影响旧逻辑。
 
 **Files:**
-- Create: `/home/advancer/.agent-memory/local-memory-mcp/config.yaml`
-- Create: `/home/advancer/.agent-memory/local-memory-mcp/tests/test_config.py`
+- Create: `/home/advancer/project/local-memory-mcp/config.yaml`
+- Create: `/home/advancer/project/local-memory-mcp/tests/test_config.py`
 
 **Verification:**
 
 Run:
 
 ```bash
-cd /home/advancer/.agent-memory/local-memory-mcp
+cd /home/advancer/project/local-memory-mcp
 .venv/bin/python -m pytest -q
 ```
 
@@ -753,9 +753,9 @@ Expected: PASS.
 **Objective:** 建立统一记录模型，避免 backend 泄漏到 MCP 工具层。
 
 **Files:**
-- Create: `/home/advancer/.agent-memory/local-memory-mcp/local_memory_mcp_models.py`
-- Modify: `/home/advancer/.agent-memory/local-memory-mcp/local_memory_mcp.py`
-- Test: `/home/advancer/.agent-memory/local-memory-mcp/tests/test_models.py`
+- Create: `/home/advancer/project/local-memory-mcp/local_memory_mcp_models.py`
+- Modify: `/home/advancer/project/local-memory-mcp/local_memory_mcp.py`
+- Test: `/home/advancer/project/local-memory-mcp/tests/test_models.py`
 
 **Verification:** 模型能 round-trip JSON，兼容现有 row_to_dict 输出。
 
@@ -764,9 +764,9 @@ Expected: PASS.
 **Objective:** 将 SQLite 操作包成 backend，为 OpenMemory 接入做准备。
 
 **Files:**
-- Create: `/home/advancer/.agent-memory/local-memory-mcp/backends/base.py`
-- Create: `/home/advancer/.agent-memory/local-memory-mcp/backends/sqlite_backend.py`
-- Test: `/home/advancer/.agent-memory/local-memory-mcp/tests/test_backend_sqlite.py`
+- Create: `/home/advancer/project/local-memory-mcp/backends/base.py`
+- Create: `/home/advancer/project/local-memory-mcp/backends/sqlite_backend.py`
+- Test: `/home/advancer/project/local-memory-mcp/tests/test_backend_sqlite.py`
 
 **Verification:** 现有 MCP 工具行为不变。
 
@@ -775,8 +775,8 @@ Expected: PASS.
 **Objective:** 先用 mock 固定接口，不依赖真实服务。
 
 **Files:**
-- Create: `/home/advancer/.agent-memory/local-memory-mcp/backends/openmemory_backend.py`
-- Test: `/home/advancer/.agent-memory/local-memory-mcp/tests/test_backend_openmemory.py`
+- Create: `/home/advancer/project/local-memory-mcp/backends/openmemory_backend.py`
+- Test: `/home/advancer/project/local-memory-mcp/tests/test_backend_openmemory.py`
 
 **Verification:** mock add/search/get 全通过。
 
@@ -785,8 +785,8 @@ Expected: PASS.
 **Objective:** 调通本地 OpenMemory endpoint。
 
 **Files:**
-- Modify: `/home/advancer/.agent-memory/local-memory-mcp/backends/openmemory_backend.py`
-- Modify: `/home/advancer/.agent-memory/local-memory-mcp/README.md`
+- Modify: `/home/advancer/project/local-memory-mcp/backends/openmemory_backend.py`
+- Modify: `/home/advancer/project/local-memory-mcp/README.md`
 
 **Verification:** `memory_add` 写入后可通过 `memory_search` 查回。
 
@@ -795,8 +795,8 @@ Expected: PASS.
 **Objective:** 先只检测 Qdrant，不切语义检索。
 
 **Files:**
-- Create: `/home/advancer/.agent-memory/local-memory-mcp/vector/qdrant_client.py`
-- Test: `/home/advancer/.agent-memory/local-memory-mcp/tests/test_qdrant_status.py`
+- Create: `/home/advancer/project/local-memory-mcp/vector/qdrant_client.py`
+- Test: `/home/advancer/project/local-memory-mcp/tests/test_qdrant_status.py`
 
 **Verification:** Qdrant 未启动时返回 degraded，不崩溃。
 
@@ -805,9 +805,9 @@ Expected: PASS.
 **Objective:** 用 Qdrant + real embedding 替换 hashing fallback。
 
 **Files:**
-- Modify: `/home/advancer/.agent-memory/local-memory-mcp/local_memory_mcp.py`
-- Create: `/home/advancer/.agent-memory/local-memory-mcp/embeddings/provider.py`
-- Test: `/home/advancer/.agent-memory/local-memory-mcp/tests/test_semantic_qdrant.py`
+- Modify: `/home/advancer/project/local-memory-mcp/local_memory_mcp.py`
+- Create: `/home/advancer/project/local-memory-mcp/embeddings/provider.py`
+- Test: `/home/advancer/project/local-memory-mcp/tests/test_semantic_qdrant.py`
 
 **Verification:** 语义搜索支持 filter 和 fallback。
 
@@ -816,8 +816,8 @@ Expected: PASS.
 **Objective:** 统一多源检索结果，生成预算内上下文。
 
 **Files:**
-- Create: `/home/advancer/.agent-memory/local-memory-mcp/context_pack.py`
-- Test: `/home/advancer/.agent-memory/local-memory-mcp/tests/test_context_pack_v2.py`
+- Create: `/home/advancer/project/local-memory-mcp/context_pack.py`
+- Test: `/home/advancer/project/local-memory-mcp/tests/test_context_pack_v2.py`
 
 **Verification:** stale/expired/contradicted 默认不进入主 context。
 
@@ -826,9 +826,9 @@ Expected: PASS.
 **Objective:** 增加时间演化字段，不改变旧调用。
 
 **Files:**
-- Modify: `/home/advancer/.agent-memory/local-memory-mcp/local_memory_mcp.py`
-- Modify: `/home/advancer/.agent-memory/local-memory-mcp/local_memory_mcp_models.py`
-- Test: `/home/advancer/.agent-memory/local-memory-mcp/tests/test_temporal_fields.py`
+- Modify: `/home/advancer/project/local-memory-mcp/local_memory_mcp.py`
+- Modify: `/home/advancer/project/local-memory-mcp/local_memory_mcp_models.py`
+- Test: `/home/advancer/project/local-memory-mcp/tests/test_temporal_fields.py`
 
 **Verification:** 旧记录字段缺失时有默认值。
 
@@ -837,8 +837,8 @@ Expected: PASS.
 **Objective:** curator 能报告潜在矛盾。
 
 **Files:**
-- Modify: `/home/advancer/.agent-memory/local-memory-mcp/local_memory_mcp.py`
-- Test: `/home/advancer/.agent-memory/local-memory-mcp/tests/test_contradictions.py`
+- Modify: `/home/advancer/project/local-memory-mcp/local_memory_mcp.py`
+- Test: `/home/advancer/project/local-memory-mcp/tests/test_contradictions.py`
 
 **Verification:** 同 scope 同 type 冲突记录进入 report，不自动删除。
 
@@ -847,8 +847,8 @@ Expected: PASS.
 **Objective:** 引入 decay policy 和 expired 状态。
 
 **Files:**
-- Modify: `/home/advancer/.agent-memory/local-memory-mcp/local_memory_mcp.py`
-- Test: `/home/advancer/.agent-memory/local-memory-mcp/tests/test_fact_expiration.py`
+- Modify: `/home/advancer/project/local-memory-mcp/local_memory_mcp.py`
+- Test: `/home/advancer/project/local-memory-mcp/tests/test_fact_expiration.py`
 
 **Verification:** expired 事实不默认注入，但可显式查询。
 
@@ -857,8 +857,8 @@ Expected: PASS.
 **Objective:** dashboard 展示 backend、temporal、curator 状态。
 
 **Files:**
-- Modify: `/home/advancer/.agent-memory/local-memory-mcp/local_memory_mcp.py`
-- Test: `/home/advancer/.agent-memory/local-memory-mcp/tests/test_html.py`
+- Modify: `/home/advancer/project/local-memory-mcp/local_memory_mcp.py`
+- Test: `/home/advancer/project/local-memory-mcp/tests/test_html.py`
 
 **Verification:** `html` 命令生成页面并包含 backend status。
 

@@ -24,7 +24,8 @@ def test_init_script_exists_and_documents_safe_behavior():
     assert "--force-config" in text
     assert "python3.11" in text
     assert "rsync" in text and "tar" in text
-    assert "hermes mcp add local_memory" in text
+    assert "http://127.0.0.1:8318/mcp" in text
+    assert "Hermes/Codex/Claude Code/Gemini/OpenCode" in text
     assert "does not" in text.lower() and "automatically" in text.lower()
 
 

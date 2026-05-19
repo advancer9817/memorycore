@@ -127,7 +127,7 @@ def ingest(
     messages: list[dict[str, str]],
     *,
     user_id: str = "advancer",
-    agent_id: str = "hermes",
+    agent_id: str = "agent",
     cfg: dict[str, Any] | None = None,
     # Allow injecting dependencies for testing
     _extraction_config=None,
@@ -161,11 +161,11 @@ def ingest(
     ext_cfg = _extraction_config or extraction_config_from_dict(cfg)
     vs: VectorStore = _vector_store or get_vector_store(cfg)
 
-    # Default SQLite write functions (imported lazily to avoid circular imports)
+    # Default SQLite write functions (lazy import from storage module — no circular risk)
     if _add_memory_fn is None:
-        from local_memory_mcp import add_memory_record as _add_memory_fn  # type: ignore
+        from local_memory_mcp.storage import add_memory_record as _add_memory_fn  # type: ignore[attr-defined]
     if _update_memory_fn is None:
-        from local_memory_mcp import update_memory_content as _update_memory_fn  # type: ignore[attr-defined]
+        from local_memory_mcp.storage import update_memory_content as _update_memory_fn  # type: ignore[attr-defined]
 
     result = IngestResult()
 
@@ -224,7 +224,7 @@ def ingest(
                 # Write new candidate that supersedes the existing one
                 new_id = str(uuid.uuid4())
                 _add_memory_fn(
-                    type="episodic_memory",
+                    memory_type="episodic_memory",
                     title=fact.text[:80],
                     content=fact.text,
                     scope="global",
@@ -252,7 +252,7 @@ def ingest(
             else:  # add
                 new_id = str(uuid.uuid4())
                 _add_memory_fn(
-                    type="episodic_memory",
+                    memory_type="episodic_memory",
                     title=fact.text[:80],
                     content=fact.text,
                     scope="global",

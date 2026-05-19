@@ -148,5 +148,5 @@ temporal:
   auto_supersede_user_corrections: true
 
 ops_db:
-  path: /home/advancer/.agent-memory/local-memory-mcp/memory_ops.sqlite3`
+  path: /home/advancer/project/local-memory-mcp/memory_ops.sqlite3`
 };

@@ -35,7 +35,7 @@ scripts/init_local_memory.sh
 Default runtime root:
 
 ```bash
-$HOME/.agent-memory/local-memory-mcp
+the current local-memory-mcp checkout
 ```
 
 Custom root:
@@ -74,18 +74,18 @@ The script does not edit Hermes/Codex/Claude Code config files automatically. Th
 All clients should point to the target root and venv:
 
 ```bash
-$HOME/.agent-memory/local-memory-mcp/.venv/bin/python \
-  $HOME/.agent-memory/local-memory-mcp/local_memory_mcp.py serve
+/path/to/local-memory-mcp/.venv/bin/python -m local_memory_mcp serve --port 8318
 ```
 
-Hermes example:
+Hermes as a client:
 
 ```bash
-hermes mcp add local_memory --command "$HOME/.agent-memory/local-memory-mcp/.venv/bin/python $HOME/.agent-memory/local-memory-mcp/local_memory_mcp.py serve"
+hermes mcp add local_memory --url "http://127.0.0.1:8318/mcp"
 hermes mcp test local_memory
 ```
 
-For Codex and Claude Code, use the same stdio command in their MCP configuration UI/file.
+For Codex, Claude Code, Gemini, and OpenCode, configure the same HTTP endpoint:
+`http://127.0.0.1:8318/mcp`.
 
 ## Configuration knobs
 
@@ -114,14 +114,13 @@ For Codex and Claude Code, use the same stdio command in their MCP configuration
 ## Post-deploy verification
 
 ```bash
-MEM_ROOT="${LOCAL_MEMORY_ROOT:-$HOME/.agent-memory/local-memory-mcp}"
+MEM_ROOT="${LOCAL_MEMORY_ROOT:-/path/to/local-memory-mcp}"
 PY="$MEM_ROOT/.venv/bin/python"
 
-"$PY" "$MEM_ROOT/local_memory_mcp.py" init
-"$PY" "$MEM_ROOT/local_memory_mcp.py" semantic-status
-"$PY" "$MEM_ROOT/local_memory_mcp.py" curator --summary-only
+"$PY" -m local_memory_mcp init
+"$PY" -m local_memory_mcp semantic-status
+"$PY" -m local_memory_mcp curator --summary-only
 "$PY" -m pytest -q
-hermes mcp test local_memory
 ```
 
 Expected minimum result:
