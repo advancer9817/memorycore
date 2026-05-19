@@ -1,5 +1,32 @@
 # local-memory-mcp 迭代日志
 
+## [迭代 9] 2026-05-19 — Agent Memory Hook Contract 与 Overmind 升级计划文档
+
+**提交**: `Phase 9`（`git log --oneline --grep="Phase 9"` 可查具体 hash）
+
+### 变更
+- `docs/plans/2026-05-19-agent-memory-hook-contract.md`: 新增跨 Agent Hook / Wrapper / MCP 记忆接入协议，覆盖 context_pack、ingest_session、feedback_event、Hermes/Claude Code/Generic CLI adapter、风险防线与分阶段实施计划。
+- `docs/plans/2026-05-19-overmind-inspired-lmmcp-evolution.md`: 纳入 Overmind 亮点到 lmmcp 演进计划，强调 client-neutral、URL-based MCP、fallback/degraded、图谱预警、反馈事件、技能推荐与可选 include adapter。
+- `docs/plans/2026-05-19-local-memory-mcp-upgrade-plan-overmind.md`: 新增 local-memory-mcp 升级计划书，按 Phase 1-6 规划图谱增强、主动预警、反馈闭环、自动 consolidate、图谱扩展注入和可选自动注入。
+
+### 修复
+- （无代码修复；本轮为架构文档留存。）
+
+### 验证
+- 文档检查: 新增 Hook Contract 文档已写入 docs/plans，包含 before-agent / during-agent / after-agent 生命周期、三类核心 schema、adapter 边界、fallback 策略和风险矩阵。
+- Git 检查: 仅暂存本轮文档与 ITERATION.md。
+
+### 已知问题
+- 尚未实现对应代码；后续需要走 design -> impl -> qa/review/security gates。
+- Hermes design/security profile 此前调用失败：HTTP 401 Invalid API key，落地实现前需修复 profile 凭据。
+
+### 下一步
+1. Phase 10: 实现 `context_pack` v2，返回 sections/sources/warnings/suggested_skills/degraded/fallback_used。
+2. Phase 11: 实现 `ingest_session` 和 feedback event taxonomy。
+3. Phase 12: 增加 generic CLI wrapper 与 Hermes profile adapter。
+
+---
+
 ## [迭代 8] 2026-05-19 — Curator 自动化 + memory_stats + Context Pack 质量报告
 
 **提交**: `Phase 8`（`git log --oneline --grep="Phase 8"` 可查具体 hash）
