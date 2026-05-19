@@ -1,5 +1,39 @@
 # local-memory-mcp 迭代日志
 
+## [迭代 8] 2026-05-19 — Curator 自动化 + memory_stats + Context Pack 质量报告
+
+**提交**: `Phase 8`（`git log --oneline --grep="Phase 8"` 可查具体 hash）
+
+### 变更
+- `local_memory_mcp/storage.py`: 新增 `get_memory_stats()` — 按 type/status/source_agent 分组统计、avg confidence/importance/feedback_score、never_accessed_count、link_count
+- `local_memory_mcp/server.py`: 新增 `memory_stats` MCP tool（第 16 个工具）
+- `local_memory_mcp/storage.py`: `build_context_pack()` 返回值新增 `quality` 字段 — total_candidates、used_count、active_ratio、avg_importance、stale_in_results、estimated_tokens
+- `scripts/lmmcp-curator.service`: 新增 systemd user service 单元
+- `scripts/lmmcp-curator.timer`: 新增 systemd user timer（每小时，RandomizedDelaySec=300）
+- `scripts/install_curator_timer.sh`: 新增一键安装脚本，自动 symlink 到 ~/.config/systemd/user/ 并 enable
+- `tests/test_stats.py`: 新增 6 个测试覆盖 memory_stats 工具
+
+### 修复
+- `run_curator.sh`: 删除 `semantic-index` 调用 — 该命令 Phase 7 后已废弃，返回 error JSON 但被 `/dev/null` 静默，语义索引实际未执行
+- `local_memory_mcp/storage.py` `consolidate()`: 重复检测 key 生成改为调用 `normalize_title_key()`，与 `curator_report()` 一致
+- ive/low_feedback/skill_promotion 候选检测全部改为专用 SQL 查询，不再依赖 `list_recent()` 的 `updated_at DESC` 排序截断，确保最老记录也能被扫描到；apply 模式下去重逻辑改用 `seen_ids` set 替代 dict comprehension
+
+### 验证
+- 测试: **111/111 pass** (0 skipped，新增 6 个)
+- `memory_stats` MCP tool: 空库返回 total=0 不报错，有数据时返回完整分布
+- `build_context_pack` quality 字段: 向后兼容，现有调用方不受影响
+- systemd timer: WSL2 systemd=true 环境下 install_curator_timer.sh 可正常安装
+
+### 已知问题
+- （无新增已知问题）
+
+### 下一步
+1. Phase 9: Agent Mailbox MVP — `agent_messages` / `agent_presence` 表 + 4 个 MCP 工具
+2. README 同步修订（Phase 7/8 架构漂移，仍有旧 stdio/Mem0/sqlite-vec 描述）
+3. 24 小时 curator dry-run 观察，确认 stale/archive 候选分布合理后开放 apply
+
+---
+
 ## [迭代 7] 2026-05-18 — 模块重构 + MCP 循环导入彻底修复
 
 **提交**: `Phase 7`（`git log --oneline --grep="Phase 7"` 可查具体 hash）
@@ -223,3 +257,19 @@ local_memory_mcp/server.py  |   1 +
 - Risk notes: 涉及记忆统计、curator 报告查询和运行脚本；系统 Python 缺少 pytest，已使用运行时 venv 验证新增测试。
 - Rollback: 回滚本次提交可移除 stats API、curator timer 资产和相关计划文档。
 - Commit message: `feat(memory): add curator stats and timer assets`
+## Iteration - 2026-05-19 16:47:26 +0800
+
+- Branch: `main`
+- Remote: `https://github.com/advancer9817-crypto/local-memory-mcp.git`
+- Purpose: 完全追踪 docs/ 与迭代文档变更；补充提交用户维护的 Phase 8 迭代记录。
+- Changed files:
+  - `ITERATION.md`
+- Diff stat:
+```
+ITERATION.md | 34 ++++++++++++++++++++++++++++++++++
+```
+- Validation:
+  - 文档/迭代日志更新，无代码路径变更；复用上一轮新增测试验证结果：`/home/advancer/.agent-memory/local-memory-mcp/.venv/bin/python -m pytest tests/test_stats.py -q => PASS (6 passed)`
+- Risk notes: 仅文档记录更新。
+- Rollback: 回滚本次提交即可移除新增迭代日志。
+- Commit message: `docs: track phase 8 iteration log`
