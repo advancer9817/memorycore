@@ -104,3 +104,86 @@
 2. 跑通 MCP 通道完整 ingestion
 3. 实体/关系迁移（从官方 server-memory）
 4. 增加 curator cron job（定期去重/归档/矛盾检测）
+## 2026-05-19 14:17:19 +0800 - test(local-memory-mcp): update project iteration
+
+- 项目: `local-memory-mcp`
+- 分支: `main`
+- 远端: `https://github.com/advancer9817-crypto/local-memory-mcp.git`
+- 关联提交: `390ff382c4a7e79df1a86b7bb03f91b81c9a3184`
+- 提交时间: `2026-05-19 14:14:00 +0800`
+- 提交作者: `advancer9817-crypto <advancer9817-crypto@users.noreply.github.com>`
+
+### 迭代说明
+
+```text
+- ITERATION.md                                       |   36 +
+- README.md                                          |   74 +-
+- config.yaml                                        |    7 +-
+- dedup.py                                           |   12 +-
+- docs/deployment.md                                 |   21 +-
+- docs/memory-platform-briefing/data.js              |    2 +-
+- docs/migration/2026-05-12-baseline.md              |   10 +-
+- ...enmemory-qdrant-memory-platform-project-book.md |   66 +-
+- docs/plans/frontend-design-brief.md                |    4 +-
+- extraction.py                                      |    2 +-
+- local_memory_mcp.py                                | 1226 --------------------
+- probe_mcp.py                                       |    2 +-
+```
+
+### 修改范围统计
+
+```text
+ITERATION.md                                       |   36 +
+ README.md                                          |   74 +-
+ config.yaml                                        |    7 +-
+ dedup.py                                           |   12 +-
+ docs/deployment.md                                 |   21 +-
+ docs/memory-platform-briefing/data.js              |    2 +-
+ docs/migration/2026-05-12-baseline.md              |   10 +-
+ ...enmemory-qdrant-memory-platform-project-book.md |   66 +-
+ docs/plans/frontend-design-brief.md                |    4 +-
+ extraction.py                                      |    2 +-
+ local_memory_mcp.py                                | 1226 --------------------
+ local_memory_mcp/__init__.py                       |   67 ++
+ local_memory_mcp/__main__.py                       |    9 +
+ local_memory_mcp/models.py                         |  267 +++++
+ local_memory_mcp/server.py                         |  406 +++++++
+ local_memory_mcp/storage.py                        |  848 ++++++++++++++
+ probe_mcp.py                                       |    2 +-
+ run_curator.sh                                     |    2 +-
+ scripts/connect_agents.py                          |  335 ++++++
+ scripts/init_local_memory.sh                       |   25 +-
+ scripts/serve.sh                                   |    6 +
+ tests/test_deployment.py                           |    3 +-
+ vector_store.py                                    |   16 +-
+ 23 files changed, 2096 insertions(+), 1350 deletions(-)
+```
+
+### 文件变更清单
+
+```text
+M	ITERATION.md
+M	README.md
+M	config.yaml
+M	dedup.py
+M	docs/deployment.md
+M	docs/memory-platform-briefing/data.js
+M	docs/migration/2026-05-12-baseline.md
+M	docs/plans/2026-05-12-openmemory-qdrant-memory-platform-project-book.md
+M	docs/plans/frontend-design-brief.md
+M	extraction.py
+D	local_memory_mcp.py
+A	local_memory_mcp/__init__.py
+A	local_memory_mcp/__main__.py
+A	local_memory_mcp/models.py
+A	local_memory_mcp/server.py
+A	local_memory_mcp/storage.py
+M	probe_mcp.py
+M	run_curator.sh
+A	scripts/connect_agents.py
+M	scripts/init_local_memory.sh
+A	scripts/serve.sh
+M	tests/test_deployment.py
+M	vector_store.py
+```
+
