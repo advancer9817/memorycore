@@ -1,0 +1,11 @@
+[Unit]
+Description=local-memory-mcp curator hourly run
+Requires=lmmcp-curator.service
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

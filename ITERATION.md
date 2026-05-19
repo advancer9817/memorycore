@@ -187,3 +187,39 @@ M	tests/test_deployment.py
 M	vector_store.py
 ```
 
+## Iteration - 2026-05-19 16:42:52 +0800
+
+- Branch: `main`
+- Remote: `https://github.com/advancer9817-crypto/local-memory-mcp.git`
+- Purpose: 增强 local-memory-mcp 记忆治理、curator 统计与 dashboard 数据能力，新增 stats 测试和 curator timer 安装脚本/计划文档。
+- Changed files:
+  - `local_memory_mcp/server.py`
+  - `local_memory_mcp/storage.py`
+  - `run_curator.sh`
+  - `docs/plans/2026-05-19-overmind-lessons-lmmcp-hardening.md`
+  - `docs/plans/cpa-real-write-validation-2026-05-19.md`
+  - `docs/plans/cpa-write-narrow-buffer-e2e-2026-05-19.md`
+  - `scripts/install_curator_timer.sh`
+  - `scripts/lmmcp-curator.service`
+  - `scripts/lmmcp-curator.timer`
+  - `tests/test_stats.py`
+- Diff stat:
+```
+local_memory_mcp/server.py  |   1 +
+ local_memory_mcp/storage.py | 126 +++++++++++++++++++++++++++++++++-----------
+ run_curator.sh              |   1 -
+ 3 files changed, 95 insertions(+), 33 deletions(-)
+```
+- Untracked files intentionally included:
+  - `docs/plans/2026-05-19-overmind-lessons-lmmcp-hardening.md`
+  - `docs/plans/cpa-real-write-validation-2026-05-19.md`
+  - `docs/plans/cpa-write-narrow-buffer-e2e-2026-05-19.md`
+  - `scripts/install_curator_timer.sh`
+  - `scripts/lmmcp-curator.service`
+  - `scripts/lmmcp-curator.timer`
+  - `tests/test_stats.py`
+- Validation:
+  - /home/advancer/.agent-memory/local-memory-mcp/.venv/bin/python -m pytest tests/test_stats.py -q => PASS (6 passed); python3 -m pytest tests/test_stats.py -q => FAIL: system python missing pytest
+- Risk notes: 涉及记忆统计、curator 报告查询和运行脚本；系统 Python 缺少 pytest，已使用运行时 venv 验证新增测试。
+- Rollback: 回滚本次提交可移除 stats API、curator timer 资产和相关计划文档。
+- Commit message: `feat(memory): add curator stats and timer assets`

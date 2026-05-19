@@ -57,6 +57,7 @@ __all__ = [
     "query_links",
     "consolidate",
     "curator_report",
+    "get_memory_stats",
     "export_html",
 ]
 
@@ -430,7 +431,21 @@ def build_context_pack(
             break
         lines.extend(section + [""])
     text = "\n".join(lines).strip()
-    return {"context": text, "records": records, "used_ids": used_ids, "budget_chars": max_chars}
+    active_count = sum(1 for r in records if r["status"] == "active")
+    return {
+        "context": text,
+        "records": records,
+        "used_ids": used_ids,
+        "budget_chars": max_chars,
+        "quality": {
+            "total_candidates": len(records),
+            "used_count": len(used_ids),
+            "active_ratio": round(active_count / max(len(records), 1), 3),
+            "avg_importance": round(sum(r["importance"] for r in records) / max(len(records), 1), 3),
+            "stale_in_results": sum(1 for r in records if r["status"] == "stale"),
+            "estimated_tokens": len(text) // 4,
+        },
+    }
 
 
 def update_status(memory_id: str, status: str) -> dict[str, Any]:
@@ -572,7 +587,7 @@ def consolidate(dry_run: bool = True, limit: int = 50) -> dict[str, Any]:
     rows = list_recent(limit)
     seen: dict[str, list[dict[str, Any]]] = {}
     for r in rows:
-        key = " ".join(r["title"].lower().split())[:80]
+        key = normalize_title_key(r.get("title", ""))
         seen.setdefault(key, []).append(r)
     duplicates = [v for v in seen.values() if len(v) > 1]
     low_feedback = [r for r in rows if float(r.get("feedback_score", 0)) < -0.5]
@@ -591,45 +606,56 @@ def curator_report(
     stale_after_days: int = 60,
     archive_after_days: int = 120,
 ) -> dict[str, Any]:
-    rows = list_recent(limit)
     now_dt = datetime.now(timezone.utc)
     stale_cutoff = now_dt - timedelta(days=max(1, int(stale_after_days)))
     archive_cutoff = now_dt - timedelta(days=max(1, int(archive_after_days)))
+    cap = max(1, min(int(limit), 5000))
 
+    # Duplicate detection: full scan grouped by normalized title key
+    all_rows = _managed_query("SELECT * FROM memories ORDER BY updated_at DESC LIMIT ?", (cap,))
     by_title: dict[str, list[dict[str, Any]]] = {}
-    for r in rows:
+    for r in all_rows:
         by_title.setdefault(normalize_title_key(r.get("title", "")), []).append(r)
     duplicate_title_groups = [v for k, v in by_title.items() if k and len(v) > 1]
 
-    low_feedback_candidates = [
-        r for r in rows
-        if r.get("status") in {"active", "candidate"}
-        and float(r.get("feedback_score", 0) or 0) < -0.5
-    ]
-    stale_candidates = [
-        r for r in rows
-        if r.get("status") in {"active", "candidate"}
-        and parse_ts(r.get("updated_at")) < stale_cutoff
-        and float(r.get("importance", 0) or 0) < 0.45
-        and float(r.get("feedback_score", 0) or 0) <= 0
-    ]
-    archive_candidates = [
-        r for r in rows
-        if r.get("status") == "stale"
-        and parse_ts(r.get("updated_at")) < archive_cutoff
-    ]
-    skill_promotion_candidates = [
-        r for r in rows
-        if r.get("type") == "skill_candidate"
-        and r.get("status") in {"active", "candidate"}
-        and float(r.get("importance", 0) or 0) >= 0.65
-        and float(r.get("feedback_score", 0) or 0) >= 0
-    ]
+    # Low feedback: dedicated query, not list_recent
+    low_feedback_candidates = _managed_query(
+        "SELECT * FROM memories WHERE status IN ('active','candidate') AND feedback_score < -0.5 LIMIT ?",
+        (cap,),
+    )
 
+    # Stale: dedicated query so oldest records are not truncated by list_recent ordering
+    stale_candidates = _managed_query(
+        """SELECT * FROM memories
+           WHERE status IN ('active','candidate')
+             AND updated_at < ?
+             AND importance < 0.45
+             AND feedback_score <= 0
+           ORDER BY updated_at ASC LIMIT ?""",
+        (stale_cutoff.isoformat(), cap),
+    )
+
+    # Archive: stale records past archive cutoff
+    archive_candidates = _managed_query(
+        "SELECT * FROM memories WHERE status = 'stale' AND updated_at < ? ORDER BY updated_at ASC LIMIT ?",
+        (archive_cutoff.isoformat(), cap),
+    )
+
+    skill_promotion_candidates = _managed_query(
+        """SELECT * FROM memories
+           WHERE type = 'skill_candidate'
+             AND status IN ('active','candidate')
+             AND importance >= 0.65
+             AND feedback_score >= 0
+           LIMIT ?""",
+        (cap,),
+    )
+
+    # Contradiction detection
     contradiction_candidates: list[dict[str, Any]] = []
     active_by_key: dict[str, list[dict[str, Any]]] = {}
     contradicted_by_key: dict[str, list[dict[str, Any]]] = {}
-    for r in rows:
+    for r in all_rows:
         key = normalize_title_key(r.get("title", ""))
         if not key:
             continue
@@ -647,18 +673,21 @@ def curator_report(
 
     actions: list[dict[str, Any]] = []
     if not dry_run:
-        for r in {item["id"]: item for item in (low_feedback_candidates + stale_candidates)}.values():
-            if r.get("status") != "stale":
+        seen_ids: set[str] = set()
+        for r in low_feedback_candidates + stale_candidates:
+            if r["id"] not in seen_ids and r.get("status") != "stale":
+                seen_ids.add(r["id"])
                 update_status(r["id"], "stale")
                 actions.append({"id": r["id"], "action": "mark_stale", "title": r.get("title")})
         for r in archive_candidates:
             update_status(r["id"], "archived")
             actions.append({"id": r["id"], "action": "archive", "title": r.get("title")})
 
+    total_scanned = _managed_query("SELECT COUNT(*) as cnt FROM memories", ())[0]["cnt"]
     return {
         "dry_run": dry_run,
         "generated_at": now(),
-        "scanned": len(rows),
+        "scanned": total_scanned,
         "duplicate_title_groups": duplicate_title_groups,
         "low_feedback_candidates": low_feedback_candidates,
         "stale_candidates": stale_candidates,
@@ -846,3 +875,36 @@ function memoryDashboard(){
 def _managed_query(sql: str, params: tuple = ()) -> list[dict[str, Any]]:
     with managed_conn() as conn:
         return [row_to_dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+def get_memory_stats() -> dict[str, Any]:
+    """Return aggregate statistics: type/status/agent distribution, avg scores, link count."""
+    with managed_conn() as conn:
+        type_dist = {r["type"]: r["cnt"] for r in conn.execute(
+            "SELECT type, COUNT(*) as cnt FROM memories GROUP BY type"
+        ).fetchall()}
+        status_dist = {r["status"]: r["cnt"] for r in conn.execute(
+            "SELECT status, COUNT(*) as cnt FROM memories GROUP BY status"
+        ).fetchall()}
+        agent_dist = {r["source_agent"]: r["cnt"] for r in conn.execute(
+            "SELECT source_agent, COUNT(*) as cnt FROM memories GROUP BY source_agent"
+        ).fetchall()}
+        agg = conn.execute(
+            "SELECT AVG(confidence) as avg_conf, AVG(importance) as avg_imp, "
+            "AVG(feedback_score) as avg_fb, COUNT(*) as total FROM memories"
+        ).fetchone()
+        never_accessed = conn.execute(
+            "SELECT COUNT(*) FROM memories WHERE last_accessed_at IS NULL"
+        ).fetchone()[0]
+        link_count = conn.execute("SELECT COUNT(*) FROM memory_links").fetchone()[0]
+    return {
+        "total": agg["total"],
+        "by_type": type_dist,
+        "by_status": status_dist,
+        "by_agent": agent_dist,
+        "avg_confidence": round(float(agg["avg_conf"] or 0), 3),
+        "avg_importance": round(float(agg["avg_imp"] or 0), 3),
+        "avg_feedback_score": round(float(agg["avg_fb"] or 0), 3),
+        "never_accessed_count": never_accessed,
+        "link_count": link_count,
+    }

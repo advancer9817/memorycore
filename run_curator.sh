@@ -26,7 +26,6 @@ esac
   --archive-after-days "${LOCAL_MEMORY_ARCHIVE_AFTER_DAYS:-120}" \
   "${APPLY_FLAG[@]}" > "$REPORT"
 
-"$PY" "$SERVER" semantic-index --limit "${LOCAL_MEMORY_SEMANTIC_LIMIT:-1000}" >/dev/null
 "$PY" "$SERVER" html "$ROOT/dashboard.html" >/dev/null
 
 python3 - "$REPORT" <<'PY'

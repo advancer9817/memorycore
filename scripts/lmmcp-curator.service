@@ -1,0 +1,11 @@
+[Unit]
+Description=local-memory-mcp curator run
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/.agent-memory/local-memory-mcp
+EnvironmentFile=-%h/.agent-memory/local-memory-mcp/.env
+ExecStart=%h/.agent-memory/local-memory-mcp/run_curator.sh
+StandardOutput=append:%h/.agent-memory/local-memory-mcp/logs/curator.log
+StandardError=append:%h/.agent-memory/local-memory-mcp/logs/curator.log

@@ -27,6 +27,7 @@ from local_memory_mcp.storage import (
     consolidate,
     curator_report,
     export_html,
+    get_memory_stats,
     get_record,
     list_recent,
     query_links,
