@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Memory Platform Project Briefing</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <div class="container">
+      <nav>
+        <ul id="main-nav">
+          <li><a href="#hero" class="active">Summary</a></li>
+          <li><a href="#architecture">Architecture</a></li>
+          <li><a href="#responsibility">Responsibilities</a></li>
+          <li><a href="#datamodel">Data Model</a></li>
+          <li><a href="#temporal">Temporal</a></li>
+          <li><a href="#roadmap">Roadmap</a></li>
+          <li><a href="#migration">Migration</a></li>
+          <li><a href="#risks">Risks</a></li>
+          <li><a href="#tasks">Task Board</a></li>
+          <li><a href="#decision">Decision</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- 1. Hero / Executive Summary -->
+    <section id="hero">
+      <h1 id="project-title">Project Title</h1>
+      <p class="thesis" id="project-thesis">Project Thesis</p>
+      <div class="stack-list" id="stack-list">
+        <!-- Populated by app.js -->
+      </div>
+    </section>
+
+    <!-- 2. Architecture Map -->
+    <section id="architecture">
+      <div class="section-title">
+        <span class="number">01</span>
+        <h2>Architecture Map</h2>
+      </div>
+      <div class="arch-map" id="arch-map">
+        <!-- Populated by app.js -->
+      </div>
+    </section>
+
+    <!-- 3. Responsibility Split -->
+    <section id="responsibility">
+      <div class="section-title">
+        <span class="number">02</span>
+        <h2>Responsibility Split</h2>
+      </div>
+      <div class="split-container">
+        <div class="split-side outsource">
+          <h3>Outsource to Products</h3>
+          <ul class="split-list" id="outsource-list"></ul>
+        </div>
+        <div class="split-side keep">
+          <h3>Keep in Local Adapter</h3>
+          <ul class="split-list" id="keep-list"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. Data Model Explorer -->
+    <section id="datamodel">
+      <div class="section-title">
+        <span class="number">03</span>
+        <h2>Data Model Explorer</h2>
+      </div>
+      <div class="card">
+        <table class="model-table">
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Group</th>
+              <th>Type</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody id="model-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 5. Temporal Governance -->
+    <section id="temporal">
+      <div class="section-title">
+        <span class="number">04</span>
+        <h2>Temporal Governance</h2>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <h3>Fact Lifecycle</h3>
+          <p>Memories evolve from <strong>Active</strong> to <strong>Stale</strong> or <strong>Contradicted</strong> based on new observations and explicit user corrections.</p>
+          <ul class="split-list">
+            <li>Supersede: New facts replace old ones while maintaining history.</li>
+            <li>Contradiction: Conflicting facts trigger curator alerts.</li>
+            <li>Expiration: Time-based decay for environment and raw facts.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Example Evolution</h3>
+          <div class="arch-layer">
+            <div class="comp">T1: User prefers Model A</div>
+            <div class="notes">Observed in conversation #102</div>
+          </div>
+          <div style="text-align: center; color: var(--accent-cyan);">↓</div>
+          <div class="arch-layer">
+            <div class="comp">T2: User switches to Model B</div>
+            <div class="notes">Direct tool usage detected</div>
+          </div>
+          <p style="font-size: 12px; margin-top: 8px; color: var(--status-warning);">Result: T1 marked as <code>superseded</code>, T2 becomes <code>active</code>.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. Roadmap -->
+    <section id="roadmap">
+      <div class="section-title">
+        <span class="number">05</span>
+        <h2>Roadmap</h2>
+      </div>
+      <div class="timeline" id="roadmap-timeline">
+        <!-- Populated by app.js -->
+      </div>
+    </section>
+
+    <!-- 7. Migration Strategy -->
+    <section id="migration">
+      <div class="section-title">
+        <span class="number">06</span>
+        <h2>Migration Strategy</h2>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <h3>Execution Order</h3>
+          <ol class="split-list" id="migration-order" style="list-style: decimal;"></ol>
+        </div>
+        <div class="card">
+          <h3>Phase Approach</h3>
+          <div class="arch-map">
+            <div class="arch-layer">
+              <h3>1. Double Write</h3>
+              <p class="notes">Write to both SQLite and OpenMemory.</p>
+            </div>
+            <div class="arch-layer">
+              <h3>2. Read Switch</h3>
+              <p class="notes">Verify data, then switch primary read to OpenMemory.</p>
+            </div>
+            <div class="arch-layer">
+              <h3>3. Cleanup</h3>
+              <p class="notes">Archive legacy SQLite records.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 8. Risk Matrix -->
+    <section id="risks">
+      <div class="section-title">
+        <span class="number">07</span>
+        <h2>Risk Matrix</h2>
+      </div>
+      <div class="grid" id="risk-grid">
+        <!-- Populated by app.js -->
+      </div>
+    </section>
+
+    <!-- 9. Implementation Task Board -->
+    <section id="tasks">
+      <div class="section-title">
+        <span class="number">08</span>
+        <h2>Implementation Task Board</h2>
+      </div>
+      <div class="task-filters">
+        <button class="filter-btn active" data-filter="all">All Tasks</button>
+        <button class="filter-btn" data-filter="phase0">Phase 0</button>
+        <button class="filter-btn" data-filter="phase1">Phase 1</button>
+        <button class="filter-btn" data-filter="phase2">Phase 2</button>
+        <button class="filter-btn" data-filter="phase3">Phase 3+</button>
+      </div>
+      <div class="grid" id="task-board">
+        <!-- Populated by app.js -->
+      </div>
+    </section>
+
+    <!-- 10. Decision Summary -->
+    <section id="decision">
+      <div class="section-title">
+        <span class="number">09</span>
+        <h2>Decision Summary</h2>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <h3>Recommendation</h3>
+          <p>Adopt a <strong>thin-adapter</strong> architecture. Offload heavy memory management to mem0 and Qdrant while retaining control over governance, multi-agent context, and local auditing.</p>
+          <p>Avoid building a custom vector database; prioritize workflow integration and temporal truth management.</p>
+        </div>
+        <div class="card">
+          <h3>Config Skeleton</h3>
+          <div class="copy-block">
+            <pre id="config-skeleton"></pre>
+            <button class="copy-btn" id="copy-config">Copy</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer style="padding: 40px 0; text-align: center; border-top: 1px solid var(--border-color); color: var(--text-secondary); font-size: 12px;">
+    Memory Platform Project Briefing &bull; 2026 Strategy
+  </footer>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

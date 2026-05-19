@@ -1,0 +1,50 @@
+backend:
+  primary: sqlite
+  fallback: sqlite
+
+openmemory:
+  url: http://127.0.0.1:8765
+  user_id: local-user
+  timeout: 30
+
+qdrant:
+  url: http://127.0.0.1:6333
+  collection: agent_memory
+  timeout: 30
+
+embedding:
+  provider: ollama
+  model: nomic-embed-text
+  dim: 768
+  ollama_url: http://127.0.0.1:11434
+  timeout: 30
+
+context_pack:
+  default_token_budget: 2000
+  include_stale_warnings: true
+  max_records_per_group: 6
+
+temporal:
+  enabled: false
+  contradiction_detection: heuristic
+  auto_supersede_user_corrections: true
+
+mem0:
+  enabled: true
+  llm_provider: deepseek
+  llm_model: deepseek-v4-flash
+  # API key loaded from .env file (MEM0_LLM_API_KEY / DEEPSEEK_API_KEY)
+  llm_api_key: ""
+  llm_base_url: https://api.deepseek.com
+  ollama_url: http://127.0.0.1:12434
+  embedder_model: nomic-embed-text
+  embedder_dim: 768
+  vector_store_path: ""
+  collection_name: agent_memory
+  default_user_id: advancer
+  temperature: 0.1
+  max_tokens: 2000
+  timeout: 60
+
+ops_db:
+  path: memory_ops.sqlite3

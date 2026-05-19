@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.venv*/
+
+# Local runtime state
+memory.sqlite3
+memory.sqlite3-*
+memory_ops.sqlite3
+memory_ops.sqlite3-*
+dashboard.html
+dashboard.log
+backups/
+
+# Editor/OS
+.idea/
+.DS_Store
+Thumbs.db
+.env
