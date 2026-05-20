@@ -14,9 +14,6 @@ def test_load_config_reads_nested_yaml_scalars(tmp_path, monkeypatch):
 backend:
   primary: sqlite
   fallback: sqlite
-openmemory:
-  url: http://127.0.0.1:8765
-  timeout: 30
 qdrant:
   url: http://127.0.0.1:6333
   collection: agent_memory
@@ -35,7 +32,6 @@ context_pack:
     config = lm.load_config()
 
     assert config["backend"]["primary"] == "sqlite"
-    assert config["openmemory"]["timeout"] == 30
     assert config["embedding"]["dim"] == 768
     assert config["context_pack"]["include_stale_warnings"] is True
 

@@ -356,3 +356,47 @@ ITERATION.md | 34 ++++++++++++++++++++++++++++++++++
 - Risk notes: 仅文档记录更新。
 - Rollback: 回滚本次提交即可移除新增迭代日志。
 - Commit message: `docs: track phase 8 iteration log`
+
+## 迭代 — Phase 9 准备：移除 openmemory 后端 + Agent Hooks 体系 (2026-05-20)
+
+### 目的
+清理 openmemory 后端残留代码，新增 Agent Hooks 体系（session-start/end + daemon 管理脚本），
+为 Phase 9 Mailbox MVP 做基础设施准备。同步修复 lmmcp-ingest 和 lmmcp-session-end.py 的
+streamable-http 握手 bug。
+
+### 变更摘要
+- `local_memory_mcp/models.py`
+  - 移除 `DEFAULT_CONFIG` 中的 `openmemory` 节
+  - 移除 `load_config()` 中的 openmemory user_id 自动注入逻辑
+- `scripts/init_local_memory.sh`
+  - 移除生成配置模板中的 openmemory 节
+- `tests/test_config.py`
+  - 移除 openmemory 相关断言
+- `tests/test_deployment.py`
+  - 将 stale test `test_default_config_user_id_is_not_a_source_machine_username`
+    替换为 `test_load_config_returns_dict_without_openmemory`，验证 openmemory key 已不存在
+- `scripts/connect_agents.py` (新增 150 行)
+  - Agent 连接辅助脚本，支持 Hermes/Claude Code/Codex 接入 lmmcp
+- `scripts/lmmcp-daemon.sh` (新增)
+  - 幂等 lmmcp HTTP 服务生命周期管理：start/stop/status，供 hooks 调用
+- `scripts/hooks/session-start.sh` (新增)
+  - 会话开始 hook：确保 lmmcp 运行，拉取任务相关 context pack
+- `scripts/hooks/session-end.sh` (新增)
+  - 会话结束 hook：从 transcript 提取消息，调用 memory_ingest 写入 lmmcp
+
+### 关联修复（~/.local/bin/lmmcp-ingest + ~/.hermes/agent-hooks/lmmcp-session-end.py）
+- lmmcp-ingest: 新增 `_mcp_initialize()` 握手，修复 streamable-http 400 Bad Request
+- lmmcp-session-end.py: SESSION_DB 路径从 sessions.db 修正为 state.db
+
+### 测试
+- 126 passed（新增 1 个替换测试，净增 1）
+
+### 影响范围
+- openmemory 后端彻底移除，不影响 SQLite/Qdrant 主路径
+- Agent Hooks 为可选接入，不影响现有 MCP 工具
+
+### 风险
+低。openmemory 本地未运行，移除无副作用。Hooks 脚本 exit 0 兜底，不阻塞 agent 启动。
+
+### 回滚
+`git revert HEAD`

@@ -116,11 +116,6 @@ backend:
   primary: sqlite
   fallback: sqlite
 
-openmemory:
-  url: ${OPENMEMORY_URL:-http://127.0.0.1:8765}
-  user_id: ${USER_ID}
-  timeout: 30
-
 qdrant:
   url: ${QDRANT_URL:-http://127.0.0.1:6333}
   collection: ${QDRANT_COLLECTION:-agent_memory}

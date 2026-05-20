@@ -35,6 +35,7 @@ SERVER_NAME = "local_memory"
 OPENMEMORY_KEYS = {"openmemory", "open_memory"}
 HOME = Path.home()
 BACKUP_ROOT = HOME / ".agent-memory" / "local-memory-mcp" / "backups" / "connect-agents"
+HOOKS_DIR = Path(__file__).resolve().parent / "hooks"
 
 
 def log(msg: str) -> None:
@@ -192,6 +193,143 @@ def configure_opencode(path: Path, endpoint: str, backup_dir: Path, dry_run: boo
     return write_json(path, data, backup_dir, dry_run)
 
 
+# ---------------------------------------------------------------------------
+# Hook registration
+# ---------------------------------------------------------------------------
+
+HOOK_SESSION_START = str(HOOKS_DIR / "session-start.sh")
+HOOK_SESSION_END = str(HOOKS_DIR / "session-end.sh")
+
+
+def detect_agents() -> dict[str, Path]:
+    """Return dict of agent_name -> config_path for agents found on this system."""
+    found: dict[str, Path] = {}
+    agents_map = {
+        "claude": HOME / ".claude" / "settings.json",
+        "codex": HOME / ".codex" / "config.toml",
+        "hermes": HOME / ".hermes" / "config.yaml",
+        "opencode": HOME / ".config" / "opencode" / "opencode.json",
+        "gemini": HOME / ".gemini" / "settings.json",
+    }
+    for name, config_path in agents_map.items():
+        if shutil.which(name) or config_path.exists():
+            found[name] = config_path
+    return found
+
+
+def register_hooks_claude(path: Path, backup_dir: Path, dry_run: bool) -> bool:
+    """Register SessionStart and Stop hooks in Claude Code settings.json."""
+    data = read_json(path)
+    hooks = data.setdefault("hooks", {})
+    start_hook = {
+        "hooks": [{"type": "command", "command": f"bash {HOOK_SESSION_START}"}]
+    }
+    end_hook = {
+        "hooks": [{"type": "command", "command": f"bash {HOOK_SESSION_END}"}]
+    }
+    changed = False
+    existing_start = hooks.get("SessionStart", [])
+    if not any(HOOK_SESSION_START in str(h) for h in existing_start):
+        hooks["SessionStart"] = existing_start + [start_hook]
+        changed = True
+    existing_stop = hooks.get("Stop", [])
+    if not any(HOOK_SESSION_END in str(h) for h in existing_stop):
+        hooks["Stop"] = existing_stop + [end_hook]
+        changed = True
+    if not changed:
+        return False
+    # Inject LMMCP env vars
+    env = data.setdefault("env", {})
+    env.setdefault("LMMCP_PORT", "8318")
+    env.setdefault("LMMCP_AGENT_ID", "claude")
+    return write_json(path, data, backup_dir, dry_run)
+
+
+def register_hooks_hermes(path: Path, backup_dir: Path, dry_run: bool) -> bool:
+    """Register hooks in Hermes config.yaml."""
+    if yaml is None:
+        log("  ! PyYAML not available; skipping Hermes hook registration")
+        return False
+    old_raw = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
+    data = yaml.safe_load(old_raw) if old_raw.strip() else {}
+    data = data or {}
+    hooks = data.setdefault("hooks", {})
+    changed = False
+    if "session_start" not in hooks or HOOK_SESSION_START not in str(hooks.get("session_start")):
+        hooks["session_start"] = f"bash {HOOK_SESSION_START}"
+        changed = True
+    if "session_end" not in hooks or HOOK_SESSION_END not in str(hooks.get("session_end")):
+        hooks["session_end"] = f"bash {HOOK_SESSION_END}"
+        changed = True
+    if not changed:
+        return False
+    if dry_run:
+        return True
+    backup_file(path, backup_dir)
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return True
+
+
+def register_hooks_codex(path: Path, backup_dir: Path, dry_run: bool) -> bool:
+    """Register hooks in Codex config.toml."""
+    old = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
+    if HOOK_SESSION_START in old and HOOK_SESSION_END in old:
+        return False
+    text = old
+    hook_block = f"""
+[hooks]
+session_start = "bash {HOOK_SESSION_START}"
+session_end = "bash {HOOK_SESSION_END}"
+"""
+    if "[hooks]" not in text:
+        text = text.rstrip() + "\n" + hook_block
+    if old == text:
+        return False
+    if dry_run:
+        return True
+    path.parent.mkdir(parents=True, exist_ok=True)
+    backup_file(path, backup_dir)
+    path.write_text(text, encoding="utf-8")
+    return True
+
+
+def register_hooks_opencode(path: Path, backup_dir: Path, dry_run: bool) -> bool:
+    """Register hooks in opencode config.json."""
+    data = read_json(path)
+    hooks = data.setdefault("hooks", {})
+    changed = False
+    if hooks.get("session_start") != f"bash {HOOK_SESSION_START}":
+        hooks["session_start"] = f"bash {HOOK_SESSION_START}"
+        changed = True
+    if hooks.get("session_end") != f"bash {HOOK_SESSION_END}":
+        hooks["session_end"] = f"bash {HOOK_SESSION_END}"
+        changed = True
+    if not changed:
+        return False
+    return write_json(path, data, backup_dir, dry_run)
+
+
+def register_all_hooks(agents: set[str], backup_dir: Path, dry_run: bool) -> list[str]:
+    """Register hooks for all detected agents. Returns list of changed paths."""
+    changed: list[str] = []
+    detected = detect_agents()
+    log(f"Detected agents: {', '.join(sorted(detected.keys())) or 'none'}")
+    if "claude" in agents and "claude" in detected:
+        if register_hooks_claude(detected["claude"], backup_dir, dry_run):
+            changed.append(str(detected["claude"]))
+    if "hermes" in agents and "hermes" in detected:
+        for p in hermes_paths():
+            if register_hooks_hermes(p, backup_dir, dry_run):
+                changed.append(str(p))
+    if "codex" in agents and "codex" in detected:
+        if register_hooks_codex(detected["codex"], backup_dir, dry_run):
+            changed.append(str(detected["codex"]))
+    if "opencode" in agents and "opencode" in detected:
+        if register_hooks_opencode(detected["opencode"], backup_dir, dry_run):
+            changed.append(str(detected["opencode"]))
+    return changed
+
+
 def windows_user_dirs() -> list[Path]:
     users = Path("/mnt/c/Users")
     if not users.exists():
@@ -259,6 +397,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="Show what would change without writing")
     parser.add_argument("--no-probe", action="store_true", help="Skip endpoint health probe")
     parser.add_argument("--verify", action="store_true", help="Run agent list commands after writing")
+    parser.add_argument("--register-hooks", action="store_true", help="Also register session hooks for memory extraction")
     args = parser.parse_args(argv)
 
     agents = {a.strip().lower() for a in args.agents.split(",") if a.strip()}
@@ -318,6 +457,17 @@ def main(argv: list[str] | None = None) -> int:
             log(f"Backups: {backup_dir}")
     else:
         log("No changes needed; all selected agents already point to the endpoint.")
+
+    # Hook registration
+    if args.register_hooks:
+        log("\n--- Hook registration ---")
+        hook_changed = register_all_hooks(agents, backup_dir, args.dry_run)
+        if hook_changed:
+            log(("Would register hooks:" if args.dry_run else "Hooks registered:"))
+            for p in hook_changed:
+                log(f"  - {p}")
+        else:
+            log("All hooks already registered.")
 
     if args.verify:
         log("Verification commands:")

@@ -52,7 +52,6 @@ _INITIALIZED_DB_PATHS: set[str] = set()
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "backend": {"primary": "sqlite", "fallback": "sqlite"},
-    "openmemory": {"url": "http://127.0.0.1:8765", "user_id": "local-user", "timeout": 30},
     "qdrant": {"url": "http://127.0.0.1:6333", "collection": "agent_memory", "timeout": 30},
     "embedding": {
         "provider": "ollama",
@@ -181,9 +180,6 @@ def load_config() -> dict[str, Any]:
         config = _deep_merge(DEFAULT_CONFIG, {})
     else:
         config = _deep_merge(DEFAULT_CONFIG, _parse_simple_yaml(path.read_text(encoding="utf-8")))
-    openmemory = config.setdefault("openmemory", {})
-    if openmemory.get("user_id") == "local-user" and os.environ.get("USER"):
-        openmemory["user_id"] = os.environ["USER"]
     return config
 
 

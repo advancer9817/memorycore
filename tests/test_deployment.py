@@ -48,10 +48,10 @@ def test_gitignore_excludes_local_runtime_state():
     assert "__pycache__/" in text
 
 
-def test_default_config_user_id_is_not_a_source_machine_username(tmp_path, monkeypatch):
-    monkeypatch.setenv("USER", "target-user")
+def test_load_config_returns_dict_without_openmemory(tmp_path, monkeypatch):
+    """openmemory backend was removed; config should not contain that key."""
     monkeypatch.setenv("LOCAL_MEMORY_CONFIG", str(tmp_path / "missing.yaml"))
 
     config = lm.load_config()
 
-    assert config["openmemory"]["user_id"] == "target-user"
+    assert "openmemory" not in config
