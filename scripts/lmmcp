@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MCP_DIR="${LMMCP_DIR:-$HOME/project/local-memory-mcp}"
+PYTHON="${LMMCP_PYTHON:-$MCP_DIR/.venv/bin/python}"
+HOST="${LMMCP_HOST:-127.0.0.1}"
+PORT="${LMMCP_PORT:-8318}"
+DB="${LOCAL_MEMORY_DB:-$MCP_DIR/memory.sqlite3}"
+PID_FILE="${LMMCP_PID_FILE:-/tmp/lmmcp.pid}"
+LOG_FILE="${LMMCP_LOG_FILE:-$MCP_DIR/lmmcp.log}"
+
+is_running() {
+  [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
+}
+
+pid_matches() {
+  if ! is_running; then return 1; fi
+  local pid
+  pid="$(cat "$PID_FILE")"
+  ps -p "$pid" -o args= 2>/dev/null | grep -q "local_memory_mcp.*serve"
+}
+
+start() {
+  if pid_matches; then
+    echo "already running (pid: $(cat "$PID_FILE"), endpoint: http://$HOST:$PORT/mcp, db: $DB)"
+    return 0
+  fi
+  if [ -f "$PID_FILE" ]; then rm -f "$PID_FILE"; fi
+  mkdir -p "$MCP_DIR" "$(dirname "$PID_FILE")"
+  if [ ! -x "$PYTHON" ]; then
+    echo "python not found/executable: $PYTHON" >&2
+    return 1
+  fi
+  cd "$MCP_DIR"
+  nohup env LOCAL_MEMORY_DB="$DB" PYTHONPATH="$MCP_DIR" "$PYTHON" -m local_memory_mcp serve --host "$HOST" --port "$PORT" >> "$LOG_FILE" 2>&1 &
+  echo $! > "$PID_FILE"
+  sleep 1
+  if pid_matches; then
+    echo "started (pid: $(cat "$PID_FILE"), endpoint: http://$HOST:$PORT/mcp, db: $DB)"
+  else
+    echo "failed — check $LOG_FILE" >&2
+    return 1
+  fi
+}
+
+stop() {
+  if is_running; then
+    local pid
+    pid="$(cat "$PID_FILE")"
+    kill "$pid" 2>/dev/null || true
+    for _ in 1 2 3 4 5; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.5
+    done
+    kill -9 "$pid" 2>/dev/null || true
+    rm -f "$PID_FILE"
+    echo "stopped"
+  else
+    rm -f "$PID_FILE"
+    echo "not running"
+  fi
+}
+
+status() {
+  if pid_matches; then
+    echo "running (pid: $(cat "$PID_FILE"), endpoint: http://$HOST:$PORT/mcp, db: $DB)"
+  else
+    echo "stopped"
+    return 1
+  fi
+}
+
+case "${1:-}" in
+  start) start ;;
+  stop) stop ;;
+  restart) stop >/dev/null || true; start ;;
+  status) status ;;
+  logs) tail -n "${2:-80}" "$LOG_FILE" ;;
+  *) echo "Usage: lmmcp {start|stop|restart|status|logs [N]}" >&2; exit 2 ;;
+esac

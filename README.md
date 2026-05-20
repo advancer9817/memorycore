@@ -16,7 +16,7 @@
 - 上下文包装：按任务生成 compact context pack，控制 token budget，区分记忆类型。
 - 协作基础：共享记忆 + 未来 agent mailbox + presence，支持 Hermes 总控 + Codex/Claude 专职执行。
 - 自进化：curator 定期整理、降噪、归档、合并，高价值经验沉淀为 skills/playbooks。
-- 低心智负担：agent 不直接关心 SQLite/Qdrant/Mem0 细节，只调用稳定 MCP tools。
+- 低心智负担：agent 不直接关心 SQLite/Qdrant 细节，只调用稳定 MCP tools。
 
 ## 路径
 
@@ -34,22 +34,33 @@ MEM_ROOT="${LOCAL_MEMORY_ROOT:-/home/advancer/project/local-memory-mcp}"
 | SQLite DB | `$MEM_ROOT/memory.sqlite3` |
 | Dashboard | `$MEM_ROOT/dashboard.html` |
 | MCP probe | `$MEM_ROOT/probe_mcp.py` |
+| 可选服务脚本 | `$MEM_ROOT/scripts/lmmcp` |
 
 代码默认使用项目目录内的 `memory.sqlite3`，可用 `LOCAL_MEMORY_DB` 覆盖数据库路径，`LOCAL_MEMORY_CONFIG` 覆盖配置文件路径。
 
 ## 当前状态
 
-已完成：
+已验证：
 
-1. **SQLite + FTS5 结构化记忆层**：支持 type/scope/tags/status/importance/confidence/source_agent 等字段，FTS5 全文检索。
-2. **MCP server**：16 个工具，Hermes/Codex/Claude Code 均已配置并验证连接。
-3. **Context Pack**：`memory_context` 按任务生成 compact 上下文包，支持 token budget 控制，按记忆类型分组。
-4. **Curator**：重复标题、低反馈、stale、archive、矛盾候选、skill_candidate 推广候选检测；`run_curator.sh` 输出 JSON 报告并刷新 dashboard。
-5. **Dashboard**：本地交互式 HTML 面板，Alpine.js，无构建步骤；支持搜索/类型/状态/排序过滤、决策时间线、反馈健康分布、curator 候选摘要、semantic index 状态。
-6. **sqlite-vec 语义层**：本地 Ollama `nomic-embed-text`（768 维）embedding，`memory_semantic_*` MCP 工具；可用 `LOCAL_MEMORY_EMBEDDING_PROVIDER=hashing` 切回 hashing-384 fallback。
-7. **Mem0 SDK 集成**：`memory_extract`（从对话抽取记忆）、`memory_smart_search`（FTS5 + sqlite-vec + Mem0 混合检索）、`memory_mem0_status`；LLM 使用 DeepSeek v4-flash，当前 Ollama 502 时 Mem0 自动降级，不影响主流程。
-8. **HTTP MCP 服务**：可通过 `python -m local_memory_mcp serve --port 8318` 独立启动，客户端只需指向 `http://127.0.0.1:8318/mcp`。
-9. **多客户端接入验证**：Hermes / Codex / Claude Code / Gemini / OpenCode 可作为普通 MCP 客户端接入；lmmcp 不依赖任一客户端配置仓库。
+1. **SQLite + FTS5 结构化记忆层**：支持 type/scope/tags/status/importance/confidence/source_agent/effectiveness 等字段，FTS5 全文检索。
+2. **HTTP MCP server**：17 个工具，Hermes 可通过 `http://127.0.0.1:8318/mcp` 作为普通 HTTP MCP 客户端连接。
+3. **Context Pack**：`memory_context` 按任务生成 compact 上下文包，支持 token budget 控制，按记忆类型分组，并集成 active contradicts/supersedes warning。
+4. **Curator**：重复标题、低反馈、stale、archive、矛盾候选、skill_candidate 推广候选检测；默认 dry-run。
+5. **Feedback / effectiveness**：`memory_feedback` 记录反馈事件并更新 feedback_score、injected_count、ineffective_count、effectiveness_score。
+6. **Memory links / warnings**：支持 `related_to`、`supersedes`、`contradicts`、`supports`、`part_of`；`memory_warnings` 可根据 active links 产生冲突/替代提示。
+7. **Qdrant 语义检索**：`memory_vector_search` / `memory_vector_status` 通过 `vector_store.py` 使用 Qdrant + Ollama embedding；Ollama embedding 不可用时使用 hashing fallback。
+8. **Dashboard**：本地交互式 HTML 面板，Alpine.js，无构建步骤；展示记录、时间线、反馈健康和 curator 候选摘要。
+9. **多客户端接入方向**：Hermes / Codex / Claude Code / Gemini / OpenCode 都应作为普通 MCP 客户端接入；lmmcp 核心不依赖任一客户端配置仓库或私有 transcript。
+
+Optional / degraded：
+
+- Qdrant、Ollama、外部 extraction LLM 都是可选增强；不可用时核心 SQLite/FTS5/context pack 仍应可用。
+- `memory_ingest` 会调用 extraction + dedup pipeline；外部模型或向量服务不可用时应视为降级能力，不影响基础 CRUD/search/context。
+
+Removed / not current core：
+
+- sqlite-vec CLI 语义命令已移除；CLI `semantic-*` 子命令仅返回提示，请使用 MCP `memory_vector_search` / `memory_vector_status`。
+- Mem0 不是当前核心部署的一部分；不要从旧配置或旧文档重新引入 Mem0/OpenMemory 假设。
 
 ## MCP 工具列表
 
@@ -63,14 +74,15 @@ MEM_ROOT="${LOCAL_MEMORY_ROOT:-/home/advancer/project/local-memory-mcp}"
 | `memory_update_status` | 更新记忆状态 |
 | `memory_feedback` | 记录记忆有用性反馈 |
 | `memory_timeline` | 决策/事件时间线 |
-| `memory_consolidate` | curator 去重/stale 检测（dry-run） |
+| `memory_consolidate` | curator 去重/stale 检测（report-only） |
 | `memory_curator_report` | curator 候选报告，可选标记 stale/archive |
-| `memory_semantic_status` | 语义索引状态 |
-| `memory_semantic_index` | 构建/更新 sqlite-vec 向量索引 |
-| `memory_semantic_search` | 语义向量搜索 |
-| `memory_extract` | 从对话抽取记忆（Mem0 LLM pipeline） |
-| `memory_smart_search` | FTS5 + sqlite-vec + Mem0 混合搜索 |
-| `memory_mem0_status` | Mem0 后端状态 |
+| `memory_ingest` | 从显式传入的对话消息抽取并去重写入 candidate |
+| `memory_vector_search` | Qdrant 语义向量搜索 |
+| `memory_vector_status` | Qdrant 向量存储状态 |
+| `memory_link_add` | 创建/更新记忆之间的有向关系 |
+| `memory_link_query` | 查询某条记忆的 incoming/outgoing links |
+| `memory_warnings` | 根据 active links 返回冲突/替代 warning |
+| `memory_update` | 更新已有记忆的 title/content/status/confidence/importance |
 
 ## CLI
 
@@ -79,14 +91,14 @@ MEM_ROOT="${LOCAL_MEMORY_ROOT:-/home/advancer/project/local-memory-mcp}"
 PY="$MEM_ROOT/.venv/bin/python"
 
 "$PY" -m local_memory_mcp init
+"$PY" -m local_memory_mcp add project_memory "标题" "内容"
 "$PY" -m local_memory_mcp search memory
 "$PY" -m local_memory_mcp context "继续实现多 agent 记忆架构"
 "$PY" -m local_memory_mcp html
 "$PY" -m local_memory_mcp curator --summary-only
-"$PY" -m local_memory_mcp semantic-index --force
-"$PY" -m local_memory_mcp semantic-search "memory_context"
-"$MEM_ROOT/run_curator.sh"
 ```
+
+`semantic-status` / `semantic-index` / `semantic-search` CLI 子命令保留为兼容提示；实际语义检索通过 MCP 工具 `memory_vector_search` / `memory_vector_status`。
 
 ## MCP 接入配置
 
@@ -131,9 +143,32 @@ Claude Code `~/.claude.json`（user scope，全局可用）：
 }
 ```
 
+## 服务脚本
+
+仓库提供可选脚本 `scripts/lmmcp`：
+
+```bash
+scripts/lmmcp start
+scripts/lmmcp status
+scripts/lmmcp logs 80
+scripts/lmmcp stop
+```
+
+默认值可通过环境变量覆盖：
+
+| 变量 | 默认值 |
+|---|---|
+| `LMMCP_DIR` | `$HOME/project/local-memory-mcp` |
+| `LMMCP_PYTHON` | `$LMMCP_DIR/.venv/bin/python` |
+| `LMMCP_HOST` | `127.0.0.1` |
+| `LMMCP_PORT` | `8318` |
+| `LOCAL_MEMORY_DB` | `$LMMCP_DIR/memory.sqlite3` |
+| `LMMCP_PID_FILE` | `/tmp/lmmcp.pid` |
+| `LMMCP_LOG_FILE` | `$LMMCP_DIR/lmmcp.log` |
+
 ## 安装与测试
 
-需要 Python 3.11+（`numpy==2.4.4` 不支持 Python 3.10）。
+需要 Python 3.11+。
 
 ```bash
 MEM_ROOT="${LOCAL_MEMORY_ROOT:-/home/advancer/project/local-memory-mcp}"
@@ -164,31 +199,19 @@ scripts/init_local_memory.sh
 
 ## 语义层说明
 
-默认使用本地 Ollama `nomic-embed-text`（768 维）。Ollama 不可用时自动降级，不影响 FTS5 搜索和 context pack。
+当前语义层通过 `vector_store.py` 使用 Qdrant。配置位于 `config.yaml` 的 `qdrant` 和 `embedding` 段，也可由环境变量覆盖部分 embedding 设置。
 
-切换到 hashing fallback：
-
-```bash
-export LOCAL_MEMORY_EMBEDDING_PROVIDER=hashing
-export LOCAL_MEMORY_EMBEDDING_DIM=384
-```
-
-## Mem0 说明
-
-Mem0 SDK 已集成，LLM 使用 DeepSeek v4-flash，向量存储路径 `~/.agent-memory/mem0_qdrant`。
-
-Mem0 不可用时（Ollama 502、key 缺失等）自动降级，`memory_smart_search` 仍返回 FTS5 + sqlite-vec 结果，`memory_extract` 报错但不影响主流程。
+默认 embedding provider 是 Ollama `nomic-embed-text`。Ollama 不可用时，`embed_text` 会使用 deterministic hashing fallback，保证语义相关能力可降级而不阻断基础 SQLite/FTS5 能力。
 
 ## 设计边界
 
-当前 v0 解决"统一结构化存储 + MCP 工具 + context pack + 三 agent 共享记忆互通"问题。
+当前 v0 解决“统一结构化存储 + MCP 工具 + context pack + 多 agent 共享记忆互通”问题。
 
 不是完整自进化系统，不是 agent 调度框架，不是完整 SaaS memory platform。
 
-下一阶段计划：
+下一阶段计划按优先级推进：
 
-1. **Agent Mailbox MVP**：agent_messages / agent_presence 表，`agent_message_send/inbox/reply/mark_read`、`agent_presence_update/list` MCP 工具，让 Hermes/Codex/Claude 从"共享记忆"升级为"能基本协作通讯"。
-2. **memory_context 集成协作状态**：context pack 附带当前 agent 未读消息摘要、相关 thread、task 阻塞项。
-3. **Backend Router / MemoryRouter**：把 SQLite、sqlite-vec、Mem0 统一进 adapter 层，不让 `local_memory_mcp.py` 继续膨胀。
-4. **Context Pack v2**：FTS5 + semantic + Mem0 混合检索，去重，可信度排序，feedback 加权，stale/contradicted 默认过滤。
-5. **Curator automation**：cron 自动巡检，skill_candidate 推广，成长日记，现实反馈闭环。
+1. **P0 稳定化**：文档-工具-测试一致性、context injection guard、隐私脱敏、审计日志、degraded/fallback response contract。
+2. **Context Pack v2**：在保留 legacy `context` 字段的同时增加 sections / records / warnings / trace。
+3. **Graph / Warning 增强**：扩展 relation types，支持 blocked_by / causes / failure-pattern warnings。
+4. **Agent Mailbox MVP**：在 P0/P1 防线完成后，再增加 agent_messages / agent_presence 与基础协作通讯工具。

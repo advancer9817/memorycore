@@ -12,6 +12,7 @@ memory_ops.sqlite3
 memory_ops.sqlite3-*
 dashboard.html
 dashboard.log
+*.log
 backups/
 
 # Editor/OS

@@ -1,5 +1,39 @@
 # local-memory-mcp 迭代日志
 
+## [迭代 11] 2026-05-21 — P0 文档现实对齐与工具清单门禁
+
+**提交**: `cd7538f`
+
+### 变更
+- `README.md`: 按当前实现重写“当前状态 / MCP 工具列表 / CLI / 服务脚本 / 语义层 / 设计边界”，将工具数对齐为 17，并明确 Qdrant 语义检索、Mem0/OpenMemory 非当前核心部署、sqlite-vec CLI 已移除。
+- `.gitignore`: 增加 `*.log`，避免 `lmmcp.log` 等运行日志进入提交。
+- `scripts/lmmcp`: 纳入可复用服务脚本，默认 root 为 `$HOME/project/local-memory-mcp`，默认 endpoint 为 `http://127.0.0.1:8318/mcp`，默认 DB 为 `$LMMCP_DIR/memory.sqlite3`，支持 `start/stop/restart/status/logs`。
+- `tests/test_docs_consistency.py`: 新增 README 与 `@mcp.tool()` 注册函数的一致性门禁，防止文档列出不存在工具或遗漏新增工具。
+
+### 修复
+- 修正 README 中过时的 “16 个工具”、sqlite-vec、Mem0/OpenMemory 当前能力描述，避免未来 agent 被旧文档误导。
+- 将下一阶段计划从 Agent Mailbox 优先调整为 P0 稳定化优先：文档门禁、context injection guard、隐私脱敏、审计日志、degraded/fallback contract。
+
+### 验证
+- TDD RED: `pytest -q tests/test_docs_consistency.py -vv` 首次失败，准确报告 README 缺失 `memory_ingest/memory_link_add/memory_link_query/memory_update/memory_vector_search/memory_vector_status/memory_warnings`，并误列旧 semantic/Mem0 工具。
+- TDD GREEN: `pytest -q tests/test_docs_consistency.py -vv` → 2/2 pass。
+- 全量测试: `.venv/bin/python -m pytest -q` → 128/128 pass。
+- MCP 连接: `hermes mcp test local_memory` → Connected，Tools discovered: 17。
+- 服务脚本: `scripts/lmmcp status` → running，endpoint `http://127.0.0.1:8318/mcp`，DB `/home/advancer/project/local-memory-mcp/memory.sqlite3`。
+
+### 已知问题
+- 本轮未实现 context injection guard、隐私脱敏、审计日志或统一 degraded/fallback response contract；这些进入后续 P0 稳定化迭代。
+
+### 回滚方式
+- 回滚本提交即可恢复 README/.gitignore/scripts/tests 改动；本轮未修改数据库 schema 和生产记忆数据。
+
+### 下一步
+1. P0-2: 实现 `injection_guard.py` 与 `tests/test_context_injection_guard.py`，确保长期记忆作为 data 而非 instruction 注入 context。
+2. P0-3: 实现 `privacy.py`，在写入与外部 extraction 前做 secret redaction/minimization。
+3. P0-4: 新增 `audit_events` 表，追踪自动写入、状态变更与 curator apply。
+
+---
+
 ## [迭代 10] 2026-05-20 — effectiveness 闭环 + memory_warnings/memory_update MCP tools
 
 **提交**: `80bd301`
