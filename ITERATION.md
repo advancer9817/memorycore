@@ -1,5 +1,33 @@
 # local-memory-mcp 迭代日志
 
+## [迭代 8.1] 2026-05-20 — Overmind 借鉴：effectiveness 追踪、主动预警、curator 衰减
+
+**提交**: `a876c69`
+
+### 变更
+- `local_memory_mcp/storage.py`: `init_db()` 新增四列 — `injected_count INTEGER DEFAULT 0`、`ineffective_count INTEGER DEFAULT 0`、`effectiveness_score REAL DEFAULT 0.5`、`last_injected_at TEXT`；新增 `idx_memories_effectiveness` 索引
+- `local_memory_mcp/storage.py`: `add_feedback()` 新增 effectiveness 追踪 — score > 0 递增 `injected_count` 并更新 `effectiveness_score`；score < 0 递增 `ineffective_count`
+- `local_memory_mcp/storage.py`: `search_memory_records()` ORDER BY 加入 `effectiveness_score DESC`（排在 importance 之后）
+- `local_memory_mcp/storage.py`: 新增 `get_active_warnings()` — 查询 `memory_links` 中 `contradicts`/`supersedes` 关系，结合 `feedback_score` 判断 severity，返回预警列表
+- `local_memory_mcp/storage.py`: `build_context_pack()` 返回值新增 `warnings` 字段；修复无条件 fallback（问候语不触发全量查询）
+- `local_memory_mcp/storage.py`: `curator_report()` 新增 `decay_candidates`（90天未访问且 effectiveness_score < 0.4）和 `evolution_candidates`（内容过短或 feedback_score < -1.0）
+
+### 设计依据
+基于对 overmind 源码的完整审计，借鉴其反馈闭环和主动预警机制，同时规避其凭证泄露（C-1）、FTS 手动同步（M-7）、key-prefix 误删（H-5）等缺陷。详见 MCP 记忆 `ed02122e`、`8d21286d`、`94aa0824`。
+
+### 验证
+- 测试: **106/106 pass**（1 个预存在失败 `test_deployment.py::test_default_config_user_id_is_not_a_source_machine_username` 与本次无关）
+- 新字段向后兼容：现有数据库通过 `ALTER TABLE IF NOT EXISTS` 模式自动迁移
+
+### 已知问题
+- `get_active_warnings()` 尚未暴露为独立 MCP tool，目前只通过 `build_context_pack` 的 `warnings` 字段返回
+
+### 下一步
+1. 在 `server.py` 新增 `memory_warnings` MCP tool 直接暴露 `get_active_warnings()`
+2. Phase 9: Agent Mailbox MVP
+
+---
+
 ## [迭代 9] 2026-05-19 — Agent Memory Hook Contract 与 Overmind 升级计划文档
 
 **提交**: `Phase 9`（`git log --oneline --grep="Phase 9"` 可查具体 hash）
