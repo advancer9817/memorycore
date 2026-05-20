@@ -1,5 +1,33 @@
 # local-memory-mcp 迭代日志
 
+## [迭代 13] 2026-05-21 — Claude 风格本地记忆 Dashboard
+
+**提交**: 本提交（见 `git log -1 --oneline`）
+
+### 变更
+- `local_memory_mcp/storage.py`: 将 `export_html()` 生成的本地 Dashboard 从暗色 Operations Console 改为 Claude-inspired 暖纸张视觉风格，更新标题、侧栏品牌、hero 文案、指标卡片、过滤器、记录卡片、时间线、健康分布和 curator 视图样式。
+- `local_memory_mcp/storage.py`: 保持单文件静态导出和 Alpine.js 本地交互模式；仍通过 `x-text` 渲染记录内容，并保留 JSON `<` 转义，避免把记忆内容作为 HTML 执行。
+- `tests/test_html.py`: 同步 HTML 导出断言，验证新 UI 文案，同时保留 `<script>` 逃逸回归检查。
+
+### 验证
+- 局部测试: `.venv/bin/python -m pytest -q tests/test_html.py tests/test_docs_consistency.py` → 3/3 pass。
+- 全量测试: `.venv/bin/python -m pytest -q` → 133/133 pass。
+- 静态扫描: added-line secret/security pattern scan → none。
+- 独立审查: `delegate_task` 只读审查 → PASS；未发现新增 XSS、秘密泄露、外部数据发送或明显逻辑错误；确认外部 Alpine CDN 为既有行为。
+
+### 已知问题
+- Dashboard 仍依赖 jsdelivr Alpine CDN；离线或零外部请求环境可后续考虑 vendoring Alpine，但本轮未改变该既有外部依赖。
+- 本轮只调整静态 HTML Dashboard 视觉与测试，不修改数据库 schema、MCP tool contract 或生产记忆数据。
+
+### 回滚方式
+- 回滚本提交即可恢复旧 Dashboard 文案/样式与测试断言；无需数据库迁移。
+
+### 下一步
+1. 如需完全离线部署，评估将 Alpine.js vendor 到仓库或提供无 CDN fallback。
+2. 继续 P0 稳定化：隐私脱敏、审计日志、统一 degraded/fallback response contract。
+
+---
+
 ## [迭代 12] 2026-05-21 — P0 Context Pack 注入防护
 
 **提交**: 本提交（见 `git log -1 --oneline`）
