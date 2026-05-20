@@ -28,12 +28,15 @@ from local_memory_mcp.storage import (
     consolidate,
     curator_report,
     export_html,
+    get_active_warnings,
+    get_memory_stats,
     get_record,
     list_recent,
     managed_conn,
     query_links,
     search_memory_records,
     timeline,
+    update_memory_content,
     update_status,
 )
 
@@ -52,6 +55,8 @@ __all__ = [
     "consolidate",
     "curator_report",
     "export_html",
+    "get_active_warnings",
+    "get_memory_stats",
     "get_record",
     "list_recent",
     "load_config",
@@ -63,5 +68,6 @@ __all__ = [
     "query_links",
     "search_memory_records",
     "timeline",
+    "update_memory_content",
     "update_status",
 ]

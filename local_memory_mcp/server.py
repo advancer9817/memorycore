@@ -27,6 +27,7 @@ from local_memory_mcp.storage import (
     consolidate,
     curator_report,
     export_html,
+    get_active_warnings,
     get_memory_stats,
     get_record,
     list_recent,
@@ -282,6 +283,56 @@ def memory_link_query(
     """
     try:
         return query_links(memory_id, direction, relation_type, limit)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+def memory_warnings(
+    memory_ids: list[str],
+    min_weight: float = 0.4,
+    max_warnings: int = 5,
+) -> list[dict[str, Any]]:
+    """Return active contradicts/supersedes warnings for a set of memory IDs.
+
+    Args:
+        memory_ids: List of memory IDs to check for conflicts
+        min_weight: Minimum link weight to include (default 0.4)
+        max_warnings: Maximum warnings to return (default 5)
+
+    Returns:
+        List of {"source_id", "target_id", "relation_type", "severity", "weight", "reason"} dicts,
+        sorted by severity (high first) then weight descending.
+    """
+    return get_active_warnings(memory_ids, min_weight=min_weight, max_warnings=max_warnings)
+
+
+@mcp.tool()
+def memory_update(
+    id: str,
+    content: str | None = None,
+    title: str | None = None,
+    status: str | None = None,
+    confidence: float | None = None,
+    importance: float | None = None,
+) -> dict[str, Any]:
+    """Update an existing memory record's fields.
+
+    Only provided (non-None) fields are updated. Returns the updated record.
+
+    Args:
+        id: Memory record ID
+        content: New content text (optional)
+        title: New title (optional)
+        status: New status — active/stale/archived/contradicted/promoted/candidate (optional)
+        confidence: New confidence 0.0-1.0 (optional)
+        importance: New importance 0.0-1.0 (optional)
+
+    Returns:
+        The updated memory record dict.
+    """
+    try:
+        return update_memory_content(id, content, title, status, confidence, importance)
     except ValueError as exc:
         return {"error": str(exc)}
 

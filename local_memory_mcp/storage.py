@@ -447,6 +447,19 @@ def build_context_pack(
             break
         lines.extend(section + [""])
     text = "\n".join(lines).strip()
+    # Record injection: bump injected_count and last_injected_at for used memories.
+    if used_ids:
+        ts = now()
+        with managed_conn() as conn:
+            for mid in used_ids:
+                conn.execute(
+                    """UPDATE memories
+                       SET injected_count = injected_count + 1,
+                           last_injected_at = ?,
+                           last_accessed_at = ?
+                       WHERE id = ?""",
+                    (ts, ts, mid),
+                )
     active_count = sum(1 for r in records if r["status"] == "active")
     warnings = get_active_warnings(used_ids) if used_ids else []
     return {
@@ -493,7 +506,31 @@ def add_feedback(
             conn.execute("SELECT AVG(score) FROM feedback_events WHERE memory_id=?", (memory_id,)).fetchone()[0]
             or 0
         )
-        conn.execute("UPDATE memories SET feedback_score=?, updated_at=? WHERE id=?", (float(avg), ts, memory_id))
+        # Update feedback_score and effectiveness tracking.
+        # Positive score → memory was useful (injected_count++, effectiveness up).
+        # Negative score → memory was not useful (ineffective_count++, effectiveness down).
+        cur = conn.execute(
+            "SELECT injected_count, ineffective_count, effectiveness_score FROM memories WHERE id=?",
+            (memory_id,),
+        ).fetchone()
+        inj = int(cur[0] or 0)
+        ineff = int(cur[1] or 0)
+        eff = float(cur[2] or 0.5)
+        if score_value > 0:
+            inj += 1
+            # Weighted moving average: pull effectiveness toward 1.0
+            eff = min(1.0, eff + 0.05 * score_value)
+        elif score_value < 0:
+            ineff += 1
+            # Pull effectiveness toward 0.0
+            eff = max(0.0, eff + 0.05 * score_value)
+        conn.execute(
+            """UPDATE memories
+               SET feedback_score=?, injected_count=?, ineffective_count=?,
+                   effectiveness_score=?, updated_at=?
+               WHERE id=?""",
+            (float(avg), inj, ineff, round(eff, 4), ts, memory_id),
+        )
         row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
     return {"feedback_id": event_id, "memory": row_to_dict(row)}
 
