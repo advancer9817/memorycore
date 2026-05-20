@@ -1,5 +1,33 @@
 # local-memory-mcp 迭代日志
 
+## [迭代 10] 2026-05-20 — effectiveness 闭环 + memory_warnings/memory_update MCP tools
+
+**提交**: `80bd301`
+
+### 变更
+- `local_memory_mcp/storage.py` `add_feedback()`: 补全 effectiveness 追踪 — 正向反馈 `injected_count++`、`effectiveness_score += 0.05*score`；负向反馈 `ineffective_count++`、`effectiveness_score -= 0.05*|score|`；clamp [0.0, 1.0]
+- `local_memory_mcp/storage.py` `build_context_pack()`: 注入记忆时自动更新 `injected_count`、`last_injected_at`、`last_accessed_at`，使 decay 检测有真实注入数据支撑
+- `local_memory_mcp/server.py`: 新增 `memory_warnings` MCP tool — 直接暴露 `get_active_warnings()`，参数 `memory_ids/min_weight/max_warnings`
+- `local_memory_mcp/server.py`: 新增 `memory_update` MCP tool — 暴露 `update_memory_content()`，支持 `content/title/status/confidence/importance` 按需更新
+- `local_memory_mcp/__init__.py`: 补充导出 `get_active_warnings`、`get_memory_stats`、`update_memory_content`
+- `tests/test_phase10.py`: 新增 15 个测试覆盖全部新功能
+
+### 验证
+- 测试: **125/126 pass**（1 个预存在失败 `test_deployment.py::test_default_config_user_id_is_not_a_source_machine_username` 与本次无关）
+- MCP 工具数量: 15 → **17**（新增 `memory_warnings`、`memory_update`）
+- effectiveness 追踪: 正/负/零分值均通过单元测试验证，clamp 边界测试通过
+- 注入记录: `build_context_pack` 调用后 `injected_count` 递增、`last_injected_at` 非空
+
+### 已知问题
+- `test_deployment.py` 预存在失败（`openmemory.user_id` key 已废弃），与本次无关
+
+### 下一步
+1. Phase 11: `memory_ingest` 改进 — 提取后自动打 `effectiveness_score` 初始值（基于 Qdrant 相似度）
+2. Phase 12: Agent Mailbox MVP — `agent_messages` / `agent_presence` 表 + 4 个 MCP 工具
+3. lmmcp hooks 生效验证 — 确认 `~/.claude/settings.json` SessionStart/Stop 钩子已注册
+
+---
+
 ## [迭代 8.1] 2026-05-20 — Overmind 借鉴：effectiveness 追踪、主动预警、curator 衰减
 
 **提交**: `a876c69`
