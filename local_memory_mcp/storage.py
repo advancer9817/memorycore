@@ -116,7 +116,11 @@ def init_db(conn: sqlite3.Connection) -> None:
           decay_policy TEXT NOT NULL DEFAULT 'review',
           feedback_score REAL NOT NULL DEFAULT 0,
           related_ids_json TEXT NOT NULL DEFAULT '[]',
-          metadata_json TEXT NOT NULL DEFAULT '{}'
+          metadata_json TEXT NOT NULL DEFAULT '{}',
+          injected_count INTEGER NOT NULL DEFAULT 0,
+          ineffective_count INTEGER NOT NULL DEFAULT 0,
+          effectiveness_score REAL NOT NULL DEFAULT 0.5,
+          last_injected_at TEXT
         );
 
         CREATE TABLE IF NOT EXISTS feedback_events (
@@ -370,7 +374,7 @@ def search_memory_records(
     sql = base
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY m.importance DESC, m.feedback_score DESC, m.updated_at DESC LIMIT ?"
+    sql += " ORDER BY m.importance DESC, m.effectiveness_score DESC, m.feedback_score DESC, m.updated_at DESC LIMIT ?"
     params.append(max(1, min(int(limit), 100)))
     with managed_conn() as conn:
         rows = [row_to_dict(r) for r in conn.execute(sql, params).fetchall()]
@@ -382,6 +386,13 @@ def search_memory_records(
     return rows
 
 
+_GREETINGS = {"hi", "hello", "hey", "你好", "嗯", "好", "继续", "ok", "okay", "yes", "no"}
+
+
+def _is_greeting(task: str) -> bool:
+    return task.strip().lower() in _GREETINGS
+
+
 def build_context_pack(
     task: str,
     agent: str = "agent",
@@ -391,16 +402,16 @@ def build_context_pack(
 ) -> dict[str, Any]:
     max_chars = max(800, int(token_budget) * 4)
     records = search_memory_records(task, scope=scope, project_path=project_path, status="active", limit=40)
-    if not records:
+    if not records and len(task.strip()) > 10 and not _is_greeting(task):
         records = search_memory_records("", scope=scope, project_path=project_path, status="active", limit=20)
     groups_order = [
+        "skill_candidate",
         "user_profile",
         "environment_fact",
         "agent_architecture",
         "project_memory",
         "decision",
         "timeline_event",
-        "skill_candidate",
         "episodic_memory",
         "feedback",
     ]
@@ -419,6 +430,11 @@ def build_context_pack(
         items = grouped.get(group) or []
         if not items:
             continue
+        # episodic_memory: cap at 2, only positive feedback
+        if group == "episodic_memory":
+            items = [i for i in items if float(i.get("feedback_score", 0)) >= 0][:2]
+            if not items:
+                continue
         section = [f"## {group}"]
         for item in items[:6]:
             snippet = item["content"].replace("\n", " ")
@@ -432,10 +448,12 @@ def build_context_pack(
         lines.extend(section + [""])
     text = "\n".join(lines).strip()
     active_count = sum(1 for r in records if r["status"] == "active")
+    warnings = get_active_warnings(used_ids) if used_ids else []
     return {
         "context": text,
         "records": records,
         "used_ids": used_ids,
+        "warnings": warnings,
         "budget_chars": max_chars,
         "quality": {
             "total_candidates": len(records),
@@ -498,6 +516,64 @@ def get_record(memory_id: str) -> dict[str, Any] | None:
 def timeline(query: str = "", scope: str = "", limit: int = 20) -> list[dict[str, Any]]:
     rows = search_memory_records(query, types=["timeline_event", "decision", "feedback"], scope=scope, status="active", limit=limit)
     return sorted(rows, key=lambda r: r.get("created_at", ""))
+
+
+def get_active_warnings(
+    memory_ids: list[str],
+    min_weight: float = 0.4,
+    max_warnings: int = 5,
+) -> list[dict[str, Any]]:
+    """Query memory_links for contradicts/supersedes relations among given IDs.
+
+    Returns severity-ranked warnings to surface in build_context_pack.
+    """
+    if not memory_ids:
+        return []
+    placeholders = ",".join("?" for _ in memory_ids)
+    sql = f"""
+        SELECT
+            ml.source_id, ml.target_id, ml.relation_type, ml.weight, ml.note,
+            ms.title AS source_title, ms.feedback_score AS source_fb,
+            mt.title AS target_title, mt.feedback_score AS target_fb
+        FROM memory_links ml
+        JOIN memories ms ON ms.id = ml.source_id
+        JOIN memories mt ON mt.id = ml.target_id
+        WHERE (ml.source_id IN ({placeholders}) OR ml.target_id IN ({placeholders}))
+          AND ml.relation_type IN ('contradicts', 'supersedes')
+          AND ml.weight >= ?
+          AND ms.status = 'active'
+          AND mt.status = 'active'
+        ORDER BY ml.weight DESC
+        LIMIT ?
+    """
+    params = memory_ids + memory_ids + [min_weight, max_warnings * 2]
+    rows = _managed_query(sql, params)
+
+    warnings: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        sig = f"{row['source_id']}→{row['target_id']}→{row['relation_type']}"
+        if sig in seen:
+            continue
+        seen.add(sig)
+        severity = "high" if float(row.get("weight") or 0) >= 0.7 else "medium"
+        if float(row.get("target_fb") or 0) < -0.5:
+            severity = "high"
+        note_part = f" — {row['note']}" if row.get("note") else ""
+        warnings.append({
+            "source_id": row["source_id"],
+            "target_id": row["target_id"],
+            "relation_type": row["relation_type"],
+            "severity": severity,
+            "weight": row["weight"],
+            "reason": (
+                f"'{row['source_title']}' {row['relation_type']} "
+                f"'{row['target_title']}'{note_part}"
+            ),
+        })
+
+    warnings.sort(key=lambda w: (0 if w["severity"] == "high" else 1, -float(w["weight"])))
+    return warnings[:max_warnings]
 
 
 # ---------------------------------------------------------------------------
@@ -622,6 +698,26 @@ def curator_report(
     low_feedback_candidates = _managed_query(
         "SELECT * FROM memories WHERE status IN ('active','candidate') AND feedback_score < -0.5 LIMIT ?",
         (cap,),
+    )
+
+    # Decay candidates: active, 90+ days unaccessed, low effectiveness
+    decay_candidates = _managed_query(
+        """SELECT * FROM memories
+           WHERE status = 'active'
+             AND (last_accessed_at IS NULL OR last_accessed_at < datetime('now', '-90 days'))
+             AND effectiveness_score < 0.4
+             AND importance < 0.6
+           ORDER BY effectiveness_score ASC, last_accessed_at ASC LIMIT ?""",
+        (cap,),
+    )
+
+    # Evolution candidates: content too short or very low feedback — suggest AI rewrite
+    evolution_candidates = _managed_query(
+        """SELECT * FROM memories
+           WHERE status IN ('active','candidate')
+             AND (LENGTH(content) < 50 OR feedback_score < -1.0)
+           ORDER BY feedback_score ASC LIMIT ?""",
+        (min(cap, 50),),
     )
 
     # Stale: dedicated query so oldest records are not truncated by list_recent ordering
