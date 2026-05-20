@@ -44,7 +44,7 @@ MEM_ROOT="${LOCAL_MEMORY_ROOT:-/home/advancer/project/local-memory-mcp}"
 
 1. **SQLite + FTS5 结构化记忆层**：支持 type/scope/tags/status/importance/confidence/source_agent/effectiveness 等字段，FTS5 全文检索。
 2. **HTTP MCP server**：17 个工具，Hermes 可通过 `http://127.0.0.1:8318/mcp` 作为普通 HTTP MCP 客户端连接。
-3. **Context Pack**：`memory_context` 按任务生成 compact 上下文包，支持 token budget 控制，按记忆类型分组，并集成 active contradicts/supersedes warning。
+3. **Context Pack**：`memory_context` 按任务生成 compact 上下文包，支持 token budget 控制，按记忆类型分组，集成 active contradicts/supersedes warning，并将检索记忆标记为 untrusted data；命中注入特征的记忆会从普通 context body 过滤到 warnings。
 4. **Curator**：重复标题、低反馈、stale、archive、矛盾候选、skill_candidate 推广候选检测；默认 dry-run。
 5. **Feedback / effectiveness**：`memory_feedback` 记录反馈事件并更新 feedback_score、injected_count、ineffective_count、effectiveness_score。
 6. **Memory links / warnings**：支持 `related_to`、`supersedes`、`contradicts`、`supports`、`part_of`；`memory_warnings` 可根据 active links 产生冲突/替代提示。
@@ -211,7 +211,7 @@ scripts/init_local_memory.sh
 
 下一阶段计划按优先级推进：
 
-1. **P0 稳定化**：文档-工具-测试一致性、context injection guard、隐私脱敏、审计日志、degraded/fallback response contract。
+1. **P0 稳定化**：文档-工具-测试一致性、context injection guard（已实现基础版）、隐私脱敏、审计日志、degraded/fallback response contract。
 2. **Context Pack v2**：在保留 legacy `context` 字段的同时增加 sections / records / warnings / trace。
 3. **Graph / Warning 增强**：扩展 relation types，支持 blocked_by / causes / failure-pattern warnings。
 4. **Agent Mailbox MVP**：在 P0/P1 防线完成后，再增加 agent_messages / agent_presence 与基础协作通讯工具。

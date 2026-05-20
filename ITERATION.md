@@ -1,5 +1,41 @@
 # local-memory-mcp 迭代日志
 
+## [迭代 12] 2026-05-21 — P0 Context Pack 注入防护
+
+**提交**: 本提交（见 `git log -1 --oneline`）
+
+### 变更
+- `local_memory_mcp/injection_guard.py`: 新增 prompt-injection guard，扫描记忆 title/content 中的中英文高风险指令覆盖、system prompt/developer message、密钥泄露/执行命令等模式。
+- `local_memory_mcp/storage.py`: `build_context_pack()` 增加 safety boundary notice，明确检索记忆是 untrusted data, not instructions；高风险记忆不进入普通 context body，仅以 `warnings` 返回脱敏摘要。
+- `local_memory_mcp/storage.py`: `build_context_pack()` 返回新增 `filtered_ids`，`quality.filtered_count` 记录被过滤记忆数；只有真正注入 context 的记忆才递增 `injected_count`。
+- `local_memory_mcp/__init__.py`: 导出 injection guard 相关 public helpers。
+- `tests/test_context_injection_guard.py`: 新增 5 个 TDD 回归测试，覆盖 context boundary notice、英文 prompt injection 过滤、中文指令注入过滤、常见误报规避和 warning title 脱敏。
+
+### 修复
+- 防止长期记忆内容以“忽略之前指令 / reveal system prompt / 泄露密钥 / 输出 developer message”等形式被直接拼入 agent context。
+- 保留可审计信号：过滤结果进入 `warnings`，但不重复输出可疑原文，降低二次注入风险。
+
+### 验证
+- TDD RED: `pytest -q tests/test_context_injection_guard.py -vv` 首次 3/3 fail，证明旧 context pack 未标记 untrusted data、未过滤恶意记忆、无 `filtered_ids`。
+- TDD GREEN: `pytest -q tests/test_context_injection_guard.py -vv` → 5/5 pass。
+- 全量测试: `.venv/bin/python -m pytest -q` → 133/133 pass。
+- MCP 连接: `hermes mcp test local_memory` → Connected，Tools discovered: 17。
+- 服务脚本: `scripts/lmmcp status` → running，endpoint `http://127.0.0.1:8318/mcp`，DB `/home/advancer/project/local-memory-mcp/memory.sqlite3`。
+
+### 已知问题
+- 本轮是 pattern-based guard，不替代后续 P0-3 写入前隐私脱敏，也不替代更完整的 policy engine。
+- `memory_add` 仍允许写入可疑内容；当前只在 context pack 注入阶段阻断。下一轮应在写入/ingest 入口做 redaction/minimization。
+
+### 回滚方式
+- 回滚本提交即可移除 injection guard 与对应测试；本轮未修改数据库 schema 和生产记忆数据。
+
+### 下一步
+1. P0-3: 实现 `privacy.py`，在 `memory_add` / `memory_ingest` 写入前做 secret redaction 与内容最小化。
+2. P0-4: 新增 `audit_events` 表，追踪自动写入、过滤、状态变更与 curator apply。
+3. P0-5: 统一 degraded/fallback response contract。
+
+---
+
 ## [迭代 11] 2026-05-21 — P0 文档现实对齐与工具清单门禁
 
 **提交**: `cd7538f`

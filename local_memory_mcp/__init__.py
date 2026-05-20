@@ -8,6 +8,12 @@ from __future__ import annotations
 # Keep pyright quiet about re-exports
 from typing import Any
 
+from local_memory_mcp.injection_guard import (
+    BOUNDARY_NOTICE,
+    check_memory_for_injection,
+    warning_for_filtered_memory,
+)
+
 # ── Models (constants + helpers) ──────────────────────────────────────────────
 from local_memory_mcp.models import (
     DEFAULT_ROOT,
@@ -44,6 +50,7 @@ from local_memory_mcp.storage import (
 from local_memory_mcp.server import main, memory_link_add, memory_link_query
 
 __all__ = [
+    "BOUNDARY_NOTICE",
     "DEFAULT_ROOT",
     "_INITIALIZED_DB_PATHS",
     "SQLITE_VEC_AVAILABLE",
@@ -51,6 +58,7 @@ __all__ = [
     "add_link",
     "add_memory_record",
     "build_context_pack",
+    "check_memory_for_injection",
     "config_path",
     "consolidate",
     "curator_report",
@@ -70,4 +78,5 @@ __all__ = [
     "timeline",
     "update_memory_content",
     "update_status",
+    "warning_for_filtered_memory",
 ]

@@ -19,6 +19,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from local_memory_mcp.injection_guard import (
+    BOUNDARY_NOTICE,
+    check_memory_for_injection,
+    warning_for_filtered_memory,
+)
 from local_memory_mcp.models import (
     DEFAULT_CONFIG,
     DEFAULT_DB,
@@ -423,9 +428,12 @@ def build_context_pack(
         f"task: {task}",
         f"scope: {scope}",
         f"project_path: {project_path or '(none)'}",
+        f"safety: {BOUNDARY_NOTICE}",
         "",
     ]
     used_ids: list[str] = []
+    filtered_ids: list[str] = []
+    injection_warnings: list[dict[str, Any]] = []
     for group in groups_order:
         items = grouped.get(group) or []
         if not items:
@@ -436,16 +444,25 @@ def build_context_pack(
             if not items:
                 continue
         section = [f"## {group}"]
+        section_used_ids: list[str] = []
         for item in items[:6]:
+            check = check_memory_for_injection(item)
+            if check.is_high_risk:
+                filtered_ids.append(item["id"])
+                injection_warnings.append(warning_for_filtered_memory(item, check))
+                continue
             snippet = item["content"].replace("\n", " ")
             if len(snippet) > 420:
                 snippet = snippet[:417] + "..."
             section.append(f"- [{item['id']}] {item['title']}: {snippet}")
-            used_ids.append(item["id"])
+            section_used_ids.append(item["id"])
+        if len(section) == 1:
+            continue
         candidate = "\n".join(lines + section) + "\n"
         if len(candidate) > max_chars:
             break
         lines.extend(section + [""])
+        used_ids.extend(section_used_ids)
     text = "\n".join(lines).strip()
     # Record injection: bump injected_count and last_injected_at for used memories.
     if used_ids:
@@ -461,16 +478,18 @@ def build_context_pack(
                     (ts, ts, mid),
                 )
     active_count = sum(1 for r in records if r["status"] == "active")
-    warnings = get_active_warnings(used_ids) if used_ids else []
+    warnings = (get_active_warnings(used_ids) if used_ids else []) + injection_warnings
     return {
         "context": text,
         "records": records,
         "used_ids": used_ids,
+        "filtered_ids": filtered_ids,
         "warnings": warnings,
         "budget_chars": max_chars,
         "quality": {
             "total_candidates": len(records),
             "used_count": len(used_ids),
+            "filtered_count": len(filtered_ids),
             "active_ratio": round(active_count / max(len(records), 1), 3),
             "avg_importance": round(sum(r["importance"] for r in records) / max(len(records), 1), 3),
             "stale_in_results": sum(1 for r in records if r["status"] == "stale"),
