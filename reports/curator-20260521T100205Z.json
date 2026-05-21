@@ -1,0 +1,546 @@
+{
+  "dry_run": false,
+  "generated_at": "2026-05-21T10:02:06+00:00",
+  "scanned": 165,
+  "duplicate_title_groups": [
+    [
+      {
+        "id": "d5409138-f06a-4a76-86be-f199f1c4aed4",
+        "type": "episodic_memory",
+        "scope": "global",
+        "title": "用户认为请求详情列表高度太高，希望调小",
+        "content": "用户认为请求详情列表高度太高，希望调小",
+        "source": "extraction",
+        "source_agent": "hermes-cli",
+        "project_path": "",
+        "created_at": "2026-05-21T09:27:48+00:00",
+        "updated_at": "2026-05-21T09:27:48+00:00",
+        "last_accessed_at": null,
+        "confidence": 0.65,
+        "importance": 0.5,
+        "status": "candidate",
+        "decay_policy": "review",
+        "feedback_score": 0.0,
+        "injected_count": 0,
+        "ineffective_count": 0,
+        "effectiveness_score": 0.5,
+        "last_injected_at": null,
+        "tags": [
+          "extracted",
+          "agent:hermes-cli"
+        ],
+        "related_ids": [],
+        "metadata": {
+          "user_id": "advancer",
+          "similarity_to_nearest": 0.0
+        }
+      },
+      {
+        "id": "2948990d-e2fb-43b5-b641-fe7d80dea2c2",
+        "type": "episodic_memory",
+        "scope": "global",
+        "title": "用户认为请求详情列表高度太高，希望调小",
+        "content": "用户认为请求详情列表高度太高，希望调小",
+        "source": "extraction",
+        "source_agent": "hermes-cli",
+        "project_path": "",
+        "created_at": "2026-05-21T09:24:19+00:00",
+        "updated_at": "2026-05-21T09:24:19+00:00",
+        "last_accessed_at": null,
+        "confidence": 0.65,
+        "importance": 0.5,
+        "status": "candidate",
+        "decay_policy": "review",
+        "feedback_score": 0.0,
+        "injected_count": 0,
+        "ineffective_count": 0,
+        "effectiveness_score": 0.5,
+        "last_injected_at": null,
+        "tags": [
+          "extracted",
+          "agent:hermes-cli"
+        ],
+        "related_ids": [],
+        "metadata": {
+          "user_id": "advancer",
+          "similarity_to_nearest": 0.0
+        }
+      }
+    ],
+    [
+      {
+        "id": "8bda4035-5bc7-4506-bd8e-e161a53d5847",
+        "type": "episodic_memory",
+        "scope": "global",
+        "title": "用户想要拉取project目录下的项目更新",
+        "content": "用户想要拉取project目录下的项目更新",
+        "source": "extraction",
+        "source_agent": "hermes-cli",
+        "project_path": "",
+        "created_at": "2026-05-21T02:18:27+00:00",
+        "updated_at": "2026-05-21T02:18:27+00:00",
+        "last_accessed_at": null,
+        "confidence": 0.65,
+        "importance": 0.5,
+        "status": "candidate",
+        "decay_policy": "review",
+        "feedback_score": 0.0,
+        "injected_count": 0,
+        "ineffective_count": 0,
+        "effectiveness_score": 0.5,
+        "last_injected_at": null,
+        "tags": [
+          "extracted",
+          "agent:hermes-cli"
+        ],
+        "related_ids": [],
+        "metadata": {
+          "user_id": "advancer",
+          "similarity_to_nearest": 0.0
+        }
+      },
+      {
+        "id": "4c8d47d9-7525-4158-8b12-825e835aa1d4",
+        "type": "episodic_memory",
+        "scope": "global",
+        "title": "用户想要拉取project目录下的项目更新。",
+        "content": "用户想要拉取project目录下的项目更新。",
+        "source": "extraction",
+        "source_agent": "hermes-cli",
+        "project_path": "",
+        "created_at": "2026-05-21T02:03:38+00:00",
+        "updated_at": "2026-05-21T02:03:38+00:00",
+        "last_accessed_at": null,
+        "confidence": 0.65,
+        "importance": 0.5,
+        "status": "candidate",
+        "decay_policy": "review",
+        "feedback_score": 0.0,
+        "injected_count": 0,
+        "ineffective_count": 0,
+        "effectiveness_score": 0.5,
+        "last_injected_at": null,
+        "tags": [
+          "extracted",
+          "agent:hermes-cli"
+        ],
+        "related_ids": [],
+        "metadata": {
+          "user_id": "advancer",
+          "similarity_to_nearest": 0.0
+        }
+      }
+    ],
+    [
+      {
+        "id": "b492e9c9-3811-458d-a51c-e3c891432c53",
+        "type": "project_memory",
+        "scope": "global",
+        "title": "local-memory-mcp 迭代书 — Phase 历史全貌",
+        "content": "**Phase 0（2026-05-12）初始实现**：单文件 SQLite MCP，基础工具，路径硬编码，无向量检索，无自动提取。\n\n**Phase 1~3（2026-05-12~13）Mem0 探索**：集成 mem0ai + ollama，切换 DeepSeek v4-flash。结论：Mem0 SDK 黑盒，type/scope/importance/feedback 治理维度无法透传，依赖重，放弃。\n\n**Phase 4（2026-05-13）去 Mem0 + Qdrant**：移除 mem0ai/sqlite-vec，引入 qdrant-client。新增 extraction.py（DeepSeek）、vector_store.py（Qdrant+Ollama）、dedup.py（三档阈值去重）。依赖精简到 4 个包。\n\n**Phase 5（2026-05-13）Memory Links**：新增 memory_links 表，5 种关系类型（related_to/supersedes/contradicts/supports/part_of）。新增 MCP 工具：memory_link_add, memory_link_query, memory_timeline, memory_feedback, memory_vector_search。\n\n**Phase 6（2026-05-15）端到端验证**：修复 5 个 bug：extraction.py os.environ.setdefault 被 Hermes 拦截→直接赋值；dedup.py memory_type 参数名错误（2处）；config.yaml DeepSeek base_url 缺 /v1；vector_store.py 新增 Docker Qdrant server 模式。遗留问题：MCP 通道 memory_ingest 写入失败（__main__ 循环导入）。\n\n**Phase 7（2026-05-18）模块重构**：1284 行单文件→5 模块包结构（models/storage/server/__init__/__main__）。dedup.py 直接导入 storage.py，彻底断绝循环链。传输层改 HTTP/SSE 端口 8318。105/105 测试通过，MCP 全链路验证通过。\n\n**Phase 8（2026-05-19）Curator 自动化 + memory_stats**：新增 get_memory_stats()、memory_stats MCP tool、systemd curator timer、build_context_pack quality 字段。111 tests。\n\n**Phase 8.1（2026-05-20）Overmind 借鉴特性落地**：新增 injected_count/ineffective_count/effectiveness_score/last_injected_at 字段、get_active_warnings()、build_context_pack warnings 字段、curator_report decay/evolution candidates、修复无条件 fallback。106 tests，提交 a876c69。\n\n**Why:** 每个 Phase 都有明确的单一目标，问题驱动迭代，不做超前设计。\n**How to apply:** 规划新 Phase 时，先明确\"解决什么问题\"，再确定最小交付范围。",
+        "source": "manual",
+        "source_agent": "agent",
+        "project_path": "/home/advancer/project/local-memory-mcp",
+        "created_at": "2026-05-20T05:03:46+00:00",
+        "updated_at": "2026-05-20T05:03:46+00:00",
+        "last_accessed_at": "2026-05-21T09:54:09+00:00",
+        "confidence": 0.97,
+        "importance": 0.9,
+        "status": "active",
+        "decay_policy": "review",
+        "feedback_score": 0.0,
+        "injected_count": 3,
+        "ineffective_count": 0,
+        "effectiveness_score": 0.5,
+        "last_injected_at": "2026-05-21T03:26:03+00:00",
+        "tags": [
+          "local-memory-mcp",
+          "iteration-history",
+          "phases",
+          "iteration-book"
+        ],
+        "related_ids": [],
+        "metadata": {}
+      },
+      {
+        "id": "d016f458-f518-4177-8fbc-9e2242be3bd5",
+        "type": "project_memory",
+        "scope": "global",
+        "title": "local-memory-mcp 迭代书 — Phase 历史全貌",
+        "content": "**Phase 0（2026-05-12）初始实现**：单文件 SQLite MCP，基础工具，路径硬编码，无向量检索，无自动提取。\n\n**Phase 1~3（2026-05-12~13）Mem0 探索**：集成 mem0ai + ollama，切换 DeepSeek v4-flash。结论：Mem0 SDK 黑盒，type/scope/importance/feedback 治理维度无法透传，依赖重，放弃。\n\n**Phase 4（2026-05-13）去 Mem0 + Qdrant**：移除 mem0ai/sqlite-vec，引入 qdrant-client。新增 extraction.py（DeepSeek）、vector_store.py（Qdrant+Ollama）、dedup.py（三档阈值去重）。依赖精简到 4 个包。\n\n**Phase 5（2026-05-13）Memory Links**：新增 memory_links 表，5 种关系类型（related_to/supersedes/contradicts/supports/part_of）。新增 MCP 工具：memory_link_add, memory_link_query, memory_timeline, memory_feedback, memory_vector_search。\n\n**Phase 6（2026-05-15）端到端验证**：修复 5 个 bug：extraction.py os.environ.setdefault 被 Hermes 拦截→直接赋值；dedup.py memory_type 参数名错误（2处）；config.yaml DeepSeek base_url 缺 /v1；vector_store.py 新增 Docker Qdrant server 模式。遗留问题：MCP 通道 memory_ingest 写入失败（__main__ 循环导入）。\n\n**Phase 7（2026-05-18）模块重构**：1284 行单文件→5 模块包结构（models/storage/server/__init__/__main__）。dedup.py 直接导入 storage.py，彻底断绝循环链。传输层改 HTTP/SSE 端口 8318。105/105 测试通过，MCP 全链路验证通过。\n\n**Why:** 每个 Phase 都有明确的单一目标，问题驱动迭代，不做超前设计。\n**How to apply:** 规划新 Phase 时，先明确\"解决什么问题\"，再确定最小交付范围。",
+        "source": "manual",
+        "source_agent": "claude",
+        "project_path": "/home/advancer/.agent-memory/local-memory-mcp",
+        "created_at": "2026-05-19T06:00:55+00:00",
+        "updated_at": "2026-05-20T05:03:20+00:00",
+        "last_accessed_at": "2026-05-20T05:01:50+00:00",
+        "confidence": 0.97,
+        "importance": 0.9,
+        "status": "contradicted",
+        "decay_policy": "review",
+        "feedback_score": 0.0,
+        "injected_count": 0,
+        "ineffective_count": 0,
+        "effectiveness_score": 0.5,
+        "last_injected_at": null,
+        "tags": [
+          "local-memory-mcp",
+          "iteration-history",
+          "phases",
+          "iteration-book"
+        ],
+        "related_ids": [],
+        "metadata": {}
+      }
+    ],
+    [
+      {
+        "id": "fd1d9638-2b0d-4da1-9794-5590a2fdbcea",
+        "type": "project_memory",
+        "scope": "global",
+        "title": "local-memory-mcp 迭代书 — 当前状态与已知问题",
+        "content": "**当前状态（2026-05-20，Phase 8.1 完成）**：\n\n已完成能力：SQLite 结构化存储（WAL+FTS5）✅ | MCP 15 工具集 ✅ | Memory Links 知识图谱 ✅ | Qdrant 语义检索 ✅ | DeepSeek 自动提取 ✅ | 去重管线 ✅ | Curator 治理报告 ✅ | HTTP/SSE 传输端口 8318 ✅ | 多 Agent 接入（Hermes/Codex/Claude Code）✅ | Dashboard HTML ✅ | 106 测试全绿 ✅ | Context Pack（任务感知+token预算+warnings）✅ | effectiveness_score 反馈追踪 ✅ | get_active_warnings() ✅\n\n**已知问题**：\n1. WSL 网络延迟（中）：DeepSeek API 间歇性超时，WSL→外网链路不稳\n2. Ollama embedding 可用性（低）：Ollama 未运行时降级哈希 fallback，语义质量下降\n3. MCP 记忆质量无量化指标（中）：无 precision/recall 度量，无法判断 context pack 实际效果\n4. Curator 未自动化（中）：需手动触发，积压重复/过期记忆靠人工清理\n5. episodic_memory 候选记录大量重复（中）：历史提取条目重复度高，candidate 状态未处理\n6. 无 Agent 间消息通道（中）：Agent 只能读写共享记忆，无法直接发消息给另一个 Agent\n7. ops_db 未实现（低）：config 中 memory_ops.sqlite3 路径定义了但未实现\n8. extraction.py prompt 未针对中文优化（中）\n\n**技术债务**：\n- __init__.py 重导出所有符号，可能意外暴露内部 API（Phase 10 公开发布前收紧）\n- Qdrant 本地文件/Docker 切换逻辑复杂（Phase 10 重写 VectorStore 初始化）\n- 无 API 访问鉴权（本地私有暂可，对外发布前必须加 token auth）\n\n**Why:** 记录已知问题防止重复踩坑，优先级排序指导 Phase 9 工作重点。\n**How to apply:** Phase 9 优先实现 Mailbox MVP（Agent 间消息通道）。",
+        "source": "manual",
+        "source_agent": "agent",
+        "project_path": "/home/advancer/project/local-memory-mcp",
+        "created_at": "2026-05-20T05:03:46+00:00",
+        "updated_at": "2026-05-20T05:03:46+00:00",
+        "last_accessed_at": "2026-05-21T09:54:09+00:00",
+        "confidence": 0.97,
+        "importance": 0.9,
+        "status": "active",
+        "decay_policy": "review",
+        "feedback_score": 0.0,
+        "injected_count": 5,
+        "ineffective_count": 0,
+        "effectiveness_score": 0.5,
+        "last_injected_at": "2026-05-21T04:46:49+00:00",
+        "tags": [
+          "local-memory-mcp",
+          "known-issues",
+          "current-status",
+          "iteration-book"
+        ],
+        "related_ids": [],
+        "metadata": {}
+      },
+      {
+        "id": "085ed15d-32da-462a-9822-35becacf506a",
+        "type": "project_memory",
+        "scope": "global",
+        "title": "local-memory-mcp 迭代书 — 当前状态与已知问题",
+        "content": "**当前状态（2026-05-19，Phase 7 完成）**：\n\n已完成能力：SQLite 结构化存储（WAL+FTS5）✅ | MCP 15 工具集 ✅ | Memory Links 知识图谱 ✅ | Qdrant 语义检索 ✅ | DeepSeek 自动提取 ✅ | 去重管线 ✅ | Curator 治理报告 ✅ | HTTP/SSE 传输端口 8318 ✅ | 多 Agent 接入（Hermes/Codex/Claude Code）✅ | Dashboard HTML ✅ | 105 测试全绿 ✅ | Context Pack（任务感知+token预算）✅\n\n**已知问题**：\n1. WSL 网络延迟（中）：DeepSeek API 间歇性超时，WSL→外网链路不稳\n2. Ollama embedding 可用性（低）：Ollama 未运行时降级哈希 fallback，语义质量下降\n3. MCP 记忆质量无量化指标（中）：无 precision/recall 度量，无法判断 context pack 实际效果\n4. Curator 未自动化（中）：需手动触发，积压重复/过期记忆靠人工清理\n5. episodic_memory 候选记录大量重复（中）：历史提取条目重复度高，candidate 状态未处理\n6. 无 Agent 间消息通道（中）：Agent 只能读写共享记忆，无法直接发消息给另一个 Agent\n7. ops_db 未实现（低）：config 中 memory_ops.sqlite3 路径定义了但未实现\n8. extraction.py prompt 未针对中文优化（中）\n\n**技术债务**：\n- __init__.py 重导出所有符号，可能意外暴露内部 API（Phase 10 公开发布前收紧）\n- Qdrant 本地文件/Docker 切换逻辑复杂（Phase 10 重写 VectorStore 初始化）\n- 无 API 访问鉴权（本地私有暂可，对外发布前必须加 token auth）\n\n**Why:** 记录已知问题防止重复踩坑，优先级排序指导 Phase 8 工作重点。\n**How to apply:** Phase 8 优先解决 Curator 自动化（中优先级，直接影响记忆质量）。",
+        "source": "manual",
+        "source_agent": "claude",
+        "project_path": "/home/advancer/.agent-memory/local-memory-mcp",
+        "created_at": "2026-05-19T06:00:55+00:00",
+        "updated_at": "2026-05-20T05:03:20+00:00",
+        "last_accessed_at": "2026-05-20T05:01:50+00:00",
+        "confidence": 0.97,
+        "importance": 0.9,
+        "status": "contradicted",
+        "decay_policy": "review",
+        "feedback_score": 0.0,
+        "injected_count": 0,
+        "ineffective_count": 0,
+        "effectiveness_score": 0.5,
+        "last_injected_at": null,
+        "tags": [
+          "local-memory-mcp",
+          "known-issues",
+          "current-status",
+          "iteration-book"
+        ],
+        "related_ids": [],
+        "metadata": {}
+      }
+    ],
+    [
+      {
+        "id": "c8afe5f7-c47e-4e3d-ae34-c77b16bcaff9",
+        "type": "project_memory",
+        "scope": "global",
+        "title": "local-memory-mcp 迭代书 — 未来规划与迭代步骤",
+        "content": "**Phase 8（建议 2026-05 内）— Curator 自动化 + 记忆质量基线**：\n- scripts/cron_curator.sh：每小时自动归档 90 天未访问 stale 记忆，自动提升 candidate+feedback>0.5 为 active\n- 新增 memory_stats MCP 工具：各 type/status 记录数、平均 confidence/importance、feedback 分布\n- extraction.py 中文 prompt 优化 + source_agent 自动注入\n- 目标：105→120 tests\n\n**Phase 9（建议 2026-06）— Agent 间消息通道（Mailbox MVP）**：\n- 新增 agent_messages 表（id/from_agent/to_agent/subject/body/thread_id/created_at/read_at/status）\n- 新增 agent_presence 表（agent_id/last_seen/current_task/status）\n- 新增 MCP 工具：mailbox_send / mailbox_read / mailbox_ack / presence_ping\n- memory_context v2：自动注入 mailbox 摘要（未读消息数、task blockers）\n- 目标：105→130+ tests\n\n**Phase 10（建议 2026-07）— Temporal Memory Layer**：\n- contradiction_detection：提取到矛盾事实时自动标记旧记忆为 contradicted + 建立 supersedes 链接\n- temporal_validity：valid_from/valid_until 字段，时间范围查询\n- auto_decay：按 decay_policy 配置自动降低 confidence\n- config 中 temporal.enabled: false 已预留入口，Phase 10 开启\n\n**Phase 11+（2026 Q3）— 对外发布**：\n- pip install local-memory-mcp（PyPI 发布）\n- Docker Compose 一键启动（含 Qdrant）\n- 多用户/多工作区支持（scope: global/project/private）\n- Memory Platform Web UI（docs/memory-platform-briefing/ 已有设计稿）\n- Embedding 升级：Ollama 不可用时自动尝试 sentence-transformers\n\n**代码审查红线（任何 PR 必须保证）**：\n1. storage.py 零 MCP 依赖（from mcp 不得出现）\n2. models.py 零 I/O 依赖\n3. tests/ 不写生产数据库（LOCAL_MEMORY_DB 隔离）\n4. 迭代后 ITERATION.md 必须追加\n5. MCP tool 参数向后兼容（新增参数必须有默认值）\n6. 105 tests 必须全绿（不得下降）\n\n**Why:** 规划分三个时间层次：近期解决质量问题，中期增加协作能力，远期对外发布。\n**How to apply:** 当前最高优先级是 Phase 8 Curator 自动化，积压重复记忆直接影响 context pack 质量。",
+        "source": "manual",
+        "source_agent": "claude",
+        "project_path": "/home/advancer/.agent-memory/local-memory-mcp",
+        "created_at": "2026-05-19T06:00:56+00:00",
+        "updated_at": "2026-05-20T05:03:20+00:00",
+        "last_accessed_at": "2026-05-20T05:01:50+00:00",
+        "confidence": 0.97,
+        "importance": 0.92,
+        "status": "contradicted",
+        "decay_policy": "review",
+        "feedback_score": 0.0,
+        "injected_count": 0,
+        "ineffective_count": 0,
+        "effectiveness_score": 0.5,
+        "last_injected_at": null,
+        "tags": [
+          "local-memory-mcp",
+          "roadmap",
+          "phase8",
+          "phase9",
+          "phase10",
+          "iteration-book"
+        ],
+        "related_ids": [],
+        "metadata": {}
+      },
+      {
+        "id": "ff8838d4-0dc0-4d04-8ea3-27d09b4063e8",
+        "type": "project_memory",
+        "scope": "global",
+        "title": "local-memory-mcp 迭代书 — 未来规划与迭代步骤",
+        "content": "**Phase 8（建议 2026-05 内）— Curator 自动化 + 记忆质量基线**：\n- scripts/cron_curator.sh：每小时自动归档 90 天未访问 stale 记忆，自动提升 candidate+feedback>0.5 为 active\n- 新增 memory_stats MCP 工具：各 type/status 记录数、平均 confidence/importance、feedback 分布\n- extraction.py 中文 prompt 优化 + source_agent 自动注入\n- 目标：105→120 tests\n\n**Phase 8.1（2026-05-20 已完成）— Overmind 借鉴特性落地**：\n- storage.py 新增 injected_count、ineffective_count、effectiveness_score、last_injected_at 字段\n- add_feedback() 追踪注入和无效计数\n- search_memory_records ORDER BY 加入 effectiveness_score\n- 新增 get_active_warnings() 基于 memory_links contradicts/supersedes 关系\n- build_context_pack 加入 warnings 字段，修复无条件 fallback\n- curator_report 加入 decay_candidates 和 evolution_candidates\n- 106 tests 全绿，提交 a876c69\n\n**Phase 9（建议 2026-06）— Agent 间消息通道（Mailbox MVP）**：\n- 新增 agent_messages 表（id/from_agent/to_agent/subject/body/thread_id/created_at/read_at/status）\n- 新增 agent_presence 表（agent_id/last_seen/current_task/status）\n- 新增 MCP 工具：mailbox_send / mailbox_read / mailbox_ack / presence_ping\n- memory_context v2：自动注入 mailbox 摘要（未读消息数、task blockers）\n- 目标：106→130+ tests\n\n**Phase 10（建议 2026-07）— Temporal Memory Layer**：\n- contradiction_detection：提取到矛盾事实时自动标记旧记忆为 contradicted + 建立 supersedes 链接\n- temporal_validity：valid_from/valid_until 字段，时间范围查询\n- auto_decay：按 decay_policy 配置自动降低 confidence\n- config 中 temporal.enabled: false 已预留入口，Phase 10 开启\n\n**Phase 11+（2026 Q3）— 对外发布**：\n- pip install local-memory-mcp（PyPI 发布）\n- Docker Compose 一键启动（含 Qdrant）\n- 多用户/多工作区支持（scope: global/project/private）\n- Memory Platform Web UI（docs/memory-platform-briefing/ 已有设计稿）\n- Embedding 升级：Ollama 不可用时自动尝试 sentence-transformers\n\n**代码审查红线（任何 PR 必须保证）**：\n1. storage.py 零 MCP 依赖（from mcp 不得出现）\n2. models.py 零 I/O 依赖\n3. tests/ 不写生产数据库（LOCAL_MEMORY_DB 隔离）\n4. 迭代后 ITERATION.md 必须追加\n5. MCP tool 参数向后兼容（新增参数必须有默认值）\n6. 106 tests 必须全绿（不得下降）\n\n**Why:** 规划分三个时间层次：近期解决质量问题，中期增加协作能力，远期对外发布。\n**How to apply:** Phase 8.1 已完成，当前最高优先级是 Phase 9 Mailbox MVP。",
+        "source": "manual",
+        "source_agent": "agent",
+        "project_path": "/home/advancer/project/local-memory-mcp",
+        "created_at": "2026-05-20T05:03:09+00:00",
+        "updated_at": "2026-05-20T05:03:09+00:00",
+        "last_accessed_at": "2026-05-21T09:54:09+00:00",
+        "confidence": 0.97,
+        "importance": 0.92,
+        "status": "active",
+        "decay_policy": "review",
+        "feedback_score": 0.0,
+        "injected_count": 21,
+        "ineffective_count": 0,
+        "effectiveness_score": 0.5,
+        "last_injected_at": "2026-05-21T09:54:09+00:00",
+        "tags": [
+          "local-memory-mcp",
+          "roadmap",
+          "phase8",
+          "phase9",
+          "phase10",
+          "iteration-book"
+        ],
+        "related_ids": [],
+        "metadata": {}
+      }
+    ]
+  ],
+  "low_feedback_candidates": [],
+  "stale_candidates": [],
+  "archive_candidates": [],
+  "contradiction_candidates": [
+    {
+      "title_key": "local memory mcp 迭代书 phase 历史全貌",
+      "active": [
+        {
+          "id": "b492e9c9-3811-458d-a51c-e3c891432c53",
+          "type": "project_memory",
+          "scope": "global",
+          "title": "local-memory-mcp 迭代书 — Phase 历史全貌",
+          "content": "**Phase 0（2026-05-12）初始实现**：单文件 SQLite MCP，基础工具，路径硬编码，无向量检索，无自动提取。\n\n**Phase 1~3（2026-05-12~13）Mem0 探索**：集成 mem0ai + ollama，切换 DeepSeek v4-flash。结论：Mem0 SDK 黑盒，type/scope/importance/feedback 治理维度无法透传，依赖重，放弃。\n\n**Phase 4（2026-05-13）去 Mem0 + Qdrant**：移除 mem0ai/sqlite-vec，引入 qdrant-client。新增 extraction.py（DeepSeek）、vector_store.py（Qdrant+Ollama）、dedup.py（三档阈值去重）。依赖精简到 4 个包。\n\n**Phase 5（2026-05-13）Memory Links**：新增 memory_links 表，5 种关系类型（related_to/supersedes/contradicts/supports/part_of）。新增 MCP 工具：memory_link_add, memory_link_query, memory_timeline, memory_feedback, memory_vector_search。\n\n**Phase 6（2026-05-15）端到端验证**：修复 5 个 bug：extraction.py os.environ.setdefault 被 Hermes 拦截→直接赋值；dedup.py memory_type 参数名错误（2处）；config.yaml DeepSeek base_url 缺 /v1；vector_store.py 新增 Docker Qdrant server 模式。遗留问题：MCP 通道 memory_ingest 写入失败（__main__ 循环导入）。\n\n**Phase 7（2026-05-18）模块重构**：1284 行单文件→5 模块包结构（models/storage/server/__init__/__main__）。dedup.py 直接导入 storage.py，彻底断绝循环链。传输层改 HTTP/SSE 端口 8318。105/105 测试通过，MCP 全链路验证通过。\n\n**Phase 8（2026-05-19）Curator 自动化 + memory_stats**：新增 get_memory_stats()、memory_stats MCP tool、systemd curator timer、build_context_pack quality 字段。111 tests。\n\n**Phase 8.1（2026-05-20）Overmind 借鉴特性落地**：新增 injected_count/ineffective_count/effectiveness_score/last_injected_at 字段、get_active_warnings()、build_context_pack warnings 字段、curator_report decay/evolution candidates、修复无条件 fallback。106 tests，提交 a876c69。\n\n**Why:** 每个 Phase 都有明确的单一目标，问题驱动迭代，不做超前设计。\n**How to apply:** 规划新 Phase 时，先明确\"解决什么问题\"，再确定最小交付范围。",
+          "source": "manual",
+          "source_agent": "agent",
+          "project_path": "/home/advancer/project/local-memory-mcp",
+          "created_at": "2026-05-20T05:03:46+00:00",
+          "updated_at": "2026-05-20T05:03:46+00:00",
+          "last_accessed_at": "2026-05-21T09:54:09+00:00",
+          "confidence": 0.97,
+          "importance": 0.9,
+          "status": "active",
+          "decay_policy": "review",
+          "feedback_score": 0.0,
+          "injected_count": 3,
+          "ineffective_count": 0,
+          "effectiveness_score": 0.5,
+          "last_injected_at": "2026-05-21T03:26:03+00:00",
+          "tags": [
+            "local-memory-mcp",
+            "iteration-history",
+            "phases",
+            "iteration-book"
+          ],
+          "related_ids": [],
+          "metadata": {}
+        }
+      ],
+      "contradicted": [
+        {
+          "id": "d016f458-f518-4177-8fbc-9e2242be3bd5",
+          "type": "project_memory",
+          "scope": "global",
+          "title": "local-memory-mcp 迭代书 — Phase 历史全貌",
+          "content": "**Phase 0（2026-05-12）初始实现**：单文件 SQLite MCP，基础工具，路径硬编码，无向量检索，无自动提取。\n\n**Phase 1~3（2026-05-12~13）Mem0 探索**：集成 mem0ai + ollama，切换 DeepSeek v4-flash。结论：Mem0 SDK 黑盒，type/scope/importance/feedback 治理维度无法透传，依赖重，放弃。\n\n**Phase 4（2026-05-13）去 Mem0 + Qdrant**：移除 mem0ai/sqlite-vec，引入 qdrant-client。新增 extraction.py（DeepSeek）、vector_store.py（Qdrant+Ollama）、dedup.py（三档阈值去重）。依赖精简到 4 个包。\n\n**Phase 5（2026-05-13）Memory Links**：新增 memory_links 表，5 种关系类型（related_to/supersedes/contradicts/supports/part_of）。新增 MCP 工具：memory_link_add, memory_link_query, memory_timeline, memory_feedback, memory_vector_search。\n\n**Phase 6（2026-05-15）端到端验证**：修复 5 个 bug：extraction.py os.environ.setdefault 被 Hermes 拦截→直接赋值；dedup.py memory_type 参数名错误（2处）；config.yaml DeepSeek base_url 缺 /v1；vector_store.py 新增 Docker Qdrant server 模式。遗留问题：MCP 通道 memory_ingest 写入失败（__main__ 循环导入）。\n\n**Phase 7（2026-05-18）模块重构**：1284 行单文件→5 模块包结构（models/storage/server/__init__/__main__）。dedup.py 直接导入 storage.py，彻底断绝循环链。传输层改 HTTP/SSE 端口 8318。105/105 测试通过，MCP 全链路验证通过。\n\n**Why:** 每个 Phase 都有明确的单一目标，问题驱动迭代，不做超前设计。\n**How to apply:** 规划新 Phase 时，先明确\"解决什么问题\"，再确定最小交付范围。",
+          "source": "manual",
+          "source_agent": "claude",
+          "project_path": "/home/advancer/.agent-memory/local-memory-mcp",
+          "created_at": "2026-05-19T06:00:55+00:00",
+          "updated_at": "2026-05-20T05:03:20+00:00",
+          "last_accessed_at": "2026-05-20T05:01:50+00:00",
+          "confidence": 0.97,
+          "importance": 0.9,
+          "status": "contradicted",
+          "decay_policy": "review",
+          "feedback_score": 0.0,
+          "injected_count": 0,
+          "ineffective_count": 0,
+          "effectiveness_score": 0.5,
+          "last_injected_at": null,
+          "tags": [
+            "local-memory-mcp",
+            "iteration-history",
+            "phases",
+            "iteration-book"
+          ],
+          "related_ids": [],
+          "metadata": {}
+        }
+      ]
+    },
+    {
+      "title_key": "local memory mcp 迭代书 当前状态与已知问题",
+      "active": [
+        {
+          "id": "fd1d9638-2b0d-4da1-9794-5590a2fdbcea",
+          "type": "project_memory",
+          "scope": "global",
+          "title": "local-memory-mcp 迭代书 — 当前状态与已知问题",
+          "content": "**当前状态（2026-05-20，Phase 8.1 完成）**：\n\n已完成能力：SQLite 结构化存储（WAL+FTS5）✅ | MCP 15 工具集 ✅ | Memory Links 知识图谱 ✅ | Qdrant 语义检索 ✅ | DeepSeek 自动提取 ✅ | 去重管线 ✅ | Curator 治理报告 ✅ | HTTP/SSE 传输端口 8318 ✅ | 多 Agent 接入（Hermes/Codex/Claude Code）✅ | Dashboard HTML ✅ | 106 测试全绿 ✅ | Context Pack（任务感知+token预算+warnings）✅ | effectiveness_score 反馈追踪 ✅ | get_active_warnings() ✅\n\n**已知问题**：\n1. WSL 网络延迟（中）：DeepSeek API 间歇性超时，WSL→外网链路不稳\n2. Ollama embedding 可用性（低）：Ollama 未运行时降级哈希 fallback，语义质量下降\n3. MCP 记忆质量无量化指标（中）：无 precision/recall 度量，无法判断 context pack 实际效果\n4. Curator 未自动化（中）：需手动触发，积压重复/过期记忆靠人工清理\n5. episodic_memory 候选记录大量重复（中）：历史提取条目重复度高，candidate 状态未处理\n6. 无 Agent 间消息通道（中）：Agent 只能读写共享记忆，无法直接发消息给另一个 Agent\n7. ops_db 未实现（低）：config 中 memory_ops.sqlite3 路径定义了但未实现\n8. extraction.py prompt 未针对中文优化（中）\n\n**技术债务**：\n- __init__.py 重导出所有符号，可能意外暴露内部 API（Phase 10 公开发布前收紧）\n- Qdrant 本地文件/Docker 切换逻辑复杂（Phase 10 重写 VectorStore 初始化）\n- 无 API 访问鉴权（本地私有暂可，对外发布前必须加 token auth）\n\n**Why:** 记录已知问题防止重复踩坑，优先级排序指导 Phase 9 工作重点。\n**How to apply:** Phase 9 优先实现 Mailbox MVP（Agent 间消息通道）。",
+          "source": "manual",
+          "source_agent": "agent",
+          "project_path": "/home/advancer/project/local-memory-mcp",
+          "created_at": "2026-05-20T05:03:46+00:00",
+          "updated_at": "2026-05-20T05:03:46+00:00",
+          "last_accessed_at": "2026-05-21T09:54:09+00:00",
+          "confidence": 0.97,
+          "importance": 0.9,
+          "status": "active",
+          "decay_policy": "review",
+          "feedback_score": 0.0,
+          "injected_count": 5,
+          "ineffective_count": 0,
+          "effectiveness_score": 0.5,
+          "last_injected_at": "2026-05-21T04:46:49+00:00",
+          "tags": [
+            "local-memory-mcp",
+            "known-issues",
+            "current-status",
+            "iteration-book"
+          ],
+          "related_ids": [],
+          "metadata": {}
+        }
+      ],
+      "contradicted": [
+        {
+          "id": "085ed15d-32da-462a-9822-35becacf506a",
+          "type": "project_memory",
+          "scope": "global",
+          "title": "local-memory-mcp 迭代书 — 当前状态与已知问题",
+          "content": "**当前状态（2026-05-19，Phase 7 完成）**：\n\n已完成能力：SQLite 结构化存储（WAL+FTS5）✅ | MCP 15 工具集 ✅ | Memory Links 知识图谱 ✅ | Qdrant 语义检索 ✅ | DeepSeek 自动提取 ✅ | 去重管线 ✅ | Curator 治理报告 ✅ | HTTP/SSE 传输端口 8318 ✅ | 多 Agent 接入（Hermes/Codex/Claude Code）✅ | Dashboard HTML ✅ | 105 测试全绿 ✅ | Context Pack（任务感知+token预算）✅\n\n**已知问题**：\n1. WSL 网络延迟（中）：DeepSeek API 间歇性超时，WSL→外网链路不稳\n2. Ollama embedding 可用性（低）：Ollama 未运行时降级哈希 fallback，语义质量下降\n3. MCP 记忆质量无量化指标（中）：无 precision/recall 度量，无法判断 context pack 实际效果\n4. Curator 未自动化（中）：需手动触发，积压重复/过期记忆靠人工清理\n5. episodic_memory 候选记录大量重复（中）：历史提取条目重复度高，candidate 状态未处理\n6. 无 Agent 间消息通道（中）：Agent 只能读写共享记忆，无法直接发消息给另一个 Agent\n7. ops_db 未实现（低）：config 中 memory_ops.sqlite3 路径定义了但未实现\n8. extraction.py prompt 未针对中文优化（中）\n\n**技术债务**：\n- __init__.py 重导出所有符号，可能意外暴露内部 API（Phase 10 公开发布前收紧）\n- Qdrant 本地文件/Docker 切换逻辑复杂（Phase 10 重写 VectorStore 初始化）\n- 无 API 访问鉴权（本地私有暂可，对外发布前必须加 token auth）\n\n**Why:** 记录已知问题防止重复踩坑，优先级排序指导 Phase 8 工作重点。\n**How to apply:** Phase 8 优先解决 Curator 自动化（中优先级，直接影响记忆质量）。",
+          "source": "manual",
+          "source_agent": "claude",
+          "project_path": "/home/advancer/.agent-memory/local-memory-mcp",
+          "created_at": "2026-05-19T06:00:55+00:00",
+          "updated_at": "2026-05-20T05:03:20+00:00",
+          "last_accessed_at": "2026-05-20T05:01:50+00:00",
+          "confidence": 0.97,
+          "importance": 0.9,
+          "status": "contradicted",
+          "decay_policy": "review",
+          "feedback_score": 0.0,
+          "injected_count": 0,
+          "ineffective_count": 0,
+          "effectiveness_score": 0.5,
+          "last_injected_at": null,
+          "tags": [
+            "local-memory-mcp",
+            "known-issues",
+            "current-status",
+            "iteration-book"
+          ],
+          "related_ids": [],
+          "metadata": {}
+        }
+      ]
+    },
+    {
+      "title_key": "local memory mcp 迭代书 未来规划与迭代步骤",
+      "active": [
+        {
+          "id": "ff8838d4-0dc0-4d04-8ea3-27d09b4063e8",
+          "type": "project_memory",
+          "scope": "global",
+          "title": "local-memory-mcp 迭代书 — 未来规划与迭代步骤",
+          "content": "**Phase 8（建议 2026-05 内）— Curator 自动化 + 记忆质量基线**：\n- scripts/cron_curator.sh：每小时自动归档 90 天未访问 stale 记忆，自动提升 candidate+feedback>0.5 为 active\n- 新增 memory_stats MCP 工具：各 type/status 记录数、平均 confidence/importance、feedback 分布\n- extraction.py 中文 prompt 优化 + source_agent 自动注入\n- 目标：105→120 tests\n\n**Phase 8.1（2026-05-20 已完成）— Overmind 借鉴特性落地**：\n- storage.py 新增 injected_count、ineffective_count、effectiveness_score、last_injected_at 字段\n- add_feedback() 追踪注入和无效计数\n- search_memory_records ORDER BY 加入 effectiveness_score\n- 新增 get_active_warnings() 基于 memory_links contradicts/supersedes 关系\n- build_context_pack 加入 warnings 字段，修复无条件 fallback\n- curator_report 加入 decay_candidates 和 evolution_candidates\n- 106 tests 全绿，提交 a876c69\n\n**Phase 9（建议 2026-06）— Agent 间消息通道（Mailbox MVP）**：\n- 新增 agent_messages 表（id/from_agent/to_agent/subject/body/thread_id/created_at/read_at/status）\n- 新增 agent_presence 表（agent_id/last_seen/current_task/status）\n- 新增 MCP 工具：mailbox_send / mailbox_read / mailbox_ack / presence_ping\n- memory_context v2：自动注入 mailbox 摘要（未读消息数、task blockers）\n- 目标：106→130+ tests\n\n**Phase 10（建议 2026-07）— Temporal Memory Layer**：\n- contradiction_detection：提取到矛盾事实时自动标记旧记忆为 contradicted + 建立 supersedes 链接\n- temporal_validity：valid_from/valid_until 字段，时间范围查询\n- auto_decay：按 decay_policy 配置自动降低 confidence\n- config 中 temporal.enabled: false 已预留入口，Phase 10 开启\n\n**Phase 11+（2026 Q3）— 对外发布**：\n- pip install local-memory-mcp（PyPI 发布）\n- Docker Compose 一键启动（含 Qdrant）\n- 多用户/多工作区支持（scope: global/project/private）\n- Memory Platform Web UI（docs/memory-platform-briefing/ 已有设计稿）\n- Embedding 升级：Ollama 不可用时自动尝试 sentence-transformers\n\n**代码审查红线（任何 PR 必须保证）**：\n1. storage.py 零 MCP 依赖（from mcp 不得出现）\n2. models.py 零 I/O 依赖\n3. tests/ 不写生产数据库（LOCAL_MEMORY_DB 隔离）\n4. 迭代后 ITERATION.md 必须追加\n5. MCP tool 参数向后兼容（新增参数必须有默认值）\n6. 106 tests 必须全绿（不得下降）\n\n**Why:** 规划分三个时间层次：近期解决质量问题，中期增加协作能力，远期对外发布。\n**How to apply:** Phase 8.1 已完成，当前最高优先级是 Phase 9 Mailbox MVP。",
+          "source": "manual",
+          "source_agent": "agent",
+          "project_path": "/home/advancer/project/local-memory-mcp",
+          "created_at": "2026-05-20T05:03:09+00:00",
+          "updated_at": "2026-05-20T05:03:09+00:00",
+          "last_accessed_at": "2026-05-21T09:54:09+00:00",
+          "confidence": 0.97,
+          "importance": 0.92,
+          "status": "active",
+          "decay_policy": "review",
+          "feedback_score": 0.0,
+          "injected_count": 21,
+          "ineffective_count": 0,
+          "effectiveness_score": 0.5,
+          "last_injected_at": "2026-05-21T09:54:09+00:00",
+          "tags": [
+            "local-memory-mcp",
+            "roadmap",
+            "phase8",
+            "phase9",
+            "phase10",
+            "iteration-book"
+          ],
+          "related_ids": [],
+          "metadata": {}
+        }
+      ],
+      "contradicted": [
+        {
+          "id": "c8afe5f7-c47e-4e3d-ae34-c77b16bcaff9",
+          "type": "project_memory",
+          "scope": "global",
+          "title": "local-memory-mcp 迭代书 — 未来规划与迭代步骤",
+          "content": "**Phase 8（建议 2026-05 内）— Curator 自动化 + 记忆质量基线**：\n- scripts/cron_curator.sh：每小时自动归档 90 天未访问 stale 记忆，自动提升 candidate+feedback>0.5 为 active\n- 新增 memory_stats MCP 工具：各 type/status 记录数、平均 confidence/importance、feedback 分布\n- extraction.py 中文 prompt 优化 + source_agent 自动注入\n- 目标：105→120 tests\n\n**Phase 9（建议 2026-06）— Agent 间消息通道（Mailbox MVP）**：\n- 新增 agent_messages 表（id/from_agent/to_agent/subject/body/thread_id/created_at/read_at/status）\n- 新增 agent_presence 表（agent_id/last_seen/current_task/status）\n- 新增 MCP 工具：mailbox_send / mailbox_read / mailbox_ack / presence_ping\n- memory_context v2：自动注入 mailbox 摘要（未读消息数、task blockers）\n- 目标：105→130+ tests\n\n**Phase 10（建议 2026-07）— Temporal Memory Layer**：\n- contradiction_detection：提取到矛盾事实时自动标记旧记忆为 contradicted + 建立 supersedes 链接\n- temporal_validity：valid_from/valid_until 字段，时间范围查询\n- auto_decay：按 decay_policy 配置自动降低 confidence\n- config 中 temporal.enabled: false 已预留入口，Phase 10 开启\n\n**Phase 11+（2026 Q3）— 对外发布**：\n- pip install local-memory-mcp（PyPI 发布）\n- Docker Compose 一键启动（含 Qdrant）\n- 多用户/多工作区支持（scope: global/project/private）\n- Memory Platform Web UI（docs/memory-platform-briefing/ 已有设计稿）\n- Embedding 升级：Ollama 不可用时自动尝试 sentence-transformers\n\n**代码审查红线（任何 PR 必须保证）**：\n1. storage.py 零 MCP 依赖（from mcp 不得出现）\n2. models.py 零 I/O 依赖\n3. tests/ 不写生产数据库（LOCAL_MEMORY_DB 隔离）\n4. 迭代后 ITERATION.md 必须追加\n5. MCP tool 参数向后兼容（新增参数必须有默认值）\n6. 105 tests 必须全绿（不得下降）\n\n**Why:** 规划分三个时间层次：近期解决质量问题，中期增加协作能力，远期对外发布。\n**How to apply:** 当前最高优先级是 Phase 8 Curator 自动化，积压重复记忆直接影响 context pack 质量。",
+          "source": "manual",
+          "source_agent": "claude",
+          "project_path": "/home/advancer/.agent-memory/local-memory-mcp",
+          "created_at": "2026-05-19T06:00:56+00:00",
+          "updated_at": "2026-05-20T05:03:20+00:00",
+          "last_accessed_at": "2026-05-20T05:01:50+00:00",
+          "confidence": 0.97,
+          "importance": 0.92,
+          "status": "contradicted",
+          "decay_policy": "review",
+          "feedback_score": 0.0,
+          "injected_count": 0,
+          "ineffective_count": 0,
+          "effectiveness_score": 0.5,
+          "last_injected_at": null,
+          "tags": [
+            "local-memory-mcp",
+            "roadmap",
+            "phase8",
+            "phase9",
+            "phase10",
+            "iteration-book"
+          ],
+          "related_ids": [],
+          "metadata": {}
+        }
+      ]
+    }
+  ],
+  "skill_promotion_candidates": [],
+  "actions": [],
+  "summary": {
+    "duplicates": 5,
+    "low_feedback": 0,
+    "stale": 0,
+    "archive": 0,
+    "contradictions": 3,
+    "skill_promotions": 0,
+    "actions": 0
+  }
+}

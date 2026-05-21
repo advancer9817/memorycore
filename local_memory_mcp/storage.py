@@ -789,13 +789,26 @@ def curator_report(
         (min(cap, 50),),
     )
 
-    # Stale: dedicated query so oldest records are not truncated by list_recent ordering
+    # Stale: dedicated query so oldest records are not truncated by list_recent ordering.
+    # Candidate memories are LLM-extracted proposals; most should either be promoted
+    # or decay out quickly.  Keep high-importance candidates for human review, but
+    # auto-stale low/medium-importance candidate noise much sooner than active
+    # curated records so episodic task-state does not accumulate indefinitely.
+    # Use SQLite datetime() so both RFC3339 timestamps with offsets and SQLite
+    # datetime('now') values compare consistently.
     stale_candidates = _managed_query(
         """SELECT * FROM memories
-           WHERE status IN ('active','candidate')
-             AND updated_at < ?
-             AND importance < 0.45
-             AND feedback_score <= 0
+           WHERE (
+               status = 'active'
+               AND datetime(updated_at) < datetime(?)
+               AND importance < 0.45
+               AND feedback_score <= 0
+             ) OR (
+               status = 'candidate'
+               AND datetime(updated_at) < datetime('now', '-12 hours')
+               AND importance < 0.65
+               AND feedback_score <= 0
+             )
            ORDER BY updated_at ASC LIMIT ?""",
         (stale_cutoff.isoformat(), cap),
     )

@@ -1,5 +1,40 @@
 # local-memory-mcp 迭代日志
 
+## [迭代 14] 2026-05-21 — 部署自动化与 curator 报告提交扫尾
+
+**提交**: 本提交（见 `git log -1 --oneline`）
+
+### 变更
+- `scripts/deploy.sh`: 新增一键部署入口，统一安装依赖、生成配置、安装/验证 systemd user 服务，并支持 dry-run、skip-tests、no-systemd、no-qdrant 等可移植部署参数。
+- `scripts/lmmcp.service` / `scripts/qdrant.service`: 新增可模板化 systemd user 服务单元，支持本地 MCP HTTP/SSE 服务与 Qdrant Docker 服务托管。
+- `scripts/lmmcp-curator.service`: 调整 curator systemd 服务模板，配合部署脚本替换运行路径、配置、DB 与 apply 参数。
+- `scripts/init_local_memory.sh`: 改为兼容包装入口，避免重复维护旧初始化逻辑。
+- `run_curator.sh`: 补充 `PYTHONPATH`，提升 systemd 与直接 shell 执行一致性。
+- `local_memory_mcp/storage.py`: 补充 curator 候选记忆自动 stale/归档策略与 legacy DB effectiveness 字段迁移。
+- `tests/test_curator.py`: 增加 curator 候选记录自动 stale 回归测试。
+- `README.md` / `docs/deployment.md`: 更新一键部署、服务拓扑、验证与回滚说明。
+- `reports/curator-20260521T*.json`: 纳入本轮 curator 报告快照，保留累计治理统计数据。
+
+### 验证
+- `python3 -m venv /tmp/lmmcp-verify-venv`
+- `/tmp/lmmcp-verify-venv/bin/pip install -q -r requirements.txt`
+- `/tmp/lmmcp-verify-venv/bin/pytest -q` → 135/135 pass。
+- 静态 secret scan：未发现凭证；报告内容包含历史记忆摘要与已知问题说明。
+
+### 已知问题
+- 当前仓库 `.venv/bin/pytest` shebang 仍指向旧路径 `/home/advancer/.agent-memory/local-memory-mcp/.venv/bin/python`，本轮验证改用 `/tmp/lmmcp-verify-venv`。
+- 默认完整部署依赖 user systemd 与 Docker；无 systemd/Docker 环境应使用 `scripts/deploy.sh --no-systemd` 或 `--no-qdrant`。
+
+### 回滚方式
+- 回滚本提交即可移除部署脚本、服务模板、文档更新、curator 测试和报告快照；如已经安装 user services，需按文档运行 `systemctl --user disable --now qdrant.service lmmcp.service lmmcp-curator.timer` 并 `systemctl --user daemon-reload`。
+
+### 下一步
+1. 修复或重建仓库本地 `.venv`，避免旧路径 shebang 误导后续验证。
+2. 继续 P0 稳定化：隐私脱敏、审计日志、统一 degraded/fallback response contract。
+
+---
+
+
 ## [迭代 13] 2026-05-21 — Claude 风格本地记忆 Dashboard
 
 **提交**: 本提交（见 `git log -1 --oneline`）

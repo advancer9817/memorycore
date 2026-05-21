@@ -57,6 +57,40 @@ def test_curator_stale_and_archive_candidates():
     assert lm.get_record("stale")["status"] == "archived"
 
 
+def test_curator_auto_stales_low_importance_candidate_noise():
+    old_candidate = (datetime.now(timezone.utc) - timedelta(hours=13)).isoformat(timespec="seconds")
+    fresh_candidate = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(timespec="seconds")
+    promoted_candidate = (datetime.now(timezone.utc) - timedelta(hours=13)).isoformat(timespec="seconds")
+    lm.add_memory_record(
+        "episodic_memory", "Old task-state candidate", "temporary task state", status="candidate",
+        importance=0.5, memory_id="old-candidate",
+    )
+    lm.add_memory_record(
+        "episodic_memory", "Fresh task-state candidate", "temporary task state", status="candidate",
+        importance=0.5, memory_id="fresh-candidate",
+    )
+    lm.add_memory_record(
+        "project_memory", "Important candidate", "needs human promotion review", status="candidate",
+        importance=0.8, memory_id="important-candidate",
+    )
+    set_updated_at("old-candidate", old_candidate)
+    set_updated_at("fresh-candidate", fresh_candidate)
+    set_updated_at("important-candidate", promoted_candidate)
+
+    report = lm.curator_report(dry_run=False, stale_after_days=60, archive_after_days=120)
+
+    assert {a["id"] for a in report["actions"]} == {"old-candidate"}
+    old_record = lm.get_record("old-candidate")
+    fresh_record = lm.get_record("fresh-candidate")
+    important_record = lm.get_record("important-candidate")
+    assert old_record is not None
+    assert fresh_record is not None
+    assert important_record is not None
+    assert old_record["status"] == "stale"
+    assert fresh_record["status"] == "candidate"
+    assert important_record["status"] == "candidate"
+
+
 def test_consolidate_dry_run_reports_duplicates_and_low_feedback():
     record = lm.add_memory_record("project_memory", "Same", "one", memory_id="same-1")
     lm.add_memory_record("project_memory", "Same", "two", memory_id="same-2")

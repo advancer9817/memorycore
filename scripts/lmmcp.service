@@ -1,0 +1,19 @@
+[Unit]
+Description=local-memory-mcp MCP Server (HTTP :__LMMCP_PORT__)
+After=network-online.target __QDRANT_SERVICE__
+Wants=network-online.target __QDRANT_SERVICE__
+
+[Service]
+Type=simple
+WorkingDirectory=__ROOT__
+ExecStart=__PYTHON__ -m local_memory_mcp serve --host __LMMCP_HOST__ --port __LMMCP_PORT__
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONPATH=__ROOT__
+Environment=LOCAL_MEMORY_CONFIG=__CONFIG__
+Environment=LOCAL_MEMORY_DB=__DB__
+
+[Install]
+WantedBy=default.target

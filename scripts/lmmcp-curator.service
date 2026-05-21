@@ -1,11 +1,19 @@
 [Unit]
 Description=local-memory-mcp curator run
-After=network.target
+After=network-online.target __LMMCP_SERVICE__
+Wants=network-online.target __LMMCP_SERVICE__
 
 [Service]
 Type=oneshot
-WorkingDirectory=%h/.agent-memory/local-memory-mcp
-EnvironmentFile=-%h/.agent-memory/local-memory-mcp/.env
-ExecStart=%h/.agent-memory/local-memory-mcp/run_curator.sh
-StandardOutput=append:%h/.agent-memory/local-memory-mcp/logs/curator.log
-StandardError=append:%h/.agent-memory/local-memory-mcp/logs/curator.log
+WorkingDirectory=__ROOT__
+EnvironmentFile=-__ENV_FILE__
+Environment=PYTHONPATH=__ROOT__
+Environment=LOCAL_MEMORY_CONFIG=__CONFIG__
+Environment=LOCAL_MEMORY_DB=__DB__
+Environment=LOCAL_MEMORY_CURATOR_APPLY=__CURATOR_APPLY__
+Environment=LOCAL_MEMORY_CURATOR_LIMIT=__CURATOR_LIMIT__
+Environment=LOCAL_MEMORY_STALE_AFTER_DAYS=__STALE_AFTER_DAYS__
+Environment=LOCAL_MEMORY_ARCHIVE_AFTER_DAYS=__ARCHIVE_AFTER_DAYS__
+ExecStart=__ROOT__/run_curator.sh
+StandardOutput=append:__ROOT__/logs/curator.log
+StandardError=append:__ROOT__/logs/curator.log

@@ -1,0 +1,20 @@
+[Unit]
+Description=Qdrant Vector Database for local-memory-mcp
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/docker rm -f %i
+ExecStart=/usr/bin/docker run --rm --name %i \
+  -p __QDRANT_HTTP_PORT__:6333 -p __QDRANT_GRPC_PORT__:6334 \
+  -v __QDRANT_STORAGE__:/qdrant/storage \
+  __QDRANT_IMAGE__
+ExecStop=/usr/bin/docker stop %i
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=120
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

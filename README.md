@@ -186,6 +186,35 @@ python3.11 -m venv .venv
 
 `pytest.ini` 已配置 `pythonpath = .`。测试通过 `LOCAL_MEMORY_DB` 指向临时 SQLite，不读写生产 `memory.sqlite3`。
 
+## 一键部署
+
+推荐在 Linux/macOS/WSL 上直接运行：
+
+```bash
+cd /path/to/local-memory-mcp
+scripts/deploy.sh
+```
+
+它会完成：创建/更新 `.venv`、安装 Python 依赖、生成/保留 `config.yaml`、初始化 SQLite、生成 dashboard、可选补齐系统依赖（`--bootstrap-deps`）、可选安装/启动 Ollama 并拉取 embedding 模型（`--with-ollama`）、安装并启动用户级 systemd 服务（Qdrant、lmmcp HTTP MCP server、curator timer）、预拉取 Qdrant 镜像、运行健康检查和 pytest。
+
+常用选项：
+
+```bash
+scripts/deploy.sh --force-config
+scripts/deploy.sh --root /opt/local-memory-mcp --port 8318
+scripts/deploy.sh --bootstrap-deps --assume-yes  # apt/dnf/yum/brew 可用时补齐 host 依赖
+scripts/deploy.sh --with-ollama                 # 确保 Ollama 可用并拉取 embedding 模型
+scripts/deploy.sh --no-systemd                  # 只初始化，不安装服务
+scripts/deploy.sh --no-qdrant                   # 使用外部 Qdrant
+scripts/deploy.sh --skip-tests                  # 部署时跳过 pytest
+```
+
+部署后 endpoint：
+
+```text
+http://127.0.0.1:8318/mcp
+```
+
 ## 部署复用
 
 在新机器上运行初始化脚本：
