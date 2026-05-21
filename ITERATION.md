@@ -498,3 +498,29 @@ streamable-http 握手 bug。
 
 ### 回滚
 `git revert HEAD`
+
+## 2026-05-21T09:28:03+08:00 — fix: migrate Phase 8.1 effectiveness columns for legacy SQLite DBs
+
+- Branch: `main`
+- Remote: `https://github.com/advancer9817-crypto/local-memory-mcp.git`
+- Purpose: fix production `memory_context` failures caused by older `memories` tables missing Phase 8.1 effectiveness tracking columns.
+- Change summary:
+  - Added `_ensure_column()` helper in `local_memory_mcp/storage.py`.
+  - `init_db()` now applies idempotent SQLite `ALTER TABLE ... ADD COLUMN` migrations for existing databases:
+    - `injected_count INTEGER NOT NULL DEFAULT 0`
+    - `ineffective_count INTEGER NOT NULL DEFAULT 0`
+    - `effectiveness_score REAL NOT NULL DEFAULT 0.5`
+    - `last_injected_at TEXT`
+  - Added regression coverage in `tests/test_phase10.py` for a legacy `memories` table without those columns.
+- Changed files:
+  - `local_memory_mcp/storage.py`
+  - `tests/test_phase10.py`
+  - `ITERATION.md`
+- Verification:
+  - Live DB migration check confirmed `/home/advancer/project/local-memory-mcp/memory.sqlite3` now has all four columns and `memory_context` no longer raises `no such column: m.effectiveness_score`.
+  - `systemctl --user restart lmmcp.service` reloaded the patched service.
+  - `.venv/bin/python -m pytest tests -q --tb=short` passed: `134 passed`.
+- Risk:
+  - Low. Migration is additive and idempotent; existing rows receive SQLite defaults.
+- Rollback:
+  - Revert this commit for code rollback. Existing added SQLite columns can safely remain; they are additive and backward-compatible.

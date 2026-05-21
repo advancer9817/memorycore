@@ -99,6 +99,12 @@ def managed_conn():
         conn.close()
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
@@ -184,6 +190,13 @@ def init_db(conn: sqlite3.Connection) -> None:
         CREATE UNIQUE INDEX IF NOT EXISTS idx_links_unique ON memory_links(source_id, target_id, relation_type);
         """
     )
+    # Migrate pre-existing SQLite databases. CREATE TABLE IF NOT EXISTS does not
+    # add columns to an existing table, so new code that orders or updates these
+    # fields must explicitly add them for older memory.sqlite3 files.
+    _ensure_column(conn, "memories", "injected_count", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(conn, "memories", "ineffective_count", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(conn, "memories", "effectiveness_score", "REAL NOT NULL DEFAULT 0.5")
+    _ensure_column(conn, "memories", "last_injected_at", "TEXT")
     # If an earlier contentless FTS table exists, stored columns read back as NULL;
     # rebuild it as a normal FTS table so JOINs on f.id work correctly.
     try:

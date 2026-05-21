@@ -72,6 +72,62 @@ def test_build_context_pack_increments_injected_count():
 
 
 # ---------------------------------------------------------------------------
+# schema migrations
+# ---------------------------------------------------------------------------
+
+def test_init_db_migrates_existing_memories_table_without_effectiveness_columns(tmp_path, monkeypatch):
+    import sqlite3
+
+    db = tmp_path / "legacy.sqlite3"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """CREATE TABLE memories (
+          id TEXT PRIMARY KEY,
+          type TEXT NOT NULL,
+          scope TEXT NOT NULL DEFAULT 'global',
+          title TEXT NOT NULL,
+          content TEXT NOT NULL,
+          tags_json TEXT NOT NULL DEFAULT '[]',
+          source TEXT NOT NULL DEFAULT 'manual',
+          source_agent TEXT NOT NULL DEFAULT 'unknown',
+          project_path TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          last_accessed_at TEXT,
+          confidence REAL NOT NULL DEFAULT 0.70,
+          importance REAL NOT NULL DEFAULT 0.50,
+          status TEXT NOT NULL DEFAULT 'active',
+          decay_policy TEXT NOT NULL DEFAULT 'review',
+          feedback_score REAL NOT NULL DEFAULT 0,
+          related_ids_json TEXT NOT NULL DEFAULT '[]',
+          metadata_json TEXT NOT NULL DEFAULT '{}'
+        )"""
+    )
+    conn.execute(
+        """INSERT INTO memories (
+          id,type,scope,title,content,tags_json,source,source_agent,project_path,
+          created_at,updated_at,confidence,importance,status,decay_policy,
+          related_ids_json,metadata_json
+        ) VALUES ('legacy-id','user_profile','global','Legacy','legacy content','[]','manual','pytest','',
+                  '2026-01-01T00:00:00+00:00','2026-01-01T00:00:00+00:00',0.7,0.5,'active','review','[]','{}')"""
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setenv("LOCAL_MEMORY_DB", str(db))
+    lm._INITIALIZED_DB_PATHS.clear()
+
+    pack = lm.build_context_pack("legacy content", agent="pytest")
+    migrated = lm.get_record("legacy-id")
+
+    assert "legacy-id" in pack["used_ids"]
+    assert migrated["effectiveness_score"] == pytest.approx(0.5)
+    assert migrated["injected_count"] >= 1
+    assert migrated["ineffective_count"] == 0
+    assert migrated["last_injected_at"] is not None
+
+
+# ---------------------------------------------------------------------------
 # memory_warnings MCP tool
 # ---------------------------------------------------------------------------
 
