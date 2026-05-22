@@ -1,5 +1,41 @@
 # local-memory-mcp 迭代日志
 
+## [迭代 15] 2026-05-22 — P0 稳定化：写入端隐私脱敏 + 审计日志 + 降级合约
+
+**提交**: 本提交（见 `git log -1 --oneline`）
+
+### 变更
+- `local_memory_mcp/privacy.py`: 新增写入端 secret redaction 模块，8 类模式（OpenAI/Anthropic key、GitHub token、AWS key/secret、Bearer token、PEM 私钥、连接字符串密码、通用 env 赋值），具体模式优先于通用模式，幂等安全。
+- `local_memory_mcp/storage.py` `add_memory_record()` / `update_memory_content()`: 写入 SQLite 前调用 `redact_record_fields()`，高熵 secret 不落库。
+- `local_memory_mcp/storage.py` `init_db()`: 新增 `audit_events` 表（`id, event_type, memory_id, agent, detail_json, created_at`）及三个索引；`log_audit_event()` 与 `get_audit_log()` 实现 fire-and-forget 审计写入与查询。
+- `local_memory_mcp/storage.py` `add_memory_record()` / `update_memory_content()` / `update_status()`: 各关键写路径写入审计事件（`memory_add` / `memory_update` / `memory_status_change`）。
+- `local_memory_mcp/server.py`: 新增 `memory_audit_log` MCP tool（第 18 个工具），暴露 `get_audit_log()`，支持按 `memory_id`、`event_type`、`limit` 过滤。
+- `local_memory_mcp/server.py` `memory_ingest()`: 捕获 ingest pipeline 全链路异常，返回带 `degraded=True/False` 的统一响应结构。
+- `local_memory_mcp/server.py` `memory_vector_search()` / `memory_vector_status()`: 捕获 Qdrant 连接异常，返回结构化降级响应而非抛出。
+- `local_memory_mcp/__init__.py`: 导出 `redact_secrets`、`redact_record_fields`、`log_audit_event`、`get_audit_log`。
+- `README.md`: 工具数 17→18，MCP 工具表追加 `memory_audit_log`。
+- `tests/test_privacy.py`: 14 个测试，覆盖各 redaction 模式、幂等性、集成写入验证。
+- `tests/test_audit.py`: 9 个测试，覆盖 audit 写入、fire-and-forget 容错、过滤、排序、集成写入验证。
+- `tests/test_degraded.py`: 5 个测试，覆盖 ingest/vector_search/vector_status 的降级响应合约。
+
+### 验证
+- 全量测试: `.venv/bin/python -m pytest -q` → **163/163 pass**。
+- 静态 secret scan：未发现凭证泄露；redaction 已在写入端生效。
+
+### 已知问题
+- `log_audit_event` 当前仅覆盖三类写事件；curator apply 路径的审计事件留待后续迭代补充。
+- `privacy.py` 为 pattern-based，高熵随机字符串如不符合已知前缀则不会被捕获；后续可补充熵检测。
+
+### 回滚方式
+- 回滚本提交可移除 `privacy.py`、`audit_events` 表（SQLite 列仍存在但无业务影响）、降级响应包装和对应测试；无需 schema 迁移。
+
+### 下一步
+1. curator apply 路径补充审计事件。
+2. `privacy.py` 补充熵检测，捕获无前缀高熵随机字符串。
+3. Agent Mailbox MVP：`agent_messages` / `agent_presence` 表 + 4 个 MCP 工具。
+
+---
+
 ## [迭代 14] 2026-05-21 — 部署自动化与 curator 报告提交扫尾
 
 **提交**: 本提交（见 `git log -1 --oneline`）

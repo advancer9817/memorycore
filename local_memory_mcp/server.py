@@ -28,6 +28,7 @@ from local_memory_mcp.storage import (
     curator_report,
     export_html,
     get_active_warnings,
+    get_audit_log,
     get_memory_stats,
     get_record,
     list_recent,
@@ -173,22 +174,35 @@ def memory_ingest(
     """
     from dedup import ingest
 
-    result = ingest(
-        messages,
-        user_id=user_id,
-        agent_id=agent_id,
-        cfg=load_config(),
-        _add_memory_fn=add_memory_record,
-        _update_memory_fn=update_memory_content,
-    )
-    return {
-        "added": result.added,
-        "updated": result.updated,
-        "skipped": result.skipped,
-        "errors": result.errors,
-        "elapsed_s": result.elapsed_s,
-        "extraction_elapsed_s": result.extraction_elapsed_s,
-    }
+    try:
+        result = ingest(
+            messages,
+            user_id=user_id,
+            agent_id=agent_id,
+            cfg=load_config(),
+            _add_memory_fn=add_memory_record,
+            _update_memory_fn=update_memory_content,
+        )
+        return {
+            "added": result.added,
+            "updated": result.updated,
+            "skipped": result.skipped,
+            "errors": result.errors,
+            "elapsed_s": result.elapsed_s,
+            "extraction_elapsed_s": result.extraction_elapsed_s,
+            "degraded": False,
+        }
+    except Exception as exc:
+        return {
+            "added": 0,
+            "updated": 0,
+            "skipped": len(messages),
+            "errors": 1,
+            "elapsed_s": 0.0,
+            "extraction_elapsed_s": 0.0,
+            "degraded": True,
+            "reason": f"ingest pipeline unavailable: {type(exc).__name__}: {exc}",
+        }
 
 
 @mcp.tool()
@@ -209,12 +223,15 @@ def memory_vector_search(
     """
     from vector_store import get_vector_store
 
-    vs = get_vector_store(load_config())
-    results = vs.search(query, top_k=top_k, score_threshold=score_threshold)
-    return [
-        {"id": r.id, "score": round(r.score, 4), "text": r.text, "payload": r.payload}
-        for r in results
-    ]
+    try:
+        vs = get_vector_store(load_config())
+        results = vs.search(query, top_k=top_k, score_threshold=score_threshold)
+        return [
+            {"id": r.id, "score": round(r.score, 4), "text": r.text, "payload": r.payload}
+            for r in results
+        ]
+    except Exception as exc:
+        return [{"degraded": True, "reason": f"vector store unavailable: {type(exc).__name__}: {exc}"}]
 
 
 @mcp.tool()
@@ -222,8 +239,11 @@ def memory_vector_status() -> dict[str, Any]:
     """Return Qdrant vector store status (availability, collection, count)."""
     from vector_store import get_vector_store
 
-    vs = get_vector_store(load_config())
-    return vs.status()
+    try:
+        vs = get_vector_store(load_config())
+        return vs.status()
+    except Exception as exc:
+        return {"available": False, "degraded": True, "reason": f"{type(exc).__name__}: {exc}"}
 
 
 @mcp.tool()
@@ -305,6 +325,25 @@ def memory_warnings(
         sorted by severity (high first) then weight descending.
     """
     return get_active_warnings(memory_ids, min_weight=min_weight, max_warnings=max_warnings)
+
+
+@mcp.tool()
+def memory_audit_log(
+    memory_id: str | None = None,
+    event_type: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Return audit events for memory writes, updates, and status changes.
+
+    Args:
+        memory_id: Filter by a specific memory record ID (optional)
+        event_type: Filter by event type, e.g. memory_add, memory_update, memory_status_change (optional)
+        limit: Maximum number of events to return (default 50, max 500)
+
+    Returns:
+        List of audit event dicts ordered by created_at desc.
+    """
+    return get_audit_log(memory_id=memory_id, event_type=event_type, limit=limit)
 
 
 @mcp.tool()

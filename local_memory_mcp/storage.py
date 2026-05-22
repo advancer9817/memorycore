@@ -24,6 +24,7 @@ from local_memory_mcp.injection_guard import (
     check_memory_for_injection,
     warning_for_filtered_memory,
 )
+from local_memory_mcp.privacy import redact_record_fields
 from local_memory_mcp.models import (
     DEFAULT_CONFIG,
     DEFAULT_DB,
@@ -64,7 +65,50 @@ __all__ = [
     "curator_report",
     "get_memory_stats",
     "export_html",
+    "log_audit_event",
+    "get_audit_log",
 ]
+
+
+def log_audit_event(
+    event_type: str,
+    memory_id: str | None = None,
+    agent: str = "unknown",
+    detail: dict[str, Any] | None = None,
+) -> None:
+    """Write one row to audit_events. Fire-and-forget; never raises."""
+    try:
+        with managed_conn() as conn:
+            conn.execute(
+                "INSERT INTO audit_events (id, event_type, memory_id, agent, detail_json, created_at) VALUES (?,?,?,?,?,?)",
+                (str(uuid.uuid4()), event_type, memory_id, agent, as_json(detail or {}), now()),
+            )
+    except Exception:
+        pass  # audit must never block the main write path
+
+
+def get_audit_log(
+    memory_id: str | None = None,
+    event_type: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Return audit events, optionally filtered by memory_id or event_type."""
+    clauses: list[str] = []
+    params: list[Any] = []
+    if memory_id:
+        clauses.append("memory_id = ?")
+        params.append(memory_id)
+    if event_type:
+        clauses.append("event_type = ?")
+        params.append(event_type)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    limit = max(1, min(int(limit), 500))
+    params.append(limit)
+    rows = _managed_query(
+        f"SELECT * FROM audit_events {where} ORDER BY created_at DESC LIMIT ?",
+        params,
+    )
+    return [dict(r) for r in rows]
 
 
 def connect() -> sqlite3.Connection:
@@ -188,6 +232,19 @@ def init_db(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_links_target ON memory_links(target_id);
         CREATE INDEX IF NOT EXISTS idx_links_relation ON memory_links(relation_type);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_links_unique ON memory_links(source_id, target_id, relation_type);
+
+        CREATE TABLE IF NOT EXISTS audit_events (
+          id TEXT PRIMARY KEY,
+          event_type TEXT NOT NULL,
+          memory_id TEXT,
+          agent TEXT NOT NULL DEFAULT 'unknown',
+          detail_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_audit_memory ON audit_events(memory_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_type ON audit_events(event_type);
+        CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_events(created_at);
         """
     )
     # Migrate pre-existing SQLite databases. CREATE TABLE IF NOT EXISTS does not
@@ -261,6 +318,7 @@ def add_memory_record(
     validate_status(status)
     if not title.strip() or not content.strip():
         raise ValueError("title and content are required")
+    title, content, _, _ = redact_record_fields(title, content)
     confidence_value = finite_float(confidence, "confidence", 0.0, 1.0)
     importance_value = finite_float(importance, "importance", 0.0, 1.0)
     memory_id = memory_id or str(uuid.uuid4())
@@ -295,7 +353,9 @@ def add_memory_record(
             ),
         )
         row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
-    return row_to_dict(row)
+    result = row_to_dict(row)
+    log_audit_event("memory_add", memory_id=memory_id, agent=source_agent, detail={"type": memory_type})
+    return result
 
 
 def update_memory_content(
@@ -319,6 +379,13 @@ def update_memory_content(
     ts = now()
     updates: list[str] = ["updated_at=?"]
     params: list[Any] = [ts]
+
+    if new_content is not None or new_title is not None:
+        _t, _c, _, _ = redact_record_fields(new_title or "", new_content or "")
+        if new_title is not None:
+            new_title = _t
+        if new_content is not None:
+            new_content = _c
 
     if new_content is not None:
         updates.append("content=?")
@@ -346,7 +413,9 @@ def update_memory_content(
             params,
         )
         row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
-    return row_to_dict(row)
+    result = row_to_dict(row)
+    log_audit_event("memory_update", memory_id=memory_id, detail={"fields": updates[1:]})
+    return result
 
 
 def search_memory_records(
@@ -518,7 +587,9 @@ def update_status(memory_id: str, status: str) -> dict[str, Any]:
         row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
     if row is None:
         raise ValueError(f"memory not found: {memory_id}")
-    return row_to_dict(row)
+    result = row_to_dict(row)
+    log_audit_event("memory_status_change", memory_id=memory_id, detail={"status": status})
+    return result
 
 
 def add_feedback(

@@ -13,6 +13,7 @@ from local_memory_mcp.injection_guard import (
     check_memory_for_injection,
     warning_for_filtered_memory,
 )
+from local_memory_mcp.privacy import redact_record_fields, redact_secrets
 
 # ── Models (constants + helpers) ──────────────────────────────────────────────
 from local_memory_mcp.models import (
@@ -35,9 +36,11 @@ from local_memory_mcp.storage import (
     curator_report,
     export_html,
     get_active_warnings,
+    get_audit_log,
     get_memory_stats,
     get_record,
     list_recent,
+    log_audit_event,
     managed_conn,
     query_links,
     search_memory_records,
@@ -79,4 +82,8 @@ __all__ = [
     "update_memory_content",
     "update_status",
     "warning_for_filtered_memory",
+    "redact_record_fields",
+    "redact_secrets",
+    "get_audit_log",
+    "log_audit_event",
 ]
