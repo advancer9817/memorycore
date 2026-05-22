@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import html
 import json
+import logging
 import re
 import sqlite3
 import uuid
@@ -37,6 +38,7 @@ from local_memory_mcp.models import (
     finite_float,
     from_json,
     fts_phrase,
+    load_config,
     normalize_list,
     normalize_title_key,
     now,
@@ -45,6 +47,23 @@ from local_memory_mcp.models import (
     validate_status,
     validate_type,
 )
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Optional vector store integration (Qdrant).  Imported at module level so
+# patch("local_memory_mcp.storage._get_vector_store", ...) works in tests.
+# Falls back to None when vector_store.py is not on sys.path (e.g. during
+# unit tests that don't need Qdrant).
+# ---------------------------------------------------------------------------
+try:
+    import sys as _sys
+    _root = str(Path(__file__).parent.parent)
+    if _root not in _sys.path:
+        _sys.path.insert(0, _root)
+    from vector_store import get_vector_store as _get_vector_store
+except Exception:
+    _get_vector_store = None  # type: ignore[assignment]
 
 __all__ = [
     "connect",
@@ -328,6 +347,25 @@ def init_db(conn: sqlite3.Connection) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _sync_to_vector(record: dict[str, Any]) -> None:
+    """Fire-and-forget Qdrant upsert after SQLite write. Never raises."""
+    try:
+        if _get_vector_store is None:
+            return
+        text = f"{record.get('title', '')} {record.get('content', '')}".strip()
+        payload = {
+            "type": record.get("type", ""),
+            "scope": record.get("scope", ""),
+            "status": record.get("status", "active"),
+            "source_agent": record.get("source_agent", ""),
+            "tags": record.get("tags", []),
+        }
+        vs = _get_vector_store(load_config())
+        vs.upsert(record["id"], text, payload)
+    except Exception as exc:
+        logger.warning("_sync_to_vector: failed for id=%s: %s", record.get("id"), exc)
+
+
 def add_memory_record(
     memory_type: str,
     title: str,
@@ -386,6 +424,7 @@ def add_memory_record(
         row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
     result = row_to_dict(row)
     log_audit_event("memory_add", memory_id=memory_id, agent=source_agent, detail={"type": memory_type})
+    _sync_to_vector(result)
     return result
 
 
@@ -446,6 +485,7 @@ def update_memory_content(
         row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
     result = row_to_dict(row)
     log_audit_event("memory_update", memory_id=memory_id, detail={"fields": updates[1:]})
+    _sync_to_vector(result)
     return result
 
 
@@ -636,6 +676,7 @@ def update_status(memory_id: str, status: str) -> dict[str, Any]:
         raise ValueError(f"memory not found: {memory_id}")
     result = row_to_dict(row)
     log_audit_event("memory_status_change", memory_id=memory_id, detail={"status": status})
+    _sync_to_vector(result)
     return result
 
 

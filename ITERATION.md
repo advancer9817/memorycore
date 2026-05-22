@@ -1,3 +1,13 @@
+## [迭代 18] 2026-05-22 — Qdrant 自动同步 + config.yaml schema 验证
+
+### 变更摘要
+- `storage.py`：顶部 try-import `_get_vector_store`；新增 `_sync_to_vector(record)`（fire-and-forget，失败只 warn）；在 `add_memory_record`、`update_memory_content`、`update_status` 三个写入路径末尾调用，SQLite 写入后自动同步到 Qdrant
+- `models.py`：新增 `validate_config(cfg) -> list[str]`，校验 embedding/qdrant/context_pack/backend 各 section 的类型、范围、URL scheme；加入 `__all__`
+- `server.py`：serve 分支启动时调用 `validate_config(load_config())`，每条警告 `logger.warning` 输出，degraded 提示更清晰
+- `__init__.py`：导出 `validate_config`
+- 新增测试：`tests/test_vector_sync.py`（5 个）、`tests/test_config_validation.py`（13 个）
+- 验证：264/264 pass
+
 ## [迭代 17] 2026-05-22 — Context Pack v2 + Mailbox TTL/广播 + Graph 增强
 
 ### 变更摘要

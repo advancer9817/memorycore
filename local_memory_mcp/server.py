@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -18,7 +19,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from local_memory_mcp.models import DEFAULT_ROOT, load_config
+from local_memory_mcp.models import DEFAULT_ROOT, load_config, validate_config
 from local_memory_mcp.storage import (
     add_memory_record,
     add_feedback,
@@ -45,6 +46,8 @@ from local_memory_mcp.storage import (
 )
 
 __all__ = ["mcp", "main"]
+
+logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
     "local-memory-mcp",
@@ -583,6 +586,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "html":
         export_html(Path(args.out))
     elif args.cmd == "serve":
+        cfg = load_config()
+        for warn in validate_config(cfg):
+            logger.warning("config validation: %s", warn)
         if args.port:
             mcp.settings.host = args.host
             mcp.settings.port = args.port

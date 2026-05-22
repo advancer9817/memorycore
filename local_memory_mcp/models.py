@@ -30,6 +30,7 @@ __all__ = [
     "_parse_simple_yaml",
     "_deep_merge",
     "load_config",
+    "validate_config",
     "db_path",
     "normalize_list",
     "row_to_dict",
@@ -184,6 +185,49 @@ def load_config() -> dict[str, Any]:
     else:
         config = _deep_merge(DEFAULT_CONFIG, _parse_simple_yaml(path.read_text(encoding="utf-8")))
     return config
+
+
+def validate_config(cfg: dict[str, Any]) -> list[str]:
+    """Validate config dict. Returns list of warning strings (empty = OK)."""
+    warnings: list[str] = []
+
+    def _warn(msg: str) -> None:
+        warnings.append(msg)
+
+    def _pos_int(section: str, key: str, val: Any) -> None:
+        if not (isinstance(val, int) and val > 0):
+            _warn(f"{section}.{key} must be a positive integer (got {val!r})")
+
+    # embedding
+    emb = cfg.get("embedding", {})
+    if emb.get("provider") not in ("ollama", "hashing"):
+        _warn(f"embedding.provider={emb.get('provider')!r} unknown, expected ollama|hashing")
+    _pos_int("embedding", "dim", emb.get("dim"))
+    _pos_int("embedding", "timeout", emb.get("timeout"))
+    ollama_url = emb.get("ollama_url", "")
+    if ollama_url and not str(ollama_url).startswith(("http://", "https://")):
+        _warn(f"embedding.ollama_url must start with http:// or https:// (got {ollama_url!r})")
+
+    # qdrant
+    qs = cfg.get("qdrant", {})
+    if not qs.get("url") and not qs.get("path"):
+        _warn("qdrant: neither url nor path is configured, vector search will be unavailable")
+    if qs.get("url") and not str(qs["url"]).startswith(("http://", "https://")):
+        _warn(f"qdrant.url must start with http:// or https:// (got {qs['url']!r})")
+    if "timeout" in qs:
+        _pos_int("qdrant", "timeout", qs.get("timeout"))
+
+    # context_pack
+    cp = cfg.get("context_pack", {})
+    _pos_int("context_pack", "default_token_budget", cp.get("default_token_budget"))
+    _pos_int("context_pack", "max_records_per_group", cp.get("max_records_per_group"))
+
+    # backend
+    be = cfg.get("backend", {})
+    if be.get("primary") not in ("sqlite", None, ""):
+        _warn(f"backend.primary={be.get('primary')!r} unknown, only sqlite is supported")
+
+    return warnings
 
 
 def db_path() -> Path:

@@ -22,6 +22,7 @@ from local_memory_mcp.models import (
     config_path,
     load_config,
     normalize_list,
+    validate_config,
 )
 
 SQLITE_VEC_AVAILABLE: bool = False  # removed; vector search now via vector_store.py
@@ -95,5 +96,6 @@ __all__ = [
     "update_agent_presence",
     "update_memory_content",
     "update_status",
+    "validate_config",
     "warning_for_filtered_memory",
 ]
