@@ -86,6 +86,9 @@ VALID_RELATION_TYPES: frozenset[str] = frozenset({
     "contradicts",
     "supports",
     "part_of",
+    "blocked_by",
+    "causes",
+    "failure_pattern",
 })
 
 

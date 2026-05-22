@@ -24,6 +24,7 @@ from local_memory_mcp.storage import (
     add_feedback,
     add_link,
     build_context_pack,
+    cleanup_expired_messages,
     consolidate,
     curator_report,
     export_html,
@@ -388,21 +389,34 @@ def agent_send(
     body: str = "",
     priority: str = "normal",
     metadata: dict[str, Any] | None = None,
+    ttl_seconds: int | None = None,
 ) -> dict[str, Any]:
-    """Send a message from one agent to another.
+    """Send a message from one agent to another (or broadcast to all online/idle agents).
 
     Args:
         from_agent: Sender agent identifier
-        to_agent: Recipient agent identifier
+        to_agent: Recipient agent identifier, or '*' to broadcast to all online/idle agents
         subject: Message subject line
         body: Message body text (optional)
         priority: low, normal, high, or urgent (default: normal)
         metadata: Optional key-value metadata
+        ttl_seconds: Optional time-to-live in seconds; message expires after this duration
 
     Returns:
-        The created message record.
+        The created message record, or broadcast summary dict when to_agent='*'.
     """
-    return send_agent_message(from_agent, to_agent, subject, body, priority, metadata)
+    return send_agent_message(from_agent, to_agent, subject, body, priority, metadata, ttl_seconds)
+
+
+@mcp.tool()
+def agent_messages_cleanup() -> dict[str, Any]:
+    """Delete all expired agent messages (where expires_at is set and in the past).
+
+    Returns:
+        Dict with 'deleted' count of removed messages.
+    """
+    deleted = cleanup_expired_messages()
+    return {"deleted": deleted}
 
 
 @mcp.tool()

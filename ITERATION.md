@@ -1,3 +1,13 @@
+## [迭代 17] 2026-05-22 — Context Pack v2 + Mailbox TTL/广播 + Graph 增强
+
+### 变更摘要
+- `build_context_pack()` 增加 `sections`（按类型分组的记忆列表）和 `trace`（`total_candidates/used_count/filtered_count/fallback_used`）字段，保留全部 legacy 字段
+- Agent Mailbox：`send_agent_message` 支持 `ttl_seconds`；`get_agent_inbox` 自动过滤已过期消息；新增 `cleanup_expired_messages() -> int`；`agent_send` 支持广播 `to_agent="*"`；新增 MCP 工具 `agent_messages_cleanup`（第 23 个工具）
+- Graph 增强：`VALID_RELATION_TYPES` 扩展至 8 种，新增 `blocked_by`、`causes`、`failure_pattern`；`get_active_warnings()` 对 `causes`/`failure_pattern` 产生 severity=medium warning
+- 新增测试：`tests/test_context_pack_v2.py`、`tests/test_graph_enhanced.py`、`tests/test_mailbox_enhanced.py`
+- README：工具数 22→23，文档同步
+- 验证：246/246 pass
+
 ## 2026-05-22 13:48 +0800 — feat: agent message + privacy filter + degraded mode + binary-files export/import
 
 ### 目的

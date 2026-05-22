@@ -1,0 +1,189 @@
+"""Tests for Graph / Warning enhancements.
+
+New relation types: blocked_by, causes, failure_pattern (total 8).
+New warning triggers: causes and failure_pattern (severity="medium").
+
+TDD: these tests should fail (RED) before models.py / storage.py are updated.
+"""
+from __future__ import annotations
+
+import local_memory_mcp as lm
+from local_memory_mcp.models import VALID_RELATION_TYPES
+
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+def _add(title: str, content: str = "content", mem_type: str = "episodic_memory") -> str:
+    result = lm.add_memory_record(
+        memory_type=mem_type,
+        title=title,
+        content=content,
+        scope="global",
+    )
+    return result["id"]
+
+
+def _link(src: str, tgt: str, relation: str, weight: float = 0.9) -> dict:
+    return lm.memory_link_add(
+        source_id=src,
+        target_id=tgt,
+        relation_type=relation,
+        weight=weight,
+    )
+
+
+# ---------------------------------------------------------------------------
+# VALID_RELATION_TYPES – 8 types
+# ---------------------------------------------------------------------------
+
+class TestValidRelationTypes:
+    def test_total_count_is_eight(self):
+        assert len(VALID_RELATION_TYPES) == 8, (
+            f"Expected 8 relation types, got {len(VALID_RELATION_TYPES)}: "
+            f"{sorted(VALID_RELATION_TYPES)}"
+        )
+
+    def test_original_five_present(self):
+        for rt in ("related_to", "supersedes", "contradicts", "supports", "part_of"):
+            assert rt in VALID_RELATION_TYPES, f"Original type '{rt}' missing"
+
+    def test_blocked_by_present(self):
+        assert "blocked_by" in VALID_RELATION_TYPES
+
+    def test_causes_present(self):
+        assert "causes" in VALID_RELATION_TYPES
+
+    def test_failure_pattern_present(self):
+        assert "failure_pattern" in VALID_RELATION_TYPES
+
+
+# ---------------------------------------------------------------------------
+# memory_link_add accepts new types
+# ---------------------------------------------------------------------------
+
+class TestLinkAddNewTypes:
+    def test_blocked_by_link_created(self):
+        a = _add("Task A")
+        b = _add("Task B")
+        result = _link(a, b, "blocked_by")
+        assert "error" not in result, f"blocked_by link failed: {result}"
+        assert result.get("relation_type") == "blocked_by"
+
+    def test_causes_link_created(self):
+        a = _add("Event X")
+        b = _add("Event Y")
+        result = _link(a, b, "causes")
+        assert "error" not in result, f"causes link failed: {result}"
+        assert result.get("relation_type") == "causes"
+
+    def test_failure_pattern_link_created(self):
+        a = _add("Bug Z")
+        b = _add("Symptom W")
+        result = _link(a, b, "failure_pattern")
+        assert "error" not in result, f"failure_pattern link failed: {result}"
+        assert result.get("relation_type") == "failure_pattern"
+
+    def test_invalid_type_still_rejected(self):
+        a = _add("Node A")
+        b = _add("Node B")
+        result = _link(a, b, "unknown_type_xyz")
+        assert "error" in result, "Expected error for invalid relation type"
+
+
+# ---------------------------------------------------------------------------
+# get_active_warnings includes causes and failure_pattern
+# ---------------------------------------------------------------------------
+
+class TestWarningsForNewTypes:
+    def test_causes_triggers_warning(self):
+        a = _add("Root cause")
+        b = _add("Effect")
+        _link(a, b, "causes", weight=0.9)
+        warnings = lm.get_active_warnings(memory_ids=[a, b])
+        relation_types_in_warnings = {w["relation_type"] for w in warnings}
+        assert "causes" in relation_types_in_warnings, (
+            f"Expected 'causes' in warnings, got: {relation_types_in_warnings}"
+        )
+
+    def test_failure_pattern_triggers_warning(self):
+        a = _add("Failure source")
+        b = _add("Failure target")
+        _link(a, b, "failure_pattern", weight=0.9)
+        warnings = lm.get_active_warnings(memory_ids=[a, b])
+        relation_types_in_warnings = {w["relation_type"] for w in warnings}
+        assert "failure_pattern" in relation_types_in_warnings, (
+            f"Expected 'failure_pattern' in warnings, got: {relation_types_in_warnings}"
+        )
+
+    def test_causes_warning_severity_is_medium(self):
+        a = _add("Cause node")
+        b = _add("Effect node")
+        _link(a, b, "causes", weight=0.5)
+        warnings = lm.get_active_warnings(memory_ids=[a, b])
+        causes_warnings = [w for w in warnings if w["relation_type"] == "causes"]
+        assert causes_warnings, "No causes warning found"
+        for w in causes_warnings:
+            assert w["severity"] == "medium", (
+                f"causes warning severity should be 'medium', got: {w['severity']}"
+            )
+
+    def test_failure_pattern_warning_severity_is_medium(self):
+        a = _add("FP source")
+        b = _add("FP target")
+        _link(a, b, "failure_pattern", weight=0.5)
+        warnings = lm.get_active_warnings(memory_ids=[a, b])
+        fp_warnings = [w for w in warnings if w["relation_type"] == "failure_pattern"]
+        assert fp_warnings, "No failure_pattern warning found"
+        for w in fp_warnings:
+            assert w["severity"] == "medium", (
+                f"failure_pattern warning severity should be 'medium', got: {w['severity']}"
+            )
+
+    def test_existing_contradicts_still_triggers_warning(self):
+        a = _add("Claim P")
+        b = _add("Counter claim")
+        _link(a, b, "contradicts", weight=0.8)
+        warnings = lm.get_active_warnings(memory_ids=[a, b])
+        relation_types = {w["relation_type"] for w in warnings}
+        assert "contradicts" in relation_types, "contradicts should still trigger warnings"
+
+    def test_existing_supersedes_still_triggers_warning(self):
+        a = _add("New fact")
+        b = _add("Old fact")
+        _link(a, b, "supersedes", weight=0.8)
+        warnings = lm.get_active_warnings(memory_ids=[a, b])
+        relation_types = {w["relation_type"] for w in warnings}
+        assert "supersedes" in relation_types, "supersedes should still trigger warnings"
+
+    def test_related_to_does_not_trigger_warning(self):
+        """related_to, supports, part_of, blocked_by should NOT trigger warnings."""
+        a = _add("Node 1")
+        b = _add("Node 2")
+        _link(a, b, "related_to", weight=0.9)
+        warnings = lm.get_active_warnings(memory_ids=[a, b])
+        relation_types = {w["relation_type"] for w in warnings}
+        assert "related_to" not in relation_types
+
+    def test_blocked_by_does_not_trigger_warning(self):
+        """blocked_by is structural and should NOT trigger a warning."""
+        a = _add("Blocked task")
+        b = _add("Blocker")
+        _link(a, b, "blocked_by", weight=0.9)
+        warnings = lm.get_active_warnings(memory_ids=[a, b])
+        relation_types = {w["relation_type"] for w in warnings}
+        assert "blocked_by" not in relation_types, (
+            "blocked_by should not trigger warnings"
+        )
+
+    def test_warning_respects_min_weight(self):
+        """causes with weight below min_weight threshold should not surface."""
+        a = _add("Low weight cause")
+        b = _add("Effect ignored")
+        _link(a, b, "causes", weight=0.1)
+        warnings = lm.get_active_warnings(memory_ids=[a, b], min_weight=0.4)
+        causes_warnings = [w for w in warnings if w["relation_type"] == "causes"]
+        assert causes_warnings == [], (
+            "causes with weight < min_weight should be filtered out"
+        )

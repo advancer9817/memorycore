@@ -71,6 +71,7 @@ __all__ = [
     "get_agent_inbox",
     "update_agent_presence",
     "list_agent_presence",
+    "cleanup_expired_messages",
 ]
 
 
@@ -260,7 +261,8 @@ def init_db(conn: sqlite3.Connection) -> None:
           status TEXT NOT NULL DEFAULT 'unread',
           created_at TEXT NOT NULL,
           read_at TEXT,
-          metadata_json TEXT NOT NULL DEFAULT '{}'
+          metadata_json TEXT NOT NULL DEFAULT '{}',
+          expires_at TEXT
         );
 
         CREATE INDEX IF NOT EXISTS idx_agent_msg_to ON agent_messages(to_agent, status);
@@ -282,6 +284,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "memories", "ineffective_count", "INTEGER NOT NULL DEFAULT 0")
     _ensure_column(conn, "memories", "effectiveness_score", "REAL NOT NULL DEFAULT 0.5")
     _ensure_column(conn, "memories", "last_injected_at", "TEXT")
+    _ensure_column(conn, "agent_messages", "expires_at", "TEXT")
     # If an earlier contentless FTS table exists, stored columns read back as NULL;
     # rebuild it as a normal FTS table so JOINs on f.id work correctly.
     try:
@@ -517,8 +520,10 @@ def build_context_pack(
 ) -> dict[str, Any]:
     max_chars = max(800, int(token_budget) * 4)
     records = search_memory_records(task, scope=scope, project_path=project_path, status="active", limit=40)
+    fallback_used = False
     if not records and len(task.strip()) > 10 and not _is_greeting(task):
         records = search_memory_records("", scope=scope, project_path=project_path, status="active", limit=20)
+        fallback_used = bool(records)
     groups_order = [
         "skill_candidate",
         "user_profile",
@@ -589,6 +594,13 @@ def build_context_pack(
                 )
     active_count = sum(1 for r in records if r["status"] == "active")
     warnings = (get_active_warnings(used_ids) if used_ids else []) + injection_warnings
+    # Build sections: one entry per group that has used records, in groups_order order.
+    used_id_set = set(used_ids)
+    sections: list[dict[str, Any]] = []
+    for group in groups_order:
+        group_records = [r for r in grouped.get(group, []) if r["id"] in used_id_set]
+        if group_records:
+            sections.append({"type": group, "records": group_records})
     return {
         "context": text,
         "records": records,
@@ -604,6 +616,13 @@ def build_context_pack(
             "avg_importance": round(sum(r["importance"] for r in records) / max(len(records), 1), 3),
             "stale_in_results": sum(1 for r in records if r["status"] == "stale"),
             "estimated_tokens": len(text) // 4,
+        },
+        "sections": sections,
+        "trace": {
+            "total_candidates": len(records),
+            "used_count": len(used_ids),
+            "filtered_count": len(filtered_ids),
+            "fallback_used": fallback_used,
         },
     }
 
@@ -707,7 +726,7 @@ def get_active_warnings(
         JOIN memories ms ON ms.id = ml.source_id
         JOIN memories mt ON mt.id = ml.target_id
         WHERE (ml.source_id IN ({placeholders}) OR ml.target_id IN ({placeholders}))
-          AND ml.relation_type IN ('contradicts', 'supersedes')
+          AND ml.relation_type IN ('contradicts', 'supersedes', 'causes', 'failure_pattern')
           AND ml.weight >= ?
           AND ms.status = 'active'
           AND mt.status = 'active'
@@ -724,9 +743,14 @@ def get_active_warnings(
         if sig in seen:
             continue
         seen.add(sig)
-        severity = "high" if float(row.get("weight") or 0) >= 0.7 else "medium"
-        if float(row.get("target_fb") or 0) < -0.5:
-            severity = "high"
+        rel_type = row["relation_type"]
+        # causes and failure_pattern are always medium severity (informational)
+        if rel_type in ("causes", "failure_pattern"):
+            severity = "medium"
+        else:
+            severity = "high" if float(row.get("weight") or 0) >= 0.7 else "medium"
+            if float(row.get("target_fb") or 0) < -0.5:
+                severity = "high"
         note_part = f" — {row['note']}" if row.get("note") else ""
         warnings.append({
             "source_id": row["source_id"],
@@ -1172,17 +1196,52 @@ def send_agent_message(
     body: str = "",
     priority: str = "normal",
     metadata: dict[str, Any] | None = None,
+    ttl_seconds: int | None = None,
 ) -> dict[str, Any]:
     if priority not in _MESSAGE_PRIORITIES:
         return {"error": f"invalid priority '{priority}', must be one of {sorted(_MESSAGE_PRIORITIES)}"}
+
+    # Compute expires_at from ttl_seconds if provided
+    expires_at: str | None = None
+    if ttl_seconds is not None:
+        from datetime import datetime, timezone, timedelta
+        expires_dt = datetime.now(timezone.utc) + timedelta(seconds=int(ttl_seconds))
+        expires_at = expires_dt.isoformat()
+
+    # Broadcast: to_agent="*" → send to all online/idle agents except from_agent
+    if to_agent == "*":
+        with managed_conn() as conn:
+            rows = conn.execute(
+                "SELECT agent_id FROM agent_presence WHERE status IN ('online', 'idle') AND agent_id != ?",
+                (from_agent,),
+            ).fetchall()
+        recipients = [row[0] for row in rows]
+        ts = now()
+        meta_json = as_json(metadata or {})
+        for recipient in recipients:
+            msg_id = str(uuid.uuid4())
+            with managed_conn() as conn:
+                conn.execute(
+                    "INSERT INTO agent_messages "
+                    "(id, from_agent, to_agent, subject, body, priority, status, created_at, metadata_json, expires_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (msg_id, from_agent, recipient, subject, body, priority, "unread", ts, meta_json, expires_at),
+                )
+            log_audit_event("agent_message_send", memory_id=msg_id, agent=from_agent, detail={
+                "message_id": msg_id, "to": recipient, "subject": subject, "priority": priority,
+                "broadcast": True,
+            })
+        return {"broadcast": True, "sent_to": recipients, "count": len(recipients)}
+
     msg_id = str(uuid.uuid4())
     ts = now()
     meta_json = as_json(metadata or {})
     with managed_conn() as conn:
         conn.execute(
-            "INSERT INTO agent_messages (id, from_agent, to_agent, subject, body, priority, status, created_at, metadata_json) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
-            (msg_id, from_agent, to_agent, subject, body, priority, "unread", ts, meta_json),
+            "INSERT INTO agent_messages "
+            "(id, from_agent, to_agent, subject, body, priority, status, created_at, metadata_json, expires_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (msg_id, from_agent, to_agent, subject, body, priority, "unread", ts, meta_json, expires_at),
         )
     log_audit_event("agent_message_send", memory_id=msg_id, agent=from_agent, detail={
         "message_id": msg_id, "to": to_agent, "subject": subject, "priority": priority,
@@ -1197,6 +1256,7 @@ def send_agent_message(
         "status": "unread",
         "created_at": ts,
         "read_at": None,
+        "expires_at": expires_at,
         "metadata": metadata or {},
     }
 
@@ -1213,6 +1273,9 @@ def get_agent_inbox(
     if status:
         clauses.append("status = ?")
         params.append(status)
+    # Filter out expired messages
+    clauses.append("(expires_at IS NULL OR expires_at > ?)")
+    params.append(now())
     where = " AND ".join(clauses)
     params.append(limit)
     with managed_conn() as conn:
@@ -1283,3 +1346,16 @@ def list_agent_presence(
         d["metadata"] = from_json(d.pop("metadata_json", "{}"), {})
         results.append(d)
     return results
+
+
+def cleanup_expired_messages() -> int:
+    """Delete all agent_messages where expires_at is set and in the past.
+
+    Returns the number of deleted messages.
+    """
+    with managed_conn() as conn:
+        cur = conn.execute(
+            "DELETE FROM agent_messages WHERE expires_at IS NOT NULL AND expires_at <= ?",
+            (now(),),
+        )
+        return cur.rowcount
