@@ -20,3 +20,9 @@ backups/
 .DS_Store
 Thumbs.db
 .env
+
+# OMC agent artifacts
+.omc/
+
+# Curator reports
+reports/

@@ -67,6 +67,10 @@ __all__ = [
     "export_html",
     "log_audit_event",
     "get_audit_log",
+    "send_agent_message",
+    "get_agent_inbox",
+    "update_agent_presence",
+    "list_agent_presence",
 ]
 
 
@@ -245,6 +249,30 @@ def init_db(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_audit_memory ON audit_events(memory_id);
         CREATE INDEX IF NOT EXISTS idx_audit_type ON audit_events(event_type);
         CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_events(created_at);
+
+        CREATE TABLE IF NOT EXISTS agent_messages (
+          id TEXT PRIMARY KEY,
+          from_agent TEXT NOT NULL,
+          to_agent TEXT NOT NULL,
+          subject TEXT NOT NULL,
+          body TEXT NOT NULL DEFAULT '',
+          priority TEXT NOT NULL DEFAULT 'normal',
+          status TEXT NOT NULL DEFAULT 'unread',
+          created_at TEXT NOT NULL,
+          read_at TEXT,
+          metadata_json TEXT NOT NULL DEFAULT '{}'
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_msg_to ON agent_messages(to_agent, status);
+        CREATE INDEX IF NOT EXISTS idx_agent_msg_from ON agent_messages(from_agent);
+        CREATE INDEX IF NOT EXISTS idx_agent_msg_created ON agent_messages(created_at);
+
+        CREATE TABLE IF NOT EXISTS agent_presence (
+          agent_id TEXT PRIMARY KEY,
+          status TEXT NOT NULL DEFAULT 'offline',
+          last_seen_at TEXT NOT NULL,
+          metadata_json TEXT NOT NULL DEFAULT '{}'
+        );
         """
     )
     # Migrate pre-existing SQLite databases. CREATE TABLE IF NOT EXISTS does not
@@ -1126,3 +1154,132 @@ def get_memory_stats() -> dict[str, Any]:
         "never_accessed_count": never_accessed,
         "link_count": link_count,
     }
+
+
+# ---------------------------------------------------------------------------
+# Agent Mailbox
+# ---------------------------------------------------------------------------
+
+_MESSAGE_PRIORITIES = {"low", "normal", "high", "urgent"}
+_MESSAGE_STATUSES = {"unread", "read"}
+_PRESENCE_STATUSES = {"online", "idle", "busy", "offline"}
+
+
+def send_agent_message(
+    from_agent: str,
+    to_agent: str,
+    subject: str,
+    body: str = "",
+    priority: str = "normal",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if priority not in _MESSAGE_PRIORITIES:
+        return {"error": f"invalid priority '{priority}', must be one of {sorted(_MESSAGE_PRIORITIES)}"}
+    msg_id = str(uuid.uuid4())
+    ts = now()
+    meta_json = as_json(metadata or {})
+    with managed_conn() as conn:
+        conn.execute(
+            "INSERT INTO agent_messages (id, from_agent, to_agent, subject, body, priority, status, created_at, metadata_json) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (msg_id, from_agent, to_agent, subject, body, priority, "unread", ts, meta_json),
+        )
+    log_audit_event("agent_message_send", memory_id=msg_id, agent=from_agent, detail={
+        "message_id": msg_id, "to": to_agent, "subject": subject, "priority": priority,
+    })
+    return {
+        "id": msg_id,
+        "from_agent": from_agent,
+        "to_agent": to_agent,
+        "subject": subject,
+        "body": body,
+        "priority": priority,
+        "status": "unread",
+        "created_at": ts,
+        "read_at": None,
+        "metadata": metadata or {},
+    }
+
+
+def get_agent_inbox(
+    agent_id: str,
+    status: str = "",
+    mark_read: bool = False,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    limit = max(1, min(int(limit), 500))
+    clauses = ["to_agent = ?"]
+    params: list[Any] = [agent_id]
+    if status:
+        clauses.append("status = ?")
+        params.append(status)
+    where = " AND ".join(clauses)
+    params.append(limit)
+    with managed_conn() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM agent_messages WHERE {where} ORDER BY created_at DESC, rowid DESC LIMIT ?",
+            params,
+        ).fetchall()
+        results = [dict(r) for r in rows]
+        for r in results:
+            r["metadata"] = from_json(r.pop("metadata_json", "{}"), {})
+        if mark_read and results:
+            ids = [r["id"] for r in results if r["status"] == "unread"]
+            if ids:
+                placeholders = ",".join("?" * len(ids))
+                conn.execute(
+                    f"UPDATE agent_messages SET status='read', read_at=? WHERE id IN ({placeholders})",
+                    [now()] + ids,
+                )
+    return results
+
+
+def update_agent_presence(
+    agent_id: str,
+    status: str = "online",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if status not in _PRESENCE_STATUSES:
+        return {"error": f"invalid status '{status}', must be one of {sorted(_PRESENCE_STATUSES)}"}
+    ts = now()
+    meta_json = as_json(metadata or {})
+    with managed_conn() as conn:
+        conn.execute(
+            "INSERT INTO agent_presence (agent_id, status, last_seen_at, metadata_json) "
+            "VALUES (?,?,?,?) "
+            "ON CONFLICT(agent_id) DO UPDATE SET status=excluded.status, last_seen_at=excluded.last_seen_at, metadata_json=excluded.metadata_json",
+            (agent_id, status, ts, meta_json),
+        )
+    log_audit_event("agent_presence_update", agent=agent_id, detail={
+        "agent_id": agent_id, "status": status,
+    })
+    return {
+        "agent_id": agent_id,
+        "status": status,
+        "last_seen_at": ts,
+        "metadata": metadata or {},
+    }
+
+
+def list_agent_presence(
+    status: str = "",
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    limit = max(1, min(int(limit), 500))
+    clauses: list[str] = []
+    params: list[Any] = []
+    if status:
+        clauses.append("status = ?")
+        params.append(status)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(limit)
+    rows = _managed_query(
+        f"SELECT * FROM agent_presence {where} ORDER BY last_seen_at DESC, rowid DESC LIMIT ?",
+        params,
+    )
+    results = []
+    for r in rows:
+        d = dict(r)
+        d["metadata"] = from_json(d.pop("metadata_json", "{}"), {})
+        results.append(d)
+    return results

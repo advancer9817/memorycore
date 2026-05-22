@@ -43,7 +43,7 @@ MEM_ROOT="${LOCAL_MEMORY_ROOT:-/home/advancer/project/local-memory-mcp}"
 已验证：
 
 1. **SQLite + FTS5 结构化记忆层**：支持 type/scope/tags/status/importance/confidence/source_agent/effectiveness 等字段，FTS5 全文检索。
-2. **HTTP MCP server**：18 个工具，Hermes 可通过 `http://127.0.0.1:8318/mcp` 作为普通 HTTP MCP 客户端连接。
+2. **HTTP MCP server**：22 个工具，Hermes 可通过 `http://127.0.0.1:8318/mcp` 作为普通 HTTP MCP 客户端连接。
 3. **Context Pack**：`memory_context` 按任务生成 compact 上下文包，支持 token budget 控制，按记忆类型分组，集成 active contradicts/supersedes warning，并将检索记忆标记为 untrusted data；命中注入特征的记忆会从普通 context body 过滤到 warnings。
 4. **Curator**：重复标题、低反馈、stale、archive、矛盾候选、skill_candidate 推广候选检测；默认 dry-run。
 5. **Feedback / effectiveness**：`memory_feedback` 记录反馈事件并更新 feedback_score、injected_count、ineffective_count、effectiveness_score。
@@ -84,6 +84,10 @@ Removed / not current core：
 | `memory_warnings` | 根据 active links 返回冲突/替代 warning |
 | `memory_update` | 更新已有记忆的 title/content/status/confidence/importance |
 | `memory_audit_log` | 查询记忆写入、更新、状态变更的审计事件日志 |
+| `agent_send` | 向指定 agent 发送消息 |
+| `agent_inbox` | 读取 agent 收件箱，支持按状态过滤和自动标记已读 |
+| `agent_presence_update` | 更新 agent 在线状态（心跳） |
+| `agent_presence_list` | 列出 agent 在线状态，支持按状态过滤 |
 
 ## CLI
 
@@ -244,4 +248,4 @@ scripts/init_local_memory.sh
 1. **P0 稳定化**：文档-工具-测试一致性、context injection guard（已实现基础版）、隐私脱敏、审计日志、degraded/fallback response contract。
 2. **Context Pack v2**：在保留 legacy `context` 字段的同时增加 sections / records / warnings / trace。
 3. **Graph / Warning 增强**：扩展 relation types，支持 blocked_by / causes / failure-pattern warnings。
-4. **Agent Mailbox MVP**：在 P0/P1 防线完成后，再增加 agent_messages / agent_presence 与基础协作通讯工具。
+4. **Agent Mailbox 增强**：在 MVP（agent_send / agent_inbox / agent_presence_update / agent_presence_list）基础上增加 TTL 过期、广播、agent 权限和 webhook 通知。

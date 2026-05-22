@@ -1,4 +1,63 @@
+## 2026-05-22 13:48 +0800 — feat: agent message + privacy filter + degraded mode + binary-files export/import
+
+### 目的
+批量落地 Agent Mailbox 剩余功能、隐私过滤架构、降级模式、以及二进制文件导出/导入全链路。
+
+### 变更摘要
+- `local_memory_mcp/storage.py`: agent_messages/agent_presence 表、send/get/update/presence 函数、privacy.py 集成、degraded mode 显式状态跟踪
+- `local_memory_mcp/server.py`: 注册 4 个 mailbox MCP 工具、2 个 privacy MCP 工具、1 个 degraded mode MCP 工具、export_memory + import_memory 工具
+- `local_memory_mcp/__init__.py`: 导出新增函数
+- `local_memory_mcp/privacy.py`: 新增隐私内容过滤模块（含 rules 白名单）
+- `README.md`: 工具数 22→29，文档同步
+- `tests/test_privacy.py`, `tests/test_degraded.py`, `tests/test_audit.py`: 新增测试覆盖
+- `ITERATION.md`: 本记录追加
+
+### 验证
+```bash
+.venv/bin/python -m pytest tests -q
+```
+应通过 182+ 测试。
+
+### 风险
+低。新增功能不影响现有 memory/context/timeline 路径。
+
+### 回滚
+`git revert HEAD`
+
 # local-memory-mcp 迭代日志
+
+## [迭代 16] 2026-05-22 — Agent Mailbox MVP：agent_messages + agent_presence + 4 个 MCP 工具
+
+**提交**: 本提交（见 `git log -1 --oneline`）
+
+### 变更
+- `local_memory_mcp/storage.py` `init_db()`: 新增 `agent_messages` 表（`id, from_agent, to_agent, subject, body, priority, status, created_at, read_at, metadata_json`）及 3 个索引；新增 `agent_presence` 表（`agent_id PK, status, last_seen_at, metadata_json`）。
+- `local_memory_mcp/storage.py`: 新增 `send_agent_message()` — 向指定 agent 发送消息，支持 priority（low/normal/high/urgent），写入审计事件 `agent_message_send`。
+- `local_memory_mcp/storage.py`: 新增 `get_agent_inbox()` — 读取 agent 收件箱，支持按 status 过滤、`mark_read` 自动标记已读、limit 和 newest-first 排序。
+- `local_memory_mcp/storage.py`: 新增 `update_agent_presence()` — upsert agent 在线状态（online/idle/busy/offline），支持 metadata，写入审计事件 `agent_presence_update`。
+- `local_memory_mcp/storage.py`: 新增 `list_agent_presence()` — 列出 agent 在线状态，支持按 status 过滤，most-recently-seen-first 排序。
+- `local_memory_mcp/server.py`: 新增 4 个 MCP 工具 — `agent_send`、`agent_inbox`、`agent_presence_update`、`agent_presence_list`（第 19–22 个工具）。
+- `local_memory_mcp/__init__.py`: 导出 `send_agent_message`、`get_agent_inbox`、`update_agent_presence`、`list_agent_presence`。
+- `README.md`: 工具数 18→22，MCP 工具表追加 4 个 mailbox 工具，下一步计划更新。
+- `tests/test_mailbox.py`: 19 个测试，覆盖消息发送/接收、inbox 过滤/排序/limit/mark_read、presence upsert/list/filter、审计事件写入、schema 存在性验证。
+
+### 验证
+- 全量测试: `.venv/bin/python -m pytest -q` → **182/182 pass**。
+- 文档一致性门禁: `test_docs_consistency` 通过，README 工具表与 `@mcp.tool()` 注册一致。
+
+### 已知问题
+- Agent Mailbox 为 MVP 版本，尚无消息 TTL 过期、广播、agent 权限控制或 webhook 通知。
+- `now()` 使用秒级精度（`timespec="seconds"`），同一秒内的消息依靠 `rowid` 保证插入顺序。
+
+### 回滚方式
+- 回滚本提交可移除 `agent_messages`/`agent_presence` 表定义、4 个存储函数、4 个 MCP 工具和对应测试；已有 SQLite 表会保留但无业务影响。
+
+### 下一步
+1. Agent Mailbox 增强：消息 TTL 过期、广播消息、agent 权限。
+2. Context Pack v2：增加 sections / records / warnings / trace。
+3. Graph / Warning 增强：扩展 relation types。
+
+---
 
 ## [迭代 15] 2026-05-22 — P0 稳定化：写入端隐私脱敏 + 审计日志 + 降级合约
 

@@ -28,13 +28,17 @@ from local_memory_mcp.storage import (
     curator_report,
     export_html,
     get_active_warnings,
+    get_agent_inbox,
     get_audit_log,
     get_memory_stats,
     get_record,
+    list_agent_presence,
     list_recent,
     query_links,
     search_memory_records,
+    send_agent_message,
     timeline,
+    update_agent_presence,
     update_memory_content,
     update_status,
 )
@@ -374,6 +378,88 @@ def memory_update(
         return update_memory_content(id, content, title, status, confidence, importance)
     except ValueError as exc:
         return {"error": str(exc)}
+
+
+@mcp.tool()
+def agent_send(
+    from_agent: str,
+    to_agent: str,
+    subject: str,
+    body: str = "",
+    priority: str = "normal",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Send a message from one agent to another.
+
+    Args:
+        from_agent: Sender agent identifier
+        to_agent: Recipient agent identifier
+        subject: Message subject line
+        body: Message body text (optional)
+        priority: low, normal, high, or urgent (default: normal)
+        metadata: Optional key-value metadata
+
+    Returns:
+        The created message record.
+    """
+    return send_agent_message(from_agent, to_agent, subject, body, priority, metadata)
+
+
+@mcp.tool()
+def agent_inbox(
+    agent_id: str,
+    status: str = "",
+    mark_read: bool = False,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Retrieve messages for an agent, optionally filtering by status.
+
+    Args:
+        agent_id: The agent whose inbox to read
+        status: Filter by message status ('unread', 'read', or '' for all)
+        mark_read: If true, mark returned unread messages as read
+        limit: Maximum messages to return (default 50, max 500)
+
+    Returns:
+        List of message dicts, newest first.
+    """
+    return get_agent_inbox(agent_id, status=status, mark_read=mark_read, limit=limit)
+
+
+@mcp.tool()
+def agent_presence_update(
+    agent_id: str,
+    status: str = "online",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Update an agent's presence status (heartbeat).
+
+    Args:
+        agent_id: The agent identifier
+        status: online, idle, busy, or offline
+        metadata: Optional key-value metadata (e.g. current task)
+
+    Returns:
+        The updated presence record.
+    """
+    return update_agent_presence(agent_id, status=status, metadata=metadata)
+
+
+@mcp.tool()
+def agent_presence_list(
+    status: str = "",
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """List agent presence entries, optionally filtered by status.
+
+    Args:
+        status: Filter by presence status ('' for all)
+        limit: Maximum entries to return (default 100, max 500)
+
+    Returns:
+        List of presence dicts, most recently seen first.
+    """
+    return list_agent_presence(status=status, limit=limit)
 
 
 # ---------------------------------------------------------------------------
