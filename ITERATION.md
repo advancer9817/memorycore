@@ -674,3 +674,48 @@ streamable-http 握手 bug。
   - Low. Migration is additive and idempotent; existing rows receive SQLite defaults.
 - Rollback:
   - Revert this commit for code rollback. Existing added SQLite columns can safely remain; they are additive and backward-compatible.
+
+
+## 2026-05-22 18:11:22 +0800 - Repository sync publish
+
+- Branch: `main`
+- Target remote: `origin`
+- Remotes:
+
+```text
+origin	https://github.com/advancer9817-crypto/local-memory-mcp.git (fetch)
+origin	https://github.com/advancer9817-crypto/local-memory-mcp.git (push)
+```
+
+### Purpose
+Batch commit and push project repository to the user-owned GitHub account as requested.
+
+### Change summary
+- Added/updated repository-local iteration record for auditable sync.
+- Included current tracked/untracked project changes selected by git status.
+- For newly initialized repositories, added conservative ignore rules for local runtime files and secrets.
+
+### Impact scope
+- Repository-local files only.
+- No force push, no branch rewrite, no remote replacement of vendor/upstream remotes.
+
+### Validation commands
+```bash
+git status --porcelain=v1 --untracked-files=all
+git rev-list --left-right --count @{u}...HEAD
+```
+
+### Risks
+- Large generated files and secret-like local files are intentionally excluded when ignored by `.gitignore`.
+- Existing repository-specific tests are not exhaustively run for this batch metadata/publish operation.
+
+### Rollback
+```bash
+git revert HEAD
+git push
+```
+
+### Commit content before staging
+```text
+Only repository sync/iteration metadata changes.
+```
