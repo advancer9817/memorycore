@@ -14,6 +14,8 @@ import json
 import logging
 import os
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -192,6 +194,7 @@ def memory_ingest(
     messages: list[dict[str, str]],
     user_id: str = "default",
     agent_id: str = "agent",
+    timeout_s: int = 120,
 ) -> dict[str, Any]:
     """Extract facts from a conversation and write deduplicated candidates to SQLite.
 
@@ -201,14 +204,16 @@ def memory_ingest(
         messages: Conversation as [{"role": "user"|"assistant", "content": "..."}]
         user_id: User scope for vector search filters
         agent_id: Which agent produced the conversation
+        timeout_s: Hard timeout in seconds (default 120)
 
     Returns:
         {"added": int, "updated": int, "skipped": int, "errors": int, "elapsed_s": float}
     """
+    import concurrent.futures
     from local_memory_mcp.dedup import ingest
 
-    try:
-        result = ingest(
+    def _run():
+        return ingest(
             messages,
             user_id=user_id,
             agent_id=agent_id,
@@ -216,6 +221,11 @@ def memory_ingest(
             _add_memory_fn=add_memory_record,
             _update_memory_fn=update_memory_content,
         )
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_run)
+            result = future.result(timeout=int(timeout_s))
         return {
             "added": result.added,
             "updated": result.updated,
@@ -225,14 +235,16 @@ def memory_ingest(
             "extraction_elapsed_s": result.extraction_elapsed_s,
             "degraded": False,
         }
+    except concurrent.futures.TimeoutError:
+        return {
+            "added": 0, "updated": 0, "skipped": len(messages), "errors": 1,
+            "elapsed_s": float(timeout_s), "extraction_elapsed_s": 0.0,
+            "degraded": True, "reason": f"ingest timed out after {timeout_s}s",
+        }
     except Exception as exc:
         return {
-            "added": 0,
-            "updated": 0,
-            "skipped": len(messages),
-            "errors": 1,
-            "elapsed_s": 0.0,
-            "extraction_elapsed_s": 0.0,
+            "added": 0, "updated": 0, "skipped": len(messages), "errors": 1,
+            "elapsed_s": 0.0, "extraction_elapsed_s": 0.0,
             "degraded": True,
             "reason": f"ingest pipeline unavailable: {type(exc).__name__}: {exc}",
         }
@@ -520,6 +532,48 @@ def agent_presence_list(
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+_OBS_START_TIME = __import__("time").time()
+
+
+def _start_observability_server(host: str, obs_port: int) -> None:
+    """Start a lightweight HTTP server exposing /health and /metrics."""
+    from local_memory_mcp.storage import get_memory_stats
+
+    class _Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):  # silence access logs
+            pass
+
+        def _send_json(self, code: int, body: dict) -> None:
+            data = json.dumps(body, ensure_ascii=False).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            import time
+            if self.path == "/health":
+                try:
+                    stats = get_memory_stats()
+                    self._send_json(200, {"status": "ok", "total_memories": stats["total"]})
+                except Exception as exc:
+                    self._send_json(503, {"status": "error", "reason": str(exc)})
+            elif self.path == "/metrics":
+                try:
+                    stats = get_memory_stats()
+                    uptime = round(time.time() - _OBS_START_TIME, 1)
+                    self._send_json(200, {**stats, "uptime_s": uptime})
+                except Exception as exc:
+                    self._send_json(503, {"error": str(exc)})
+            else:
+                self._send_json(404, {"error": "not found"})
+
+    server = HTTPServer((host, obs_port), _Handler)
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    print(f"Observability endpoints: http://{host}:{obs_port}/health  http://{host}:{obs_port}/metrics", file=sys.stderr)
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="local-memory-mcp server and CLI")
@@ -563,6 +617,7 @@ def main(argv: list[str] | None = None) -> int:
     p_serve = sub.add_parser("serve")
     p_serve.add_argument("--host", default="127.0.0.1", help="HTTP bind address (SSE mode)")
     p_serve.add_argument("--port", type=int, default=0, help="HTTP port (SSE mode; default=0 = stdio)")
+    p_serve.add_argument("--obs-port", type=int, default=0, help="Observability HTTP port for /health and /metrics (0 = disabled)")
     args = parser.parse_args(argv)
     if args.cmd == "init":
         from local_memory_mcp.storage import managed_conn
@@ -626,6 +681,9 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load_config()
         for warn in validate_config(cfg):
             logger.warning("config validation: %s", warn)
+        obs_port = getattr(args, "obs_port", 0)
+        if obs_port:
+            _start_observability_server(args.host, obs_port)
         if args.port:
             mcp.settings.host = args.host
             mcp.settings.port = args.port

@@ -1,8 +1,10 @@
 """SQLite connection management and schema initialisation."""
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from typing import Any
 
@@ -13,7 +15,10 @@ from local_memory_mcp.models import (
     row_to_dict,
 )
 
+logger = logging.getLogger(__name__)
 _thread_local = threading.local()
+_LOCK_RETRY_ATTEMPTS = 3
+_LOCK_RETRY_DELAY = 0.1
 
 
 def _get_thread_conn(path) -> sqlite3.Connection:
@@ -44,12 +49,21 @@ def connect() -> sqlite3.Connection:
 @contextmanager
 def managed_conn():
     conn = connect()
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
+    for attempt in range(_LOCK_RETRY_ATTEMPTS):
+        try:
+            yield conn
+            conn.commit()
+            return
+        except sqlite3.OperationalError as exc:
+            conn.rollback()
+            if "database is locked" in str(exc) and attempt < _LOCK_RETRY_ATTEMPTS - 1:
+                logger.warning("db locked, retrying (%d/%d)", attempt + 1, _LOCK_RETRY_ATTEMPTS)
+                time.sleep(_LOCK_RETRY_DELAY * (attempt + 1))
+            else:
+                raise
+        except Exception:
+            conn.rollback()
+            raise
 
 
 def _managed_query(sql: str, params: tuple = ()) -> list[dict[str, Any]]:
