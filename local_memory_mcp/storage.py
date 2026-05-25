@@ -57,11 +57,7 @@ logger = logging.getLogger(__name__)
 # unit tests that don't need Qdrant).
 # ---------------------------------------------------------------------------
 try:
-    import sys as _sys
-    _root = str(Path(__file__).parent.parent)
-    if _root not in _sys.path:
-        _sys.path.insert(0, _root)
-    from vector_store import get_vector_store as _get_vector_store
+    from local_memory_mcp.vector_store import get_vector_store as _get_vector_store
 except Exception:
     _get_vector_store = None  # type: ignore[assignment]
 

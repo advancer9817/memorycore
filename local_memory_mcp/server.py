@@ -180,7 +180,7 @@ def memory_ingest(
     Returns:
         {"added": int, "updated": int, "skipped": int, "errors": int, "elapsed_s": float}
     """
-    from dedup import ingest
+    from local_memory_mcp.dedup import ingest
 
     try:
         result = ingest(
@@ -229,7 +229,7 @@ def memory_vector_search(
     Returns:
         List of {"id", "score", "text", "payload"} dicts, sorted by score desc.
     """
-    from vector_store import get_vector_store
+    from local_memory_mcp.vector_store import get_vector_store
 
     try:
         vs = get_vector_store(load_config())
@@ -245,7 +245,7 @@ def memory_vector_search(
 @mcp.tool()
 def memory_vector_status() -> dict[str, Any]:
     """Return Qdrant vector store status (availability, collection, count)."""
-    from vector_store import get_vector_store
+    from local_memory_mcp.vector_store import get_vector_store
 
     try:
         vs = get_vector_store(load_config())

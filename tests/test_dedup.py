@@ -1,15 +1,11 @@
 """Tests for dedup.py — deduplication engine."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, call
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from dedup import (
+from local_memory_mcp.dedup import (
     LINK_THRESHOLD,
     SKIP_THRESHOLD,
     UPDATE_THRESHOLD,
@@ -18,7 +14,7 @@ from dedup import (
     decide,
     ingest,
 )
-from vector_store import SearchResult
+from local_memory_mcp.vector_store import SearchResult
 
 
 # ---------------------------------------------------------------------------
@@ -116,18 +112,18 @@ class TestIngest:
 
     def _make_mock_ext(self, facts):
         """Return a mock extraction config and patch extract_facts."""
-        from extraction import ExtractionConfig, ExtractedFact
+        from local_memory_mcp.extraction import ExtractionConfig, ExtractedFact
         cfg = ExtractionConfig(api_key="sk-test")
         return cfg, facts
 
     def test_empty_extraction_returns_zero(self):
-        from extraction import ExtractionConfig
+        from local_memory_mcp.extraction import ExtractionConfig
         vs = self._make_mock_vs()
         add_fn = MagicMock()
         upd_fn = MagicMock()
 
         with __import__("unittest.mock", fromlist=["patch"]).patch(
-            "dedup.extract_facts", return_value=([], 0.1)
+            "local_memory_mcp.dedup.extract_facts", return_value=([], 0.1)
         ):
             result = ingest(
                 [{"role": "user", "content": "hi"}],
@@ -143,7 +139,7 @@ class TestIngest:
         add_fn.assert_not_called()
 
     def test_new_fact_calls_add(self):
-        from extraction import ExtractionConfig, ExtractedFact
+        from local_memory_mcp.extraction import ExtractionConfig, ExtractedFact
         from unittest.mock import patch
 
         vs = self._make_mock_vs(search_results=[])
@@ -151,7 +147,7 @@ class TestIngest:
         upd_fn = MagicMock()
         facts = [ExtractedFact(text="User uses Neovim")]
 
-        with patch("dedup.extract_facts", return_value=(facts, 0.5)):
+        with patch("local_memory_mcp.dedup.extract_facts", return_value=(facts, 0.5)):
             result = ingest(
                 [{"role": "user", "content": "I use Neovim"}],
                 _extraction_config=ExtractionConfig(api_key="sk-test"),
@@ -168,7 +164,7 @@ class TestIngest:
         assert "extracted" in call_kwargs.kwargs["tags"]
 
     def test_duplicate_fact_skipped(self):
-        from extraction import ExtractionConfig, ExtractedFact
+        from local_memory_mcp.extraction import ExtractionConfig, ExtractedFact
         from unittest.mock import patch
 
         similar = [SearchResult(id="existing-id", score=0.97, text="User uses Neovim")]
@@ -177,7 +173,7 @@ class TestIngest:
         upd_fn = MagicMock()
         facts = [ExtractedFact(text="User uses Neovim editor")]
 
-        with patch("dedup.extract_facts", return_value=(facts, 0.5)):
+        with patch("local_memory_mcp.dedup.extract_facts", return_value=(facts, 0.5)):
             result = ingest(
                 [{"role": "user", "content": "I use Neovim"}],
                 _extraction_config=ExtractionConfig(api_key="sk-test"),
@@ -191,7 +187,7 @@ class TestIngest:
         add_fn.assert_not_called()
 
     def test_update_fact_adds_candidate_with_supersedes(self):
-        from extraction import ExtractionConfig, ExtractedFact
+        from local_memory_mcp.extraction import ExtractionConfig, ExtractedFact
         from unittest.mock import patch
 
         score = (UPDATE_THRESHOLD + SKIP_THRESHOLD) / 2
@@ -201,7 +197,7 @@ class TestIngest:
         upd_fn = MagicMock()
         facts = [ExtractedFact(text="User switched from Python to Rust")]
 
-        with patch("dedup.extract_facts", return_value=(facts, 0.5)):
+        with patch("local_memory_mcp.dedup.extract_facts", return_value=(facts, 0.5)):
             result = ingest(
                 [{"role": "user", "content": "I now use Rust"}],
                 _extraction_config=ExtractionConfig(api_key="sk-test"),
@@ -217,7 +213,7 @@ class TestIngest:
         assert "old-id" in kwargs["related_ids"]
 
     def test_multiple_facts_mixed(self):
-        from extraction import ExtractionConfig, ExtractedFact
+        from local_memory_mcp.extraction import ExtractionConfig, ExtractedFact
         from unittest.mock import patch
 
         score_dup = SKIP_THRESHOLD + 0.01
@@ -237,7 +233,7 @@ class TestIngest:
             ExtractedFact(text="User likes Rust"),     # new → add
         ]
 
-        with patch("dedup.extract_facts", return_value=(facts, 0.5)):
+        with patch("local_memory_mcp.dedup.extract_facts", return_value=(facts, 0.5)):
             result = ingest(
                 [{"role": "user", "content": "..."}],
                 _extraction_config=ExtractionConfig(api_key="sk-test"),
@@ -251,7 +247,7 @@ class TestIngest:
         assert add_fn.call_count == 1
 
     def test_vector_store_unavailable_still_adds(self):
-        from extraction import ExtractionConfig, ExtractedFact
+        from local_memory_mcp.extraction import ExtractionConfig, ExtractedFact
         from unittest.mock import patch
 
         vs = MagicMock()
@@ -261,7 +257,7 @@ class TestIngest:
         upd_fn = MagicMock()
         facts = [ExtractedFact(text="User uses WSL2")]
 
-        with patch("dedup.extract_facts", return_value=(facts, 0.5)):
+        with patch("local_memory_mcp.dedup.extract_facts", return_value=(facts, 0.5)):
             result = ingest(
                 [{"role": "user", "content": "I use WSL2"}],
                 _extraction_config=ExtractionConfig(api_key="sk-test"),
@@ -274,14 +270,14 @@ class TestIngest:
         add_fn.assert_called_once()
 
     def test_result_has_elapsed_time(self):
-        from extraction import ExtractionConfig
+        from local_memory_mcp.extraction import ExtractionConfig
         from unittest.mock import patch
 
         vs = self._make_mock_vs()
         add_fn = MagicMock()
         upd_fn = MagicMock()
 
-        with patch("dedup.extract_facts", return_value=([], 0.1)):
+        with patch("local_memory_mcp.dedup.extract_facts", return_value=([], 0.1)):
             result = ingest(
                 [{"role": "user", "content": "hi"}],
                 _extraction_config=ExtractionConfig(api_key="sk-test"),

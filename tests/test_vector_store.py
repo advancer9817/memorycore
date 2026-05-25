@@ -1,16 +1,12 @@
 """Tests for vector_store.py."""
 from __future__ import annotations
 
-import sys
 import uuid
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from vector_store import (
+from local_memory_mcp.vector_store import (
     EmbedConfig,
     SearchResult,
     VectorStore,
@@ -83,7 +79,7 @@ class TestEmbedText:
         vec = embed_text("hello", cfg)
         assert len(vec) == 64
 
-    @patch("vector_store._embed_ollama", side_effect=Exception("connection refused"))
+    @patch("local_memory_mcp.vector_store._embed_ollama", side_effect=Exception("connection refused"))
     def test_ollama_failure_falls_back_to_hashing(self, mock_ollama):
         cfg = EmbedConfig(provider="ollama", dim=64)
         vec = embed_text("hello", cfg)

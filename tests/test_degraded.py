@@ -13,13 +13,13 @@ from dataclasses import dataclass, field
 class TestMemoryIngestDegraded:
     def test_returns_degraded_on_pipeline_error(self, monkeypatch):
         """If dedup.ingest raises (e.g. LLM/Qdrant down), memory_ingest returns degraded dict."""
-        fake_dedup = types.ModuleType("dedup")
+        fake_dedup = types.ModuleType("local_memory_mcp.dedup")
 
         def broken_ingest(*a, **kw):
             raise ConnectionError("DeepSeek unreachable")
 
         fake_dedup.ingest = broken_ingest
-        monkeypatch.setitem(sys.modules, "dedup", fake_dedup)
+        monkeypatch.setitem(sys.modules, "local_memory_mcp.dedup", fake_dedup)
 
         import local_memory_mcp.server as srv
         result = srv.memory_ingest(messages=[{"role": "user", "content": "hello"}])
@@ -39,9 +39,9 @@ class TestMemoryIngestDegraded:
             elapsed_s: float = 0.1
             extraction_elapsed_s: float = 0.05
 
-        fake_dedup = types.ModuleType("dedup")
+        fake_dedup = types.ModuleType("local_memory_mcp.dedup")
         fake_dedup.ingest = lambda *a, **kw: FakeResult()
-        monkeypatch.setitem(sys.modules, "dedup", fake_dedup)
+        monkeypatch.setitem(sys.modules, "local_memory_mcp.dedup", fake_dedup)
 
         import local_memory_mcp.server as srv
         result = srv.memory_ingest(messages=[{"role": "user", "content": "hello"}])
@@ -52,14 +52,14 @@ class TestMemoryIngestDegraded:
 class TestMemoryVectorSearchDegraded:
     def test_returns_degraded_list_on_qdrant_error(self, monkeypatch):
         """If Qdrant is down, memory_vector_search returns a single-item list with degraded=True."""
-        fake_vs_mod = types.ModuleType("vector_store")
+        fake_vs_mod = types.ModuleType("local_memory_mcp.vector_store")
 
         class BrokenVS:
             def search(self, *a, **kw):
                 raise ConnectionRefusedError("Qdrant not running")
 
         fake_vs_mod.get_vector_store = lambda cfg: BrokenVS()
-        monkeypatch.setitem(sys.modules, "vector_store", fake_vs_mod)
+        monkeypatch.setitem(sys.modules, "local_memory_mcp.vector_store", fake_vs_mod)
 
         import local_memory_mcp.server as srv
         result = srv.memory_vector_search(query="test query")
@@ -77,14 +77,14 @@ class TestMemoryVectorSearchDegraded:
             text: str = "some text"
             payload: dict = field(default_factory=dict)
 
-        fake_vs_mod = types.ModuleType("vector_store")
+        fake_vs_mod = types.ModuleType("local_memory_mcp.vector_store")
 
         class OkVS:
             def search(self, *a, **kw):
                 return [FakeHit()]
 
         fake_vs_mod.get_vector_store = lambda cfg: OkVS()
-        monkeypatch.setitem(sys.modules, "vector_store", fake_vs_mod)
+        monkeypatch.setitem(sys.modules, "local_memory_mcp.vector_store", fake_vs_mod)
 
         import local_memory_mcp.server as srv
         result = srv.memory_vector_search(query="test query")
@@ -96,14 +96,14 @@ class TestMemoryVectorSearchDegraded:
 class TestMemoryVectorStatusDegraded:
     def test_returns_degraded_on_connection_error(self, monkeypatch):
         """If Qdrant status() raises, memory_vector_status returns degraded structure."""
-        fake_vs_mod = types.ModuleType("vector_store")
+        fake_vs_mod = types.ModuleType("local_memory_mcp.vector_store")
 
         class BrokenVS:
             def status(self):
                 raise OSError("cannot connect to Qdrant")
 
         fake_vs_mod.get_vector_store = lambda cfg: BrokenVS()
-        monkeypatch.setitem(sys.modules, "vector_store", fake_vs_mod)
+        monkeypatch.setitem(sys.modules, "local_memory_mcp.vector_store", fake_vs_mod)
 
         import local_memory_mcp.server as srv
         result = srv.memory_vector_status()

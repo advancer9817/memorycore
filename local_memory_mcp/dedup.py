@@ -22,8 +22,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-# Module-level import so patch("dedup.extract_facts") works in tests
-from extraction import extract_facts  # noqa: E402
+# Module-level import so patch("local_memory_mcp.dedup.extract_facts") works in tests
+from local_memory_mcp.extraction import extract_facts  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -155,8 +155,8 @@ def ingest(
     cfg = cfg or {}
 
     # --- 1. Build dependencies ---
-    from extraction import ExtractionConfig, extraction_config_from_dict
-    from vector_store import VectorStore, get_vector_store, vector_store_config_from_dict
+    from local_memory_mcp.extraction import ExtractionConfig, extraction_config_from_dict
+    from local_memory_mcp.vector_store import VectorStore, get_vector_store, vector_store_config_from_dict
 
     ext_cfg = _extraction_config or extraction_config_from_dict(cfg)
     vs: VectorStore = _vector_store or get_vector_store(cfg)

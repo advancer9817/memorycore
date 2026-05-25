@@ -407,7 +407,7 @@ if [ "$INSTALL_SYSTEMD" -eq 1 ]; then
   for i in $(seq 1 30); do ss -ltn 2>/dev/null | grep -q ":$PORT " && break; sleep 1; [ "$i" -eq 30 ] && die "lmmcp port $PORT did not open"; done
 fi
 LOCAL_MEMORY_CONFIG="$CONFIG" LOCAL_MEMORY_DB="$DB" PYTHONPATH="$ROOT" "$PY" - <<'PY'
-from vector_store import get_vector_store
+from local_memory_mcp.vector_store import get_vector_store
 from local_memory_mcp.models import load_config
 print(get_vector_store(load_config()).status())
 PY
