@@ -14,6 +14,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 __all__ = [
     "DEFAULT_ROOT",
     "DEFAULT_DB",
@@ -26,8 +28,6 @@ __all__ = [
     "as_json",
     "from_json",
     "config_path",
-    "_parse_yaml_scalar",
-    "_parse_simple_yaml",
     "_deep_merge",
     "load_config",
     "validate_config",
@@ -118,49 +118,6 @@ def config_path() -> Path:
     ).expanduser()
 
 
-def _parse_yaml_scalar(value: str) -> Any:
-    raw = value.strip()
-    lowered = raw.lower()
-    if lowered in {"true", "false"}:
-        return lowered == "true"
-    if lowered in {"null", "none", "~"}:
-        return None
-    try:
-        return int(raw)
-    except ValueError:
-        pass
-    try:
-        return float(raw)
-    except ValueError:
-        pass
-    if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith("'") and raw.endswith("'")):
-        return raw[1:-1]
-    return raw
-
-
-def _parse_simple_yaml(text: str) -> dict[str, Any]:
-    """Parse the small nested config.yaml subset used by this adapter.
-
-    This intentionally avoids adding PyYAML as a runtime dependency. Supported
-    syntax is enough for config.yaml: top-level sections with two-space indented
-    scalar key/value pairs.
-    """
-    data: dict[str, Any] = {}
-    current: dict[str, Any] | None = None
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if not line.startswith(" ") and stripped.endswith(":"):
-            section = stripped[:-1].strip()
-            current = data.setdefault(section, {})
-            continue
-        if ":" not in stripped:
-            continue
-        key, value = stripped.split(":", 1)
-        target = current if line.startswith(" ") and current is not None else data
-        target[key.strip()] = _parse_yaml_scalar(value)
-    return data
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -181,10 +138,9 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 def load_config() -> dict[str, Any]:
     path = config_path()
     if not path.exists():
-        config = _deep_merge(DEFAULT_CONFIG, {})
-    else:
-        config = _deep_merge(DEFAULT_CONFIG, _parse_simple_yaml(path.read_text(encoding="utf-8")))
-    return config
+        return _deep_merge(DEFAULT_CONFIG, {})
+    parsed = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return _deep_merge(DEFAULT_CONFIG, parsed)
 
 
 def validate_config(cfg: dict[str, Any]) -> list[str]:
