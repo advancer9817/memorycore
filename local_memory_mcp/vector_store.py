@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 class EmbedConfig:
     provider: str = "ollama"          # "ollama" | "hashing" (fallback)
     model: str = "nomic-embed-text"
-    ollama_url: str = "http://127.0.0.1:12434"
+    ollama_url: str = "http://127.0.0.1:11434"
     dim: int = 768
     timeout: int = 30
 

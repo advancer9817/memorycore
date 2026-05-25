@@ -14,6 +14,7 @@ import json
 import logging
 import re
 import sqlite3
+import threading
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -131,23 +132,32 @@ def get_audit_log(
     return [dict(r) for r in rows]
 
 
-def connect() -> sqlite3.Connection:
-    """Open a SQLite connection and ensure the schema exists for its DB path.
+_thread_local = threading.local()
 
-    Internal code should prefer managed_conn() so connections are explicitly
-    closed.
-    """
-    path = db_path()
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("PRAGMA busy_timeout=5000")
+
+def _get_thread_conn(path: Path) -> sqlite3.Connection:
+    """Return a thread-local SQLite connection, creating it if needed."""
     key = str(path.resolve())
-    if key not in _INITIALIZED_DB_PATHS:
-        init_db(conn)
-        _INITIALIZED_DB_PATHS.add(key)
-    return conn
+    cache: dict = getattr(_thread_local, "conns", None)
+    if cache is None:
+        _thread_local.conns = {}
+        cache = _thread_local.conns
+    if key not in cache:
+        conn = sqlite3.connect(path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=5000")
+        if key not in _INITIALIZED_DB_PATHS:
+            init_db(conn)
+            _INITIALIZED_DB_PATHS.add(key)
+        cache[key] = conn
+    return cache[key]
+
+
+def connect() -> sqlite3.Connection:
+    """Return the thread-local SQLite connection for the configured DB path."""
+    return _get_thread_conn(db_path())
 
 
 @contextmanager
@@ -159,8 +169,6 @@ def managed_conn():
     except Exception:
         conn.rollback()
         raise
-    finally:
-        conn.close()
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
@@ -290,7 +298,16 @@ def init_db(conn: sqlite3.Connection) -> None:
           last_seen_at TEXT NOT NULL,
           metadata_json TEXT NOT NULL DEFAULT '{}'
         );
+        CREATE TABLE IF NOT EXISTS schema_version (
+          version INTEGER PRIMARY KEY,
+          applied_at TEXT NOT NULL
+        );
         """
+    )
+    # Record schema version for future migrations.
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES (?, ?)",
+        (1, now()),
     )
     # Migrate pre-existing SQLite databases. CREATE TABLE IF NOT EXISTS does not
     # add columns to an existing table, so new code that orders or updates these
