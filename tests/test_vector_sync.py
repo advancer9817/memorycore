@@ -15,7 +15,7 @@ def test_add_triggers_upsert(isolated_memory_db):
     from local_memory_mcp.storage import add_memory_record
 
     mock_vs = make_mock_vs()
-    with patch("local_memory_mcp.storage._get_vector_store", return_value=mock_vs):
+    with patch("local_memory_mcp.storage.crud._get_vector_store", return_value=mock_vs):
         result = add_memory_record("user_profile", "Test Title", "Test content")
 
     assert result["id"] is not None
@@ -29,7 +29,7 @@ def test_update_content_triggers_upsert(isolated_memory_db):
     from local_memory_mcp.storage import add_memory_record, update_memory_content
 
     mock_vs = make_mock_vs()
-    with patch("local_memory_mcp.storage._get_vector_store", return_value=mock_vs):
+    with patch("local_memory_mcp.storage.crud._get_vector_store", return_value=mock_vs):
         rec = add_memory_record("project_memory", "Old Title", "Old content")
         mock_vs.reset_mock()
         result = update_memory_content(rec["id"], new_content="New content")
@@ -43,7 +43,7 @@ def test_update_status_triggers_upsert(isolated_memory_db):
     from local_memory_mcp.storage import add_memory_record, update_status
 
     mock_vs = make_mock_vs()
-    with patch("local_memory_mcp.storage._get_vector_store", return_value=mock_vs):
+    with patch("local_memory_mcp.storage.crud._get_vector_store", return_value=mock_vs):
         rec = add_memory_record("feedback", "Feedback", "body")
         mock_vs.reset_mock()
         update_status(rec["id"], "stale")
@@ -57,7 +57,7 @@ def test_sync_failure_does_not_raise(isolated_memory_db):
 
     mock_vs = make_mock_vs()
     mock_vs.upsert.side_effect = RuntimeError("Qdrant down")
-    with patch("local_memory_mcp.storage._get_vector_store", return_value=mock_vs):
+    with patch("local_memory_mcp.storage.crud._get_vector_store", return_value=mock_vs):
         result = add_memory_record("user_profile", "Resilience test", "content")
 
     assert result["id"] is not None
@@ -67,7 +67,7 @@ def test_sync_skipped_when_vector_store_none(isolated_memory_db):
     """When _get_vector_store is None, sync is skipped without error."""
     from local_memory_mcp.storage import add_memory_record
 
-    with patch("local_memory_mcp.storage._get_vector_store", None):
+    with patch("local_memory_mcp.storage.crud._get_vector_store", None):
         result = add_memory_record("user_profile", "No vector", "content")
 
     assert result["id"] is not None
