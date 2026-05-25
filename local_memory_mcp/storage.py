@@ -1024,6 +1024,12 @@ def curator_report(
         for r in archive_candidates:
             update_status(r["id"], "archived")
             actions.append({"id": r["id"], "action": "archive", "title": r.get("title")})
+        stale_count = sum(1 for a in actions if a["action"] == "mark_stale")
+        archive_count = sum(1 for a in actions if a["action"] == "archive")
+        log_audit_event(
+            "curator_apply",
+            detail={"stale": stale_count, "archived": archive_count, "total_actions": len(actions)},
+        )
 
     total_scanned = _managed_query("SELECT COUNT(*) as cnt FROM memories", ())[0]["cnt"]
     return {

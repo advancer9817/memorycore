@@ -1,3 +1,20 @@
+## [迭代 19] 2026-05-25 — 熵检测 + curator_apply 审计 + qdrant-client 升级
+
+### 变更摘要
+- `local_memory_mcp/privacy.py`：新增 `_shannon_entropy()`、`_redact_high_entropy_tokens()` 函数；`redact_secrets()` 在 pattern pass 之后追加熵检测 pass，捕获无前缀高熵随机字符串（Shannon 熵 ≥ 4.5、长度 ≥ 20），命中时追加 `high_entropy` label；已 REDACTED 占位符不二次标记（幂等）
+- `local_memory_mcp/storage.py`：`curator_report()` apply 块（`not dry_run`）末尾新增 `log_audit_event("curator_apply", detail={"stale": N, "archived": N, "total_actions": N})`，dry_run 路径不写审计
+- `requirements.txt`：`qdrant-client==1.14.3` → `qdrant-client>=1.18.0,<2.0`；venv 内已升级至 1.18.0，消除 server/client 版本不兼容警告
+- `tests/test_iter19.py`：新增 10 个测试覆盖三项改动（熵检测 6 个、curator_apply 审计 3 个、版本兼容 1 个）
+
+### 验证
+- 全量测试：**274/274 pass**（新增 10 个，无警告）
+
+### 已知问题
+- 无
+
+### 回滚
+`git revert HEAD`
+
 ## [迭代 18] 2026-05-22 — Qdrant 自动同步 + config.yaml schema 验证
 
 ### 变更摘要
