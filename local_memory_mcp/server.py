@@ -45,16 +45,30 @@ from local_memory_mcp.storage import (
     update_status,
 )
 
+import functools
+
+
 __all__ = ["mcp", "main"]
 
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
     "local-memory-mcp",
-    instructions="Author: advancer9817-crypto <advancer9817-crypto@users.noreply.github.com>",
 )
 
 SQLITE_VEC_AVAILABLE = False  # removed; vector search now via vector_store.py (Qdrant)
+
+
+def _safe_tool(fn):
+    """Wrap an MCP tool so unhandled exceptions return {"error": ...} instead of crashing."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            logger.error("MCP tool %s failed: %s", fn.__name__, exc, exc_info=True)
+            return {"error": f"{type(exc).__name__}: {exc}"}
+    return wrapper
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +77,7 @@ SQLITE_VEC_AVAILABLE = False  # removed; vector search now via vector_store.py (
 
 
 @mcp.tool()
+@_safe_tool
 def memory_add(
     type: str,
     title: str,
@@ -88,6 +103,7 @@ def memory_add(
 
 
 @mcp.tool()
+@_safe_tool
 def memory_search(
     query: str = "",
     types: list[str] | str | None = None,
@@ -102,6 +118,7 @@ def memory_search(
 
 
 @mcp.tool()
+@_safe_tool
 def memory_context(
     task: str,
     agent: str = "agent",
@@ -114,24 +131,28 @@ def memory_context(
 
 
 @mcp.tool()
+@_safe_tool
 def memory_get(id: str) -> dict[str, Any] | None:
     """Get one memory record by id."""
     return get_record(id)
 
 
 @mcp.tool()
+@_safe_tool
 def memory_list_recent(limit: int = 10) -> list[dict[str, Any]]:
     """List recently updated memory records."""
     return list_recent(limit, cap=100)
 
 
 @mcp.tool()
+@_safe_tool
 def memory_update_status(id: str, status: str) -> dict[str, Any]:
     """Mark a memory active/stale/archived/contradicted/promoted/candidate."""
     return update_status(id, status)
 
 
 @mcp.tool()
+@_safe_tool
 def memory_feedback(
     id: str, score: float, note: str = "", source_agent: str = "agent"
 ) -> dict[str, Any]:
@@ -140,18 +161,21 @@ def memory_feedback(
 
 
 @mcp.tool()
+@_safe_tool
 def memory_timeline(query: str = "", scope: str = "", limit: int = 20) -> list[dict[str, Any]]:
     """Return decision/timeline/feedback memories in chronological order."""
     return timeline(query, scope, limit)
 
 
 @mcp.tool()
+@_safe_tool
 def memory_consolidate(dry_run: bool = True, limit: int = 50) -> dict[str, Any]:
     """Curator helper: detect duplicate/stale candidates. v0 is dry-run oriented."""
     return consolidate(dry_run, limit)
 
 
 @mcp.tool()
+@_safe_tool
 def memory_curator_report(
     dry_run: bool = True,
     limit: int = 500,
@@ -163,6 +187,7 @@ def memory_curator_report(
 
 
 @mcp.tool()
+@_safe_tool
 def memory_ingest(
     messages: list[dict[str, str]],
     user_id: str = "default",
@@ -214,6 +239,7 @@ def memory_ingest(
 
 
 @mcp.tool()
+@_safe_tool
 def memory_vector_search(
     query: str,
     top_k: int = 10,
@@ -243,6 +269,7 @@ def memory_vector_search(
 
 
 @mcp.tool()
+@_safe_tool
 def memory_vector_status() -> dict[str, Any]:
     """Return Qdrant vector store status (availability, collection, count)."""
     from local_memory_mcp.vector_store import get_vector_store
@@ -255,6 +282,7 @@ def memory_vector_status() -> dict[str, Any]:
 
 
 @mcp.tool()
+@_safe_tool
 def memory_link_add(
     source_id: str,
     target_id: str,
@@ -292,6 +320,7 @@ def memory_link_add(
 
 
 @mcp.tool()
+@_safe_tool
 def memory_link_query(
     memory_id: str,
     direction: str = "both",
@@ -316,6 +345,7 @@ def memory_link_query(
 
 
 @mcp.tool()
+@_safe_tool
 def memory_warnings(
     memory_ids: list[str],
     min_weight: float = 0.4,
@@ -336,6 +366,7 @@ def memory_warnings(
 
 
 @mcp.tool()
+@_safe_tool
 def memory_audit_log(
     memory_id: str | None = None,
     event_type: str | None = None,
@@ -355,6 +386,7 @@ def memory_audit_log(
 
 
 @mcp.tool()
+@_safe_tool
 def memory_update(
     id: str,
     content: str | None = None,
@@ -385,6 +417,7 @@ def memory_update(
 
 
 @mcp.tool()
+@_safe_tool
 def agent_send(
     from_agent: str,
     to_agent: str,
@@ -412,6 +445,7 @@ def agent_send(
 
 
 @mcp.tool()
+@_safe_tool
 def agent_messages_cleanup() -> dict[str, Any]:
     """Delete all expired agent messages (where expires_at is set and in the past).
 
@@ -423,6 +457,7 @@ def agent_messages_cleanup() -> dict[str, Any]:
 
 
 @mcp.tool()
+@_safe_tool
 def agent_inbox(
     agent_id: str,
     status: str = "",
@@ -444,6 +479,7 @@ def agent_inbox(
 
 
 @mcp.tool()
+@_safe_tool
 def agent_presence_update(
     agent_id: str,
     status: str = "online",
@@ -463,6 +499,7 @@ def agent_presence_update(
 
 
 @mcp.tool()
+@_safe_tool
 def agent_presence_list(
     status: str = "",
     limit: int = 100,
