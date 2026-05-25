@@ -165,7 +165,7 @@ def memory_curator_report(
 @mcp.tool()
 def memory_ingest(
     messages: list[dict[str, str]],
-    user_id: str = "advancer",
+    user_id: str = "default",
     agent_id: str = "agent",
 ) -> dict[str, Any]:
     """Extract facts from a conversation and write deduplicated candidates to SQLite.

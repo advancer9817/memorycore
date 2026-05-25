@@ -23,7 +23,7 @@
 运行时根目录默认就是本项目 checkout；也可由环境变量控制：
 
 ```bash
-MEM_ROOT="${LOCAL_MEMORY_ROOT:-/home/advancer/project/local-memory-mcp}"
+MEM_ROOT="${LOCAL_MEMORY_ROOT:-$(pwd)}"
 ```
 
 | 文件 | 路径 |
@@ -93,7 +93,7 @@ Removed / not current core：
 ## CLI
 
 ```bash
-MEM_ROOT="${LOCAL_MEMORY_ROOT:-/home/advancer/project/local-memory-mcp}"
+MEM_ROOT="${LOCAL_MEMORY_ROOT:-$(pwd)}"
 PY="$MEM_ROOT/.venv/bin/python"
 
 "$PY" -m local_memory_mcp init
@@ -177,7 +177,7 @@ scripts/lmmcp stop
 需要 Python 3.11+。
 
 ```bash
-MEM_ROOT="${LOCAL_MEMORY_ROOT:-/home/advancer/project/local-memory-mcp}"
+MEM_ROOT="${LOCAL_MEMORY_ROOT:-$(pwd)}"
 cd "$MEM_ROOT"
 python3.11 -m venv .venv
 .venv/bin/python -m pip install -U pip

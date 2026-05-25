@@ -123,16 +123,11 @@ class ExtractionConfig:
 
 
 def extraction_config_from_dict(cfg: dict[str, Any]) -> ExtractionConfig:
-    """Build ExtractionConfig from config.yaml dict."""
-    # Load .env if present
-    env_path = Path(__file__).resolve().parent / ".env"
-    if env_path.exists():
-        for line in env_path.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                os.environ[k.strip()] = v.strip()
+    """Build ExtractionConfig from config.yaml dict.
 
+    API keys are resolved from: config dict > environment variables.
+    Set DEEPSEEK_API_KEY or MEM0_LLM_API_KEY in your environment.
+    """
     mem0 = cfg.get("mem0", {})
     extraction = cfg.get("extraction", {})
     # extraction section takes priority; fall back to mem0 section for compat

@@ -126,7 +126,7 @@ def decide(
 def ingest(
     messages: list[dict[str, str]],
     *,
-    user_id: str = "advancer",
+    user_id: str = "default",
     agent_id: str = "agent",
     cfg: dict[str, Any] | None = None,
     # Allow injecting dependencies for testing
