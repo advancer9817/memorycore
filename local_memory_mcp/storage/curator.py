@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from local_memory_mcp.models import normalize_title_key, now
+from local_memory_mcp.models import normalize_list, normalize_title_key, now
 from local_memory_mcp.storage.db import _managed_query
 from local_memory_mcp.storage.audit import log_audit_event
 
@@ -32,6 +32,8 @@ def curator_report(
     limit: int = 500,
     stale_after_days: int = 60,
     archive_after_days: int = 120,
+    allow_actions: Any = None,
+    deny_actions: Any = None,
 ) -> dict[str, Any]:
     from local_memory_mcp.storage.crud import update_status
     now_dt = datetime.now(timezone.utc)
@@ -104,21 +106,55 @@ def curator_report(
             })
 
     actions: list[dict[str, Any]] = []
+    allow_set = set(normalize_list(allow_actions))
+    deny_set = set(normalize_list(deny_actions))
+    action_plan: list[dict[str, Any]] = []
+    planned_ids: set[str] = set()
+
+    def _plan(row: dict[str, Any], action: str, reason: str, target_status: str) -> None:
+        if row["id"] in planned_ids:
+            return
+        if allow_set and action not in allow_set:
+            return
+        if action in deny_set:
+            return
+        planned_ids.add(row["id"])
+        action_plan.append({
+            "id": row["id"],
+            "action": action,
+            "title": row.get("title"),
+            "reason": reason,
+            "target_status": target_status,
+            "rollback": {"status": row.get("status")},
+        })
+
+    for r in low_feedback_candidates:
+        if r.get("status") != "stale":
+            _plan(r, "mark_stale", "low_feedback", "stale")
+    for r in stale_candidates:
+        if r.get("status") != "stale":
+            _plan(r, "mark_stale", "stale_candidate", "stale")
+    for r in archive_candidates:
+        _plan(r, "archive", "archive_candidate", "archived")
+
     if not dry_run:
-        seen_ids: set[str] = set()
-        for r in low_feedback_candidates + stale_candidates:
-            if r["id"] not in seen_ids and r.get("status") != "stale":
-                seen_ids.add(r["id"])
-                update_status(r["id"], "stale")
-                actions.append({"id": r["id"], "action": "mark_stale", "title": r.get("title")})
-        for r in archive_candidates:
-            update_status(r["id"], "archived")
-            actions.append({"id": r["id"], "action": "archive", "title": r.get("title")})
+        for planned in action_plan:
+            update_status(planned["id"], planned["target_status"])
+            actions.append({
+                "id": planned["id"],
+                "action": planned["action"],
+                "title": planned.get("title"),
+            })
         stale_count = sum(1 for a in actions if a["action"] == "mark_stale")
         archive_count = sum(1 for a in actions if a["action"] == "archive")
         log_audit_event(
             "curator_apply",
-            detail={"stale": stale_count, "archived": archive_count, "total_actions": len(actions)},
+            detail={
+                "stale": stale_count,
+                "archived": archive_count,
+                "total_actions": len(actions),
+                "actions": action_plan,
+            },
         )
 
     total_scanned = _managed_query("SELECT COUNT(*) as cnt FROM memories", ())[0]["cnt"]
@@ -132,6 +168,7 @@ def curator_report(
         "archive_candidates": archive_candidates,
         "contradiction_candidates": contradiction_candidates,
         "skill_promotion_candidates": skill_promotion_candidates,
+        "action_plan": action_plan,
         "actions": actions,
         "summary": {
             "duplicates": len(duplicate_title_groups),
@@ -140,6 +177,7 @@ def curator_report(
             "archive": len(archive_candidates),
             "contradictions": len(contradiction_candidates),
             "skill_promotions": len(skill_promotion_candidates),
+            "planned_actions": len(action_plan),
             "actions": len(actions),
         },
     }

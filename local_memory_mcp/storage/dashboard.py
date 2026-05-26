@@ -5,14 +5,16 @@ import html
 import json
 from pathlib import Path
 
-from local_memory_mcp.storage.db import db_path
+from local_memory_mcp.storage.db import db_path, managed_conn
 from local_memory_mcp.storage.crud import list_recent
 from local_memory_mcp.storage.curator import curator_report
+from local_memory_mcp.storage.search import get_context_quality_stats
 
 
-def export_html(path: Path) -> None:
-    rows = list_recent(1000)
-    report = curator_report(dry_run=True, limit=1000)
+def dashboard_payload(limit: int = 1000) -> dict[str, object]:
+    cap = max(1, min(int(limit), 5000))
+    rows = list_recent(cap)
+    report = curator_report(dry_run=True, limit=cap)
     type_counts: dict[str, int] = {}
     status_counts: dict[str, int] = {}
     feedback_negative = 0
@@ -28,14 +30,30 @@ def export_html(path: Path) -> None:
         r for r in rows
         if r.get("type") in {"timeline_event", "decision", "feedback"}
     ][:80]
-    payload = {
+    with managed_conn() as conn:
+        links = [dict(r) for r in conn.execute("SELECT * FROM memory_links ORDER BY created_at DESC LIMIT 200").fetchall()]
+        mailbox = [dict(r) for r in conn.execute("SELECT * FROM agent_messages ORDER BY created_at DESC, rowid DESC LIMIT 100").fetchall()]
+        presence = [dict(r) for r in conn.execute("SELECT * FROM agent_presence ORDER BY last_seen_at DESC LIMIT 100").fetchall()]
+    return {
         "rows": rows,
         "report": report,
         "semantic": {"available": False, "note": "vector search via Qdrant (vector_store.py)"},
         "type_counts": type_counts,
         "status_counts": status_counts,
         "timeline_rows": timeline_rows,
+        "links": links,
+        "mailbox": mailbox,
+        "presence": presence,
+        "context_quality": get_context_quality_stats(),
+        "feedback_positive": feedback_positive,
+        "feedback_negative": feedback_negative,
     }
+
+
+def export_html(path: Path) -> None:
+    payload = dashboard_payload(1000)
+    rows = payload["rows"]
+    type_counts = payload["type_counts"]
     data_json = json.dumps(payload, ensure_ascii=True).replace("<", "\\u003c")
     db_label = html.escape(str(db_path()))
     doc = _DASHBOARD_HTML_TEMPLATE()
@@ -43,8 +61,8 @@ def export_html(path: Path) -> None:
         "__DATA_JSON__": data_json,
         "__RECORD_COUNT__": str(len(rows)),
         "__TYPE_COUNT__": str(len(type_counts)),
-        "__POSITIVE_FEEDBACK__": str(feedback_positive),
-        "__NEGATIVE_FEEDBACK__": str(feedback_negative),
+        "__POSITIVE_FEEDBACK__": str(payload["feedback_positive"]),
+        "__NEGATIVE_FEEDBACK__": str(payload["feedback_negative"]),
         "__DB_PATH__": db_label,
     }
     for key, value in replacements.items():
@@ -92,6 +110,9 @@ a{color:var(--accent-2)}button,input,select{font:inherit}button:focus-visible,in
       <button type="button" :class="{active:view==='timeline'}" @click="view='timeline'"><span>Timeline</span><span class="pill" x-text="timelineRows.length"></span></button>
       <button type="button" :class="{active:view==='health'}" @click="view='health'"><span>Health</span><span class="pill" x-text="Object.keys(typeCounts).length"></span></button>
       <button type="button" :class="{active:view==='curator'}" @click="view='curator'"><span>Curator</span><span class="pill" x-text="curatorTotal"></span></button>
+      <button type="button" :class="{active:view==='graph'}" @click="view='graph'"><span>Graph</span><span class="pill" x-text="links.length"></span></button>
+      <button type="button" :class="{active:view==='mailbox'}" @click="view='mailbox'"><span>Mailbox</span><span class="pill" x-text="mailbox.length"></span></button>
+      <button type="button" :class="{active:view==='presence'}" @click="view='presence'"><span>Presence</span><span class="pill" x-text="presence.length"></span></button>
     </nav>
     <div class="side-card"><h2>Runtime</h2><div class="row"><span>Semantic</span><strong x-text="semantic.available ? 'available' : 'offline'"></strong></div><div class="row"><span>Provider</span><strong x-text="semantic.provider || 'Qdrant optional'"></strong></div><div class="row"><span>Indexed</span><strong x-text="`${semantic.indexed_records || 0}/${semantic.total_records || 0}`"></strong></div></div>
   </aside>
@@ -106,8 +127,11 @@ a{color:var(--accent-2)}button,input,select{font:inherit}button:focus-visible,in
     <section class="toolbar" aria-label="Record filters"><input x-model.debounce.120ms="query" type="search" placeholder="搜索 title / content / tags / id..." aria-label="Search records"><select x-model="typeFilter" aria-label="Filter by type"><option value="">全部类型</option><template x-for="type in typeOptions" :key="type"><option :value="type" x-text="type"></option></template></select><select x-model="statusFilter" aria-label="Filter by status"><option value="">全部状态</option><template x-for="status in statusOptions" :key="status"><option :value="status" x-text="status"></option></template></select><select x-model="sortBy" aria-label="Sort records"><option value="updated_at">按更新时间</option><option value="importance">按重要性</option><option value="feedback_score">按反馈</option><option value="type">按类型</option></select></section>
     <section x-show="view==='records'"><div class="content-head"><div><h2>Records <span class="pill" x-text="filteredRows.length"></span></h2><p>结构化长期记忆，支持搜索、类型、状态和排序。</p></div></div><div class="grid"><template x-for="record in filteredRows" :key="record.id"><article class="record"><h3 x-text="record.title"></h3><div class="meta"><span class="chip type" x-text="record.type"></span><span class="chip" :class="record.status" x-text="record.status"></span><span class="chip" x-text="`importance ${record.importance ?? 0}`"></span><span class="chip" x-text="`feedback ${record.feedback_score ?? 0}`"></span></div><p x-text="record.content"></p><div class="meta"><template x-for="tag in (record.tags || [])" :key="tag"><span class="chip" x-text="tag"></span></template></div><code x-text="record.id"></code></article></template></div><div class="empty" x-show="filteredRows.length === 0">无匹配记录</div></section>
     <section x-show="view==='timeline'"><div class="content-head"><div><h2>Decision timeline</h2><p>仅展示 timeline_event / decision / feedback 相关记录。</p></div></div><div class="timeline"><template x-for="event in timelineRows" :key="event.id"><article class="event"><h3 x-text="event.title"></h3><div class="meta"><span x-text="event.created_at"></span><span x-text="event.type"></span><span x-text="event.status"></span></div><p x-text="event.content"></p></article></template></div><div class="empty" x-show="timelineRows.length === 0">暂无 timeline / decision / feedback 记录</div></section>
-    <section x-show="view==='health'"><div class="content-head"><div><h2>Feedback health</h2><p>分布视图帮助判断记忆库是否偏科、陈旧或反馈不足。</p></div></div><div class="split"><div class="panel" style="padding:18px"><h3>Type distribution</h3><div class="bars"><template x-for="item in bars(typeCounts)" :key="item.key"><div class="bar"><span x-text="item.key"></span><div class="track"><div class="fill" :style="`width:${item.width}%`"></div></div><strong x-text="item.value"></strong></div></template></div></div><div class="panel" style="padding:18px"><h3>Status distribution</h3><div class="bars"><template x-for="item in bars(statusCounts)" :key="item.key"><div class="bar"><span x-text="item.key"></span><div class="track"><div class="fill" :style="`width:${item.width}%`"></div></div><strong x-text="item.value"></strong></div></template></div></div></div></section>
-    <section x-show="view==='curator'"><div class="content-head"><div><h2>Curator candidates</h2><p>面向去重、归档、矛盾检测和 skill 推广的候选摘要。</p></div></div><div class="curator-grid"><template x-for="group in curatorGroups" :key="group.key"><article class="curator-card"><h3><span x-text="group.label"></span><span class="pill" x-text="group.items.length"></span></h3><template x-for="item in group.items.slice(0, 12)" :key="itemKey(item)"><p x-text="itemLabel(item)"></p></template><p x-show="group.items.length === 0" style="color:var(--sage)">无</p></article></template></div></section>
+    <section x-show="view==='health'"><div class="content-head"><div><h2>Feedback health</h2><p>分布视图帮助判断记忆库是否偏科、陈旧或反馈不足。</p></div></div><div class="split"><div class="panel" style="padding:18px"><h3>Type distribution</h3><div class="bars"><template x-for="item in bars(typeCounts)" :key="item.key"><div class="bar"><span x-text="item.key"></span><div class="track"><div class="fill" :style="`width:${item.width}%`"></div></div><strong x-text="item.value"></strong></div></template></div></div><div class="panel" style="padding:18px"><h3>Status distribution</h3><div class="bars"><template x-for="item in bars(statusCounts)" :key="item.key"><div class="bar"><span x-text="item.key"></span><div class="track"><div class="fill" :style="`width:${item.width}%`"></div></div><strong x-text="item.value"></strong></div></template></div></div></div><div class="content-head"><div><h2>Feedback drilldown</h2><p>Context pack 质量趋势：hit/filter/ineffective rate。</p></div></div><div class="grid"><article class="record"><h3>Context quality</h3><p x-text="`packs ${contextQuality.total_packs || 0}, hit ${contextQuality.avg_hit_rate || 0}, filter ${contextQuality.avg_filter_rate || 0}, ineffective ${contextQuality.avg_ineffective_rate || 0}`"></p></article><template x-for="item in bars(contextQuality.by_task_type || {})" :key="item.key"><article class="record"><h3 x-text="item.key"></h3><p x-text="JSON.stringify((contextQuality.by_task_type || {})[item.key])"></p></article></template></div></section>
+    <section x-show="view==='curator'"><div class="content-head"><div><h2>Curator candidates</h2><p>面向去重、归档、矛盾检测和 skill 推广的候选摘要。</p></div></div><div class="curator-grid"><template x-for="group in curatorGroups" :key="group.key"><article class="curator-card"><h3><span x-text="group.label"></span><span class="pill" x-text="group.items.length"></span></h3><template x-for="item in group.items.slice(0, 12)" :key="itemKey(item)"><p x-text="itemLabel(item)"></p></template><p x-show="group.items.length === 0" style="color:var(--sage)">无</p></article></template></div><div class="content-head"><div><h2>Action plan</h2><p>Curator dry-run preview，包含原因和 rollback metadata。</p></div></div><div class="grid"><template x-for="action in (report.action_plan || [])" :key="action.id + action.action"><article class="record"><h3 x-text="`${action.action}: ${action.title || action.id}`"></h3><p x-text="`reason=${action.reason}, rollback=${JSON.stringify(action.rollback || {})}`"></p></article></template></div></section>
+    <section x-show="view==='graph'"><div class="content-head"><div><h2>Memory link graph</h2><p>最近的 memory_links 关系边。</p></div></div><div class="grid"><template x-for="link in links" :key="link.id"><article class="record"><h3 x-text="link.relation_type"></h3><p x-text="`${link.source_id} → ${link.target_id}`"></p><div class="meta"><span class="chip" x-text="`weight ${link.weight}`"></span><span class="chip" x-text="link.source_agent"></span></div></article></template></div><div class="empty" x-show="links.length === 0">暂无 memory links</div></section>
+    <section x-show="view==='mailbox'"><div class="content-head"><div><h2>Mailbox inbox</h2><p>最近 agent_messages，包括 handoff workflow metadata。</p></div></div><div class="grid"><template x-for="msg in mailbox" :key="msg.id"><article class="record"><h3 x-text="msg.subject"></h3><p x-text="msg.body || JSON.stringify(msg.metadata || {})"></p><div class="meta"><span class="chip" x-text="msg.from_agent"></span><span class="chip" x-text="`to ${msg.to_agent}`"></span><span class="chip" x-text="msg.status"></span></div></article></template></div><div class="empty" x-show="mailbox.length === 0">暂无 mailbox 消息</div></section>
+    <section x-show="view==='presence'"><div class="content-head"><div><h2>Agent presence</h2><p>在线状态与 namespace metadata。</p></div></div><div class="grid"><template x-for="agent in presence" :key="agent.agent_id"><article class="record"><h3 x-text="agent.agent_id"></h3><p x-text="JSON.stringify(agent.metadata || {})"></p><div class="meta"><span class="chip" x-text="agent.status"></span><span class="chip" x-text="agent.last_seen_at"></span></div></article></template></div><div class="empty" x-show="presence.length === 0">暂无 presence</div></section>
   </main>
 </div>
 <script id="memory-data" type="application/json">__DATA_JSON__</script>
@@ -119,8 +143,10 @@ function memoryDashboard(){
   const report = data.report || {};
   const semantic = data.semantic || {};
   const unique = (values) => [...new Set(values.filter(Boolean))].sort();
+  const parseJson = (value, fallback) => { try { return JSON.parse(value || ''); } catch { return fallback; } };
   return {
     data, rows, report, semantic, view:'records', query:'', typeFilter:'', statusFilter:'', sortBy:'updated_at',
+    links: data.links || [], mailbox: (data.mailbox || []).map(m => ({...m, metadata: parseJson(m.metadata_json, {})})), presence: (data.presence || []).map(p => ({...p, metadata: parseJson(p.metadata_json, {})})), contextQuality: data.context_quality || {},
     typeCounts: data.type_counts || {}, statusCounts: data.status_counts || {},
     get typeOptions(){ return unique(this.rows.map(r => r.type)); },
     get statusOptions(){ return unique(this.rows.map(r => r.status)); },

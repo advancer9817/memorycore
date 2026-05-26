@@ -36,7 +36,23 @@ The default deployment:
 11. Runs curator summary and health checks.
 12. Runs pytest unless `--skip-tests` is used.
 
-Default endpoint:
+Default unified endpoint layout:
+
+```text
+http://127.0.0.1:8318/        frontend control console
+http://127.0.0.1:8318/api/*   frontend REST API
+http://127.0.0.1:8318/mcp     MCP endpoint
+http://127.0.0.1:8318/health  health check
+http://127.0.0.1:8318/metrics metrics
+```
+
+The default bind host is loopback-only. For remote access, provide a token:
+
+```bash
+LOCAL_MEMORY_FRONTEND_TOKEN='change-me' .venv/bin/python -m local_memory_mcp serve --host 0.0.0.0 --port 8318
+```
+
+MCP clients should continue using:
 
 ```text
 http://127.0.0.1:8318/mcp

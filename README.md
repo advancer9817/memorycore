@@ -43,7 +43,7 @@ MEM_ROOT="${LOCAL_MEMORY_ROOT:-$(pwd)}"
 已验证：
 
 1. **SQLite + FTS5 结构化记忆层**：支持 type/scope/tags/status/importance/confidence/source_agent/effectiveness 等字段，FTS5 全文检索。
-2. **HTTP MCP server**：23 个工具，Hermes 可通过 `http://127.0.0.1:8318/mcp` 作为普通 HTTP MCP 客户端连接。
+2. **HTTP MCP server**：34 个工具，Hermes 可通过 `http://127.0.0.1:8318/mcp` 作为普通 HTTP MCP 客户端连接。
 3. **Context Pack**：`memory_context` 按任务生成 compact 上下文包，支持 token budget 控制，按记忆类型分组，集成 active contradicts/supersedes warning，并将检索记忆标记为 untrusted data；命中注入特征的记忆会从普通 context body 过滤到 warnings。
 4. **Curator**：重复标题、低反馈、stale、archive、矛盾候选、skill_candidate 推广候选检测；默认 dry-run。
 5. **Feedback / effectiveness**：`memory_feedback` 记录反馈事件并更新 feedback_score、injected_count、ineffective_count、effectiveness_score。
@@ -69,6 +69,7 @@ Removed / not current core：
 | `memory_add` | 写入结构化记忆 |
 | `memory_search` | FTS5 关键词搜索 |
 | `memory_context` | 按任务生成 context pack |
+| `memory_context_stats` | 查询 context pack 质量趋势指标 |
 | `memory_get` | 读取单条记忆 |
 | `memory_list_recent` | 最近更新记录 |
 | `memory_update_status` | 更新记忆状态 |
@@ -84,7 +85,17 @@ Removed / not current core：
 | `memory_warnings` | 根据 active links 返回冲突/替代 warning |
 | `memory_update` | 更新已有记忆的 title/content/status/confidence/importance |
 | `memory_audit_log` | 查询记忆写入、更新、状态变更的审计事件日志 |
+| `memory_export` | 导出 schema-versioned JSON 记忆数据 |
+| `memory_import` | 导入记忆数据，支持 dry-run 冲突报告 |
+| `memory_backup` | 使用 SQLite backup API 创建数据库备份 |
+| `memory_rebuild_vectors` | 从 SQLite 记录重建 Qdrant 向量索引 |
 | `agent_send` | 向指定 agent 发送消息 |
+| `agent_permission_grant` | 创建或更新 agent 权限策略 |
+| `agent_permission_get` | 查询单个 agent 权限策略 |
+| `agent_handoff_create` | 创建结构化 agent handoff 请求 |
+| `agent_handoff_update` | 更新 handoff 状态并发送响应 |
+| `agent_capability_register` | 注册 agent 能力用于任务移交 |
+| `agent_capability_search` | 按能力和 namespace 查找 agent |
 | `agent_inbox` | 读取 agent 收件箱，支持按状态过滤和自动标记已读 |
 | `agent_presence_update` | 更新 agent 在线状态（心跳） |
 | `agent_presence_list` | 列出 agent 在线状态，支持按状态过滤 |
@@ -106,18 +117,34 @@ PY="$MEM_ROOT/.venv/bin/python"
 
 `semantic-status` / `semantic-index` / `semantic-search` CLI 子命令保留为兼容提示；实际语义检索通过 MCP 工具 `memory_vector_search` / `memory_vector_status`。
 
-## MCP 接入配置
+## MCP 与前端控制台
 
-推荐独立运行 HTTP MCP 服务，然后让各客户端只指向同一个 URL：
+推荐独立运行统一 HTTP 服务，让浏览器前端、REST API 和 MCP 客户端共用同一个端口：
 
 ```bash
-"$PY" -m local_memory_mcp serve --port 8318
+"$PY" -m local_memory_mcp serve --host 127.0.0.1 --port 8318
 ```
 
-HTTP endpoint:
+同端口路径：
 
 ```text
-http://127.0.0.1:8318/mcp
+http://127.0.0.1:8318/        前端控制台
+http://127.0.0.1:8318/api/*   前端 REST API
+http://127.0.0.1:8318/mcp     MCP endpoint
+http://127.0.0.1:8318/health  健康检查
+http://127.0.0.1:8318/metrics 指标
+```
+
+如需远程绑定，默认要求 Bearer token：
+
+```bash
+LOCAL_MEMORY_FRONTEND_TOKEN='change-me' "$PY" -m local_memory_mcp serve --host 0.0.0.0 --port 8318
+```
+
+纯 MCP 模式可用：
+
+```bash
+"$PY" -m local_memory_mcp serve --mcp-only --host 127.0.0.1 --port 8318
 ```
 
 Hermes 作为普通 MCP 客户端时可使用：

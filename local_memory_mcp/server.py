@@ -21,11 +21,23 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from local_memory_mcp.frontend import (
+    configure_frontend,
+    frontend_api,
+    frontend_health,
+    frontend_index,
+    frontend_metrics,
+)
+
 from local_memory_mcp.models import DEFAULT_ROOT, load_config, validate_config
 from local_memory_mcp.storage import (
     add_memory_record,
     add_feedback,
     add_link,
+    agent_capability_register as register_agent_capability,
+    agent_capability_search as search_agent_capabilities,
+    agent_handoff_create as create_agent_handoff,
+    agent_handoff_update as update_agent_handoff,
     build_context_pack,
     cleanup_expired_messages,
     consolidate,
@@ -33,11 +45,18 @@ from local_memory_mcp.storage import (
     export_html,
     get_active_warnings,
     get_agent_inbox,
+    get_agent_permission,
     get_audit_log,
+    get_context_quality_stats,
     get_memory_stats,
     get_record,
+    grant_agent_permission,
     list_agent_presence,
     list_recent,
+    memory_backup as create_memory_backup,
+    memory_export as export_memory_payload,
+    memory_import as import_memory_payload,
+    memory_rebuild_vectors as rebuild_memory_vectors,
     query_links,
     search_memory_records,
     send_agent_message,
@@ -57,6 +76,26 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP(
     "local-memory-mcp",
 )
+
+
+@mcp.custom_route("/", methods=["GET"], include_in_schema=False)
+async def _frontend_index_route(request):
+    return await frontend_index(request)
+
+
+@mcp.custom_route("/api/{path:path}", methods=["GET", "POST", "PATCH"], include_in_schema=False)
+async def _frontend_api_route(request):
+    return await frontend_api(request)
+
+
+@mcp.custom_route("/health", methods=["GET"], include_in_schema=False)
+async def _frontend_health_route(request):
+    return await frontend_health(request)
+
+
+@mcp.custom_route("/metrics", methods=["GET"], include_in_schema=False)
+async def _frontend_metrics_route(request):
+    return await frontend_metrics(request)
 
 SQLITE_VEC_AVAILABLE = False  # removed; vector search now via vector_store.py (Qdrant)
 
@@ -134,6 +173,13 @@ def memory_context(
 
 @mcp.tool()
 @_safe_tool
+def memory_context_stats(limit: int = 500) -> dict[str, Any]:
+    """Return context pack quality trend metrics."""
+    return get_context_quality_stats(limit=limit)
+
+
+@mcp.tool()
+@_safe_tool
 def memory_get(id: str) -> dict[str, Any] | None:
     """Get one memory record by id."""
     return get_record(id)
@@ -183,9 +229,11 @@ def memory_curator_report(
     limit: int = 500,
     stale_after_days: int = 60,
     archive_after_days: int = 120,
+    allow_actions: list[str] | str | None = None,
+    deny_actions: list[str] | str | None = None,
 ) -> dict[str, Any]:
     """Return memory curator candidates; optionally mark stale/archive records without deleting."""
-    return curator_report(dry_run, limit, stale_after_days, archive_after_days)
+    return curator_report(dry_run, limit, stale_after_days, archive_after_days, allow_actions, deny_actions)
 
 
 @mcp.tool()
@@ -430,6 +478,112 @@ def memory_update(
 
 @mcp.tool()
 @_safe_tool
+def memory_export(include_audit: bool = False) -> dict[str, Any]:
+    """Export memory data as a schema-versioned JSON-compatible payload."""
+    return export_memory_payload(include_audit=include_audit)
+
+
+@mcp.tool()
+@_safe_tool
+def memory_import(
+    payload: dict[str, Any],
+    dry_run: bool = True,
+    conflict_policy: str = "skip",
+) -> dict[str, Any]:
+    """Import a schema-versioned memory payload with dry-run conflict reporting."""
+    return import_memory_payload(payload, dry_run=dry_run, conflict_policy=conflict_policy)
+
+
+@mcp.tool()
+@_safe_tool
+def memory_backup(path: str | None = None) -> dict[str, Any]:
+    """Create a SQLite backup using the SQLite backup API."""
+    return create_memory_backup(path)
+
+
+@mcp.tool()
+@_safe_tool
+def memory_rebuild_vectors(dry_run: bool = True, limit: int = 5000) -> dict[str, Any]:
+    """Rebuild Qdrant vectors from SQLite memory rows."""
+    return rebuild_memory_vectors(dry_run=dry_run, limit=limit)
+
+
+@mcp.tool()
+@_safe_tool
+def agent_handoff_create(
+    from_agent: str,
+    to_agent: str,
+    task: str,
+    payload: dict[str, Any] | None = None,
+    correlation_id: str | None = None,
+    priority: str = "normal",
+    ttl_seconds: int | None = None,
+) -> dict[str, Any]:
+    """Create a structured agent handoff request message."""
+    return create_agent_handoff(from_agent, to_agent, task, payload, correlation_id, priority, ttl_seconds)
+
+
+@mcp.tool()
+@_safe_tool
+def agent_handoff_update(
+    message_id: str,
+    from_agent: str,
+    status: str,
+    result: dict[str, Any] | None = None,
+    error: str = "",
+) -> dict[str, Any]:
+    """Acknowledge, complete, or fail an agent handoff request."""
+    return update_agent_handoff(message_id, from_agent, status, result, error)
+
+
+@mcp.tool()
+@_safe_tool
+def agent_capability_register(
+    agent_id: str,
+    capabilities: list[str] | str,
+    namespace: str = "default",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Register an agent's capabilities for handoff routing."""
+    return register_agent_capability(agent_id, capabilities, namespace, metadata)
+
+
+@mcp.tool()
+@_safe_tool
+def agent_capability_search(
+    capability: str = "",
+    namespace: str = "",
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Find agents by capability and optional namespace."""
+    return search_agent_capabilities(capability, namespace, limit)
+
+
+@mcp.tool()
+@_safe_tool
+def agent_permission_grant(
+    agent_id: str,
+    namespace: str = "default",
+    can_read: bool = True,
+    can_write: bool = True,
+    can_broadcast: bool = True,
+    scopes: list[str] | str | None = None,
+    types: list[str] | str | None = None,
+    tags: list[str] | str | None = None,
+) -> dict[str, Any]:
+    """Create or update an agent permission policy."""
+    return grant_agent_permission(agent_id, namespace, can_read, can_write, can_broadcast, scopes, types, tags)
+
+
+@mcp.tool()
+@_safe_tool
+def agent_permission_get(agent_id: str) -> dict[str, Any] | None:
+    """Get one agent permission policy by agent id."""
+    return get_agent_permission(agent_id)
+
+
+@mcp.tool()
+@_safe_tool
 def agent_send(
     from_agent: str,
     to_agent: str,
@@ -615,9 +769,12 @@ def main(argv: list[str] | None = None) -> int:
     p_html = sub.add_parser("html")
     p_html.add_argument("out", nargs="?", default=str(DEFAULT_ROOT / "dashboard.html"))
     p_serve = sub.add_parser("serve")
-    p_serve.add_argument("--host", default="127.0.0.1", help="HTTP bind address (SSE mode)")
-    p_serve.add_argument("--port", type=int, default=0, help="HTTP port (SSE mode; default=0 = stdio)")
-    p_serve.add_argument("--obs-port", type=int, default=0, help="Observability HTTP port for /health and /metrics (0 = disabled)")
+    p_serve.add_argument("--host", default="127.0.0.1", help="HTTP bind address")
+    p_serve.add_argument("--port", type=int, default=8318, help="HTTP port (default=8318, /mcp plus frontend routes)")
+    p_serve.add_argument("--obs-port", type=int, default=0, help="Legacy extra observability HTTP port (0 = disabled; /health and /metrics are on main port)")
+    p_serve.add_argument("--auth-token", default=os.environ.get("LOCAL_MEMORY_FRONTEND_TOKEN", ""), help="Bearer token required for /api/*")
+    p_serve.add_argument("--allow-insecure-remote", action="store_true", help="Allow non-loopback frontend bind without auth token")
+    p_serve.add_argument("--mcp-only", action="store_true", help="Disable frontend / and /api routes while keeping /mcp")
     args = parser.parse_args(argv)
     if args.cmd == "init":
         from local_memory_mcp.storage import managed_conn
@@ -681,13 +838,24 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load_config()
         for warn in validate_config(cfg):
             logger.warning("config validation: %s", warn)
+        configure_frontend(
+            host=args.host,
+            port=args.port,
+            auth_token=args.auth_token,
+            allow_insecure_remote=args.allow_insecure_remote,
+            enabled=not args.mcp_only,
+        )
         obs_port = getattr(args, "obs_port", 0)
         if obs_port:
             _start_observability_server(args.host, obs_port)
         if args.port:
             mcp.settings.host = args.host
             mcp.settings.port = args.port
-            print(f"Starting MCP server on http://{args.host}:{args.port}/mcp", file=sys.stderr)
+            if args.mcp_only:
+                print(f"Starting MCP server on http://{args.host}:{args.port}/mcp", file=sys.stderr)
+            else:
+                auth_note = "auth enabled" if args.auth_token else "localhost/no-token"
+                print(f"Starting unified service on http://{args.host}:{args.port}/  (/mcp, /api/*, {auth_note})", file=sys.stderr)
             mcp.run(transport="streamable-http")
         else:
             mcp.run(transport="stdio")

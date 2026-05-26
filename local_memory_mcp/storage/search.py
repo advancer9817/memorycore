@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from typing import Any
 
 from local_memory_mcp.injection_guard import (
@@ -9,10 +10,99 @@ from local_memory_mcp.injection_guard import (
     check_memory_for_injection,
     warning_for_filtered_memory,
 )
-from local_memory_mcp.models import fts_phrase, normalize_list, now, row_to_dict
+from local_memory_mcp.models import as_json, fts_phrase, normalize_list, now, row_to_dict
 from local_memory_mcp.storage.db import _managed_query, managed_conn
 
 _GREETINGS = {"hi", "hello", "hey", "你好", "嗯", "好", "继续", "ok", "okay", "yes", "no"}
+
+_TASK_TYPE_WEIGHTS: dict[str, dict[str, float]] = {
+    "feedback": {"feedback": 1.5, "user_profile": 1.2, "project_memory": 0.9},
+    "implementation": {"project_memory": 1.4, "decision": 1.2, "feedback": 1.0},
+    "debugging": {"feedback": 1.3, "timeline_event": 1.2, "project_memory": 1.1},
+    "general": {},
+}
+
+
+def _classify_task(task: str) -> str:
+    lowered = task.lower()
+    if any(word in lowered for word in ("feedback", "preference", "remember", "correction", "偏好", "反馈")):
+        return "feedback"
+    if any(word in lowered for word in ("bug", "debug", "error", "fail", "修复", "错误")):
+        return "debugging"
+    if any(word in lowered for word in ("implement", "build", "feature", "迭代", "实现")):
+        return "implementation"
+    return "general"
+
+
+def _type_weights(task_type: str) -> dict[str, float]:
+    weights = {"project_memory": 1.0, "feedback": 1.0, "user_profile": 1.0, "decision": 1.0, "timeline_event": 1.0}
+    weights.update(_TASK_TYPE_WEIGHTS.get(task_type, {}))
+    return weights
+
+
+def _record_context_quality_event(
+    task: str,
+    task_type: str,
+    agent: str,
+    project_path: str,
+    scope: str,
+    quality: dict[str, Any],
+    type_weights: dict[str, float],
+) -> None:
+    with managed_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO context_quality_events (
+              id, task, task_type, agent, project_path, scope, total_candidates,
+              used_count, filtered_count, hit_rate, filter_rate, ineffective_rate,
+              type_weights_json, created_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                str(uuid.uuid4()), task, task_type, agent, project_path or "", scope or "global",
+                quality["total_candidates"], quality["used_count"], quality["filtered_count"],
+                quality["hit_rate"], quality["filter_rate"], quality["ineffective_rate"],
+                as_json(type_weights), now(),
+            ),
+        )
+
+
+def get_context_quality_stats(limit: int = 500) -> dict[str, Any]:
+    cap = max(1, min(int(limit), 5000))
+    with managed_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM context_quality_events ORDER BY created_at DESC LIMIT ?",
+            (cap,),
+        ).fetchall()
+    if not rows:
+        return {
+            "total_packs": 0,
+            "avg_hit_rate": 0.0,
+            "avg_filter_rate": 0.0,
+            "avg_ineffective_rate": 0.0,
+            "by_task_type": {},
+        }
+    by_task_type: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        task_type = row["task_type"]
+        bucket = by_task_type.setdefault(task_type, {"count": 0, "hit_rate": 0.0, "filter_rate": 0.0, "ineffective_rate": 0.0})
+        bucket["count"] += 1
+        bucket["hit_rate"] += float(row["hit_rate"])
+        bucket["filter_rate"] += float(row["filter_rate"])
+        bucket["ineffective_rate"] += float(row["ineffective_rate"])
+    for bucket in by_task_type.values():
+        count = max(bucket["count"], 1)
+        bucket["hit_rate"] = round(bucket["hit_rate"] / count, 3)
+        bucket["filter_rate"] = round(bucket["filter_rate"] / count, 3)
+        bucket["ineffective_rate"] = round(bucket["ineffective_rate"] / count, 3)
+    total = len(rows)
+    return {
+        "total_packs": total,
+        "avg_hit_rate": round(sum(float(row["hit_rate"]) for row in rows) / total, 3),
+        "avg_filter_rate": round(sum(float(row["filter_rate"]) for row in rows) / total, 3),
+        "avg_ineffective_rate": round(sum(float(row["ineffective_rate"]) for row in rows) / total, 3),
+        "by_task_type": by_task_type,
+    }
 
 
 def _is_greeting(task: str) -> bool:
@@ -144,6 +234,17 @@ def build_context_pack(
     if not records and len(task.strip()) > 10 and not _is_greeting(task):
         records = search_memory_records("", scope=scope, project_path=project_path, status="active", limit=20)
         fallback_used = bool(records)
+    task_type = _classify_task(task)
+    type_weights = _type_weights(task_type)
+    records = sorted(
+        records,
+        key=lambda r: (
+            float(type_weights.get(r.get("type"), 1.0)),
+            float(r.get("importance") or 0),
+            float(r.get("effectiveness_score") or 0),
+        ),
+        reverse=True,
+    )
     groups_order = [
         "skill_candidate", "user_profile", "environment_fact", "agent_architecture",
         "project_memory", "decision", "timeline_event", "episodic_memory", "feedback",
@@ -202,6 +303,25 @@ def build_context_pack(
                 )
     active_count = sum(1 for r in records if r["status"] == "active")
     warnings = (get_active_warnings(used_ids) if used_ids else []) + injection_warnings
+    hit_rate = round(len(used_ids) / max(len(records), 1), 3)
+    filter_rate = round(len(filtered_ids) / max(len(records), 1), 3)
+    ineffective_rate = round(
+        sum(1 for r in records if float(r.get("ineffective_count") or 0) > 0) / max(len(records), 1),
+        3,
+    )
+    quality = {
+        "total_candidates": len(records),
+        "used_count": len(used_ids),
+        "filtered_count": len(filtered_ids),
+        "active_ratio": round(active_count / max(len(records), 1), 3),
+        "avg_importance": round(sum(r["importance"] for r in records) / max(len(records), 1), 3),
+        "stale_in_results": sum(1 for r in records if r["status"] == "stale"),
+        "estimated_tokens": len(text) // 4,
+        "hit_rate": hit_rate,
+        "filter_rate": filter_rate,
+        "ineffective_rate": ineffective_rate,
+    }
+    _record_context_quality_event(task, task_type, agent, project_path, scope, quality, type_weights)
     used_id_set = set(used_ids)
     sections: list[dict[str, Any]] = []
     for group in groups_order:
@@ -215,20 +335,14 @@ def build_context_pack(
         "filtered_ids": filtered_ids,
         "warnings": warnings,
         "budget_chars": max_chars,
-        "quality": {
-            "total_candidates": len(records),
-            "used_count": len(used_ids),
-            "filtered_count": len(filtered_ids),
-            "active_ratio": round(active_count / max(len(records), 1), 3),
-            "avg_importance": round(sum(r["importance"] for r in records) / max(len(records), 1), 3),
-            "stale_in_results": sum(1 for r in records if r["status"] == "stale"),
-            "estimated_tokens": len(text) // 4,
-        },
+        "quality": quality,
         "sections": sections,
         "trace": {
             "total_candidates": len(records),
             "used_count": len(used_ids),
             "filtered_count": len(filtered_ids),
             "fallback_used": fallback_used,
+            "task_type": task_type,
+            "type_weights": type_weights,
         },
     }

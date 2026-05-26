@@ -18,6 +18,7 @@ from local_memory_mcp.models import (
 from local_memory_mcp.privacy import redact_record_fields
 from local_memory_mcp.storage.db import _managed_query, managed_conn
 from local_memory_mcp.storage.audit import log_audit_event
+from local_memory_mcp.storage.permissions import check_agent_permission
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,9 @@ def add_memory_record(
     validate_status(status)
     if not title.strip() or not content.strip():
         raise ValueError("title and content are required")
+    permission = check_agent_permission(source_agent or "unknown", "memory.write", scope or "global", memory_type, tags)
+    if not permission["allowed"]:
+        return {"error": "permission_denied", "decision": permission}
     title, content, _, _ = redact_record_fields(title, content)
     confidence_value = finite_float(confidence, "confidence", 0.0, 1.0)
     importance_value = finite_float(importance, "importance", 0.0, 1.0)

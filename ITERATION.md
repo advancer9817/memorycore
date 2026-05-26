@@ -1,3 +1,259 @@
+## [迭代 26] 2026-05-26 — 同端口前端控制服务
+
+### 变更摘要
+- `local_memory_mcp/frontend.py`：新增同端口前端控制服务路由，提供 `/` 控制台、`/api/*` REST API、`/health`、`/metrics`。
+- `local_memory_mcp/server.py`：通过 FastMCP `custom_route` 将前端与 REST API 挂载到现有 HTTP 服务；`/mcp` 保持不变。
+- `serve` 默认端口改为 `8318`，默认提供统一服务：`/`、`/api/*`、`/mcp`、`/health`、`/metrics`。
+- `serve` 新增 `--auth-token`、`--allow-insecure-remote`、`--mcp-only`；非 loopback 绑定默认要求 token 或显式不安全开关。
+- 前端控制台使用无构建 vanilla JS，不加载第三方 CDN；支持 records、curator、agents、ops、raw JSON 等基础控制视图。
+- `local_memory_mcp/storage/dashboard.py`：抽出 `dashboard_payload(limit=1000)`，静态 `export_html()` 与实时 `/api/dashboard` 复用同一数据源。
+- `local_memory_mcp/storage/__init__.py`：导出 `dashboard_payload`。
+- `README.md` / `docs/deployment.md`：文档更新为同端口路径布局：`/` 前端、`/api/*` REST、`/mcp` MCP。
+- `tests/test_frontend.py`：新增 7 个测试覆盖前端首页、health、dashboard payload、memory create/get/patch、bad JSON、404、token auth、remote bind guard。
+
+### 验证
+- 聚焦测试：`/home/advancer/project/local-memory-mcp/.venv/bin/python -m pytest /home/advancer/project/local-memory-mcp/tests/test_frontend.py /home/advancer/project/local-memory-mcp/tests/test_html.py /home/advancer/project/local-memory-mcp/tests/test_dashboard_ops.py /home/advancer/project/local-memory-mcp/tests/test_cli.py -q` → **11/11 pass**（1 个 httpx 测试 warning）。
+- 全量测试：`/home/advancer/project/local-memory-mcp/.venv/bin/python -m pytest /home/advancer/project/local-memory-mcp/tests -q` → **310/310 pass**（1 个 httpx 测试 warning）。
+
+### 使用方式
+```bash
+cd /home/advancer/project/local-memory-mcp
+.venv/bin/python -m local_memory_mcp serve --host 127.0.0.1 --port 8318
+```
+
+浏览器访问：
+```text
+http://127.0.0.1:8318/
+```
+
+MCP 客户端继续使用：
+```text
+http://127.0.0.1:8318/mcp
+```
+
+远程访问示例：
+```bash
+LOCAL_MEMORY_FRONTEND_TOKEN='change-me' .venv/bin/python -m local_memory_mcp serve --host 0.0.0.0 --port 8318
+```
+
+### 已知问题
+- 前端控制台是轻量 vanilla JS 单页，不是完整设计系统；复杂表单校验仍依赖后端 API。
+- `/api/*` token 是单 token 模式，尚未实现用户账号、RBAC 或 agent identity 绑定。
+- 测试中的 bad JSON case 触发 httpx deprecation warning，不影响功能。
+
+---
+
+## [迭代 25] 2026-05-26 — Dashboard 运维台增强
+
+### 变更摘要
+- `local_memory_mcp/storage/dashboard.py`：Dashboard payload 新增 `links`、`mailbox`、`presence`、`context_quality`，用于本地运维视图。
+- Dashboard 导航新增 Graph / Mailbox / Presence 视图。
+- Health 视图新增 Feedback drilldown，展示 context pack 质量趋势（pack 数、hit/filter/ineffective rate、按 task type 分布）。
+- Curator 视图新增 Action plan 区块，展示 dry-run preview、原因与 rollback metadata。
+- Graph 视图展示最近 memory_links 关系边。
+- Mailbox 视图展示最近 agent_messages 与 handoff metadata。
+- Presence 视图展示 agent 在线状态与 namespace metadata。
+- `local_memory_mcp/storage/db.py`：SQLite lock 重试次数 3→10，降低权限/审计/向量同步叠加后的并发写入偶发锁冲突。
+- `tests/test_dashboard_ops.py`：新增 2 个测试覆盖 dashboard ops payload 与视图文案。
+
+### 验证
+- 局部测试：`/home/advancer/project/local-memory-mcp/.venv/bin/python -m pytest /home/advancer/project/local-memory-mcp/tests/test_dashboard_ops.py /home/advancer/project/local-memory-mcp/tests/test_html.py -q` → **3/3 pass**。
+- 并发回归：`/home/advancer/project/local-memory-mcp/.venv/bin/python -m pytest /home/advancer/project/local-memory-mcp/tests/test_concurrent_and_migration.py::test_concurrent_writes_no_corruption -q` → **1/1 pass**。
+- 全量测试：`/home/advancer/project/local-memory-mcp/.venv/bin/python -m pytest /home/advancer/project/local-memory-mcp/tests -q` → **303/303 pass**。
+
+### 已知问题
+- Dashboard 仍是静态 HTML 运维台，只展示 preview，不直接执行 curator apply / permission / handoff 操作。
+- Graph 视图当前为关系边列表，不是可交互力导向图。
+
+### 下一步
+1. 如需继续增强，可实现 dashboard 操作端点或导出可执行 CLI command snippets。
+2. 如需更强图谱视图，可引入本地无构建 SVG graph 渲染。
+
+---
+
+## [迭代 24] 2026-05-26 — Agent handoff workflow schema
+
+### 变更摘要
+- `local_memory_mcp/storage/db.py`：新增 `agent_capabilities` 表与 namespace 索引。
+- `local_memory_mcp/storage/handoff.py`：新增结构化 handoff 工作流与能力注册模块。
+- `agent_handoff_create()`：创建带 `workflow=handoff`、`handoff_status=requested`、`correlation_id`、payload 的 mailbox 消息。
+- `agent_handoff_update()`：支持 `ack` / `done` / `failed` 状态，向原请求方发送响应消息，并写回原消息 metadata。
+- `agent_capability_register()` / `agent_capability_search()`：提供 agent capability registry，用于后续任务路由。
+- `local_memory_mcp/server.py`：新增 MCP 工具 `agent_handoff_create`、`agent_handoff_update`、`agent_capability_register`、`agent_capability_search`。
+- `local_memory_mcp/storage/__init__.py` / `local_memory_mcp/__init__.py`：导出 handoff public API。
+- `README.md`：MCP 工具数 30→34，工具表补充 handoff 与 capability 工具。
+- `tests/test_handoff.py`：新增 4 个测试覆盖 handoff schema、状态响应、非法状态拒绝、capability registry 查询。
+
+### 验证
+- 局部测试：`/home/advancer/project/local-memory-mcp/.venv/bin/python -m pytest /home/advancer/project/local-memory-mcp/tests/test_handoff.py /home/advancer/project/local-memory-mcp/tests/test_mailbox.py /home/advancer/project/local-memory-mcp/tests/test_docs_consistency.py -q` → **25/25 pass**。
+- 全量测试：`/home/advancer/project/local-memory-mcp/.venv/bin/python -m pytest /home/advancer/project/local-memory-mcp/tests -q` → **301/301 pass**。
+
+### 已知问题
+- handoff 当前基于 mailbox metadata 实现，未新增专用 handoff table；这保持兼容，但复杂查询能力有限。
+- capability search 当前是精确 capability 字符串匹配，尚未支持模糊匹配或权重排序。
+
+### 下一步
+1. Iter 25：Dashboard 运维台增强。
+
+---
+
+## [迭代 23] 2026-05-26 — Context Pack 质量指标与权重调优
+
+### 变更摘要
+- `local_memory_mcp/storage/db.py`：新增 `context_quality_events` 表，记录 context pack 生成时的候选数、使用数、过滤数、hit/filter/ineffective rate、task type 与 type weights。
+- `local_memory_mcp/storage/search.py`：新增 task type 轻量分类与类型权重；`build_context_pack()` 根据 task type 对 memory type 做二次排序。
+- `build_context_pack()` 的 `quality` 新增 `hit_rate`、`filter_rate`、`ineffective_rate`；`trace` 新增 `task_type` 与 `type_weights`。
+- `get_context_quality_stats()`：新增 context pack 质量趋势聚合，返回总体平均与按 task type 分组指标。
+- `local_memory_mcp/server.py`：新增 MCP 工具 `memory_context_stats`。
+- `local_memory_mcp/storage/__init__.py` / `local_memory_mcp/__init__.py`：导出 context quality stats API。
+- `README.md`：MCP 工具数 29→30，工具表补充 `memory_context_stats`。
+- `tests/test_context_quality_metrics.py`：新增 3 个测试覆盖质量事件记录、task type 权重、空统计返回形状。
+
+### 验证
+- 局部测试：`/home/advancer/project/local-memory-mcp/.venv/bin/python -m pytest /home/advancer/project/local-memory-mcp/tests/test_context_quality_metrics.py /home/advancer/project/local-memory-mcp/tests/test_context_pack_v2.py /home/advancer/project/local-memory-mcp/tests/test_docs_consistency.py -q` → **21/21 pass**。
+- 全量测试：`/home/advancer/project/local-memory-mcp/.venv/bin/python -m pytest /home/advancer/project/local-memory-mcp/tests -q` → **297/297 pass**。
+
+### 已知问题
+- task type 分类为关键词启发式，不是 LLM 分类器。
+- hit_rate 当前表示 used/candidates，不代表下游用户实际满意度；真实效果仍需结合 `memory_feedback`。
+
+### 下一步
+1. Iter 24：Agent handoff workflow schema。
+2. Iter 25：Dashboard 运维台增强。
+
+---
+
+## [迭代 22] 2026-05-26 — Curator apply plan + rollback metadata
+
+### 变更摘要
+- `local_memory_mcp/storage/curator.py`：`curator_report()` 新增 `allow_actions` / `deny_actions` 参数，支持按 action 类型过滤 apply plan。
+- `curator_report()` 新增 `action_plan` 字段；dry-run 也会返回计划动作，包含 `id`、`action`、`title`、`reason`、`target_status`、`rollback`。
+- apply 路径改为先生成 action plan，再执行状态变更；`actions` 保持旧格式以维持向后兼容。
+- `curator_apply` 审计 detail 新增完整 action plan 与 rollback metadata，便于人工恢复。
+- `summary` 新增 `planned_actions`。
+- `local_memory_mcp/server.py`：`memory_curator_report` MCP 工具参数补充 `allow_actions` / `deny_actions`。
+- `tests/test_curator_plan.py`：新增 4 个测试覆盖 dry-run preview、allow filter、deny filter、rollback 审计 metadata。
+
+### 验证
+- 局部测试：`/home/advancer/project/local-memory-mcp/.venv/bin/python -m pytest /home/advancer/project/local-memory-mcp/tests/test_curator.py /home/advancer/project/local-memory-mcp/tests/test_curator_plan.py -q` → **10/10 pass**。
+- 全量测试：`/home/advancer/project/local-memory-mcp/.venv/bin/python -m pytest /home/advancer/project/local-memory-mcp/tests -q` → **294/294 pass**。
+
+### 已知问题
+- rollback metadata 当前记录状态字段，尚未提供一键 rollback MCP 工具。
+- allow/deny 过滤粒度为 action 类型，尚未支持按 memory type/scope/tag 的 curator rule DSL。
+
+### 下一步
+1. Iter 23：Context Pack 质量指标与权重调优。
+2. Iter 24：Agent handoff workflow schema。
+3. Iter 25：Dashboard 运维台增强。
+
+---
+
+## [迭代 21] 2026-05-26 — export/import/backup/restore 稳定化
+
+### 变更摘要
+- `local_memory_mcp/storage/transfer.py`：新增 schema-versioned JSON 导出/导入、SQLite backup、Qdrant 向量重建入口。
+- `memory_export()`：导出 `memories`、`feedback_events`、`memory_links`、`agent_messages`、`agent_presence`、`agent_permissions`，可选包含 `audit_events`。
+- `memory_import()`：支持 `dry_run`、冲突报告、schema version 检查、`skip` / `replace` 冲突策略；导入落地时写入 `memory_import` 审计事件。
+- `memory_backup()`：使用 SQLite backup API 创建一致性数据库备份，并写入 `memory_backup` 审计事件。
+- `memory_rebuild_vectors()`：支持 dry-run 预估与从 SQLite 非 archived 记录重建 Qdrant 向量索引，落地时写入 `memory_vector_rebuild` 审计事件。
+- `local_memory_mcp/server.py`：新增 MCP 工具 `memory_export`、`memory_import`、`memory_backup`、`memory_rebuild_vectors`。
+- `local_memory_mcp/storage/__init__.py` / `local_memory_mcp/__init__.py`：导出 transfer public API。
+- `README.md`：MCP 工具数 25→29，工具表补充 export/import/backup/vector rebuild。
+- `tests/test_transfer.py`：新增 5 个测试覆盖导出 payload、dry-run 冲突、实际导入、schema 拒绝、SQLite 备份。
+
+### 验证
+- 局部测试：`/home/advancer/project/local-memory-mcp/.venv/bin/python -m pytest /home/advancer/project/local-memory-mcp/tests/test_transfer.py /home/advancer/project/local-memory-mcp/tests/test_docs_consistency.py /home/advancer/project/local-memory-mcp/tests/test_agent_permissions.py -q` → **13/13 pass**。
+- 全量测试：`/home/advancer/project/local-memory-mcp/.venv/bin/python -m pytest /home/advancer/project/local-memory-mcp/tests -q` → **290/290 pass**。
+
+### 已知问题
+- JSON import 当前按表主键处理冲突，不做跨表引用完整性预演；错误 payload 仍可能在 apply 阶段由 SQLite 外键约束拒绝。
+- Qdrant rebuild 复用现有 fire-and-forget `_sync_to_vector()`，单条失败只记录 warning，不中断整批。
+
+### 下一步
+1. Iter 22：Curator apply plan + rollback metadata。
+2. Iter 23：Context Pack 质量指标与权重调优。
+3. Iter 24：Agent handoff workflow schema。
+
+---
+
+## [迭代 20] 2026-05-26 — Agent 权限模型 + 拒绝审计
+
+### 变更摘要
+- `local_memory_mcp/storage/permissions.py`：新增 agent 权限策略模块，支持 `grant_agent_permission()`、`get_agent_permission()`、`check_agent_permission()`、`get_agent_namespace()` 与拒绝审计。
+- `local_memory_mcp/storage/db.py`：新增 `agent_permissions` 表与 namespace 索引，按 agent_id 唯一 upsert 权限策略。
+- `local_memory_mcp/storage/crud.py`：`add_memory_record()` 写入前检查 agent 对 scope/type/tag 的写权限；未配置权限策略时保持向后兼容默认允许。
+- `local_memory_mcp/storage/agents.py`：广播消息前检查 `can_broadcast`；已配置 namespace 时仅广播给同 namespace 的 online/idle agent；presence metadata 缺失 namespace 时使用权限策略默认 namespace 补齐。
+- `local_memory_mcp/server.py`：新增 MCP 工具 `agent_permission_grant` 与 `agent_permission_get`。
+- `local_memory_mcp/storage/__init__.py` / `local_memory_mcp/__init__.py`：导出权限相关 public API。
+- `README.md`：MCP 工具数 23→25，工具表补充 agent 权限工具。
+- `tests/test_agent_permissions.py`：新增 6 个测试覆盖默认兼容、写入拒绝审计、scope/type/tag 过滤、广播拒绝审计、namespace 广播隔离、presence namespace 默认值。
+
+### 验证
+- 局部测试：`/home/advancer/project/local-memory-mcp/.venv/bin/python -m pytest /home/advancer/project/local-memory-mcp/tests/test_agent_permissions.py /home/advancer/project/local-memory-mcp/tests/test_docs_consistency.py -q` → **8/8 pass**。
+- 全量测试：`/home/advancer/project/local-memory-mcp/.venv/bin/python -m pytest /home/advancer/project/local-memory-mcp/tests -q` → **285/285 pass**。
+
+### 已知问题
+- 权限模型当前为 agent 级静态策略；尚未实现 group/role 继承、token identity 绑定或外部认证集成。
+- 读权限检查尚未覆盖所有 read MCP tools；本轮优先落地写入与广播信任边界。
+
+### 下一步
+1. Iter 21：export/import/backup/restore 稳定化。
+2. Iter 22：Curator apply plan + rollback metadata。
+3. Iter 23：Context Pack 质量指标与权重调优。
+
+---
+
+## [下一步迭代规划] 2026-05-26 — Iter 20–25 Roadmap
+
+### 推荐优先级
+
+1. **Iter 20 — Agent 权限模型 + 拒绝审计**
+   - 增加 agent identity / namespace 概念。
+   - 定义 agent 对 memory scope/type/tag 的读写权限。
+   - 限制 broadcast 跨 namespace 行为。
+   - 对权限拒绝写入 audit event。
+   - 目标：在多 agent 共享记忆前先补齐信任边界。
+
+2. **Iter 21 — export/import/backup/restore 稳定化**
+   - 稳定 `memory_export` / `memory_import` 合约。
+   - 支持 dry-run import、冲突报告、schema version 检查。
+   - 支持 SQLite 自动备份与可选 Qdrant 重建。
+   - 目标：形成可恢复、可迁移、可审计的数据安全闭环。
+
+3. **Iter 22 — Curator apply plan + rollback metadata**
+   - curator apply 前生成 action preview。
+   - 支持 allowlist / denylist rule。
+   - 每条 curator action 提供原因说明。
+   - 写入 rollback metadata，便于人工恢复。
+   - 目标：让 curator 从 report-only 走向安全半自动治理。
+
+4. **Iter 23 — Context Pack 质量指标与权重调优**
+   - 追踪 context pack 注入后的正/负反馈。
+   - 统计命中率、无效率、过滤率趋势。
+   - 按 task 类型调整 project / feedback / reference / user memory 权重。
+   - 目标：让检索从“能找到”进化到“越用越准”。
+
+5. **Iter 24 — Agent handoff workflow schema**
+   - 定义 task handoff message schema。
+   - 增加 request/response correlation id。
+   - 增加 ack / done / failed 状态。
+   - 增加 agent capability registry。
+   - 目标：让 Hermes / Claude / Codex / OpenCode 之间能真实协作分工。
+
+6. **Iter 25 — Dashboard 运维台增强**
+   - 增加 curator action preview/apply 视图。
+   - 增加 memory link graph。
+   - 增加 mailbox inbox / presence 面板。
+   - 增加 feedback health drilldown。
+   - 目标：把当前 Dashboard 从查看器升级成本地运维台。
+
+### 当前建议
+
+如果只做一个下一步，优先进入 **Iter 20 — Agent 权限模型 + 拒绝审计**。当前 lmmcp 已经具备多 agent 共享记忆、mailbox、presence、context pack 与 audit 基础；继续扩大自动协作前，最需要先明确“谁能看、谁能写、谁能广播”。
+
+---
+
 ## [迭代 19] 2026-05-25 — 熵检测 + curator_apply 审计 + qdrant-client 升级
 
 ### 变更摘要
