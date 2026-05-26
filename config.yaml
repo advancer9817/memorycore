@@ -24,6 +24,14 @@ temporal:
   contradiction_detection: heuristic
   auto_supersede_user_corrections: true
 
+extraction:
+  api_key: "sk"
+  base_url: "http://127.0.0.1:8317/v1"
+  model: "gpt-5.5"
+  temperature: 0.1
+  max_tokens: 2000
+  timeout: 60
+
 mem0:
   enabled: true
   llm_provider: deepseek
