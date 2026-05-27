@@ -1,5 +1,99 @@
 # ITERATION.md — local-memory-mcp 迭代日志
 
+## [迭代 29] 2026-05-27 — 多设备记忆同步（export/import/sync）
+
+### 背景
+
+用户有多台设备，需要通过代码仓库实现记忆同步。设计要求：
+- 导出文件放入 git 仓库（只含持久知识，不含临时状态）
+- `lmmcp start` 自动从远端拉取最新记忆
+- `lmmcp stop` 自动将当前记忆推送到远端
+- 冲突按时间戳（`updated_at`）决定保留哪条（newer 策略）
+
+### 变更摘要
+
+**`local_memory_mcp/storage/transfer.py`**
+- `memory_export` 新增 `memories_only: bool` 参数：只导出 `memories`、`feedback_events`、`memory_links`（持久跨设备知识），跳过 `agent_messages`/`presence`/`permissions`（设备私有运行时状态）。
+- `memory_import` 新增 `conflict_policy="newer"` 策略：按 `updated_at` 时间戳决定保留本地还是导入行，`newer_wins` 字段返回各表被更新的行数。返回值新增 `newer_wins` 字段。
+- 合法冲突策略集合更新为 `{"skip", "replace", "newer"}`。
+
+**`local_memory_mcp/server.py`**
+- MCP tool `memory_export` 新增 `memories_only` 参数，文档说明跨设备同步用途。
+- MCP tool `memory_import` 文档更新，列出 `newer` 策略说明。
+- CLI 新增 `export` 子命令：
+  ```
+  python -m local_memory_mcp export [FILE] [--memories-only] [--include-audit]
+  ```
+  默认输出 `memory-export.json`，`--memories-only` 用于同步场景。
+- CLI 新增 `import` 子命令：
+  ```
+  python -m local_memory_mcp import FILE [--conflict-policy newer] [--apply]
+  ```
+  默认 dry-run，`--apply` 实际写入，`--conflict-policy` 默认 `newer`。
+
+**`scripts/sync-memory.sh`**（新建）
+- 独立同步脚本，支持 `push` / `pull` / `sync` / `status` 四个子命令。
+- `push`：导出 → git add → git commit → git push。
+- `pull`：git pull → dry-run 预览 → 交互式确认 → import。
+- `sync`：push 后再 pull（完整双向）。
+- 环境变量：`SYNC_FILE`（默认 `memory-sync/memories.json`）、`SYNC_REMOTE`、`SYNC_DEVICE`、`LMMCP_AUTO_SYNC`。
+
+**`scripts/lmmcp`**（更新）
+- `start` 前自动执行 `git pull + import --conflict-policy newer`（拉取远端最新记忆）。
+- `stop` 后自动执行 `export + git commit + git push`（将本次会话记忆推送到远端）。
+- 新增 `sync` 子命令：手动触发 export+push+pull+import。
+- 新增 `LMMCP_AUTO_SYNC` 环境变量（默认 `1`），设为 `0` 禁用自动同步。
+- 所有 git/sync 操作失败时只打日志，不阻断主服务启停。
+
+**`tests/test_sync.py`**（新建，11 个测试）
+- `memories_only` 导出字段验证
+- `newer` 策略：incoming 更新时覆盖、existing 更新时保留、新行直接插入
+- dry-run 不写入验证
+- 非法 conflict_policy 返回错误
+- CLI `export` 生成文件
+- CLI `import` dry-run 不改数据
+- CLI `import` 文件不存在返回 1
+
+### 同步工作流
+
+**首次配置（在代码仓库内）：**
+```bash
+# 确保 memory-sync/ 目录会被 git 追踪（默认不被 .gitignore 排除）
+mkdir -p memory-sync
+```
+
+**日常使用（自动模式）：**
+```bash
+scripts/lmmcp start   # 自动拉取远端最新记忆 → 启动服务
+# ... 工作 ...
+scripts/lmmcp stop    # 停止服务 → 自动导出并推送记忆
+```
+
+**手动同步：**
+```bash
+scripts/lmmcp sync
+# 或独立脚本
+scripts/sync-memory.sh push    # 仅推送
+scripts/sync-memory.sh pull    # 仅拉取（有交互式确认）
+scripts/sync-memory.sh status  # 查看状态
+```
+
+**关闭自动同步：**
+```bash
+LMMCP_AUTO_SYNC=0 scripts/lmmcp start
+```
+
+### 验证
+
+```bash
+.venv/bin/python -m pytest -q
+# 338 passed, 1 warning
+```
+
+---
+
+
+
 ## 下一阶段规划（2026-06）
 
 当前版本：`v0.21.0`，327 tests，35 MCP tools。已完成所有规划中的 Phase 9（Agent Mailbox）和 Phase 10（Temporal Memory）。

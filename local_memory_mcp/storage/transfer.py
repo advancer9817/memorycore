@@ -10,6 +10,8 @@ from local_memory_mcp.storage.audit import log_audit_event
 from local_memory_mcp.storage.db import connect, db_path, managed_conn
 
 SCHEMA_VERSION = 1
+
+# All tables eligible for full backup export
 _TRANSFER_TABLES = [
     "memories",
     "feedback_events",
@@ -18,6 +20,14 @@ _TRANSFER_TABLES = [
     "agent_presence",
     "agent_permissions",
 ]
+
+# Tables that represent durable, cross-device knowledge (used by --memories-only / sync)
+_SYNC_TABLES = [
+    "memories",
+    "feedback_events",
+    "memory_links",
+]
+
 _TABLE_PK = {
     "memories": "id",
     "feedback_events": "id",
@@ -26,6 +36,8 @@ _TABLE_PK = {
     "agent_presence": "agent_id",
     "agent_permissions": "agent_id",
 }
+
+_CONFLICT_POLICIES = {"skip", "replace", "newer"}
 
 
 def _table_columns(conn, table: str) -> list[str]:
@@ -36,9 +48,23 @@ def _table_rows(conn, table: str) -> list[dict[str, Any]]:
     return [dict(row) for row in conn.execute(f"SELECT * FROM {table}").fetchall()]
 
 
-def memory_export(include_audit: bool = False) -> dict[str, Any]:
-    tables = list(_TRANSFER_TABLES)
-    if include_audit:
+def memory_export(
+    include_audit: bool = False,
+    memories_only: bool = False,
+) -> dict[str, Any]:
+    """Export memory data as a schema-versioned JSON-compatible payload.
+
+    Args:
+        include_audit: Also export audit_events (large, device-local).
+        memories_only: Only export memories/feedback_events/memory_links —
+            the durable cross-device knowledge. Skips agent_messages,
+            presence, permissions (device-local runtime state).
+    """
+    if memories_only:
+        tables = list(_SYNC_TABLES)
+    else:
+        tables = list(_TRANSFER_TABLES)
+    if include_audit and not memories_only:
         tables.append("audit_events")
     data: dict[str, list[dict[str, Any]]] = {}
     with managed_conn() as conn:
@@ -49,6 +75,7 @@ def memory_export(include_audit: bool = False) -> dict[str, Any]:
     return {
         "schema_version": schema_version,
         "exported_at": now(),
+        "memories_only": memories_only,
         "tables": tables,
         "counts": {table: len(rows) for table, rows in data.items()},
         "data": data,
@@ -60,35 +87,68 @@ def memory_import(
     dry_run: bool = True,
     conflict_policy: str = "skip",
 ) -> dict[str, Any]:
+    """Import a schema-versioned memory payload with dry-run conflict reporting.
+
+    conflict_policy:
+        skip    — keep existing row, ignore incoming (default)
+        replace — overwrite existing row with incoming unconditionally
+        newer   — keep whichever row has the later updated_at timestamp
+                  (best for multi-device sync; falls back to skip on ties)
+    """
     schema_version = int(payload.get("schema_version") or 0)
     if schema_version > SCHEMA_VERSION:
         return {"error": "unsupported_schema_version", "schema_version": schema_version, "supported": SCHEMA_VERSION}
-    if conflict_policy not in {"skip", "replace"}:
-        return {"error": "invalid_conflict_policy", "allowed": ["skip", "replace"]}
+    if conflict_policy not in _CONFLICT_POLICIES:
+        return {"error": "invalid_conflict_policy", "allowed": sorted(_CONFLICT_POLICIES)}
 
     data = payload.get("data") or {}
     conflicts: dict[str, list[str]] = {}
+    newer_wins: dict[str, int] = {}   # incoming rows that won the newer comparison
     planned: dict[str, int] = {}
     inserted: dict[str, int] = {}
 
+    tables_in_payload = [t for t in _TRANSFER_TABLES if t in data]
+
     with managed_conn() as conn:
-        for table in _TRANSFER_TABLES:
+        for table in tables_in_payload:
             rows = list(data.get(table) or [])
             pk = _TABLE_PK[table]
             ids = [str(row[pk]) for row in rows if pk in row]
-            existing: set[str] = set()
+            existing_map: dict[str, dict[str, Any]] = {}
             if ids:
                 placeholders = ",".join("?" for _ in ids)
-                existing = {str(row[0]) for row in conn.execute(
-                    f"SELECT {pk} FROM {table} WHERE {pk} IN ({placeholders})",
-                    ids,
-                ).fetchall()}
-            conflicts[table] = [item for item in ids if item in existing]
-            candidates = [row for row in rows if conflict_policy == "replace" or str(row.get(pk)) not in existing]
+                columns = _table_columns(conn, table)
+                for raw in conn.execute(
+                    f"SELECT * FROM {table} WHERE {pk} IN ({placeholders})", ids
+                ).fetchall():
+                    row_dict = dict(zip(columns, raw))
+                    existing_map[str(row_dict[pk])] = row_dict
+
+            conflicts[table] = [item for item in ids if item in existing_map]
+            newer_wins[table] = 0
+            candidates: list[dict[str, Any]] = []
+
+            for row in rows:
+                row_pk = str(row.get(pk, ""))
+                if row_pk not in existing_map:
+                    candidates.append(row)
+                    continue
+                if conflict_policy == "skip":
+                    pass  # not a candidate
+                elif conflict_policy == "replace":
+                    candidates.append(row)
+                elif conflict_policy == "newer":
+                    incoming_ts = str(row.get("updated_at") or row.get("created_at") or "")
+                    existing_ts = str(existing_map[row_pk].get("updated_at") or existing_map[row_pk].get("created_at") or "")
+                    if incoming_ts > existing_ts:
+                        candidates.append(row)
+                        newer_wins[table] += 1
+
             planned[table] = len(candidates)
             inserted[table] = 0
             if dry_run:
                 continue
+
             columns = _table_columns(conn, table)
             for row in candidates:
                 filtered = {key: row.get(key) for key in columns if key in row}
@@ -96,7 +156,7 @@ def memory_import(
                     continue
                 names = list(filtered.keys())
                 placeholders = ",".join("?" for _ in names)
-                verb = "INSERT OR REPLACE" if conflict_policy == "replace" else "INSERT"
+                verb = "INSERT OR REPLACE" if conflict_policy in ("replace", "newer") else "INSERT"
                 conn.execute(
                     f"{verb} INTO {table} ({','.join(names)}) VALUES ({placeholders})",
                     [filtered[name] for name in names],
@@ -104,12 +164,17 @@ def memory_import(
                 inserted[table] += 1
 
     if not dry_run:
-        log_audit_event("memory_import", detail={"inserted": inserted, "conflict_policy": conflict_policy})
+        log_audit_event("memory_import", detail={
+            "inserted": inserted,
+            "conflict_policy": conflict_policy,
+            "newer_wins": newer_wins,
+        })
     return {
         "dry_run": dry_run,
         "applied": not dry_run,
         "conflict_policy": conflict_policy,
         "conflicts": conflicts,
+        "newer_wins": newer_wins,
         "planned": planned,
         "inserted": inserted,
     }

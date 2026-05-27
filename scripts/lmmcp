@@ -8,6 +8,10 @@ PORT="${LMMCP_PORT:-8318}"
 DB="${LOCAL_MEMORY_DB:-$MCP_DIR/memory.sqlite3}"
 PID_FILE="${LMMCP_PID_FILE:-/tmp/lmmcp.pid}"
 LOG_FILE="${LMMCP_LOG_FILE:-$MCP_DIR/lmmcp.log}"
+SYNC_FILE="${SYNC_FILE:-memory-sync/memories.json}"
+SYNC_REMOTE="${SYNC_REMOTE:-origin}"
+# Set to 0 to disable automatic memory sync on start/stop
+AUTO_SYNC="${LMMCP_AUTO_SYNC:-1}"
 
 is_running() {
   [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
@@ -18,6 +22,59 @@ pid_matches() {
   local pid
   pid="$(cat "$PID_FILE")"
   ps -p "$pid" -o args= 2>/dev/null | grep -q "local_memory_mcp.*serve"
+}
+
+# Auto-sync helpers — never fatal, always log
+_sync_pull() {
+  if [[ "$AUTO_SYNC" != "1" ]]; then return 0; fi
+  local sync_path="$MCP_DIR/$SYNC_FILE"
+  echo "[lmmcp] auto-sync: pulling from git remote ..." >&2
+  cd "$MCP_DIR"
+  if ! git pull "$SYNC_REMOTE" --ff-only --quiet 2>/dev/null; then
+    echo "[lmmcp] auto-sync: git pull skipped (not a git repo or diverged)" >&2
+    return 0
+  fi
+  if [[ ! -f "$sync_path" ]]; then
+    echo "[lmmcp] auto-sync: no sync file at $sync_path, skipping import" >&2
+    return 0
+  fi
+  echo "[lmmcp] auto-sync: importing memories (conflict_policy=newer) ..." >&2
+  "$PYTHON" -m local_memory_mcp import "$sync_path" \
+    --conflict-policy newer --apply 2>&1 | grep -v "^$" | sed 's/^/[lmmcp] import: /' >&2 || true
+}
+
+_sync_push() {
+  if [[ "$AUTO_SYNC" != "1" ]]; then return 0; fi
+  local sync_path="$MCP_DIR/$SYNC_FILE"
+  echo "[lmmcp] auto-sync: exporting memories ..." >&2
+  mkdir -p "$(dirname "$sync_path")"
+  "$PYTHON" -m local_memory_mcp export "$sync_path" --memories-only 2>/dev/null || {
+    echo "[lmmcp] auto-sync: export failed, skipping push" >&2
+    return 0
+  }
+  cd "$MCP_DIR"
+  if ! git rev-parse --git-dir &>/dev/null; then
+    echo "[lmmcp] auto-sync: not a git repo, skipping push" >&2
+    return 0
+  fi
+  git add "$SYNC_FILE" 2>/dev/null || true
+  if git diff --cached --quiet; then
+    echo "[lmmcp] auto-sync: no changes in sync file, skipping commit" >&2
+    return 0
+  fi
+  local ts device
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  device="$(hostname -s 2>/dev/null || echo unknown)"
+  local count
+  count="$("$PYTHON" -c "
+import json, sys
+d = json.load(open('$sync_path'))
+print(d['counts'].get('memories', 0))
+" 2>/dev/null || echo '?')"
+  git commit -m "chore(memory-sync): $device @ $ts — ${count} memories" --quiet
+  echo "[lmmcp] auto-sync: pushing to $SYNC_REMOTE ..." >&2
+  git push "$SYNC_REMOTE" --quiet 2>/dev/null || \
+    echo "[lmmcp] auto-sync: git push failed (remote may be unreachable)" >&2
 }
 
 start() {
@@ -31,6 +88,8 @@ start() {
     echo "python not found/executable: $PYTHON" >&2
     return 1
   fi
+  # Pull + import before starting so this session starts with latest memories
+  _sync_pull || true
   cd "$MCP_DIR"
   nohup env LOCAL_MEMORY_DB="$DB" PYTHONPATH="$MCP_DIR" "$PYTHON" -m local_memory_mcp serve --host "$HOST" --port "$PORT" >> "$LOG_FILE" 2>&1 &
   echo $! > "$PID_FILE"
@@ -59,6 +118,8 @@ stop() {
     rm -f "$PID_FILE"
     echo "not running"
   fi
+  # Export + push after stopping so latest memories are committed
+  _sync_push || true
 }
 
 status() {
@@ -71,10 +132,15 @@ status() {
 }
 
 case "${1:-}" in
-  start) start ;;
-  stop) stop ;;
+  start)   start ;;
+  stop)    stop ;;
   restart) stop >/dev/null || true; start ;;
-  status) status ;;
-  logs) tail -n "${2:-80}" "$LOG_FILE" ;;
-  *) echo "Usage: lmmcp {start|stop|restart|status|logs [N]}" >&2; exit 2 ;;
+  status)  status ;;
+  logs)    tail -n "${2:-80}" "$LOG_FILE" ;;
+  sync)
+    # Manual sync: export+push then pull+import
+    _sync_push || true
+    _sync_pull || true
+    ;;
+  *) echo "Usage: lmmcp {start|stop|restart|status|logs [N]|sync}" >&2; exit 2 ;;
 esac

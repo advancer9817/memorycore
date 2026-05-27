@@ -480,9 +480,16 @@ def memory_update(
 
 @mcp.tool()
 @_safe_tool
-def memory_export(include_audit: bool = False) -> dict[str, Any]:
-    """Export memory data as a schema-versioned JSON-compatible payload."""
-    return export_memory_payload(include_audit=include_audit)
+def memory_export(
+    include_audit: bool = False,
+    memories_only: bool = False,
+) -> dict[str, Any]:
+    """Export memory data as a schema-versioned JSON-compatible payload.
+
+    Set memories_only=True to export only durable cross-device knowledge
+    (memories, feedback_events, memory_links) — suitable for git-based sync.
+    """
+    return export_memory_payload(include_audit=include_audit, memories_only=memories_only)
 
 
 @mcp.tool()
@@ -492,7 +499,11 @@ def memory_import(
     dry_run: bool = True,
     conflict_policy: str = "skip",
 ) -> dict[str, Any]:
-    """Import a schema-versioned memory payload with dry-run conflict reporting."""
+    """Import a schema-versioned memory payload with dry-run conflict reporting.
+
+    conflict_policy: skip | replace | newer
+      newer = keep whichever row has the later updated_at (best for multi-device sync)
+    """
     return import_memory_payload(payload, dry_run=dry_run, conflict_policy=conflict_policy)
 
 
@@ -777,6 +788,20 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("semantic-status")
     p_html = sub.add_parser("html")
     p_html.add_argument("out", nargs="?", default=str(DEFAULT_ROOT / "dashboard.html"))
+    p_export = sub.add_parser("export", help="Export memories to a JSON file")
+    p_export.add_argument("out", nargs="?", default="memory-export.json",
+                          help="Output file path (default: memory-export.json)")
+    p_export.add_argument("--memories-only", action="store_true",
+                          help="Only export memories/links/feedback (skip agent state); recommended for sync")
+    p_export.add_argument("--include-audit", action="store_true",
+                          help="Also include audit_events in the export")
+    p_import = sub.add_parser("import", help="Import memories from a JSON file")
+    p_import.add_argument("src", help="Source JSON file path")
+    p_import.add_argument("--conflict-policy", default="newer",
+                          choices=["skip", "replace", "newer"],
+                          help="How to handle conflicts (default: newer — keep whichever is more recent)")
+    p_import.add_argument("--apply", action="store_true",
+                          help="Actually apply the import (default is dry-run)")
     p_serve = sub.add_parser("serve")
     p_serve.add_argument("--host", default="127.0.0.1", help="HTTP bind address")
     p_serve.add_argument("--port", type=int, default=8318, help="HTTP port (default=8318, /mcp plus frontend routes)")
@@ -843,6 +868,31 @@ def main(argv: list[str] | None = None) -> int:
         )
     elif args.cmd == "html":
         export_html(Path(args.out))
+    elif args.cmd == "export":
+        payload = export_memory_payload(
+            include_audit=args.include_audit,
+            memories_only=args.memories_only,
+        )
+        out_path = Path(args.out)
+        out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        counts = payload["counts"]
+        total = sum(counts.values())
+        print(f"Exported {total} rows to {out_path}", file=sys.stderr)
+        print(json.dumps(counts, ensure_ascii=False))
+    elif args.cmd == "import":
+        src_path = Path(args.src)
+        if not src_path.exists():
+            print(f"Error: file not found: {src_path}", file=sys.stderr)
+            return 1
+        payload = json.loads(src_path.read_text(encoding="utf-8"))
+        dry_run = not args.apply
+        result = import_memory_payload(payload, dry_run=dry_run, conflict_policy=args.conflict_policy)
+        if "error" in result:
+            print(json.dumps(result, ensure_ascii=False, indent=2), file=sys.stderr)
+            return 1
+        mode = "DRY RUN" if dry_run else "APPLIED"
+        print(f"[{mode}] conflict_policy={args.conflict_policy}", file=sys.stderr)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.cmd == "serve":
         cfg = load_config()
         for warn in validate_config(cfg):
