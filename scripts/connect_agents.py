@@ -198,7 +198,9 @@ def configure_opencode(path: Path, endpoint: str, backup_dir: Path, dry_run: boo
 # ---------------------------------------------------------------------------
 
 HOOK_SESSION_START = str(HOOKS_DIR / "session-start.sh")
-HOOK_SESSION_END = str(HOOKS_DIR / "session-end.sh")
+HOOK_LMMCP_CONTEXT = str(HOOKS_DIR / "lmmcp-context.sh")
+HOOK_LMMCP_INGEST = str(HOOKS_DIR / "lmmcp-ingest.py")
+OLD_HOOK_FRAGMENTS = ("session-end.sh", "codex-session-end.sh", "lmmcp-session-end.py")
 
 
 def detect_agents() -> dict[str, Path]:
@@ -217,31 +219,52 @@ def detect_agents() -> dict[str, Path]:
     return found
 
 
+def _remove_old_hook_entries(hooks: dict, event: str) -> bool:
+    entries = hooks.get(event, [])
+    if not isinstance(entries, list):
+        return False
+    filtered = [entry for entry in entries if not any(fragment in str(entry) for fragment in OLD_HOOK_FRAGMENTS)]
+    if filtered == entries:
+        return False
+    hooks[event] = filtered
+    return True
+
+
 def register_hooks_claude(path: Path, backup_dir: Path, dry_run: bool) -> bool:
-    """Register SessionStart and Stop hooks in Claude Code settings.json."""
+    """Register memory hooks in Claude Code settings.json."""
     data = read_json(path)
     hooks = data.setdefault("hooks", {})
     start_hook = {
         "hooks": [{"type": "command", "command": f"bash {HOOK_SESSION_START}"}]
     }
-    end_hook = {
-        "hooks": [{"type": "command", "command": f"bash {HOOK_SESSION_END}"}]
+    context_hook = {
+        "hooks": [{"type": "command", "command": f"bash {HOOK_LMMCP_CONTEXT}", "timeout": 3}]
     }
-    changed = False
+    end_command = f"python3 {HOOK_LMMCP_INGEST} --agent claude"
+    end_hook = {
+        "hooks": [{"type": "command", "command": end_command, "timeout": 30}]
+    }
+    changed = _remove_old_hook_entries(hooks, "Stop")
     existing_start = hooks.get("SessionStart", [])
     if not any(HOOK_SESSION_START in str(h) for h in existing_start):
         hooks["SessionStart"] = existing_start + [start_hook]
         changed = True
+    existing_context = hooks.get("UserPromptSubmit", [])
+    if not any(HOOK_LMMCP_CONTEXT in str(h) for h in existing_context):
+        hooks["UserPromptSubmit"] = existing_context + [context_hook]
+        changed = True
     existing_stop = hooks.get("Stop", [])
-    if not any(HOOK_SESSION_END in str(h) for h in existing_stop):
+    if not any(end_command in str(h) for h in existing_stop):
         hooks["Stop"] = existing_stop + [end_hook]
+        changed = True
+    env = data.setdefault("env", {})
+    before_env = dict(env)
+    env.setdefault("LMMCP_PORT", "8318")
+    env.setdefault("LMMCP_AGENT_ID", "claude")
+    if env != before_env:
         changed = True
     if not changed:
         return False
-    # Inject LMMCP env vars
-    env = data.setdefault("env", {})
-    env.setdefault("LMMCP_PORT", "8318")
-    env.setdefault("LMMCP_AGENT_ID", "claude")
     return write_json(path, data, backup_dir, dry_run)
 
 
@@ -254,42 +277,78 @@ def register_hooks_hermes(path: Path, backup_dir: Path, dry_run: bool) -> bool:
     data = yaml.safe_load(old_raw) if old_raw.strip() else {}
     data = data or {}
     hooks = data.setdefault("hooks", {})
+    hermes_hook = HOME / ".hermes" / "agent-hooks" / "lmmcp-ingest.py"
+    command = f"python3 {hermes_hook} --agent hermes"
+    entries = hooks.get("on_session_end")
     changed = False
-    if "session_start" not in hooks or HOOK_SESSION_START not in str(hooks.get("session_start")):
-        hooks["session_start"] = f"bash {HOOK_SESSION_START}"
+    if entries is None:
+        hooks["on_session_end"] = [{"command": command, "timeout": 120}]
         changed = True
-    if "session_end" not in hooks or HOOK_SESSION_END not in str(hooks.get("session_end")):
-        hooks["session_end"] = f"bash {HOOK_SESSION_END}"
+    elif isinstance(entries, list):
+        filtered = [entry for entry in entries if not any(fragment in str(entry) for fragment in OLD_HOOK_FRAGMENTS)]
+        if not any(command in str(entry) for entry in filtered):
+            filtered.append({"command": command, "timeout": 120})
+        if filtered != entries:
+            hooks["on_session_end"] = filtered
+            changed = True
+    elif isinstance(entries, str):
+        hooks["on_session_end"] = [{"command": command, "timeout": 120}]
         changed = True
     if not changed:
         return False
     if dry_run:
         return True
+    hermes_hook.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(HOOK_LMMCP_INGEST, hermes_hook)
+    hermes_hook.chmod(0o755)
     backup_file(path, backup_dir)
     path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
     return True
 
 
+def enable_codex_hooks_feature(text: str) -> str:
+    lines = text.splitlines()
+    for idx, line in enumerate(lines):
+        if line.strip() != "[features]":
+            continue
+        end = idx + 1
+        while end < len(lines) and not lines[end].lstrip().startswith("["):
+            if lines[end].split("=", 1)[0].strip() in {"hooks", "codex_hooks"}:
+                lines[end] = "hooks = true"
+                return "\n".join(lines).rstrip() + "\n"
+            end += 1
+        lines.insert(end, "hooks = true")
+        return "\n".join(lines).rstrip() + "\n"
+    if text and not text.endswith("\n"):
+        text += "\n"
+    return text + "\n[features]\nhooks = true\n"
+
+
 def register_hooks_codex(path: Path, backup_dir: Path, dry_run: bool) -> bool:
-    """Register hooks in Codex config.toml."""
-    old = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
-    if HOOK_SESSION_START in old and HOOK_SESSION_END in old:
-        return False
-    text = old
-    hook_block = f"""
-[hooks]
-session_start = "bash {HOOK_SESSION_START}"
-session_end = "bash {HOOK_SESSION_END}"
-"""
-    if "[hooks]" not in text:
-        text = text.rstrip() + "\n" + hook_block
-    if old == text:
+    """Register hooks in Codex config.toml and hooks.json."""
+    old_config = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
+    new_config = enable_codex_hooks_feature(old_config)
+    hooks_path = path.parent / "hooks.json"
+    hooks_data = read_json(hooks_path)
+    root = hooks_data.setdefault("hooks", {})
+    changed = old_config != new_config
+    changed = _remove_old_hook_entries(root, "Stop") or changed
+    for event, command, timeout in (
+        ("UserPromptSubmit", f"bash {HOOK_LMMCP_CONTEXT}", 3),
+        ("Stop", f"python3 {HOOK_LMMCP_INGEST} --agent codex", 30),
+    ):
+        entries = root.setdefault(event, [])
+        if not any(command in json.dumps(entry, ensure_ascii=False) for entry in entries):
+            entries.append({"hooks": [{"type": "command", "command": command, "timeout": timeout}]})
+            changed = True
+    if not changed:
         return False
     if dry_run:
         return True
     path.parent.mkdir(parents=True, exist_ok=True)
     backup_file(path, backup_dir)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(new_config, encoding="utf-8")
+    write_json(hooks_path, hooks_data, backup_dir, dry_run=False)
     return True
 
 
@@ -301,8 +360,9 @@ def register_hooks_opencode(path: Path, backup_dir: Path, dry_run: bool) -> bool
     if hooks.get("session_start") != f"bash {HOOK_SESSION_START}":
         hooks["session_start"] = f"bash {HOOK_SESSION_START}"
         changed = True
-    if hooks.get("session_end") != f"bash {HOOK_SESSION_END}":
-        hooks["session_end"] = f"bash {HOOK_SESSION_END}"
+    end_command = f"python3 {HOOK_LMMCP_INGEST} --agent opencode"
+    if hooks.get("session_end") != end_command:
+        hooks["session_end"] = end_command
         changed = True
     if not changed:
         return False

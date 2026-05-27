@@ -13,6 +13,8 @@ LMMCP_URL="http://${LMMCP_HOST}:${LMMCP_PORT}/mcp"
 
 ensure_lmmcp_running 2>/dev/null || true
 
+touch /tmp/lmmcp-session-mark 2>/dev/null || true
+
 TASK="${CLAUDE_TASK:-${HERMES_TASK:-${OPENCODE_TASK:-general}}}"
 AGENT="${LMMCP_AGENT_ID:-unknown}"
 

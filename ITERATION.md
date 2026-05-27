@@ -1,5 +1,61 @@
 # ITERATION.md — local-memory-mcp 迭代日志
 
+## [迭代 32] 2026-05-28 — 三端 hook 部署与写回脚本统一化
+
+### 背景
+
+Claude Code、Codex、Hermes 已经能在用户输入后读取相关 lmmcp 记忆，并在会话结束后写回摘要。但三端的 session-end 脚本、部署路径和注册逻辑分散，后续维护容易漂移。用户要求把部署脚本、部署方式、执行脚本、存放目录和规则尽量统一。
+
+### 变更摘要
+
+**`scripts/hooks/lmmcp-ingest.py`**（新建）
+- 用单一 Python 脚本统一 Claude / Codex / Hermes 的 session-end 写回。
+- `--agent claude`：读取 `CLAUDE_SESSION_FILE` 或 `~/.claude/projects/**/*.jsonl`。
+- `--agent codex`：读取 `CODEX_SESSION_FILE` 或 `~/.codex/sessions/**/*.jsonl`，兼容 `event_msg` 与 `response_item`。
+- `--agent hermes`：读取 hook stdin 的 `session_id`，解析 `~/.hermes/sessions/session_<id>.json`。
+- 统一调用 `memory_ingest`，使用 `curl --max-time 10` 后台 fire-and-forget，不阻塞 agent 退出。
+
+**`scripts/setup-hooks.sh`**（新建/更新）
+- 作为统一部署入口，写入 Claude/Codex/Hermes 配置。
+- Claude Stop → `python3 scripts/hooks/lmmcp-ingest.py --agent claude`。
+- Codex Stop → `python3 scripts/hooks/lmmcp-ingest.py --agent codex`。
+- Hermes on_session_end → 部署副本到 `~/.hermes/agent-hooks/lmmcp-ingest.py --agent hermes`。
+- 自动清理旧的 `session-end.sh` / `codex-session-end.sh` / `lmmcp-session-end.py` hook 条目。
+
+**`scripts/connect_agents.py`**
+- `--register-hooks` 路径与 `setup-hooks.sh` 对齐。
+- Claude/Codex/Hermes 都注册统一 ingest hook；Codex 启用 `[features] hooks = true` 并写 `hooks.json`。
+- Hermes 注册时同步部署统一 hook 到 `~/.hermes/agent-hooks/`。
+
+**清理**
+- 删除旧的 `scripts/hooks/session-end.sh`。
+- 删除旧的 `scripts/hooks/codex-session-end.sh`。
+- 删除旧的 `scripts/hermes/lmmcp-session-end.py` 及空目录。
+
+### 验证
+
+```bash
+python3 -m py_compile scripts/hooks/lmmcp-ingest.py scripts/connect_agents.py
+bash scripts/setup-hooks.sh
+echo '{}' | python3 scripts/hooks/lmmcp-ingest.py --agent claude
+echo '{}' | python3 scripts/hooks/lmmcp-ingest.py --agent codex
+echo '{}' | python3 scripts/hooks/lmmcp-ingest.py --agent hermes
+/home/advancer/project/local-memory-mcp/.venv/bin/python -m pytest /home/advancer/project/local-memory-mcp/tests -q
+# 342 passed, 2 warnings
+```
+
+### 影响范围
+
+- 只改变 agent hook 部署和会话写回路径，不改变 MCP 数据模型。
+- 旧 hook 配置会被安装脚本幂等清理，避免重复写回。
+- Hermes 仍使用自身 `memory_context.enabled` 做上下文注入，只统一 session-end 写回。
+
+### 回滚
+
+`git revert HEAD` 后重新运行 `scripts/setup-hooks.sh` 可恢复配置；如需清理本机 Hermes 副本，可删除 `~/.hermes/agent-hooks/lmmcp-ingest.py`。
+
+---
+
 ## [迭代 31] 2026-05-27 — episodic memory 自动汇总 rollup
 
 ### 背景

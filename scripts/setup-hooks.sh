@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+HOOKS_DIR="$SCRIPT_DIR/hooks"
+HERMES_SRC="$SCRIPT_DIR/hooks/lmmcp-ingest.py"
+CLAUDE_SETTINGS="${CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
+CLAUDE_MD="${CLAUDE_MD:-$HOME/.claude/CLAUDE.md}"
+AGENTS_MD="${AGENTS_MD:-$HOME/AGENTS.md}"
+CODEX_CONFIG="${CODEX_CONFIG:-$HOME/.codex/config.toml}"
+CODEX_HOOKS="${CODEX_HOOKS:-$HOME/.codex/hooks.json}"
+HERMES_CONFIG="${HERMES_CONFIG:-$HOME/.hermes/config.yaml}"
+HERMES_ALLOWLIST="${HERMES_ALLOWLIST:-$HOME/.hermes/shell-hooks-allowlist.json}"
+HERMES_HOOK_DIR="$HOME/.hermes/agent-hooks"
+HERMES_DEST="$HERMES_HOOK_DIR/lmmcp-ingest.py"
+
+chmod +x "$HOOKS_DIR/lmmcp-context.sh" "$HOOKS_DIR/lmmcp-ingest.py" "$HOOKS_DIR/session-start.sh" 2>/dev/null || true
+mkdir -p "$HERMES_HOOK_DIR"
+cp "$HERMES_SRC" "$HERMES_DEST"
+chmod +x "$HERMES_DEST"
+
+python3 - "$REPO_ROOT" "$CLAUDE_SETTINGS" "$CLAUDE_MD" "$AGENTS_MD" "$CODEX_CONFIG" "$CODEX_HOOKS" "$HERMES_CONFIG" "$HERMES_ALLOWLIST" "$HERMES_DEST" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+repo_root = Path(sys.argv[1])
+claude_settings = Path(sys.argv[2])
+claude_md = Path(sys.argv[3])
+agents_md = Path(sys.argv[4])
+codex_config = Path(sys.argv[5])
+codex_hooks = Path(sys.argv[6])
+hermes_config = Path(sys.argv[7])
+hermes_allowlist = Path(sys.argv[8])
+hermes_dest = Path(sys.argv[9])
+
+lmmcp_context = repo_root / "scripts" / "hooks" / "lmmcp-context.sh"
+lmmcp_ingest = repo_root / "scripts" / "hooks" / "lmmcp-ingest.py"
+endpoint = "http://127.0.0.1:8318/mcp"
+old_hook_fragments = ("session-end.sh", "codex-session-end.sh", "lmmcp-session-end.py")
+
+
+def load_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8") or "{}")
+
+
+def write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def add_hook(hooks: dict, event: str, command: str, timeout: int | None = None) -> None:
+    entries = hooks.setdefault(event, [])
+    if any(command in json.dumps(entry, ensure_ascii=False) for entry in entries):
+        return
+    hook = {"type": "command", "command": command}
+    if timeout is not None:
+        hook["timeout"] = timeout
+    entries.append({"hooks": [hook]})
+
+
+def remove_hook_entries(hooks: dict, event: str, fragments: tuple[str, ...]) -> None:
+    entries = hooks.get(event, [])
+    if not isinstance(entries, list):
+        return
+    hooks[event] = [
+        entry for entry in entries
+        if not any(fragment in json.dumps(entry, ensure_ascii=False) for fragment in fragments)
+    ]
+
+
+def enable_codex_hooks(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    lines = text.splitlines()
+    for idx, line in enumerate(lines):
+        if line.strip() == "[features]":
+            end = idx + 1
+            while end < len(lines) and not lines[end].lstrip().startswith("["):
+                if lines[end].split("=", 1)[0].strip() in {"hooks", "codex_hooks"}:
+                    lines[end] = "hooks = true"
+                    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+                    return
+                end += 1
+            lines.insert(end, "hooks = true")
+            path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+            return
+    if text and not text.endswith("\n"):
+        text += "\n"
+    text += "\n[features]\nhooks = true\n"
+    path.write_text(text, encoding="utf-8")
+
+
+settings = load_json(claude_settings)
+hooks = settings.setdefault("hooks", {})
+remove_hook_entries(hooks, "Stop", old_hook_fragments)
+add_hook(hooks, "UserPromptSubmit", f"bash {lmmcp_context}", 3)
+add_hook(hooks, "Stop", f"python3 {lmmcp_ingest} --agent claude", 30)
+env = settings.setdefault("env", {})
+env.setdefault("LMMCP_PORT", "8318")
+env.setdefault("LMMCP_AGENT_ID", "claude")
+servers = settings.setdefault("mcpServers", {})
+servers.setdefault("local_memory", {"type": "http", "url": endpoint})
+write_json(claude_settings, settings)
+
+claude_rules = """
+<!-- lmmcp-memory-rules-begin -->
+## 记忆系统使用规则
+
+每次对话开始时，相关的历史记忆已通过 lmmcp memory_context 自动检索并注入到上下文中。
+请将这些记忆作为背景知识自然使用，无需向用户提及“我从记忆中获取了...”。
+
+对话结束 / 用 Stop hook 触发时，系统会自动调用 memory_ingest 将对话摘要写回记忆库。
+<!-- lmmcp-memory-rules-end -->
+""".strip()
+claude_md.parent.mkdir(parents=True, exist_ok=True)
+claude_text = claude_md.read_text(encoding="utf-8") if claude_md.exists() else ""
+if "lmmcp-memory-rules-begin" not in claude_text:
+    claude_md.write_text(claude_text.rstrip() + "\n\n" + claude_rules + "\n", encoding="utf-8")
+
+agents_rules = """
+<!-- lmmcp-memory-rules-begin -->
+# Memory Integration Rules
+
+You have access to the `local_memory` MCP server (tool prefix: `mcp__local_memory__`).
+
+## On every user request
+Call `mcp__local_memory__memory_context` with the user's prompt as `task` and `token_budget=1500`.
+Incorporate any returned context naturally — treat it as background knowledge, not raw output.
+Do not mention that you fetched memory unless the user asks.
+
+## On session end / after long conversations
+Call `mcp__local_memory__memory_ingest` with the recent conversation messages (last 20 turns, role=user/assistant).
+This ensures durable facts from this session are persisted.
+<!-- lmmcp-memory-rules-end -->
+""".strip()
+agents_text = agents_md.read_text(encoding="utf-8") if agents_md.exists() else ""
+if "lmmcp-memory-rules-begin" not in agents_text:
+    agents_md.write_text(agents_text.rstrip() + ("\n\n" if agents_text.strip() else "") + agents_rules + "\n", encoding="utf-8")
+
+enable_codex_hooks(codex_config)
+codex_data = load_json(codex_hooks)
+if "hooks" in codex_data and isinstance(codex_data["hooks"], dict):
+    codex_hook_root = codex_data["hooks"]
+elif any(k in codex_data for k in ("UserPromptSubmit", "Stop")):
+    codex_hook_root = {k: v for k, v in codex_data.items() if k in ("UserPromptSubmit", "Stop")}
+    codex_data = {"hooks": codex_hook_root}
+else:
+    codex_hook_root = {}
+    codex_data = {"hooks": codex_hook_root}
+remove_hook_entries(codex_hook_root, "Stop", old_hook_fragments)
+add_hook(codex_hook_root, "UserPromptSubmit", f"bash {lmmcp_context}", 3)
+add_hook(codex_hook_root, "Stop", f"python3 {lmmcp_ingest} --agent codex", 30)
+write_json(codex_hooks, codex_data)
+
+try:
+    import yaml  # type: ignore
+except Exception:
+    yaml = None
+
+if hermes_config.exists() and yaml is not None:
+    data = yaml.safe_load(hermes_config.read_text(encoding="utf-8") or "{}") or {}
+    hooks_cfg = data.setdefault("hooks", {})
+    command = f"python3 {hermes_dest} --agent hermes"
+    entries = hooks_cfg.get("on_session_end")
+    if entries is None:
+        hooks_cfg["on_session_end"] = [{"command": command, "timeout": 120}]
+    elif isinstance(entries, list):
+        entries = [entry for entry in entries if not any(fragment in str(entry) for fragment in old_hook_fragments)]
+        if not any(command in str(entry) for entry in entries):
+            entries.append({"command": command, "timeout": 120})
+        hooks_cfg["on_session_end"] = entries
+    elif isinstance(entries, str):
+        hooks_cfg["on_session_end"] = [{"command": command, "timeout": 120}]
+    hermes_config.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+allow = load_json(hermes_allowlist)
+approvals = allow.setdefault("approvals", [])
+command = f"python3 {hermes_dest} --agent hermes"
+approvals[:] = [
+    item for item in approvals
+    if not (isinstance(item, dict) and any(fragment in str(item.get("command", "")) for fragment in old_hook_fragments))
+]
+if not any(item.get("command") == command and item.get("event") == "on_session_end" for item in approvals if isinstance(item, dict)):
+    approvals.append({
+        "command": command,
+        "event": "on_session_end",
+        "script_mtime_at_approval": None,
+    })
+write_json(hermes_allowlist, allow)
+PY
+
+echo "lmmcp hooks configured"

@@ -7,6 +7,7 @@
 #   2. 安装/更新依赖
 #   3. 初始化 SQLite DB（幂等）
 #   4. 导入 memory-sync/memories.json（冲突策略 newer，有则导入无则跳过）
+#   4.5 配置 Agent hooks / 软注入规则（幂等）
 #   5. 启动 HTTP MCP 服务
 #
 # 用法：
@@ -86,6 +87,10 @@ if [[ "$SKIP_IMPORT" -eq 0 ]]; then
 else
   _log "--no-import: skipping memory import"
 fi
+
+# ── 4.5 配置 Agent Hooks / 软注入规则（幂等）────────────────────────────────
+_log "Configuring agent hooks and memory rules ..."
+bash "$SCRIPT_DIR/scripts/setup-hooks.sh" || _warn "Hook setup failed (non-fatal)"
 
 # ── 5. 启动服务 ───────────────────────────────────────────────────────────────
 _log "Starting MCP service on http://$HOST:$PORT ..."
