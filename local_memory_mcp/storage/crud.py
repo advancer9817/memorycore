@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime
 from typing import Any
 
 from local_memory_mcp.models import (
@@ -21,6 +22,15 @@ from local_memory_mcp.storage.audit import log_audit_event
 from local_memory_mcp.storage.permissions import check_agent_permission
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_iso(value: str | None, field: str) -> None:
+    if value is None:
+        return
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError(f"{field} must be ISO-8601, got: {value!r}")
 
 try:
     from local_memory_mcp.vector_store import get_vector_store as _get_vector_store
@@ -63,11 +73,15 @@ def add_memory_record(
     related_ids: Any = None,
     metadata: Any = None,
     memory_id: str | None = None,
+    valid_from: str | None = None,
+    valid_until: str | None = None,
 ) -> dict[str, Any]:
     validate_type(memory_type)
     validate_status(status)
     if not title.strip() or not content.strip():
         raise ValueError("title and content are required")
+    _validate_iso(valid_from, "valid_from")
+    _validate_iso(valid_until, "valid_until")
     permission = check_agent_permission(source_agent or "unknown", "memory.write", scope or "global", memory_type, tags)
     if not permission["allowed"]:
         return {"error": "permission_denied", "decision": permission}
@@ -82,14 +96,15 @@ def add_memory_record(
             INSERT INTO memories (
               id,type,scope,title,content,tags_json,source,source_agent,project_path,
               created_at,updated_at,confidence,importance,status,decay_policy,
-              related_ids_json,metadata_json
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              related_ids_json,metadata_json,valid_from,valid_until
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 memory_id, memory_type, scope or "global", title.strip(), content.strip(),
                 as_json(normalize_list(tags)), source or "manual", source_agent or "unknown",
                 project_path or "", ts, ts, confidence_value, importance_value, status,
                 decay_policy or "review", as_json(normalize_list(related_ids)), as_json(metadata or {}),
+                valid_from, valid_until,
             ),
         )
         row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()

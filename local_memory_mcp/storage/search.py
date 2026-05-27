@@ -13,7 +13,7 @@ from local_memory_mcp.injection_guard import (
 from local_memory_mcp.models import as_json, fts_phrase, normalize_list, now, row_to_dict
 from local_memory_mcp.storage.db import _managed_query, managed_conn
 
-_GREETINGS = {"hi", "hello", "hey", "你好", "嗯", "好", "继续", "ok", "okay", "yes", "no"}
+_GREETINGS = {"hi", "hello", "hey", "你好", "嗯", "好", "ok", "okay", "yes", "no"}
 
 _TASK_TYPE_WEIGHTS: dict[str, dict[str, float]] = {
     "feedback": {"feedback": 1.5, "user_profile": 1.2, "project_memory": 0.9},
@@ -149,6 +149,8 @@ def search_memory_records(
     if status:
         clauses.append("m.status = ?")
         params.append(status)
+    clauses.append("(m.valid_until IS NULL OR m.valid_until > ?)")
+    params.append(now())
     sql = base
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)

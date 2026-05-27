@@ -5,8 +5,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from local_memory_mcp.models import normalize_list, normalize_title_key, now
-from local_memory_mcp.storage.db import _managed_query
+from local_memory_mcp.storage.db import _managed_query, managed_conn
 from local_memory_mcp.storage.audit import log_audit_event
+
+_DECAY_STEP = 0.05
+_DECAY_INTERVAL_DAYS = 30
+_DECAY_MIN_CONFIDENCE = 0.10
 
 
 def consolidate(dry_run: bool = True, limit: int = 50) -> dict[str, Any]:
@@ -86,6 +90,16 @@ def curator_report(
         (cap,),
     )
 
+    decay_cutoff = (now_dt - timedelta(days=_DECAY_INTERVAL_DAYS)).isoformat()
+    auto_decay_candidates = _managed_query(
+        """SELECT * FROM memories WHERE status = 'active'
+             AND decay_policy = 'review'
+             AND (last_accessed_at IS NULL OR last_accessed_at < ?)
+             AND confidence > ?
+           ORDER BY confidence DESC LIMIT ?""",
+        (decay_cutoff, _DECAY_MIN_CONFIDENCE, cap),
+    )
+
     contradiction_candidates: list[dict[str, Any]] = []
     active_by_key: dict[str, list[dict[str, Any]]] = {}
     contradicted_by_key: dict[str, list[dict[str, Any]]] = {}
@@ -138,6 +152,28 @@ def curator_report(
         _plan(r, "archive", "archive_candidate", "archived")
 
     if not dry_run:
+        decay_applied = 0
+        if auto_decay_candidates:
+            now_ts = now()
+            decay_rows = [
+                (max(_DECAY_MIN_CONFIDENCE, round(float(r["confidence"]) - _DECAY_STEP, 3)), now_ts, r["id"])
+                for r in auto_decay_candidates
+            ]
+            with managed_conn() as conn:
+                conn.executemany(
+                    "UPDATE memories SET confidence=?, updated_at=? WHERE id=?",
+                    decay_rows,
+                )
+                conn.execute(
+                    "DELETE FROM context_quality_events WHERE created_at < datetime('now', '-90 days')"
+                )
+                conn.execute(
+                    "DELETE FROM audit_events WHERE created_at < datetime('now', '-180 days')"
+                )
+            decay_applied = len(decay_rows)
+            # WAL checkpoint must run outside any transaction
+            from local_memory_mcp.storage.db import connect as _connect
+            _connect().execute("PRAGMA wal_checkpoint(TRUNCATE)")
         for planned in action_plan:
             update_status(planned["id"], planned["target_status"])
             actions.append({
@@ -152,6 +188,7 @@ def curator_report(
             detail={
                 "stale": stale_count,
                 "archived": archive_count,
+                "auto_decay": decay_applied,
                 "total_actions": len(actions),
                 "actions": action_plan,
             },
@@ -168,6 +205,7 @@ def curator_report(
         "archive_candidates": archive_candidates,
         "contradiction_candidates": contradiction_candidates,
         "skill_promotion_candidates": skill_promotion_candidates,
+        "auto_decay_candidates": auto_decay_candidates,
         "action_plan": action_plan,
         "actions": actions,
         "summary": {
@@ -177,6 +215,7 @@ def curator_report(
             "archive": len(archive_candidates),
             "contradictions": len(contradiction_candidates),
             "skill_promotions": len(skill_promotion_candidates),
+            "auto_decay_candidates": len(auto_decay_candidates),
             "planned_actions": len(action_plan),
             "actions": len(actions),
         },

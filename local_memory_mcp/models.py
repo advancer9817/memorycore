@@ -63,7 +63,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "context_pack": {"default_token_budget": 2000, "include_stale_warnings": True, "max_records_per_group": 6},
     "temporal": {"enabled": False, "contradiction_detection": "heuristic", "auto_supersede_user_corrections": True},
-    "ops_db": {"path": str(DEFAULT_ROOT / "memory_ops.sqlite3")},
 }
 
 MEMORY_TYPES: set[str] = {
@@ -187,7 +186,9 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
 
 
 def db_path() -> Path:
-    path = Path(os.environ.get("LOCAL_MEMORY_DB", str(DEFAULT_DB))).expanduser()
+    path = Path(
+        os.environ.get("LOCAL_MEMORY_DB", str(DEFAULT_ROOT / "memory.sqlite3"))
+    ).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 

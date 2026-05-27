@@ -42,10 +42,11 @@ class TestExtractionConfig:
         assert cfg.api_key == "sk-test"
 
     def test_from_dict_mem0_fallback(self):
+        # mem0 compat section is removed; extraction section is the sole config path
         cfg = extraction_config_from_dict({
-            "mem0": {
-                "llm_model": "qwen2.5:7b",
-                "llm_base_url": "http://localhost:11434",
+            "extraction": {
+                "model": "qwen2.5:7b",
+                "base_url": "http://localhost:11434",
             }
         })
         assert cfg.model == "qwen2.5:7b"

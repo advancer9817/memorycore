@@ -1,6 +1,7 @@
 """Tests for memory_stats / get_memory_stats."""
 import pytest
 from local_memory_mcp.storage import add_memory_record, add_feedback, add_link, get_memory_stats
+from local_memory_mcp.server import memory_stats as mcp_memory_stats
 
 
 @pytest.fixture(autouse=True)
@@ -62,3 +63,15 @@ def test_stats_feedback_score_avg():
     add_feedback(r["id"], -0.5)
     s = get_memory_stats()
     assert abs(s["avg_feedback_score"] - 0.25) < 0.01
+
+
+def test_mcp_memory_stats_tool_returns_dict():
+    add_memory_record("user_profile", "U", "c", source_agent="agent-x")
+    s = mcp_memory_stats()
+    assert isinstance(s, dict)
+    assert "total" in s
+    assert "by_type" in s
+    assert "by_status" in s
+    assert "by_agent" in s
+    assert s["total"] == 1
+    assert s["by_agent"].get("agent-x") == 1

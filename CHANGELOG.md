@@ -5,7 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.20.0] - 2026-05-25
+## [0.21.0] - 2026-05-27
+
+### Added
+- **Temporal Memory Layer**: `memory_add` now accepts `valid_from` and `valid_until`
+  ISO-8601 string fields. Expired memories (`valid_until < now()`) are automatically
+  excluded from `memory_search` and `memory_context` results while remaining in the DB.
+- **Auto-decay**: `curator_report` now identifies `decay_policy='review'` memories
+  not accessed for 30+ days and reduces their `confidence` by 0.05 per curator run
+  (floor: 0.10). `dry_run=True` lists candidates without applying changes.
+- **`memory_stats` MCP tool**: Returns per-type, per-status, per-agent counts
+  plus aggregate confidence/importance/feedback_score averages. Previously only
+  accessible via the `/metrics` observability endpoint.
+- **Contradiction detection tests**: 3 new tests covering title-key-based
+  contradiction candidate detection in `curator_report`.
+- **Temporal tests**: 13 new tests in `tests/test_temporal.py`.
+
+### Changed
+- `curator_report` summary now includes `auto_decay_candidates` count.
+- README tool table updated to list `memory_stats`; tool count updated to 35.
+
+
 
 ### Added
 - **P2 Observability**: `serve --obs-port N` starts a lightweight HTTP sidecar

@@ -102,3 +102,35 @@ def test_consolidate_dry_run_reports_duplicates_and_low_feedback():
     assert report["applied"] is False
     assert len(report["duplicate_title_groups"]) == 1
     assert [r["id"] for r in report["low_feedback_candidates"]] == ["same-1"]
+
+
+def test_contradiction_candidates_detected_by_title_key():
+    """Active + contradicted records sharing a normalized title key are surfaced."""
+    lm.add_memory_record("feedback", "Auth Method", "use JWT", status="active", memory_id="c-active")
+    lm.add_memory_record("feedback", "Auth Method", "use sessions", status="contradicted", memory_id="c-contradicted")
+
+    report = lm.curator_report(dry_run=True)
+
+    keys = [c["title_key"] for c in report["contradiction_candidates"]]
+    assert any("auth" in k or "method" in k for k in keys)
+    assert report["summary"]["contradictions"] >= 1
+
+
+def test_contradiction_candidates_not_listed_when_only_active():
+    """Two active records with the same title are duplicates, not contradictions."""
+    lm.add_memory_record("feedback", "Same Key", "v1", status="active", memory_id="sa1")
+    lm.add_memory_record("feedback", "Same Key", "v2", status="active", memory_id="sa2")
+
+    report = lm.curator_report(dry_run=True)
+
+    assert report["summary"]["contradictions"] == 0
+    assert report["summary"]["duplicates"] == 1
+
+
+def test_contradiction_candidates_not_listed_without_active_counterpart():
+    """A lone contradicted record without an active counterpart is not flagged."""
+    lm.add_memory_record("feedback", "Orphan Contradiction", "old", status="contradicted", memory_id="oc1")
+
+    report = lm.curator_report(dry_run=True)
+
+    assert report["summary"]["contradictions"] == 0

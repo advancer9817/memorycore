@@ -12,7 +12,6 @@ def test_checked_in_config_is_portable():
     assert "e-pengyang" not in text
     assert "C:\\" not in text
     assert "primary: sqlite" in text
-    assert "memory_ops.sqlite3" in text
 
 
 def test_init_script_exists_and_documents_safe_behavior():

@@ -49,21 +49,24 @@ def connect() -> sqlite3.Connection:
 @contextmanager
 def managed_conn():
     conn = connect()
+    try:
+        yield conn
+        _commit_with_retry(conn)
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _commit_with_retry(conn: sqlite3.Connection) -> None:
     for attempt in range(_LOCK_RETRY_ATTEMPTS):
         try:
-            yield conn
             conn.commit()
             return
         except sqlite3.OperationalError as exc:
-            conn.rollback()
-            if "database is locked" in str(exc) and attempt < _LOCK_RETRY_ATTEMPTS - 1:
-                logger.warning("db locked, retrying (%d/%d)", attempt + 1, _LOCK_RETRY_ATTEMPTS)
-                time.sleep(_LOCK_RETRY_DELAY * (attempt + 1))
-            else:
+            if "database is locked" not in str(exc) or attempt >= _LOCK_RETRY_ATTEMPTS - 1:
                 raise
-        except Exception:
-            conn.rollback()
-            raise
+            logger.warning("db locked on commit, retrying (%d/%d)", attempt + 1, _LOCK_RETRY_ATTEMPTS)
+            time.sleep(_LOCK_RETRY_DELAY * (attempt + 1))
 
 
 def _managed_query(sql: str, params: tuple = ()) -> list[dict[str, Any]]:
@@ -103,7 +106,9 @@ def init_db(conn: sqlite3.Connection) -> None:
           injected_count INTEGER NOT NULL DEFAULT 0,
           ineffective_count INTEGER NOT NULL DEFAULT 0,
           effectiveness_score REAL NOT NULL DEFAULT 0.5,
-          last_injected_at TEXT
+          last_injected_at TEXT,
+          valid_from TEXT,
+          valid_until TEXT
         );
 
         CREATE TABLE IF NOT EXISTS feedback_events (
@@ -259,6 +264,8 @@ def init_db(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "memories", "effectiveness_score", "REAL NOT NULL DEFAULT 0.5")
     _ensure_column(conn, "memories", "last_injected_at", "TEXT")
     _ensure_column(conn, "agent_messages", "expires_at", "TEXT")
+    _ensure_column(conn, "memories", "valid_from", "TEXT")
+    _ensure_column(conn, "memories", "valid_until", "TEXT")
     try:
         null_fts = conn.execute("SELECT COUNT(*) FROM memories_fts WHERE id IS NULL").fetchone()[0]
     except sqlite3.OperationalError:

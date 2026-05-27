@@ -134,12 +134,14 @@ def memory_add(
     decay_policy: str = "review",
     related_ids: list[str] | str | None = None,
     metadata: dict[str, Any] | None = None,
+    valid_from: str | None = None,
+    valid_until: str | None = None,
 ) -> dict[str, Any]:
     """Add a structured memory record to local SQLite memory."""
     return add_memory_record(
         type, title, content, scope, tags, source, source_agent,
         project_path, confidence, importance, status, decay_policy,
-        related_ids, metadata,
+        related_ids, metadata, valid_from=valid_from, valid_until=valid_until,
     )
 
 
@@ -506,6 +508,13 @@ def memory_backup(path: str | None = None) -> dict[str, Any]:
 def memory_rebuild_vectors(dry_run: bool = True, limit: int = 5000) -> dict[str, Any]:
     """Rebuild Qdrant vectors from SQLite memory rows."""
     return rebuild_memory_vectors(dry_run=dry_run, limit=limit)
+
+
+@mcp.tool()
+@_safe_tool
+def memory_stats() -> dict[str, Any]:
+    """Return memory statistics grouped by type, status, and agent, with aggregate scores."""
+    return get_memory_stats()
 
 
 @mcp.tool()

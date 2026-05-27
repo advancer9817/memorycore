@@ -48,19 +48,23 @@ def send_agent_message(
             recipients.append(row["agent_id"])
         ts = now()
         meta_json = as_json(metadata or {})
-        for recipient in recipients:
-            msg_id = str(uuid.uuid4())
+        if recipients:
+            rows_to_insert = [
+                (str(uuid.uuid4()), from_agent, recipient, subject, body, priority, "unread", ts, meta_json, expires_at)
+                for recipient in recipients
+            ]
             with managed_conn() as conn:
-                conn.execute(
+                conn.executemany(
                     "INSERT INTO agent_messages "
                     "(id, from_agent, to_agent, subject, body, priority, status, created_at, metadata_json, expires_at) "
                     "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                    (msg_id, from_agent, recipient, subject, body, priority, "unread", ts, meta_json, expires_at),
+                    rows_to_insert,
                 )
-            log_audit_event("agent_message_send", memory_id=msg_id, agent=from_agent, detail={
-                "message_id": msg_id, "to": recipient, "subject": subject,
-                "priority": priority, "broadcast": True,
-            })
+            for msg_id, _, recipient, *_ in rows_to_insert:
+                log_audit_event("agent_message_send", memory_id=msg_id, agent=from_agent, detail={
+                    "message_id": msg_id, "to": recipient, "subject": subject,
+                    "priority": priority, "broadcast": True,
+                })
         return {"broadcast": True, "sent_to": recipients, "count": len(recipients)}
 
     msg_id = str(uuid.uuid4())

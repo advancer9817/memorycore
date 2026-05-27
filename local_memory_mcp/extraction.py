@@ -128,24 +128,16 @@ def extraction_config_from_dict(cfg: dict[str, Any]) -> ExtractionConfig:
     API keys are resolved from: config dict > environment variables.
     Set DEEPSEEK_API_KEY or MEM0_LLM_API_KEY in your environment.
     """
-    mem0 = cfg.get("mem0", {})
     extraction = cfg.get("extraction", {})
-    # extraction section takes priority; fall back to mem0 section for compat
     return ExtractionConfig(
         api_key=extraction.get("api_key", "")
-               or mem0.get("llm_api_key", "")
                or os.environ.get("MEM0_LLM_API_KEY", "")
                or os.environ.get("DEEPSEEK_API_KEY", ""),
-        base_url=extraction.get("base_url",
-                 mem0.get("llm_base_url", "https://api.deepseek.com/v1")),
-        model=extraction.get("model",
-              mem0.get("llm_model", "deepseek-v4-flash")),
-        temperature=extraction.get("temperature",
-                    mem0.get("temperature", 0.1)),
-        max_tokens=extraction.get("max_tokens",
-                   mem0.get("max_tokens", 2000)),
-        timeout=extraction.get("timeout",
-                mem0.get("timeout", 60)),
+        base_url=extraction.get("base_url", "https://api.deepseek.com/v1"),
+        model=extraction.get("model", "deepseek-v4-flash"),
+        temperature=extraction.get("temperature", 0.1),
+        max_tokens=extraction.get("max_tokens", 2000),
+        timeout=extraction.get("timeout", 60),
         custom_instructions=extraction.get("custom_instructions", ""),
     )
 
