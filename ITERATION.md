@@ -1,5 +1,40 @@
 # ITERATION.md — local-memory-mcp 迭代日志
 
+## [迭代 30] 2026-05-27 — 一键启动脚本 start.sh
+
+### 背景
+
+新机器 clone 仓库后需要一条命令完成 venv 创建、依赖安装、DB 初始化、记忆导入、服务启动。
+
+### 变更摘要
+
+**`start.sh`**（新建，项目根目录）
+- 步骤 1：自动查找 Python 3.11+（`python3.11 → python3.12 → python3`）并创建/复用 `.venv`
+- 步骤 2：`pip install -e .[extraction]`（幂等，已安装则跳过升级）
+- 步骤 3：`python -m local_memory_mcp init` 初始化 SQLite（幂等）
+- 步骤 4：若 `memory-sync/memories.json` 存在，自动 import（`--conflict-policy newer`）
+- 步骤 5：启动 HTTP MCP 服务
+
+**参数：**
+```
+bash start.sh                   # 前台运行（默认）
+bash start.sh --daemon          # 后台守护进程（PID → /tmp/lmmcp.pid）
+bash start.sh --no-import       # 跳过记忆导入
+bash start.sh --host 0.0.0.0 --port 8318
+bash start.sh --python /usr/bin/python3.12
+```
+
+**环境变量（兼容 lmmcp 脚本）：**
+`LMMCP_HOST` / `LMMCP_PORT` / `LMMCP_PYTHON` / `LMMCP_PID_FILE` / `LMMCP_AUTO_SYNC`
+
+### 验证
+
+```bash
+bash start.sh --no-import --daemon && sleep 1 && curl -s http://127.0.0.1:8318/health
+```
+
+---
+
 ## [迭代 29] 2026-05-27 — 多设备记忆同步（export/import/sync）
 
 ### 背景

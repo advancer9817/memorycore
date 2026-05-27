@@ -38,7 +38,100 @@ MEM_ROOT="${LOCAL_MEMORY_ROOT:-$(pwd)}"
 
 代码默认使用项目目录内的 `memory.sqlite3`，可用 `LOCAL_MEMORY_DB` 覆盖数据库路径，`LOCAL_MEMORY_CONFIG` 覆盖配置文件路径。
 
-## 当前状态
+## 快速开始
+
+在任意支持 Python 3.11+ 的机器上，clone 仓库后一条命令完成全部初始化并启动服务：
+
+```bash
+git clone https://github.com/advancer9817-crypto/local-memory-mcp.git
+cd local-memory-mcp
+bash start.sh
+```
+
+`start.sh` 自动完成：
+
+1. 创建/复用 `.venv`（自动查找 python3.11/3.12/3.13）
+2. 安装依赖（`pip install -e .[extraction]`）
+3. 初始化 SQLite 数据库（幂等）
+4. 导入 `memory-sync/memories.json`（若存在，使用 `newer` 冲突策略）
+5. 启动 HTTP MCP 服务（默认 `127.0.0.1:8318`）
+
+常用参数：
+
+```bash
+bash start.sh                        # 前台运行
+bash start.sh --daemon               # 后台守护进程
+bash start.sh --no-import            # 跳过记忆导入
+bash start.sh --host 0.0.0.0 --port 8318
+```
+
+服务启动后访问：
+
+```text
+http://127.0.0.1:8318/mcp     MCP endpoint
+http://127.0.0.1:8318/        前端控制台
+http://127.0.0.1:8318/health  健康检查
+```
+
+## 多设备记忆同步
+
+记忆通过 git 仓库在多台设备间同步。同步文件为 `memory-sync/memories.json`，只包含持久知识（memories / feedback_events / memory_links），不含设备私有的运行时状态。
+
+### 自动模式（推荐）
+
+`scripts/lmmcp` 服务脚本在 **启动前自动拉取**、**停止后自动推送**：
+
+```bash
+scripts/lmmcp start   # git pull → import → 启动服务
+scripts/lmmcp stop    # 停止服务 → export → git commit → git push
+```
+
+设置 `LMMCP_AUTO_SYNC=0` 可禁用自动同步（git 操作失败时也不会影响服务启停）。
+
+### 手动同步
+
+```bash
+# 推送当前设备记忆到远端
+scripts/sync-memory.sh push
+
+# 从远端拉取并导入（有 dry-run 预览 + 交互式确认）
+scripts/sync-memory.sh pull
+
+# 完整双向同步
+scripts/sync-memory.sh sync
+
+# 查看同步状态
+scripts/sync-memory.sh status
+```
+
+也可直接用 CLI：
+
+```bash
+# 导出（只含持久知识）
+.venv/bin/python -m local_memory_mcp export memory-sync/memories.json --memories-only
+
+# 导入（newer 策略：按 updated_at 保留更新的一条）
+.venv/bin/python -m local_memory_mcp import memory-sync/memories.json --conflict-policy newer --apply
+```
+
+### 冲突策略
+
+| 策略 | 行为 | 适用场景 |
+|------|------|---------|
+| `newer` | 保留 `updated_at` 更新的一条（默认） | 多设备日常同步 |
+| `skip` | 本地优先，忽略外来变更 | 只读导入 |
+| `replace` | 外来优先，无条件覆盖 | 全量覆盖恢复 |
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `LMMCP_AUTO_SYNC` | `1` | 设为 `0` 禁用 lmmcp 自动同步 |
+| `SYNC_FILE` | `memory-sync/memories.json` | 同步文件路径（相对仓库根） |
+| `SYNC_REMOTE` | `origin` | git remote 名称 |
+| `SYNC_DEVICE` | `hostname -s` | commit message 中的设备标识 |
+
+
 
 已验证：
 
@@ -202,14 +295,15 @@ scripts/lmmcp stop
 
 ## 安装与测试
 
-需要 Python 3.11+。
+需要 Python 3.11+。日常启动推荐直接使用 `bash start.sh`（见上方"快速开始"）。
+
+手动安装：
 
 ```bash
 MEM_ROOT="${LOCAL_MEMORY_ROOT:-$(pwd)}"
 cd "$MEM_ROOT"
 python3.11 -m venv .venv
-.venv/bin/python -m pip install -U pip
-.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install -e .[extraction]
 ```
 
 运行测试：
@@ -217,8 +311,6 @@ python3.11 -m venv .venv
 ```bash
 .venv/bin/python -m pytest -q
 ```
-
-`pytest.ini` 已配置 `pythonpath = .`。测试通过 `LOCAL_MEMORY_DB` 指向临时 SQLite，不读写生产 `memory.sqlite3`。
 
 ## 一键部署
 
