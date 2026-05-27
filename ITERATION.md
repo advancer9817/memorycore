@@ -1,5 +1,44 @@
 # ITERATION.md — local-memory-mcp 迭代日志
 
+## [迭代 31] 2026-05-27 — episodic memory 自动汇总 rollup
+
+### 背景
+
+对话抽取目前会把单次事实写成 `episodic_memory` 候选；这些碎片适合短期留痕，但长期会形成噪声。用户要求记忆积攒到一定数量后自动提炼成更稳定的长期记忆，并由 lmmcp 自行执行。
+
+### 变更摘要
+
+**`local_memory_mcp/storage/rollup.py`**（新建）
+- 新增 `rollup_report()`：扫描 `source='extraction'` 且 `status IN ('candidate','active')` 的 `episodic_memory`。
+- 触发条件：同一 `scope/source_agent/project_path` 分组达到 `min_count`（默认 30），或小批量达到 `min_age_count` 且最老记录超过 `max_age_hours`（默认 24h）。
+- LLM rollup 输出 durable memories：`user_profile` / `environment_fact` / `agent_architecture` / `project_memory` / `timeline_event` / `decision` / `feedback` / `skill_candidate`。
+- `dry_run=True` 只生成计划；`dry_run=False` 会创建 durable memory，并在全部创建成功后 archive 源 episodic 记录。
+- 审计事件：`memory_rollup_apply` 记录 source ids、created ids、触发原因和 proposal 数量。
+
+**`local_memory_mcp/server.py`**
+- 新增 MCP tool `memory_rollup_report(...)`。
+- CLI 新增：
+  ```bash
+  python -m local_memory_mcp rollup [--apply] [--force] [--summary-only]
+  ```
+- 自动 curator 线程每轮先执行 `rollup_report(dry_run=False)`，再执行 `curator_report(dry_run=False)`。
+
+**公共 API**
+- `local_memory_mcp.storage.rollup_report`
+- `local_memory_mcp.rollup_report`
+
+**测试**
+- 新增 `tests/test_rollup.py`：覆盖阈值未触发、dry-run proposal、apply 创建长期记忆并归档源 episodic、小批量年龄触发。
+- 同步更新 curator/temporal 测试以匹配迭代 31 的强记忆保守规则。
+
+### 验证
+
+```bash
+.venv/bin/python -m pytest tests/test_rollup.py tests/test_curator.py tests/test_curator_plan.py tests/test_temporal.py -q
+```
+
+---
+
 ## [迭代 30] 2026-05-27 — 一键启动脚本 start.sh
 
 ### 背景

@@ -136,7 +136,7 @@ scripts/sync-memory.sh status
 已验证：
 
 1. **SQLite + FTS5 结构化记忆层**：支持 type/scope/tags/status/importance/confidence/source_agent/effectiveness 等字段，FTS5 全文检索。
-2. **HTTP MCP server**：35 个工具，Hermes 可通过 `http://127.0.0.1:8318/mcp` 作为普通 HTTP MCP 客户端连接。
+2. **HTTP MCP server**：36 个工具，Hermes 可通过 `http://127.0.0.1:8318/mcp` 作为普通 HTTP MCP 客户端连接。
 3. **Context Pack**：`memory_context` 按任务生成 compact 上下文包，支持 token budget 控制，按记忆类型分组，集成 active contradicts/supersedes warning，并将检索记忆标记为 untrusted data；命中注入特征的记忆会从普通 context body 过滤到 warnings。
 4. **Curator**：重复标题、低反馈、stale、archive、矛盾候选、skill_candidate 推广候选检测；默认 dry-run。
 5. **Feedback / effectiveness**：`memory_feedback` 记录反馈事件并更新 feedback_score、injected_count、ineffective_count、effectiveness_score。
@@ -170,6 +170,7 @@ Removed / not current core：
 | `memory_timeline` | 决策/事件时间线 |
 | `memory_consolidate` | curator 去重/stale 检测（report-only） |
 | `memory_curator_report` | curator 候选报告，可选标记 stale/archive |
+| `memory_rollup_report` | 将累计 episodic 记忆滚动总结为长期记忆 |
 | `memory_ingest` | 从显式传入的对话消息抽取并去重写入 candidate |
 | `memory_vector_search` | Qdrant 语义向量搜索 |
 | `memory_vector_status` | Qdrant 向量存储状态 |

@@ -34,6 +34,7 @@ from local_memory_mcp.storage.search import (
 )
 from local_memory_mcp.storage.links import add_link, query_links
 from local_memory_mcp.storage.curator import consolidate, curator_report
+from local_memory_mcp.storage.rollup import rollup_report
 from local_memory_mcp.storage.agents import (
     send_agent_message,
     get_agent_inbox,
@@ -79,6 +80,7 @@ __all__ = [
     "query_links",
     "consolidate",
     "curator_report",
+    "rollup_report",
     "get_memory_stats",
     "dashboard_payload",
     "export_html",

@@ -13,15 +13,47 @@ SYNC_REMOTE="${SYNC_REMOTE:-origin}"
 # Set to 0 to disable automatic memory sync on start/stop
 AUTO_SYNC="${LMMCP_AUTO_SYNC:-1}"
 
-is_running() {
-  [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
+service_cmd_matches() {
+  local pid="$1"
+  ps -p "$pid" -o args= 2>/dev/null | grep -q "local_memory_mcp.*serve.*--port $PORT"
 }
 
-pid_matches() {
-  if ! is_running; then return 1; fi
+port_pid() {
+  command -v ss >/dev/null 2>&1 || return 1
   local pid
-  pid="$(cat "$PID_FILE")"
-  ps -p "$pid" -o args= 2>/dev/null | grep -q "local_memory_mcp.*serve"
+  pid="$(ss -ltnp "sport = :$PORT" 2>/dev/null | grep -m1 -o 'pid=[0-9]\+' | cut -d= -f2 || true)"
+  [[ -n "$pid" ]] || return 1
+  echo "$pid"
+}
+
+pid_file_pid() {
+  local pid
+  [ -f "$PID_FILE" ] || return 1
+  pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  [[ -n "$pid" ]] || return 1
+  service_cmd_matches "$pid" || return 1
+  echo "$pid"
+}
+
+running_pid() {
+  local pid
+  pid="$(port_pid || true)"
+  if [[ -n "$pid" ]]; then
+    if service_cmd_matches "$pid"; then
+      echo "$pid"
+      return 0
+    fi
+    # Something else is on the port — not our service
+    return 1
+  fi
+
+  pid="$(pid_file_pid || true)"
+  if [[ -n "$pid" ]]; then
+    echo "$pid"
+    return 0
+  fi
+
+  return 1
 }
 
 # Auto-sync helpers — never fatal, always log
@@ -78,11 +110,13 @@ print(d['counts'].get('memories', 0))
 }
 
 start() {
-  if pid_matches; then
-    echo "already running (pid: $(cat "$PID_FILE"), endpoint: http://$HOST:$PORT/mcp, db: $DB)"
+  local pid
+  if pid="$(running_pid 2>/dev/null || true)" && [[ -n "$pid" ]]; then
+    echo "already running (pid: $pid, endpoint: http://$HOST:$PORT/mcp, db: $DB)"
+    [[ -f "$PID_FILE" ]] || echo "$pid" > "$PID_FILE"
     return 0
   fi
-  if [ -f "$PID_FILE" ]; then rm -f "$PID_FILE"; fi
+  rm -f "$PID_FILE"
   mkdir -p "$MCP_DIR" "$(dirname "$PID_FILE")"
   if [ ! -x "$PYTHON" ]; then
     echo "python not found/executable: $PYTHON" >&2
@@ -94,8 +128,10 @@ start() {
   nohup env LOCAL_MEMORY_DB="$DB" PYTHONPATH="$MCP_DIR" "$PYTHON" -m local_memory_mcp serve --host "$HOST" --port "$PORT" >> "$LOG_FILE" 2>&1 &
   echo $! > "$PID_FILE"
   sleep 1
-  if pid_matches; then
-    echo "started (pid: $(cat "$PID_FILE"), endpoint: http://$HOST:$PORT/mcp, db: $DB)"
+  local post_pid
+  post_pid="$(running_pid 2>/dev/null || true)"
+  if [[ -n "$post_pid" ]]; then
+    echo "started (pid: $post_pid, endpoint: http://$HOST:$PORT/mcp, db: $DB)"
   else
     echo "failed — check $LOG_FILE" >&2
     return 1
@@ -103,9 +139,9 @@ start() {
 }
 
 stop() {
-  if is_running; then
-    local pid
-    pid="$(cat "$PID_FILE")"
+  local pid
+  pid="$(running_pid 2>/dev/null || true)"
+  if [[ -n "$pid" ]]; then
     kill "$pid" 2>/dev/null || true
     for _ in 1 2 3 4 5; do
       kill -0 "$pid" 2>/dev/null || break
@@ -123,9 +159,18 @@ stop() {
 }
 
 status() {
-  if pid_matches; then
-    echo "running (pid: $(cat "$PID_FILE"), endpoint: http://$HOST:$PORT/mcp, db: $DB)"
+  local pid
+  pid="$(running_pid 2>/dev/null || true)"
+  if [[ -n "$pid" ]]; then
+    # Reconcile PID file if stale
+    local file_pid=""
+    [[ -f "$PID_FILE" ]] && file_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    if [[ "$file_pid" != "$pid" ]]; then
+      echo "$pid" > "$PID_FILE"
+    fi
+    echo "running (pid: $pid, endpoint: http://$HOST:$PORT/mcp, db: $DB)"
   else
+    rm -f "$PID_FILE"
     echo "stopped"
     return 1
   fi

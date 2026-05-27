@@ -58,6 +58,7 @@ from local_memory_mcp.storage import (
     memory_import as import_memory_payload,
     memory_rebuild_vectors as rebuild_memory_vectors,
     query_links,
+    rollup_report,
     search_memory_records,
     send_agent_message,
     timeline,
@@ -236,6 +237,31 @@ def memory_curator_report(
 ) -> dict[str, Any]:
     """Return memory curator candidates; optionally mark stale/archive records without deleting."""
     return curator_report(dry_run, limit, stale_after_days, archive_after_days, allow_actions, deny_actions)
+
+
+@mcp.tool()
+@_safe_tool
+def memory_rollup_report(
+    dry_run: bool = True,
+    limit: int = 250,
+    min_count: int = 30,
+    max_age_hours: float = 24,
+    min_age_count: int = 5,
+    source_agent: str = "",
+    project_path: str = "",
+    force: bool = False,
+) -> dict[str, Any]:
+    """Roll up accumulated episodic memories into durable long-term memories."""
+    return rollup_report(
+        dry_run=dry_run,
+        limit=limit,
+        min_count=min_count,
+        max_age_hours=max_age_hours,
+        min_age_count=min_age_count,
+        source_agent=source_agent,
+        project_path=project_path,
+        force=force,
+    )
 
 
 @mcp.tool()
@@ -709,6 +735,38 @@ def agent_presence_list(
 _OBS_START_TIME = __import__("time").time()
 
 
+def _start_auto_curator(interval_hours: float = 6.0) -> None:
+    """Background thread: run curator(dry_run=False) every interval_hours."""
+    import time
+
+    def _loop() -> None:
+        # First run after 2 minutes so startup I/O settles first
+        time.sleep(120)
+        while True:
+            try:
+                rollup = rollup_report(dry_run=False)
+                rollup_summary = rollup.get("summary", {})
+                result = curator_report(dry_run=False)
+                summary = result.get("summary", {})
+                logger.info(
+                    "[auto-curator] rollup_created=%s rollup_archived=%s stale=%s archived=%s promoted=%s decayed=%s",
+                    rollup_summary.get("created", 0),
+                    rollup_summary.get("archived_sources", 0),
+                    summary.get("stale", 0),
+                    summary.get("archive", 0),
+                    summary.get("promote_candidates", 0),
+                    summary.get("auto_decay_candidates", 0),
+                )
+            except Exception as exc:
+                logger.warning("[auto-curator] error: %s", exc)
+            time.sleep(interval_hours * 3600)
+
+    t = threading.Thread(target=_loop, daemon=True, name="auto-curator")
+    t.start()
+    logger.info("[auto-curator] scheduled every %.1f hours", interval_hours)
+
+
+
 def _start_observability_server(host: str, obs_port: int) -> None:
     """Start a lightweight HTTP server exposing /health and /metrics."""
     from local_memory_mcp.storage import get_memory_stats
@@ -778,6 +836,16 @@ def main(argv: list[str] | None = None) -> int:
     p_curator.add_argument("--stale-after-days", type=int, default=60)
     p_curator.add_argument("--archive-after-days", type=int, default=120)
     p_curator.add_argument("--summary-only", action="store_true")
+    p_rollup = sub.add_parser("rollup")
+    p_rollup.add_argument("--apply", action="store_true", help="create durable memories and archive source episodic records")
+    p_rollup.add_argument("--limit", type=int, default=250)
+    p_rollup.add_argument("--min-count", type=int, default=30)
+    p_rollup.add_argument("--max-age-hours", type=float, default=24)
+    p_rollup.add_argument("--min-age-count", type=int, default=5)
+    p_rollup.add_argument("--source-agent", default="")
+    p_rollup.add_argument("--project-path", default="")
+    p_rollup.add_argument("--force", action="store_true")
+    p_rollup.add_argument("--summary-only", action="store_true")
     p_sem_index = sub.add_parser("semantic-index")
     p_sem_index.add_argument("--limit", type=int, default=1000)
     p_sem_index.add_argument("--force", action="store_true")
@@ -859,6 +927,19 @@ def main(argv: list[str] | None = None) -> int:
         )
         payload = report["summary"] if args.summary_only else report
         print(json.dumps(payload, ensure_ascii=False, indent=2))
+    elif args.cmd == "rollup":
+        report = rollup_report(
+            dry_run=not args.apply,
+            limit=args.limit,
+            min_count=args.min_count,
+            max_age_hours=args.max_age_hours,
+            min_age_count=args.min_age_count,
+            source_agent=args.source_agent,
+            project_path=args.project_path,
+            force=args.force,
+        )
+        payload = report["summary"] if args.summary_only else report
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
     elif args.cmd in ("semantic-status", "semantic-index", "semantic-search"):
         print(
             json.dumps(
@@ -907,6 +988,7 @@ def main(argv: list[str] | None = None) -> int:
         obs_port = getattr(args, "obs_port", 0)
         if obs_port:
             _start_observability_server(args.host, obs_port)
+        _start_auto_curator(interval_hours=6.0)
         if args.port:
             mcp.settings.host = args.host
             mcp.settings.port = args.port

@@ -17,9 +17,9 @@ def test_empty_curator_report():
 
 
 def test_curator_detects_duplicate_title_and_low_feedback():
-    first = lm.add_memory_record("project_memory", "Duplicate Title", "one", memory_id="dup-1")
+    first = lm.add_memory_record("feedback", "Duplicate Title", "one", memory_id="dup-1")
     lm.add_memory_record("decision", " duplicate   title ", "two", memory_id="dup-2")
-    lm.add_feedback(first["id"], -1)
+    lm.add_feedback(first["id"], -2)
 
     report = lm.curator_report(dry_run=True)
 
@@ -29,8 +29,8 @@ def test_curator_detects_duplicate_title_and_low_feedback():
 
 
 def test_curator_dry_run_does_not_change_status_and_apply_marks_stale():
-    record = lm.add_memory_record("project_memory", "Low feedback", "Content", memory_id="low")
-    lm.add_feedback(record["id"], -1)
+    record = lm.add_memory_record("feedback", "Low feedback", "Content", memory_id="low")
+    lm.add_feedback(record["id"], -2)
 
     dry_report = lm.curator_report(dry_run=True)
     assert dry_report["summary"]["low_feedback"] == 1
@@ -44,8 +44,9 @@ def test_curator_dry_run_does_not_change_status_and_apply_marks_stale():
 def test_curator_stale_and_archive_candidates():
     old = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat(timespec="seconds")
     stale_old = (datetime.now(timezone.utc) - timedelta(days=20)).isoformat(timespec="seconds")
-    lm.add_memory_record("project_memory", "Old unimportant", "Content", importance=0.1, memory_id="old")
-    lm.add_memory_record("project_memory", "Already stale", "Content", status="stale", memory_id="stale")
+    old_record = lm.add_memory_record("feedback", "Old unimportant", "Content", importance=0.1, memory_id="old")
+    lm.add_memory_record("feedback", "Already stale", "Content", status="stale", memory_id="stale")
+    lm.add_feedback(old_record["id"], -1)
     set_updated_at("old", old)
     set_updated_at("stale", stale_old)
 
@@ -57,38 +58,41 @@ def test_curator_stale_and_archive_candidates():
     assert lm.get_record("stale")["status"] == "archived"
 
 
-def test_curator_auto_stales_low_importance_candidate_noise():
-    old_candidate = (datetime.now(timezone.utc) - timedelta(hours=13)).isoformat(timespec="seconds")
+def test_curator_archives_dead_candidates_and_promotes_important_candidates():
+    dead_candidate = (datetime.now(timezone.utc) - timedelta(hours=49)).isoformat(timespec="seconds")
     fresh_candidate = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(timespec="seconds")
-    promoted_candidate = (datetime.now(timezone.utc) - timedelta(hours=13)).isoformat(timespec="seconds")
+    promoted_candidate = (datetime.now(timezone.utc) - timedelta(hours=49)).isoformat(timespec="seconds")
     lm.add_memory_record(
-        "episodic_memory", "Old task-state candidate", "temporary task state", status="candidate",
-        importance=0.5, memory_id="old-candidate",
+        "feedback", "Dead candidate", "temporary task state", status="candidate",
+        importance=0.4, memory_id="dead-candidate",
     )
     lm.add_memory_record(
-        "episodic_memory", "Fresh task-state candidate", "temporary task state", status="candidate",
-        importance=0.5, memory_id="fresh-candidate",
+        "feedback", "Fresh candidate", "temporary task state", status="candidate",
+        importance=0.4, memory_id="fresh-candidate",
     )
     lm.add_memory_record(
-        "project_memory", "Important candidate", "needs human promotion review", status="candidate",
+        "project_memory", "Important candidate", "needs promotion", status="candidate",
         importance=0.8, memory_id="important-candidate",
     )
-    set_updated_at("old-candidate", old_candidate)
+    set_updated_at("dead-candidate", dead_candidate)
     set_updated_at("fresh-candidate", fresh_candidate)
     set_updated_at("important-candidate", promoted_candidate)
 
     report = lm.curator_report(dry_run=False, stale_after_days=60, archive_after_days=120)
 
-    assert {a["id"] for a in report["actions"]} == {"old-candidate"}
-    old_record = lm.get_record("old-candidate")
+    assert {(a["id"], a["action"]) for a in report["actions"]} == {
+        ("dead-candidate", "archive"),
+        ("important-candidate", "promote"),
+    }
+    dead_record = lm.get_record("dead-candidate")
     fresh_record = lm.get_record("fresh-candidate")
     important_record = lm.get_record("important-candidate")
-    assert old_record is not None
+    assert dead_record is not None
     assert fresh_record is not None
     assert important_record is not None
-    assert old_record["status"] == "stale"
+    assert dead_record["status"] == "archived"
     assert fresh_record["status"] == "candidate"
-    assert important_record["status"] == "candidate"
+    assert important_record["status"] == "active"
 
 
 def test_consolidate_dry_run_reports_duplicates_and_low_feedback():

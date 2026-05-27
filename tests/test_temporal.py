@@ -79,14 +79,14 @@ def _set_last_accessed(memory_id: str, days_ago: int) -> None:
     ts = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
     with managed_conn() as conn:
         conn.execute(
-            "UPDATE memories SET last_accessed_at=?, updated_at=? WHERE id=?",
+            "UPDATE memories SET last_accessed_at=?, updated_at=?, effectiveness_score=0.2, importance=0.4 WHERE id=?",
             (ts, ts, memory_id),
         )
 
 
 def test_auto_decay_candidates_listed_in_dry_run():
     r = add_memory_record("feedback", "OldMem", "old content", decay_policy="review", confidence=0.7)
-    _set_last_accessed(r["id"], 35)
+    _set_last_accessed(r["id"], 95)
     report = curator_report(dry_run=True)
     candidate_ids = [c["id"] for c in report["auto_decay_candidates"]]
     assert r["id"] in candidate_ids
@@ -94,7 +94,7 @@ def test_auto_decay_candidates_listed_in_dry_run():
 
 def test_auto_decay_reduces_confidence_on_apply():
     r = add_memory_record("feedback", "DecayMem", "old content", decay_policy="review", confidence=0.7)
-    _set_last_accessed(r["id"], 35)
+    _set_last_accessed(r["id"], 95)
     curator_report(dry_run=False)
     with managed_conn() as conn:
         row = conn.execute("SELECT confidence FROM memories WHERE id=?", (r["id"],)).fetchone()
@@ -103,7 +103,7 @@ def test_auto_decay_reduces_confidence_on_apply():
 
 def test_auto_decay_does_not_go_below_min():
     r = add_memory_record("feedback", "NearFloor", "old", decay_policy="review", confidence=_DECAY_MIN_CONFIDENCE + 0.01)
-    _set_last_accessed(r["id"], 35)
+    _set_last_accessed(r["id"], 95)
     curator_report(dry_run=False)
     with managed_conn() as conn:
         row = conn.execute("SELECT confidence FROM memories WHERE id=?", (r["id"],)).fetchone()
@@ -112,7 +112,7 @@ def test_auto_decay_does_not_go_below_min():
 
 def test_auto_decay_skips_stable_policy():
     r = add_memory_record("feedback", "Stable", "stable content", decay_policy="stable", confidence=0.8)
-    _set_last_accessed(r["id"], 35)
+    _set_last_accessed(r["id"], 95)
     curator_report(dry_run=False)
     with managed_conn() as conn:
         row = conn.execute("SELECT confidence FROM memories WHERE id=?", (r["id"],)).fetchone()
@@ -132,7 +132,7 @@ def test_auto_decay_skips_recently_accessed():
 
 def test_curator_summary_includes_auto_decay_count():
     r = add_memory_record("feedback", "SumMem", "sum content", decay_policy="review", confidence=0.7)
-    _set_last_accessed(r["id"], 35)
+    _set_last_accessed(r["id"], 95)
     report = curator_report(dry_run=True)
     assert "auto_decay_candidates" in report["summary"]
     assert report["summary"]["auto_decay_candidates"] >= 1

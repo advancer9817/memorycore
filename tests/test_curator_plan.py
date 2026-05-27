@@ -12,8 +12,8 @@ def _set_updated_at(memory_id: str, value: str) -> None:
 
 
 def test_curator_dry_run_returns_action_plan_with_reasons_and_rollback():
-    record = lm.add_memory_record("project_memory", "Noisy", "Low value", memory_id="plan-noisy")
-    lm.add_feedback(record["id"], -1)
+    record = lm.add_memory_record("feedback", "Noisy", "Low value", memory_id="plan-noisy")
+    lm.add_feedback(record["id"], -2)
 
     report = lm.curator_report(dry_run=True)
     action = report["action_plan"][0]
@@ -27,8 +27,9 @@ def test_curator_dry_run_returns_action_plan_with_reasons_and_rollback():
 
 def test_curator_allow_actions_filters_apply_plan():
     old = (datetime.now(timezone.utc) - timedelta(days=20)).isoformat(timespec="seconds")
-    lm.add_memory_record("project_memory", "Old", "Content", importance=0.1, memory_id="allow-old")
-    lm.add_memory_record("project_memory", "Stale", "Content", status="stale", memory_id="allow-stale")
+    old_record = lm.add_memory_record("feedback", "Old", "Content", importance=0.1, memory_id="allow-old")
+    lm.add_memory_record("feedback", "Stale", "Content", status="stale", memory_id="allow-stale")
+    lm.add_feedback(old_record["id"], -1)
     _set_updated_at("allow-old", old)
     _set_updated_at("allow-stale", old)
 
@@ -45,8 +46,8 @@ def test_curator_allow_actions_filters_apply_plan():
 
 
 def test_curator_deny_actions_filters_apply_plan():
-    record = lm.add_memory_record("project_memory", "Deny stale", "Content", memory_id="deny-stale")
-    lm.add_feedback(record["id"], -1)
+    record = lm.add_memory_record("feedback", "Deny stale", "Content", memory_id="deny-stale")
+    lm.add_feedback(record["id"], -2)
 
     report = lm.curator_report(dry_run=False, deny_actions=["mark_stale"])
 
@@ -56,8 +57,8 @@ def test_curator_deny_actions_filters_apply_plan():
 
 
 def test_curator_apply_audit_includes_rollback_metadata():
-    record = lm.add_memory_record("project_memory", "Audit rollback", "Content", memory_id="audit-rollback")
-    lm.add_feedback(record["id"], -1)
+    record = lm.add_memory_record("feedback", "Audit rollback", "Content", memory_id="audit-rollback")
+    lm.add_feedback(record["id"], -2)
 
     lm.curator_report(dry_run=False)
 
