@@ -1,3 +1,211 @@
+# ITERATION.md — local-memory-mcp 迭代日志
+
+## 下一阶段规划（2026-06）
+
+当前版本：`v0.21.0`，327 tests，35 MCP tools。已完成所有规划中的 Phase 9（Agent Mailbox）和 Phase 10（Temporal Memory）。
+
+---
+
+### P0 — 已知剩余设计问题
+
+**S-2 嵌套 `managed_conn` 破坏事务原子性（待决策）**
+
+当前 `update_status()` 内部调用 `managed_conn`，curator 的 `for planned in action_plan: update_status(...)` 又在外层循环外没有统一事务包裹。如果外部调用方同时持有 `managed_conn`，内层 `commit` 会提前释放，外层 rollback 无法撤销内层已提交的变更。
+
+三个选项：
+1. 拆分 `update_status_unsafe(conn, id, status)` 供内部复用（推荐）
+2. 用 SQLite `SAVEPOINT` 实现嵌套事务语义
+3. 接受当前行为，文档化为已知限制
+
+**D-2 `valid_until` 时区比较风险**
+
+`valid_until` 过滤用字符串比较 `valid_until > now()`，`now()` 输出带 `+00:00` 的 ISO 字符串。若写入值无时区后缀（`2026-06-01T00:00:00`），字符串比较结果取决于字典序，可能误判。
+
+修复：在 `_validate_iso()` 中强制要求时区信息（`tzinfo is not None`）。
+
+---
+
+### Phase 11 — 存储层强化（建议 2026-06）
+
+**11-A `managed_conn` S-2 修复**
+- 新增 `_execute_with_conn(conn, ...)` 系列内部 API，区分"已有连接"和"需要新连接"两种调用路径
+- curator apply 批量操作包在单一 `managed_conn` 中
+- 预期：3–4 个文件，约 80 行改动，0 test 变动
+
+**11-B WAL 自动检查点策略**
+- 当前只在 curator apply 时触发一次 `wal_checkpoint(TRUNCATE)`
+- 方案：在 `_get_thread_conn()` 中注册 `PRAGMA wal_autocheckpoint=500`（默认 1000），降低 WAL 累积上限
+- 预期：1 行改动
+
+**11-C `context_quality_events` 写入节流**
+- 当前每次 `build_context_pack` 都写入，高频调用时写放大严重
+- 方案：采样写入（每 N 次写 1 次），或只在 `used_ids` 非空时写入
+- 预期：3 行改动
+
+---
+
+### Phase 12 — 提取与去重增强（建议 2026-06）
+
+**12-A `memory_ingest` 语义去重改进**
+- 当前 Qdrant 去重阈值固定（`>=0.92 skip / >=0.78 update`），无法按 type 差异化
+- 方案：`dedup_threshold` 按 `memory_type` 配置，`feedback` 类型阈值更低（更容易合并），`decision` 类型阈值更高（更保守）
+
+**12-B 中文提取 prompt 优化**
+- `extraction.py` 的系统 prompt 全英文，对中文输入效果降级
+- 方案：检测输入语言，动态切换中/英双语 prompt
+
+---
+
+### Phase 13 — Agent 协作增强（建议 2026-07）
+
+**13-A Handoff 超时与重试**
+- 当前 `agent_handoff_create` 创建后无超时检测，死 handoff 永远不清理
+- 方案：`handoff_timeout_seconds` 字段 + curator 定期清理超时 handoff
+
+**13-B `memory_context` v2 结构化响应**
+- 当前 `context` 字段是纯文本，不利于 agent 程序化解析
+- 方案：在保留 `context` 字段的同时，`sections` 字段提供结构化 `{type, records, warnings}`（已有雏形，需完善 schema）
+
+**13-C Agent 能力匹配路由**
+- `agent_capability_search` 已实现，但 handoff 创建时没有自动推荐目标 agent
+- 方案：`agent_handoff_create` 新增可选 `auto_route=True`，自动查找能力匹配的 online agent
+
+---
+
+### Phase 14 — 发布准备（建议 2026-Q3）
+
+- PyPI 发布流程（已有 `.github/workflows/publish.yml` 骨架）
+- Docker Compose 一键启动（已有 `Dockerfile` + `docker-compose.yml`）
+- `memory_import` / `memory_export` 跨版本兼容性测试
+- 多工作区支持：`scope: project/<name>` 隔离不同项目的记忆命名空间
+- Embedding 升级：Ollama 不可用时自动降级到 `sentence-transformers`（zero-dep fallback 已有 hashing）
+
+---
+
+### 代码审查红线（任何 PR 必须保证）
+
+1. `storage/` 包零 MCP 依赖（`from mcp` 不得出现在 `storage/` 下任何文件）
+2. `models.py` 零 I/O 依赖
+3. `tests/` 通过 `LOCAL_MEMORY_DB` 指向临时库，不写生产数据库
+4. 新增 MCP tool 参数必须有默认值（向后兼容）
+5. 327 tests 全绿（不得下降）
+6. 每次推送前追加 `ITERATION.md`
+
+---
+
+## [迭代 28] 2026-05-27 — 全项目缺陷审计与快速优化
+
+### 背景
+
+对当前整个项目做全面静态分析，找出漏洞、不合理点、冗余代码、可小改动明显优化体验的点，并全部执行修复。
+
+### 变更摘要
+
+**S-1/Q-4 [CRITICAL] `managed_conn` retry 逻辑完全失效**
+- 原实现：`@contextmanager` 内用 `for attempt in range(N): yield conn`，当 `with` 块抛出异常时 Python 调用 `generator.throw()`，第二次 `yield` 触发 `RuntimeError: generator didn't stop after throw()`，retry 是死代码。
+- 修复：`yield` 拆出循环，单独放在 `try/except` 中；retry 移到 `_commit_with_retry()` 辅助函数，在 `commit` 阶段循环重试 `database is locked`。
+- 文件：`local_memory_mcp/storage/db.py`
+
+**S-3 [HIGH] `config.yaml` 中 `extraction.api_key: "sk"` 屏蔽 env var 回退**
+- 原问题：非空占位符 `"sk"` 在 `extraction_config_from_dict` 中优先级最高，导致 `DEEPSEEK_API_KEY` / `MEM0_LLM_API_KEY` 环境变量永远不被读取。
+- 修复：清空为 `""`，env var 回退链恢复正常。
+- 文件：`config.yaml`
+
+**N-1/N-2 [HIGH] N+1 查询**
+- `agents.py` broadcast：原来每个收件人开一个 `managed_conn` + `INSERT`（N 个事务）→ 改为单次 `executemany`。
+- `curator.py` auto_decay：原来每条记录一个 `managed_conn` + `UPDATE` → 改为单次 `executemany`，同一连接内合并执行。
+- 文件：`local_memory_mcp/storage/agents.py`、`local_memory_mcp/storage/curator.py`
+
+**Q-1 [MEDIUM] `"继续"` 在 `_GREETINGS` 中**
+- `"继续"` 是任务续接词，不是问候语。被识别为问候时 `build_context_pack` 跳过 FTS 搜索，导致续接场景完全没有记忆上下文。
+- 修复：从 `_GREETINGS` 集合中删除。
+- 文件：`local_memory_mcp/storage/search.py`
+
+**Q-2 [MEDIUM] `context_quality_events` 和 `audit_events` 无清理机制**
+- 每次 `build_context_pack` 无条件写一行 `context_quality_events`，无任何 DELETE 路径，长期运行后无限增长。
+- 修复：在 curator apply 块内加 90 天 / 180 天 DELETE SQL，与 auto_decay `executemany` 同一事务。
+- 文件：`local_memory_mcp/storage/curator.py`
+
+**Q-3 [MEDIUM] `valid_from`/`valid_until` 无格式校验**
+- 任意字符串写入后 expiry filter 做字符串比较，格式错误会静默产生错误过滤结果。
+- 修复：新增 `_validate_iso()` 在写入前调用 `datetime.fromisoformat()`，格式错误立即抛出 `ValueError`。
+- 文件：`local_memory_mcp/storage/crud.py`
+
+**Q-5/D-4 [LOW] WAL 无检查点，4.2MB vs 1.8MB 主库**
+- curator apply 后加 `PRAGMA wal_checkpoint(TRUNCATE)`（必须在事务外执行，独立调用 thread-local conn）。
+- 文件：`local_memory_mcp/storage/curator.py`
+
+**R-1 [LOW] `ops_db` 死配置**
+- `DEFAULT_CONFIG` 中 `ops_db` 字段、`config.yaml` 中 `ops_db` 段在整个代码库中无任何读取路径，纯噪音。
+- 修复：从两处删除。
+- 文件：`local_memory_mcp/models.py`、`config.yaml`
+
+**R-2 [LOW] `mem0` compat 代码与配置段**
+- `extraction_config_from_dict` 中保留的 `mem0` 回退链（`llm_api_key`/`llm_base_url`/`llm_model`）永远不触发（README 明确 mem0 已移除）。
+- `config.yaml` 中 `mem0:` 配置段同样已成死配置。
+- 修复：清除 `extraction.py` 中的 compat 代码；删除 `config.yaml` 中 `mem0:` 段。
+- 文件：`local_memory_mcp/extraction.py`、`config.yaml`
+
+**R-3 [LOW] `DEFAULT_DB` import 时冻结**
+- `db_path()` 原来用 `str(DEFAULT_DB)` 作为默认值，而 `DEFAULT_DB` 在 import 时已固化（env var 设置在 import 之后不生效）。
+- 修复：`db_path()` 直接读 `DEFAULT_ROOT / "memory.sqlite3"`，不再依赖 `DEFAULT_DB`。
+- 文件：`local_memory_mcp/models.py`
+
+### 验证
+
+```bash
+.venv/bin/python -m pytest -q
+# 327 passed, 1 warning in 34.45s
+```
+
+测试更新：
+- `tests/test_deployment.py`：移除对 `memory_ops.sqlite3` 的断言（R-1 已删除该配置）。
+- `tests/test_extraction.py`：`test_from_dict_mem0_fallback` 改为测试 `extraction` 段（R-2 已移除 mem0 compat）。
+
+---
+
+## [迭代 27] 2026-05-27 — Temporal Memory Layer + Auto-decay + Memory Stats
+
+### 背景
+
+执行规划中 Phase 10（Temporal Memory Layer）及配套工具与测试。
+
+### 变更摘要
+
+**Temporal Memory Layer**
+- `memory_add` / `add_memory_record` 新增 `valid_from: str | None` 和 `valid_until: str | None` 参数（ISO-8601）。
+- `search_memory_records` 自动过滤 `valid_until < now()` 的过期记忆（仍保留在 DB，`memory_get` 可取回）。
+- DB 层：`CREATE TABLE` 已含 `valid_from TEXT, valid_until TEXT`；`_ensure_column` 向后兼容旧库。
+
+**Auto-decay**
+- `curator.py` 新增常量 `_DECAY_STEP=0.05`、`_DECAY_INTERVAL_DAYS=30`、`_DECAY_MIN_CONFIDENCE=0.10`。
+- `curator_report` 新增 `auto_decay_candidates` 查询：`decay_policy='review'` 且 30+ 天未访问的 active 记忆。
+- `dry_run=False` 时批量降低 `confidence`（每轮 -0.05，floor 0.10）；`dry_run=True` 仅列出候选。
+- `summary` 新增 `auto_decay_candidates` 计数字段。
+
+**Contradiction detection**
+- `curator_report` 新增 `contradiction_candidates` 列表：同一 normalized title key 同时存在 `active` 和 `contradicted` 状态记录时，标记为矛盾候选。
+- 新增 3 个测试：`test_contradiction_candidates_detected_by_title_key`、`_not_listed_when_only_active`、`_not_listed_without_active_counterpart`。
+
+**`memory_stats` MCP 工具**
+- 新增 MCP tool `memory_stats()`：返回按 type/status/agent 分组的记录数及 confidence/importance/feedback 聚合均值、`never_accessed_count`、`link_count`。
+- `README.md` 工具表更新（35 个工具）；`CHANGELOG.md` 新增 `[0.21.0]` 条目。
+- `pyproject.toml` version: `0.20.0 → 0.21.0`。
+
+**测试**
+- 新增 `tests/test_temporal.py`：13 个测试，覆盖 valid_from/until 存储、过期过滤、DB 保留、auto_decay 候选、confidence 降低、floor 强制、stable policy 跳过、近期访问跳过、summary 计数。
+- 新增 3 个 contradiction 测试到 `tests/test_curator.py`。
+- 新增 `tests/test_stats.py`：`memory_stats` 返回结构验证。
+
+### 验证
+
+```bash
+.venv/bin/python -m pytest -q
+# 317 passed → (after 迭代 28) 327 passed
+```
+
+---
+
 ## [迭代 26] 2026-05-26 — 同端口前端控制服务
 
 ### 变更摘要
