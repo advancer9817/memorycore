@@ -28,9 +28,11 @@ def _validate_iso(value: str | None, field: str) -> None:
     if value is None:
         return
     try:
-        datetime.fromisoformat(value.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         raise ValueError(f"{field} must be ISO-8601, got: {value!r}")
+    if dt.tzinfo is None:
+        raise ValueError(f"{field} must include timezone info (e.g. '+00:00'), got: {value!r}")
 
 try:
     from local_memory_mcp.vector_store import get_vector_store as _get_vector_store
@@ -171,6 +173,19 @@ def update_status(memory_id: str, status: str) -> dict[str, Any]:
     log_audit_event("memory_status_change", memory_id=memory_id, detail={"status": status})
     _sync_to_vector(result)
     return result
+
+
+def update_status_batch(conn, updates: list[tuple[str, str]]) -> None:
+    """Execute multiple status updates inside a caller-owned connection/transaction.
+
+    Each item in updates is (memory_id, new_status). Caller is responsible for
+    committing/rolling back the connection. No audit events are emitted here —
+    caller should log a single bulk audit event instead.
+    """
+    ts = now()
+    for memory_id, status in updates:
+        validate_status(status)
+        conn.execute("UPDATE memories SET status=?, updated_at=? WHERE id=?", (status, ts, memory_id))
 
 
 def add_feedback(

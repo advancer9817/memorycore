@@ -80,7 +80,6 @@ def curator_report(
     allow_actions: Any = None,
     deny_actions: Any = None,
 ) -> dict[str, Any]:
-    from local_memory_mcp.storage.crud import update_status
     now_dt = datetime.now(timezone.utc)
     cap = max(1, min(int(limit), 5000))
 
@@ -321,33 +320,38 @@ def curator_report(
     actions: list[dict[str, Any]] = []
 
     if not dry_run:
+        from local_memory_mcp.storage.crud import update_status_batch
         decay_applied = 0
-        if auto_decay_candidates:
-            now_ts = now()
-            decay_rows = [
-                (max(_DECAY_MIN_CONFIDENCE, round(float(r["confidence"]) - _DECAY_STEP, 3)), now_ts, r["id"])
-                for r in auto_decay_candidates
-            ]
-            with managed_conn() as conn:
+        with managed_conn() as conn:
+            if auto_decay_candidates:
+                now_ts = now()
+                decay_rows = [
+                    (max(_DECAY_MIN_CONFIDENCE, round(float(r["confidence"]) - _DECAY_STEP, 3)), now_ts, r["id"])
+                    for r in auto_decay_candidates
+                ]
                 conn.executemany(
                     "UPDATE memories SET confidence=?, updated_at=? WHERE id=?",
                     decay_rows,
                 )
-                conn.execute(
-                    "DELETE FROM context_quality_events WHERE created_at < datetime('now', '-90 days')"
-                )
-                conn.execute(
-                    "DELETE FROM audit_events WHERE created_at < datetime('now', '-180 days')"
-                )
-            decay_applied = len(decay_rows)
+                decay_applied = len(decay_rows)
+            conn.execute(
+                "DELETE FROM context_quality_events WHERE created_at < datetime('now', '-90 days')"
+            )
+            conn.execute(
+                "DELETE FROM audit_events WHERE created_at < datetime('now', '-180 days')"
+            )
+            # Apply all status transitions in a single transaction (S-2 fix)
+            batch_updates = [
+                (planned["id"], "active" if planned["action"] in ("promote", "revive") else planned["target_status"])
+                for planned in action_plan
+            ]
+            update_status_batch(conn, batch_updates)
+
+        if decay_applied:
             from local_memory_mcp.storage.db import connect as _connect
             _connect().execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
         for planned in action_plan:
-            if planned["action"] in ("promote", "revive"):
-                update_status(planned["id"], "active")
-            else:
-                update_status(planned["id"], planned["target_status"])
             actions.append({
                 "id": planned["id"],
                 "action": planned["action"],

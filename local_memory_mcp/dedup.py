@@ -10,6 +10,10 @@ Decision thresholds (cosine similarity):
   >= LINK_THRESHOLD   → related, add as new but link to existing
   <  LINK_THRESHOLD   → genuinely new fact, add without link
 
+Per-type overrides in TYPE_THRESHOLDS tune conservatism:
+  decision / user_profile: higher thresholds (keep distinct facts separate)
+  episodic_memory / feedback: lower thresholds (merge similar fragments aggressively)
+
 Public API
 ----------
 ingest(messages, config) -> IngestResult
@@ -27,10 +31,25 @@ from local_memory_mcp.extraction import extract_facts  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-# Cosine similarity thresholds
+# Base cosine similarity thresholds
 SKIP_THRESHOLD = 0.92       # near-identical → skip
 UPDATE_THRESHOLD = 0.78     # same topic, new info → update existing
 LINK_THRESHOLD = 0.55       # related → add new, link to existing
+
+# Per-type threshold overrides (skip, update, link)
+# Types not listed fall back to the base thresholds above.
+TYPE_THRESHOLDS: dict[str, tuple[float, float, float]] = {
+    # Conservative: keep decision records separate; avoid accidental merges
+    "decision":          (0.96, 0.88, 0.65),
+    "user_profile":      (0.95, 0.85, 0.60),
+    "environment_fact":  (0.95, 0.85, 0.60),
+    "project_memory":    (0.94, 0.84, 0.60),
+    # Aggressive: merge similar episodic/feedback fragments readily
+    "episodic_memory":   (0.88, 0.72, 0.50),
+    "feedback":          (0.88, 0.72, 0.50),
+    # skill_candidate: moderate
+    "skill_candidate":   (0.90, 0.78, 0.55),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +85,7 @@ def decide(
     fact_text: str,
     similar: list[Any],          # list of SearchResult from vector_store
     linked_memory_ids: list[str] | None = None,
+    memory_type: str = "",
     skip_threshold: float = SKIP_THRESHOLD,
     update_threshold: float = UPDATE_THRESHOLD,
     link_threshold: float = LINK_THRESHOLD,
@@ -80,7 +100,12 @@ def decide(
         Nearest-neighbour results from VectorStore.search(), sorted by score desc.
     linked_memory_ids:
         IDs the LLM itself suggested as related (from extraction.py).
+    memory_type:
+        Memory type string used to look up per-type threshold overrides.
     """
+    if memory_type and memory_type in TYPE_THRESHOLDS:
+        skip_threshold, update_threshold, link_threshold = TYPE_THRESHOLDS[memory_type]
+
     linked = list(linked_memory_ids or [])
 
     if not similar:
@@ -200,19 +225,23 @@ def ingest(
     # --- 4. Dedup each fact ---
     for fact in facts:
         try:
+            # Use per-type link threshold for vector search floor
+            fact_type = "episodic_memory"  # all ingest facts are episodic initially
+            type_link = TYPE_THRESHOLDS.get(fact_type, (SKIP_THRESHOLD, UPDATE_THRESHOLD, LINK_THRESHOLD))[2]
             similar = []
             if vs.available:
                 similar = vs.search(
                     fact.text,
                     top_k=5,
                     filters={"status": "active"},
-                    score_threshold=LINK_THRESHOLD,
+                    score_threshold=type_link,
                 )
 
             decision = decide(
                 fact.text,
                 similar,
                 linked_memory_ids=fact.linked_memory_ids,
+                memory_type=fact_type,
             )
             result.decisions.append(decision)
 

@@ -20,6 +20,7 @@ from local_memory_mcp.storage.crud import (
     add_memory_record,
     update_memory_content,
     update_status,
+    update_status_batch,
     add_feedback,
     list_recent,
     get_record,

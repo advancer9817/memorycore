@@ -11,6 +11,37 @@ from local_memory_mcp.storage.db import managed_conn
 
 _HANDOFF_STATUSES = {"ack", "done", "failed"}
 
+# Default TTL for handoff requests — auto-expire if not acknowledged
+_DEFAULT_HANDOFF_TTL_SECONDS = 3600  # 1 hour
+
+
+def cleanup_expired_handoffs() -> dict[str, Any]:
+    """Archive agent_messages that are handoff requests and have expired.
+
+    Called by the auto-curator thread each run. Returns count of cleaned records.
+    """
+    ts = now()
+    with managed_conn() as conn:
+        rows = conn.execute(
+            """SELECT id FROM agent_messages
+               WHERE expires_at IS NOT NULL AND expires_at < ?
+                 AND metadata_json LIKE '%"workflow": "handoff"%'
+                 AND metadata_json LIKE '%"handoff_status": "requested"%'""",
+            (ts,),
+        ).fetchall()
+        ids = [r[0] for r in rows]
+        if ids:
+            conn.executemany(
+                "UPDATE agent_messages SET status='read' WHERE id=?",
+                [(mid,) for mid in ids],
+            )
+    if ids:
+        log_audit_event(
+            "handoff_timeout_cleanup",
+            detail={"cleaned": len(ids), "message_ids": ids},
+        )
+    return {"cleaned": len(ids)}
+
 
 def agent_handoff_create(
     from_agent: str,
@@ -19,8 +50,25 @@ def agent_handoff_create(
     payload: dict[str, Any] | None = None,
     correlation_id: str | None = None,
     priority: str = "normal",
-    ttl_seconds: int | None = None,
+    ttl_seconds: int | None = _DEFAULT_HANDOFF_TTL_SECONDS,
+    auto_route: bool = False,
 ) -> dict[str, Any]:
+    """Create a structured agent handoff request message.
+
+    Parameters
+    ----------
+    auto_route:
+        When True and to_agent is empty or '*', automatically select the best
+        available online/idle agent whose registered capabilities overlap with
+        the task keywords.  Falls back to to_agent as-is if no match found.
+    """
+    resolved_to = to_agent
+
+    if auto_route:
+        candidate = _auto_route_agent(task, exclude=from_agent)
+        if candidate:
+            resolved_to = candidate
+
     correlation = correlation_id or str(uuid.uuid4())
     metadata = {
         "workflow": "handoff",
@@ -30,7 +78,7 @@ def agent_handoff_create(
     }
     message = send_agent_message(
         from_agent,
-        to_agent,
+        resolved_to,
         f"handoff: {task}",
         body=task,
         priority=priority,
@@ -39,9 +87,54 @@ def agent_handoff_create(
     )
     if "error" in message:
         return message
-    result = {**message, "workflow": "handoff", "handoff_status": "requested", "correlation_id": correlation}
-    log_audit_event("agent_handoff_create", memory_id=message["id"], agent=from_agent, detail={"to": to_agent, "correlation_id": correlation})
+    result = {
+        **message,
+        "workflow": "handoff",
+        "handoff_status": "requested",
+        "correlation_id": correlation,
+        "routed_to": resolved_to,
+    }
+    log_audit_event(
+        "agent_handoff_create",
+        memory_id=message["id"],
+        agent=from_agent,
+        detail={"to": resolved_to, "correlation_id": correlation, "auto_route": auto_route},
+    )
     return result
+
+
+def _auto_route_agent(task: str, exclude: str = "") -> str:
+    """Find the best online/idle agent whose capabilities match the task.
+
+    Scores agents by counting how many of their capability keywords appear in
+    the task string (case-insensitive). Returns the agent_id with the highest
+    score, or empty string if none found.
+    """
+    task_lower = task.lower()
+    with managed_conn() as conn:
+        presence_rows = conn.execute(
+            "SELECT agent_id FROM agent_presence WHERE status IN ('online', 'idle') AND agent_id != ?",
+            (exclude,),
+        ).fetchall()
+        online_ids = {r[0] for r in presence_rows}
+        if not online_ids:
+            return ""
+        cap_rows = conn.execute(
+            "SELECT agent_id, capabilities_json FROM agent_capabilities WHERE agent_id IN ({})".format(
+                ",".join("?" * len(online_ids))
+            ),
+            list(online_ids),
+        ).fetchall()
+
+    best_agent = ""
+    best_score = 0
+    for row in cap_rows:
+        caps = from_json(row["capabilities_json"], [])
+        score = sum(1 for cap in caps if cap.lower() in task_lower)
+        if score > best_score:
+            best_score = score
+            best_agent = row["agent_id"]
+    return best_agent
 
 
 def agent_handoff_update(

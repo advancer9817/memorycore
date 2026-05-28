@@ -31,20 +31,27 @@ if command -v ss >/dev/null 2>&1; then
   ss -tln 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${LMMCP_PORT}$" || exit 0
 fi
 
+INIT_PAYLOAD='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"lmmcp-context-hook","version":"1.0"}}}'
+INIT_RESPONSE="$(curl -sS -i --max-time 1.0 -X POST "$LMMCP_URL" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d "$INIT_PAYLOAD" 2>/dev/null || true)"
+
+SESSION_ID="$(printf '%s' "$INIT_RESPONSE" | awk -F': ' 'tolower($1)=="mcp-session-id"{gsub(/\r/,"",$2); print $2; exit}')"
+[ -z "$SESSION_ID" ] && exit 0
+
 PAYLOAD="$(python3 -c '
-import json, sys
+import json
+import sys
 prompt = sys.argv[1][:300]
+agent = sys.argv[2]
 payload = {
     "jsonrpc": "2.0",
     "id": 1,
     "method": "tools/call",
     "params": {
         "name": "memory_context",
-        "arguments": {
-            "task": prompt,
-            "agent": sys.argv[2],
-            "token_budget": 1500,
-        },
+        "arguments": {"task": prompt, "agent": agent, "token_budget": 1500},
     },
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -52,16 +59,26 @@ print(json.dumps(payload, ensure_ascii=False))
 
 [ -z "$PAYLOAD" ] && exit 0
 
-RESPONSE="$(curl -sf --max-time 1.8 -X POST "$LMMCP_URL" \
+RESPONSE="$(curl -sS --max-time 1.8 -X POST "$LMMCP_URL" \
   -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: $SESSION_ID" \
   -d "$PAYLOAD" 2>/dev/null || true)"
 
 [ -z "$RESPONSE" ] && exit 0
 
 CONTEXT="$(printf '%s' "$RESPONSE" | python3 -c '
-import json, sys
+import json
+import sys
+
 try:
-    resp = json.load(sys.stdin)
+    body = sys.stdin.read()
+    raw = body.strip()
+    for line in body.splitlines():
+        if line.startswith("data:"):
+            raw = line[5:].strip()
+            break
+    resp = json.loads(raw)
     content = resp.get("result", {}).get("content", [])
     text = content[0].get("text", "") if content else ""
     try:

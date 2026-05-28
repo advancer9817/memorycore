@@ -17,6 +17,48 @@ def _lmmcp_url() -> str:
     return f"http://{host}:{port}/mcp"
 
 
+def _curl_post(payload: dict, session_id: str = "", timeout: float = 10.0) -> tuple[dict, str]:
+    cmd = [
+        "curl",
+        "-sS",
+        "-i",
+        "--max-time",
+        str(timeout),
+        "-X",
+        "POST",
+        _lmmcp_url(),
+        "-H",
+        "Content-Type: application/json",
+        "-H",
+        "Accept: application/json, text/event-stream",
+    ]
+    if session_id:
+        cmd.extend(["-H", f"Mcp-Session-Id: {session_id}"])
+    cmd.extend(["-d", json.dumps(payload, ensure_ascii=False)])
+
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=timeout + 2,
+    )
+    if proc.returncode != 0:
+        return {}, ""
+
+    raw = proc.stdout.replace("\r\n", "\n")
+    if "\n\n" in raw:
+        header_text, body = raw.split("\n\n", 1)
+    else:
+        header_text, body = raw, ""
+    headers: dict[str, str] = {}
+    for line in header_text.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        headers[key.strip().lower()] = value.strip()
+    return headers, body
+
+
 def _find_transcript(root: Path, env_key: str, pattern: str) -> Path | None:
     explicit = os.environ.get(env_key, "")
     if explicit:
@@ -78,6 +120,7 @@ def _extract_claude(path: Path) -> list[dict[str, str]]:
 
 def _extract_codex(path: Path) -> list[dict[str, str]]:
     messages: list[dict[str, str]] = []
+    fallback: list[dict[str, str]] = []
     for line in path.read_text(encoding="utf-8", errors="ignore").splitlines()[-300:]:
         try:
             item = json.loads(line)
@@ -110,8 +153,15 @@ def _extract_codex(path: Path) -> list[dict[str, str]]:
                 )
 
         text = text.strip()
-        if role in ("user", "assistant") and text:
-            messages.append({"role": role, "content": text[:800]})
+        if not (role in ("user", "assistant") and text):
+            continue
+        msg = {"role": role, "content": text[:800]}
+        if item.get("type") == "event_msg":
+            messages.append(msg)
+        else:
+            fallback.append(msg)
+    if not messages:
+        messages = fallback
     return messages[-40:]
 
 
@@ -141,36 +191,35 @@ def _extract_hermes(session_id: str) -> list[dict[str, str]]:
 def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:
     if not messages:
         return
-    payload = json.dumps(
-        {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {
-                "name": "memory_ingest",
-                "arguments": {"messages": messages, "agent_id": agent_id},
-            },
-        },
-        ensure_ascii=False,
-    )
     try:
-        subprocess.Popen(
-            [
-                "curl",
-                "-sf",
-                "--max-time",
-                "10",
-                "-X",
-                "POST",
-                _lmmcp_url(),
-                "-H",
-                "Content-Type: application/json",
-                "-d",
-                payload,
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            close_fds=True,
+        headers, _ = _curl_post(
+            {
+                "jsonrpc": "2.0",
+                "id": 0,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "lmmcp-ingest-hook", "version": "1.0"},
+                },
+            },
+            timeout=5,
+        )
+        session_id = headers.get("mcp-session-id", "")
+        if not session_id:
+            return
+        _curl_post(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "memory_ingest",
+                    "arguments": {"messages": messages, "agent_id": agent_id},
+                },
+            },
+            session_id=session_id,
+            timeout=20,
         )
     except Exception:
         pass

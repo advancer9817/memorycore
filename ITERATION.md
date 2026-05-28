@@ -1,5 +1,67 @@
 # ITERATION.md — local-memory-mcp 迭代日志
 
+## [迭代 34] 2026-05-28 — 文档缺口全修复（8 个遗留问题）
+
+### 背景
+
+对迭代日志规划条目与实际代码做全面比对，发现 8 个"文档已规划但代码未实现"的缺口，全部修复。
+
+### 变更摘要
+
+**D-2 `valid_until` 时区强制校验（`storage/crud.py`）**
+- `_validate_iso()` 新增 `tzinfo is not None` 检查
+- 无时区后缀（如 `2026-06-01T00:00:00`）写入时立即抛 `ValueError`，而非静默写入后字符串比较错误
+
+**11-B WAL autocheckpoint=500（`storage/db.py`）**
+- `_get_thread_conn()` 建连时注册 `PRAGMA wal_autocheckpoint=500`
+- WAL 文件超过 500 页自动触发检查点，默认 1000 的上限减半
+
+**11-C context_quality_events 写入节流（`storage/search.py`）**
+- `_record_context_quality_event()` 开头加 `used_count == 0` 提前返回
+- 仅在有记忆被实际注入时写入，消除空命中时的无效写放大
+
+**12-A 语义去重阈值按 type 差异化（`dedup.py`）**
+- 新增 `TYPE_THRESHOLDS` 字典，按记忆类型配置 (skip, update, link) 三阈值：
+  - `decision`/`user_profile`/`environment_fact`：保守（0.96/0.88/0.65），避免误合并独立事实
+  - `episodic_memory`/`feedback`：激进（0.88/0.72/0.50），快速合并重复碎片
+- `decide()` 新增 `memory_type` 参数，自动查表覆盖默认阈值
+- `ingest()` 向量搜索 floor 也使用 per-type link 阈值
+
+**12-B 中文双语 extraction prompt（`extraction.py`）**
+- `extract_facts()` 检测输入消息中中文字符占比，超过 15% 时在 system prompt 末尾追加中文指令段
+- 指令要求 LLM 用中文记录事实、保留工具名/版本号等不翻译
+
+**S-2 curator apply 单事务（`storage/crud.py` + `storage/curator.py`）**
+- 新增 `update_status_batch(conn, updates)` 内部函数：接受调用方传入的连接，在同一事务内批量执行所有状态变更，不自行 commit
+- curator `apply` 块改用 `with managed_conn() as conn:` 单一事务包裹：decay executemany + 清理 DELETE + 全部状态变更 → 原子提交
+- `storage/__init__.py` 导出 `update_status_batch`
+
+**13-A handoff 超时清理（`storage/handoff.py` + `server.py`）**
+- `agent_handoff_create` 默认 `ttl_seconds=3600`（1小时），原来默认 None
+- 新增 `cleanup_expired_handoffs()`：扫描 expires_at 已过期且 handoff_status=requested 的消息，标记为 read
+- auto-curator 线程每轮先调 `cleanup_expired_handoffs()`，日志新增 `handoff_cleaned` 字段
+
+**13-C agent_handoff_create auto_route（`storage/handoff.py` + `server.py`）**
+- `agent_handoff_create` 新增 `auto_route: bool = False` 参数
+- `auto_route=True` 时：查询 online/idle agent presence，对每个 agent 的 capability 关键字与 task 文本做匹配打分，选最高分者作为 to_agent
+- MCP tool 签名同步更新，文档说明 auto_route 行为
+
+### 验证
+
+```bash
+.venv/bin/python -m pytest -q
+# 362 passed, 1 warning
+```
+
+### 影响范围
+
+- `agent_handoff_create` 新增 `auto_route` 参数（默认 False，向后兼容）
+- `ttl_seconds` 默认值从 None 改为 3600（破坏性变更：旧调用若依赖无超时行为，需显式传 `ttl_seconds=None`）
+- `valid_until` 无时区写入现在会报错（可能影响已有调用方）
+- curator apply 日志新增 `revived` 和 `handoff_cleaned` 字段
+
+---
+
 ## [迭代 33] 2026-05-28 — 记忆状态流转完善（v3 状态机）
 
 ### 背景
@@ -306,7 +368,7 @@ LMMCP_AUTO_SYNC=0 scripts/lmmcp start
 
 ## 下一阶段规划（2026-06）
 
-当前版本：`v0.24.0`，362 tests，36 MCP tools。已完成所有规划中的 Phase 9（Agent Mailbox）和 Phase 10（Temporal Memory），以及迭代 31（episodic rollup）、迭代 32（hooks 统一化）、迭代 33（v3 状态机）。
+当前版本：`v0.25.0`，362 tests，36 MCP tools。
 
 ---
 

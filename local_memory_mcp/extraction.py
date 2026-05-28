@@ -189,6 +189,17 @@ def extract_facts(
 
     today = datetime.now(timezone.utc).date().isoformat()
     system_prompt = ADDITIVE_EXTRACTION_PROMPT.replace("{today}", today)
+
+    # Detect dominant language of input messages; append Chinese instructions if needed
+    all_text = " ".join(m.get("content", "") for m in messages)
+    chinese_chars = sum(1 for c in all_text if "一" <= c <= "鿿")
+    if len(all_text) > 0 and chinese_chars / max(len(all_text), 1) > 0.15:
+        system_prompt += (
+            "\n\n# 中文补充说明\n"
+            "- 当输入消息主要为中文时，请用中文记录所有事实。\n"
+            "- 标题和内容均使用中文，保持具体细节（版本号、人名、工具名等）不翻译。\n"
+            "- 输出格式不变，仍为 JSON。\n"
+        )
     user_prompt = _build_user_prompt(
         messages,
         existing_memories or [],

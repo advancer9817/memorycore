@@ -49,6 +49,9 @@ def _record_context_quality_event(
     quality: dict[str, Any],
     type_weights: dict[str, float],
 ) -> None:
+    # Throttle: only write when records were actually used (hit_rate > 0)
+    if quality.get("used_count", 0) == 0:
+        return
     with managed_conn() as conn:
         conn.execute(
             """

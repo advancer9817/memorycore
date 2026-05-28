@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-05-28
+
+### Added
+- **`update_status_batch(conn, updates)`** internal API for atomic bulk status transitions (S-2 fix)
+- **`cleanup_expired_handoffs()`**: auto-curator now cleans timed-out handoff requests each run
+- **`agent_handoff_create` `auto_route=True`**: selects best online agent by capability keyword matching
+- **`TYPE_THRESHOLDS`** in `dedup.py`: per-type cosine similarity overrides (conservative for decisions, aggressive for episodic)
+- **Chinese bilingual extraction prompt**: auto-detected when >15% Chinese chars in input
+
+### Changed
+- `_validate_iso()` now enforces `tzinfo is not None` — timezone-naive ISO strings are rejected (D-2 fix)
+- `_get_thread_conn()` registers `PRAGMA wal_autocheckpoint=500` (11-B)
+- `_record_context_quality_event()` skips write when `used_count == 0` (11-C throttle)
+- `curator_report` apply block uses single `managed_conn` transaction for all status changes (S-2)
+- `agent_handoff_create` default `ttl_seconds` changed from `None` to `3600` (1 hour)
+- Auto-curator loop logs `handoff_cleaned` count
+
+### Breaking
+- `valid_until`/`valid_from` without timezone suffix now raises `ValueError`
+- `agent_handoff_create` default TTL is now 1 hour (pass `ttl_seconds=None` for no expiry)
+
 ## [0.24.0] - 2026-05-28
 
 ### Added

@@ -563,10 +563,16 @@ def agent_handoff_create(
     payload: dict[str, Any] | None = None,
     correlation_id: str | None = None,
     priority: str = "normal",
-    ttl_seconds: int | None = None,
+    ttl_seconds: int | None = 3600,
+    auto_route: bool = False,
 ) -> dict[str, Any]:
-    """Create a structured agent handoff request message."""
-    return create_agent_handoff(from_agent, to_agent, task, payload, correlation_id, priority, ttl_seconds)
+    """Create a structured agent handoff request message.
+
+    Set auto_route=True to automatically select the best online agent whose
+    capabilities match the task keywords, ignoring the to_agent value.
+    ttl_seconds defaults to 3600 (1 hour); set to None to disable expiry.
+    """
+    return create_agent_handoff(from_agent, to_agent, task, payload, correlation_id, priority, ttl_seconds, auto_route)
 
 
 @mcp.tool()
@@ -744,12 +750,15 @@ def _start_auto_curator(interval_hours: float = 6.0) -> None:
         time.sleep(120)
         while True:
             try:
+                from local_memory_mcp.storage.handoff import cleanup_expired_handoffs
+                handoff_cleanup = cleanup_expired_handoffs()
                 rollup = rollup_report(dry_run=False)
                 rollup_summary = rollup.get("summary", {})
                 result = curator_report(dry_run=False)
                 summary = result.get("summary", {})
                 logger.info(
-                    "[auto-curator] rollup_created=%s rollup_archived=%s stale=%s archived=%s promoted=%s decayed=%s",
+                    "[auto-curator] handoff_cleaned=%s rollup_created=%s rollup_archived=%s stale=%s archived=%s promoted=%s decayed=%s",
+                    handoff_cleanup.get("cleaned", 0),
                     rollup_summary.get("created", 0),
                     rollup_summary.get("archived_sources", 0),
                     summary.get("stale", 0),
