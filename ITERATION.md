@@ -1,5 +1,91 @@
 # ITERATION.md — local-memory-mcp 迭代日志
 
+## [迭代 35] 2026-05-28 — lmmcp 本地时间与 Codex hook 信任修复
+
+### 背景
+
+排查 Codex 自动抽取链路时发现两个实际问题：
+
+- 记忆写入时间仍有部分路径使用 UTC，用户要求统一使用本地 CST（Asia/Shanghai, UTC+08:00）。
+- Codex hooks 虽然已写入 `~/.codex/hooks.json`，但 Codex CLI 会额外校验 hook trust hash；未信任时 `UserPromptSubmit` / `Stop` 不会真正执行，造成“已注册但不自动抽取”的假象。
+
+### 变更摘要
+
+**CST 本地时间统一**
+- `local_memory_mcp/models.py` 新增 `LOCAL_TZ` 与 `local_now()`。
+- `now()` 改为返回带 `+08:00` 偏移的 ISO 时间戳。
+- `extraction.py` 的 observation date 改用本地日期，避免跨 UTC 日期边界时抽取日期偏移。
+- `storage/agents.py` 的消息 TTL `expires_at`、`storage/curator.py` 的生命周期判断、`storage/rollup.py` 的 episodic 年龄计算统一改用 `local_now()`。
+- `storage/transfer.py` 的备份文件名将 `+` 替换为 `p`，避免本地时区后缀生成不友好的文件名。
+
+**Codex ingest 可观测性**
+- `scripts/hooks/lmmcp-ingest.py` 新增 `/tmp/lmmcp-ingest.log`（可用 `LMMCP_INGEST_LOG` 覆盖）。
+- 日志覆盖：
+  - Codex transcript 路径与抽取消息数。
+  - `ingest_start` / `ingest_done`。
+  - `curl_failed`。
+  - `initialize_missing_session`。
+  - 空消息跳过与异常。
+- 这让后续可以区分“Stop hook 没执行”“MCP 连接失败”“ingest 成功但无新增事实”“ingest 成功写入”。
+
+**Codex hook trust 自动写入**
+- `scripts/connect_agents.py --register-hooks` 在注册 Codex hooks 后，调用：
+  ```bash
+  codex app-server --listen stdio:// --enable hooks
+  ```
+  并通过 `hooks/list` 获取官方 `currentHash`。
+- 自动写入 `~/.codex/config.toml`：
+  ```toml
+  [hooks.state."/home/advancer/.codex/hooks.json:user_prompt_submit:0:0"]
+  trusted_hash = "..."
+
+  [hooks.state."/home/advancer/.codex/hooks.json:stop:0:0"]
+  trusted_hash = "..."
+  ```
+- `scripts/setup-hooks.sh` 同步实现同一逻辑，避免 `start.sh -> setup-hooks.sh` 路径只注册 hook 却不信任 hook。
+- 若当前机器没有 `codex` 或无法取到 hashes，脚本只给 warning，不阻断其它 agent 的 hook 注册。
+
+### 验证
+
+```bash
+python3 -m py_compile scripts/connect_agents.py scripts/hooks/lmmcp-ingest.py
+bash -n scripts/setup-hooks.sh
+python3 scripts/connect_agents.py --register-hooks --agents codex --no-probe
+bash scripts/setup-hooks.sh
+```
+
+Codex 官方 hook 状态确认：
+
+```text
+/home/advancer/.codex/hooks.json:user_prompt_submit:0:0 trusted
+/home/advancer/.codex/hooks.json:stop:0:0 trusted
+```
+
+手动触发 Codex ingest 验证：
+
+```text
+2026-05-28T13:54:42+08:00 ingest_start agent=codex messages=16
+2026-05-28T13:54:52+08:00 ingest_done agent=codex messages=16 response=... "added": 2 ... "errors": 0 ...
+```
+
+新增记忆记录验证：
+
+- `ec51c7af-4fa8-42ca-bd40-71489131dbc6`
+- `ef089ab3-c74d-48f1-9f10-47764e8ee1e8`
+
+### 影响范围
+
+- 新写入的 lmmcp 记录时间统一为 CST `+08:00`；旧记录不会自动迁移。
+- Codex hook 注册工具现在会尝试启动 `codex app-server` 获取 trust hash；在沙箱或只读环境可能失败并输出 warning。
+- Codex hook 内容变化后 hash 会变化，需要重新运行 `scripts/setup-hooks.sh` 或 `scripts/connect_agents.py --register-hooks --agents codex`。
+- `/tmp/lmmcp-ingest.log` 是诊断日志，不参与持久记忆存储，可按需清理。
+
+### 回滚
+
+`git revert HEAD`；如只想撤销本机 Codex hook 信任，可删除 `~/.codex/config.toml` 中对应 `[hooks.state."..."]` 段后重启 Codex 会话。
+
+---
+
 ## [迭代 34] 2026-05-28 — 文档缺口全修复（8 个遗留问题）
 
 ### 背景

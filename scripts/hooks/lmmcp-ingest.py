@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import os
 import subprocess
@@ -9,6 +10,16 @@ import sys
 from pathlib import Path
 
 MARK = Path("/tmp/lmmcp-session-mark")
+LOG = Path(os.environ.get("LMMCP_INGEST_LOG", "/tmp/lmmcp-ingest.log"))
+
+
+def _log(message: str) -> None:
+    try:
+        stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with LOG.open("a", encoding="utf-8") as fh:
+            fh.write(f"{stamp} {message}\n")
+    except Exception:
+        pass
 
 
 def _lmmcp_url() -> str:
@@ -43,6 +54,7 @@ def _curl_post(payload: dict, session_id: str = "", timeout: float = 10.0) -> tu
         timeout=timeout + 2,
     )
     if proc.returncode != 0:
+        _log(f"curl_failed rc={proc.returncode} stderr={proc.stderr.strip()[:300]}")
         return {}, ""
 
     raw = proc.stdout.replace("\r\n", "\n")
@@ -190,8 +202,10 @@ def _extract_hermes(session_id: str) -> list[dict[str, str]]:
 
 def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:
     if not messages:
+        _log(f"skip_empty_messages agent={agent_id}")
         return
     try:
+        _log(f"ingest_start agent={agent_id} messages={len(messages)}")
         headers, _ = _curl_post(
             {
                 "jsonrpc": "2.0",
@@ -207,8 +221,9 @@ def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:
         )
         session_id = headers.get("mcp-session-id", "")
         if not session_id:
+            _log(f"initialize_missing_session agent={agent_id}")
             return
-        _curl_post(
+        _, body = _curl_post(
             {
                 "jsonrpc": "2.0",
                 "id": 1,
@@ -221,8 +236,10 @@ def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:
             session_id=session_id,
             timeout=20,
         )
+        preview = " ".join(body.split())[:500]
+        _log(f"ingest_done agent={agent_id} messages={len(messages)} response={preview}")
     except Exception:
-        pass
+        _log(f"ingest_exception agent={agent_id}")
 
 
 def _messages_for_agent(agent: str) -> list[dict[str, str]]:
@@ -236,7 +253,12 @@ def _messages_for_agent(agent: str) -> list[dict[str, str]]:
 
     if agent == "codex":
         path = _find_transcript(Path.home() / ".codex" / "sessions", "CODEX_SESSION_FILE", "**/*.jsonl")
-        return _extract_codex(path) if path else []
+        if path:
+            messages = _extract_codex(path)
+            _log(f"codex_transcript path={path} messages={len(messages)}")
+            return messages
+        _log("codex_transcript_missing")
+        return []
 
     if agent == "claude":
         path = _find_transcript(Path.home() / ".claude" / "projects", "CLAUDE_SESSION_FILE", "*/*.jsonl")

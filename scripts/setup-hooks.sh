@@ -23,7 +23,12 @@ chmod +x "$HERMES_DEST"
 python3 - "$REPO_ROOT" "$CLAUDE_SETTINGS" "$CLAUDE_MD" "$AGENTS_MD" "$CODEX_CONFIG" "$CODEX_HOOKS" "$HERMES_CONFIG" "$HERMES_ALLOWLIST" "$HERMES_DEST" <<'PY'
 import json
 import os
+import re
+import select
+import shutil
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 repo_root = Path(sys.argv[1])
@@ -95,6 +100,93 @@ def enable_codex_hooks(path: Path) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def upsert_codex_hook_trust(text: str, trusted_hashes: dict[str, str]) -> str:
+    for key, trusted_hash in sorted(trusted_hashes.items()):
+        quoted_key = json.dumps(key)
+        pattern = rf"(?ms)^\[hooks\.state\.{re.escape(quoted_key)}\]\n(?:^(?!\[).*\n?)*"
+        text = re.sub(pattern, "", text).rstrip()
+        if text:
+            text += "\n\n"
+        text += f"[hooks.state.{quoted_key}]\ntrusted_hash = {json.dumps(trusted_hash)}\n"
+    return text
+
+
+def codex_list_hook_hashes(cwd: Path, hooks_path: Path) -> dict[str, str]:
+    if shutil.which("codex") is None:
+        return {}
+    proc = subprocess.Popen(
+        ["codex", "app-server", "--listen", "stdio://", "--enable", "hooks"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=str(cwd),
+    )
+    assert proc.stdin is not None
+    assert proc.stdout is not None
+    assert proc.stderr is not None
+
+    def send(payload: dict) -> None:
+        proc.stdin.write(json.dumps(payload, separators=(",", ":")) + "\n")
+        proc.stdin.flush()
+        time.sleep(0.2)
+
+    def drain(seconds: float) -> list[str]:
+        end = time.time() + seconds
+        lines: list[str] = []
+        while time.time() < end:
+            readable, _, _ = select.select([proc.stdout, proc.stderr], [], [], 0.1)
+            for stream in readable:
+                line = stream.readline()
+                if line:
+                    lines.append(line.rstrip())
+            if proc.poll() is not None:
+                break
+        return lines
+
+    try:
+        send({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"clientInfo": {"name": "lmmcp-setup-hooks", "version": "1"}}})
+        drain(0.5)
+        send({"jsonrpc": "2.0", "id": 1, "method": "hooks/list", "params": {"cwds": [str(cwd)]}})
+        target_prefix = f"{hooks_path}:"
+        hashes: dict[str, str] = {}
+        for line in drain(3):
+            if '"id":1' not in line:
+                continue
+            data = json.loads(line)
+            for entry in data.get("result", {}).get("data", []):
+                for hook in entry.get("hooks", []):
+                    key = hook.get("key")
+                    current_hash = hook.get("currentHash")
+                    if isinstance(key, str) and isinstance(current_hash, str) and key.startswith(target_prefix):
+                        hashes[key] = current_hash
+        return hashes
+    except Exception as exc:
+        print(f"warning: Codex hook trust update skipped: {exc}", file=sys.stderr)
+        return {}
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=1)
+        except Exception:
+            proc.kill()
+
+
+def trust_codex_hooks(config_path: Path, hooks_path: Path) -> None:
+    cwd = config_path.parent.parent if config_path.parent.name == ".codex" else Path.home()
+    trusted_hashes = codex_list_hook_hashes(cwd, hooks_path)
+    if not trusted_hashes:
+        print(
+            "warning: Codex hook trust hashes not found; run `codex app-server --enable hooks` or accept hooks manually",
+            file=sys.stderr,
+        )
+        return
+    old = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+    new = upsert_codex_hook_trust(old, trusted_hashes)
+    if old != new:
+        config_path.write_text(new, encoding="utf-8")
+
+
 settings = load_json(claude_settings)
 hooks = settings.setdefault("hooks", {})
 remove_hook_entries(hooks, "Stop", old_hook_fragments)
@@ -156,6 +248,7 @@ remove_hook_entries(codex_hook_root, "Stop", old_hook_fragments)
 add_hook(codex_hook_root, "UserPromptSubmit", f"bash {lmmcp_context}", 3)
 add_hook(codex_hook_root, "Stop", f"python3 {lmmcp_ingest} --agent codex", 30)
 write_json(codex_hooks, codex_data)
+trust_codex_hooks(codex_config, codex_hooks)
 
 try:
     import yaml  # type: ignore

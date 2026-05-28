@@ -20,11 +20,13 @@ __all__ = [
     "DEFAULT_ROOT",
     "DEFAULT_DB",
     "_INITIALIZED_DB_PATHS",
+    "LOCAL_TZ",
     "DEFAULT_CONFIG",
     "MEMORY_TYPES",
     "STATUSES",
     "VALID_RELATION_TYPES",
     "now",
+    "local_now",
     "as_json",
     "from_json",
     "config_path",
@@ -50,6 +52,7 @@ DEFAULT_DB = Path(
     )
 )
 _INITIALIZED_DB_PATHS: set[str] = set()
+LOCAL_TZ = timezone(timedelta(hours=8), "CST")
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "backend": {"primary": "sqlite", "fallback": "sqlite"},
@@ -92,8 +95,12 @@ VALID_RELATION_TYPES: frozenset[str] = frozenset({
 })
 
 
+def local_now() -> datetime:
+    return datetime.now(LOCAL_TZ)
+
+
 def now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return local_now().isoformat(timespec="seconds")
 
 
 def as_json(value: Any) -> str:

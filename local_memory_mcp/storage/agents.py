@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Any
 
-from local_memory_mcp.models import as_json, from_json, now
+from local_memory_mcp.models import as_json, from_json, local_now, now
 from local_memory_mcp.storage.db import managed_conn
 from local_memory_mcp.storage.audit import log_audit_event
 from local_memory_mcp.storage.permissions import check_agent_permission, get_agent_namespace
@@ -28,7 +28,7 @@ def send_agent_message(
 
     expires_at: str | None = None
     if ttl_seconds is not None:
-        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=int(ttl_seconds))).isoformat()
+        expires_at = (local_now() + timedelta(seconds=int(ttl_seconds))).isoformat(timespec="seconds")
 
     if to_agent == "*":
         permission = check_agent_permission(from_agent, "agent.broadcast")

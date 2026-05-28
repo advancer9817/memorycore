@@ -20,10 +20,10 @@ Memory retention philosophy (v3 — evidence-driven lifecycle):
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Any
 
-from local_memory_mcp.models import normalize_list, normalize_title_key, now
+from local_memory_mcp.models import local_now, normalize_list, normalize_title_key, now
 from local_memory_mcp.storage.db import _managed_query, managed_conn
 from local_memory_mcp.storage.audit import log_audit_event
 
@@ -80,7 +80,7 @@ def curator_report(
     allow_actions: Any = None,
     deny_actions: Any = None,
 ) -> dict[str, Any]:
-    now_dt = datetime.now(timezone.utc)
+    now_dt = local_now()
     cap = max(1, min(int(limit), 5000))
 
     all_rows = _managed_query("SELECT * FROM memories ORDER BY updated_at DESC LIMIT ?", (cap,))

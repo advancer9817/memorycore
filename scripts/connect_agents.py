@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import re
+import select
 import shutil
 import subprocess
 import sys
@@ -324,6 +325,94 @@ def enable_codex_hooks_feature(text: str) -> str:
     return text + "\n[features]\nhooks = true\n"
 
 
+def _upsert_codex_hook_trust(text: str, trusted_hashes: dict[str, str]) -> str:
+    for key, trusted_hash in sorted(trusted_hashes.items()):
+        quoted_key = json.dumps(key)
+        pattern = rf"(?ms)^\[hooks\.state\.{re.escape(quoted_key)}\]\n(?:^(?!\[).*\n?)*"
+        text = re.sub(pattern, "", text).rstrip()
+        if text:
+            text += "\n\n"
+        text += f"[hooks.state.{quoted_key}]\ntrusted_hash = {json.dumps(trusted_hash)}\n"
+    return text
+
+
+def _codex_list_hook_hashes(cwd: Path, hooks_path: Path) -> dict[str, str]:
+    if not shutil.which("codex"):
+        return {}
+    proc = subprocess.Popen(
+        ["codex", "app-server", "--listen", "stdio://", "--enable", "hooks"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=str(cwd),
+    )
+    assert proc.stdin is not None
+    assert proc.stdout is not None
+    assert proc.stderr is not None
+
+    def send(payload: dict) -> None:
+        proc.stdin.write(json.dumps(payload, separators=(",", ":")) + "\n")
+        proc.stdin.flush()
+        time.sleep(0.2)
+
+    def drain(seconds: float) -> list[str]:
+        end = time.time() + seconds
+        lines: list[str] = []
+        while time.time() < end:
+            readable, _, _ = select.select([proc.stdout, proc.stderr], [], [], 0.1)
+            for stream in readable:
+                line = stream.readline()
+                if line:
+                    lines.append(line.rstrip())
+            if proc.poll() is not None:
+                break
+        return lines
+
+    try:
+        send({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"clientInfo": {"name": "lmmcp-connect-agents", "version": "1"}}})
+        drain(0.5)
+        send({"jsonrpc": "2.0", "id": 1, "method": "hooks/list", "params": {"cwds": [str(cwd)]}})
+        target_prefix = f"{hooks_path}:"
+        hashes: dict[str, str] = {}
+        for line in drain(3):
+            if '"id":1' not in line:
+                continue
+            data = json.loads(line)
+            for entry in data.get("result", {}).get("data", []):
+                for hook in entry.get("hooks", []):
+                    key = hook.get("key")
+                    current_hash = hook.get("currentHash")
+                    if isinstance(key, str) and isinstance(current_hash, str) and key.startswith(target_prefix):
+                        hashes[key] = current_hash
+        return hashes
+    except Exception as exc:
+        log(f"  ! Codex hook trust update skipped: {exc}")
+        return {}
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=1)
+        except Exception:
+            proc.kill()
+
+
+def trust_codex_hooks(config_path: Path, hooks_path: Path, backup_dir: Path, dry_run: bool) -> bool:
+    trusted_hashes = _codex_list_hook_hashes(config_path.parent.parent if config_path.parent.name == ".codex" else HOME, hooks_path)
+    if not trusted_hashes:
+        log("  ! Codex hook trust hashes not found; run `codex app-server --enable hooks` or accept hooks manually")
+        return False
+    old = config_path.read_text(encoding="utf-8", errors="ignore") if config_path.exists() else ""
+    new = _upsert_codex_hook_trust(old, trusted_hashes)
+    if old == new:
+        return False
+    if dry_run:
+        return True
+    backup_file(config_path, backup_dir)
+    config_path.write_text(new, encoding="utf-8")
+    return True
+
+
 def register_hooks_codex(path: Path, backup_dir: Path, dry_run: bool) -> bool:
     """Register hooks in Codex config.toml and hooks.json."""
     old_config = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
@@ -342,13 +431,14 @@ def register_hooks_codex(path: Path, backup_dir: Path, dry_run: bool) -> bool:
             entries.append({"hooks": [{"type": "command", "command": command, "timeout": timeout}]})
             changed = True
     if not changed:
-        return False
+        return trust_codex_hooks(path, hooks_path, backup_dir, dry_run)
     if dry_run:
         return True
     path.parent.mkdir(parents=True, exist_ok=True)
     backup_file(path, backup_dir)
     path.write_text(new_config, encoding="utf-8")
     write_json(hooks_path, hooks_data, backup_dir, dry_run=False)
+    trust_codex_hooks(path, hooks_path, backup_dir, dry_run=False)
     return True
 
 

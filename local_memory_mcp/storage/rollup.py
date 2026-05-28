@@ -4,11 +4,10 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import datetime, timezone
 from typing import Any, Callable
 
 from local_memory_mcp.extraction import extraction_config_from_dict, _call_llm
-from local_memory_mcp.models import finite_float, load_config, normalize_list, now, parse_ts, validate_type
+from local_memory_mcp.models import finite_float, load_config, local_now, normalize_list, now, parse_ts, validate_type
 from local_memory_mcp.storage.audit import log_audit_event
 from local_memory_mcp.storage.crud import add_memory_record, update_status
 from local_memory_mcp.storage.db import _managed_query
@@ -67,7 +66,7 @@ def _parse_llm_json(raw: str) -> dict[str, Any]:
 
 def _candidate_age_hours(row: dict[str, Any]) -> float:
     ts = parse_ts(row.get("created_at") or row.get("updated_at"))
-    return max(0.0, (datetime.now(timezone.utc) - ts).total_seconds() / 3600.0)
+    return max(0.0, (local_now() - ts).total_seconds() / 3600.0)
 
 
 def _select_rollup_group(

@@ -181,7 +181,8 @@ def memory_import(
 
 
 def memory_backup(path: str | None = None) -> dict[str, Any]:
-    destination = Path(path) if path else DEFAULT_ROOT / "backups" / f"memory-{now().replace(':', '').replace('+', 'Z')}.sqlite3"
+    stamp = now().replace(":", "").replace("+", "p")
+    destination = Path(path) if path else DEFAULT_ROOT / "backups" / f"memory-{stamp}.sqlite3"
     destination = destination.expanduser()
     destination.parent.mkdir(parents=True, exist_ok=True)
     source = connect()

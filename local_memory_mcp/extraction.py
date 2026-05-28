@@ -14,9 +14,10 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from local_memory_mcp.models import local_now
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ def _build_user_prompt(
     existing_memories: list[dict[str, Any]],
     custom_instructions: str = "",
 ) -> str:
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = local_now().date().isoformat()
     parts: list[str] = []
 
     parts.append(f"## Observation Date\n{today}")
@@ -187,7 +188,7 @@ def extract_facts(
         logger.warning("extraction: no API key configured — skipping LLM call")
         return [], 0.0
 
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = local_now().date().isoformat()
     system_prompt = ADDITIVE_EXTRACTION_PROMPT.replace("{today}", today)
 
     # Detect dominant language of input messages; append Chinese instructions if needed
