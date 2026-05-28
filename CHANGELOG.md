@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2026-05-28
+
+### Added
+- **v3 State Machine** (`storage/curator.py` rewrite):
+  - Tiered candidate TTL: episodic 7d, precious types 30d, others 7d (replaces flat 48h window)
+  - `stale → active` revival: records injected within 7d with good effectiveness auto-revive
+  - `contradicted` auto-archive: no access in 90 days → archived
+  - `decay_policy='freeze'`: curator skips all auto-rules entirely
+  - `decay_policy='stable'`: stale only when `feedback < -2.0 AND importance < 0.3`; no confidence decay
+  - Precious-type protection: `user_profile`/`environment_fact`/`decision`/`project_memory`/`skill_candidate` immune to default stale rules
+  - `injected_count >= 3` candidate promotion (evidence-of-utility path)
+  - Decay condition adds `injected_count > 0` (never-used records don't decay)
+  - `curator_report` returns new `revival_candidates` field
+- **20 new tests** in `tests/test_curator_v3.py`
+
+### Changed
+- `STATUSES` removes `promoted` (no auto-trigger existed; records map to `active`)
+- `rollup.py`: scan includes all `episodic_memory` regardless of `source` field (previously only `source='extraction'`)
+- `tests/test_curator.py`: dead_candidate test uses 8-day window (aligns with new 7d TTL)
+- `tests/test_temporal.py`: decay helper sets `injected_count=1` (aligns with new decay condition)
+
+## [0.23.0] - 2026-05-28
+
+### Added
+- **Unified agent session-end hooks** (`scripts/hooks/lmmcp-ingest.py`): single Python
+  script replaces three separate session-end scripts for Claude / Codex / Hermes.
+  - `--agent claude`: reads `CLAUDE_SESSION_FILE` or `~/.claude/projects/**/*.jsonl`
+  - `--agent codex`: reads `CODEX_SESSION_FILE` or `~/.codex/sessions/**/*.jsonl`
+  - `--agent hermes`: reads hook stdin `session_id`, parses Hermes session JSON
+  - Calls `memory_ingest` via `curl --max-time 10` fire-and-forget, non-blocking
+- **`scripts/setup-hooks.sh`**: unified deployment entry point — writes Claude/Codex/Hermes
+  hook configs and auto-cleans stale entries from previous hook scripts.
+- **`scripts/connect_agents.py`** updated: `--register-hooks` now deploys the unified
+  ingest script for all three agents; Codex `hooks.json` auto-written.
+
+### Removed
+- `scripts/hooks/session-end.sh` (replaced by unified `lmmcp-ingest.py`)
+- `scripts/hooks/codex-session-end.sh` (replaced by unified `lmmcp-ingest.py`)
+- `scripts/hermes/lmmcp-session-end.py` (replaced by unified `lmmcp-ingest.py`)
+
+## [0.22.0] - 2026-05-27
+
+### Added
+- **`memory_rollup_report` MCP tool**: scans accumulated `episodic_memory` candidates
+  and, when a group reaches threshold (`min_count=30` or age-based `min_age_count`),
+  calls an LLM to distill them into durable long-term memories
+  (`user_profile`, `environment_fact`, `agent_architecture`, `project_memory`,
+  `timeline_event`, `decision`, `feedback`, `skill_candidate`).
+  `dry_run=True` returns a plan; `dry_run=False` creates memories and archives sources.
+- **`local_memory_mcp/storage/rollup.py`**: new module with `rollup_report()`.
+- **CLI `rollup` subcommand**: `python -m local_memory_mcp rollup [--apply] [--force] [--summary-only]`.
+- Auto-curator thread now runs `rollup_report(dry_run=False)` before each `curator_report` pass.
+- Audit event `memory_rollup_apply` records source/created IDs, trigger reason, proposal count.
+- **Tests**: `tests/test_rollup.py` — threshold not met, dry-run proposal, apply + archive,
+  small-batch age trigger.
+
 ## [0.21.0] - 2026-05-27
 
 ### Added

@@ -1,5 +1,85 @@
 # ITERATION.md — local-memory-mcp 迭代日志
 
+## [迭代 33] 2026-05-28 — 记忆状态流转完善（v3 状态机）
+
+### 背景
+
+原状态机存在六大缺陷：candidate 窗口太短（12h/48h 导致大批 hermes 记忆被误杀）、stale 无复活通道、decay_policy 策略只实现了 `review`（`stable`/`freeze` 是空壳）、`promoted`/`contradicted` 写入后无后续流转、rollup 只认 `source='extraction'`（hermes 直写的 episodic 永远不被提炼）、decay 条件未区分"从未被用过"和"曾经有用但被遗忘"。
+
+### 变更摘要
+
+**`local_memory_mcp/models.py`**
+- 从 `STATUSES` 中移除 `promoted`（该状态无任何自动触发逻辑，等价于 active）
+
+**`local_memory_mcp/storage/curator.py`**（完整重写）
+
+candidate 超时分档（替换原来的 48h 一刀切）：
+- `episodic_memory`：7 天（与 rollup 30条阈值的积累速度匹配）
+- 高价值类型（用户画像/环境事实/决策/项目记忆/技能候选）：30 天（需 importance<0.4 且 feedback<0）
+- 其他类型：7 天（需 importance<0.5）
+
+stale 复活通道（新增）：
+- stale 记忆若 7 天内被注入（`last_injected_at >= now-7d`）且 `effectiveness_score >= 0.5` 且 `feedback_score >= 0` → 自动复活为 active
+
+precious 类型保护加强：
+- `user_profile`/`environment_fact`/`decision`/`project_memory`/`skill_candidate` 永不被默认 stale 规则命中
+- 只有 `feedback_score < -2.0 AND importance < 0.3`（且 decay_policy 非 freeze/stable）才触发 stale
+
+contradicted 自动归档（新增）：
+- `contradicted` 状态记录若 90 天内未被访问 → 自动 archive（`contradicted_expired`）
+
+decay_policy 真正生效：
+- `freeze`：curator 跳过所有自动规则（stale/archive/decay 全部免疫）
+- `stable`：stale 阈值提高到 feedback<-2.0 AND importance<0.3，且无 confidence 衰减
+
+decay 条件修正：
+- 新增 `injected_count > 0` 条件——从未被注入过的记忆不衰减，避免把"冷门但正确"的记忆错误降权
+
+promotion 扩展：
+- 新增按 `injected_count >= 3` 晋升——实际被使用 3 次以上的 candidate 无论 importance 多少都提升为 active
+
+`curator_report` 返回值新增字段：`revival_candidates`
+
+**`local_memory_mcp/storage/rollup.py`**
+- 去掉 `source = 'extraction'` 限制，所有 episodic_memory（包括 hermes 直写的 source='manual'）均可被 rollup 处理
+
+**`tests/test_curator.py`** / **`tests/test_temporal.py`**
+- 调整 dead_candidate 测试：7 天窗口（8天前）替代原 48h
+- 调整 decay 测试：`_set_last_accessed` 补充 `injected_count=1`
+
+**`tests/test_curator_v3.py`**（新建，20 个测试）
+- candidate 分档超时（episodic 7天、precious 30天、default 7天）
+- stale 复活（近期注入 + 有效 + 无负反馈 → active）
+- contradicted 归档（90天无访问）
+- freeze policy 完全跳过
+- stable policy 仅极端负反馈才 stale
+- precious 类型保护
+- injected_count >= 3 晋升
+- rollup 可处理 manual source 的 episodic
+
+**数据迁移（一次性 SQL）**
+- `promoted → active`（当前库无此状态记录）
+- stale 复活扫描（当前库无符合条件记录）
+
+### 验证
+
+```bash
+.venv/bin/python -m pytest -q
+# 362 passed, 1 warning
+```
+
+### 影响范围
+
+- MCP 工具 API 零变更（所有改动在 storage 层）
+- `curator_report` 返回值新增 `revival_candidates` 字段（向后兼容，调用方可忽略）
+- 外部工具若依赖 `status='promoted'` 过滤需改为 `status='active'`
+
+### 回滚
+
+`git revert HEAD`；无数据库 schema 变更，无需迁移脚本。
+
+---
+
 ## [迭代 32] 2026-05-28 — 三端 hook 部署与写回脚本统一化
 
 ### 背景
@@ -226,7 +306,7 @@ LMMCP_AUTO_SYNC=0 scripts/lmmcp start
 
 ## 下一阶段规划（2026-06）
 
-当前版本：`v0.21.0`，327 tests，35 MCP tools。已完成所有规划中的 Phase 9（Agent Mailbox）和 Phase 10（Temporal Memory）。
+当前版本：`v0.24.0`，362 tests，36 MCP tools。已完成所有规划中的 Phase 9（Agent Mailbox）和 Phase 10（Temporal Memory），以及迭代 31（episodic rollup）、迭代 32（hooks 统一化）、迭代 33（v3 状态机）。
 
 ---
 
@@ -312,7 +392,7 @@ LMMCP_AUTO_SYNC=0 scripts/lmmcp start
 2. `models.py` 零 I/O 依赖
 3. `tests/` 通过 `LOCAL_MEMORY_DB` 指向临时库，不写生产数据库
 4. 新增 MCP tool 参数必须有默认值（向后兼容）
-5. 327 tests 全绿（不得下降）
+5. 362 tests 全绿（不得下降）
 6. 每次推送前追加 `ITERATION.md`
 
 ---

@@ -1,16 +1,22 @@
 """Curator: duplicate detection, stale/archive lifecycle management.
 
-Memory retention philosophy (v2 — maximum memory strength):
+Memory retention philosophy (v3 — evidence-driven lifecycle):
+  - Entry status is determined by the write path, not the caller:
+      memory_add → active, memory_ingest → candidate, rollup output → active.
   - High-value types (user_profile, environment_fact, decision, project_memory,
-    skill_candidate) are preserved aggressively: stale only after 365 days of
-    non-update with low importance AND negative feedback.
-  - episodic_memory is treated as ephemeral: candidates auto-promote after 24 h
-    if importance >= 0.7, otherwise stale after 14 days and archive after 30 days.
-  - Candidates older than 48 h with no activity are cleaned up fast.
-  - Decay runs on truly forgotten memories only (not accessed in 90 days AND
-    effectiveness < 0.3), at a smaller step so confidence fades slowly.
-  - Auto-promotion: active candidates with importance >= 0.75 are promoted to
-    active status automatically.
+    skill_candidate) are NEVER auto-staled unless feedback < -2.0 AND importance < 0.3.
+  - candidate windows are tiered by type:
+      episodic_memory: 7 days (aligned with rollup 30-record threshold pace)
+      precious types:  30 days (importance < 0.4 AND feedback < 0)
+      other types:      7 days (importance < 0.5)
+  - Promotion from candidate to active:
+      importance >= 0.75 AND feedback >= 0, OR injected_count >= 3 (evidence of utility)
+  - stale → active revival: record injected in last 7 days AND effective AND no neg feedback.
+  - contradicted auto-archive: 90 days without access.
+  - decay_policy semantics:
+      review  — slow confidence decay when truly forgotten (injected, then abandoned)
+      stable  — no decay; stale threshold requires feedback < -2.0 AND importance < 0.3
+      freeze  — curator skips entirely; manual management only
 """
 from __future__ import annotations
 
@@ -21,22 +27,31 @@ from local_memory_mcp.models import normalize_list, normalize_title_key, now
 from local_memory_mcp.storage.db import _managed_query, managed_conn
 from local_memory_mcp.storage.audit import log_audit_event
 
-# Decay: very slow — only truly forgotten memories fade
-_DECAY_STEP = 0.02            # was 0.05 — much gentler fade
-_DECAY_INTERVAL_DAYS = 90     # was 30 — only decay if not accessed in 90 days
-_DECAY_MIN_CONFIDENCE = 0.15  # floor stays higher
+# Decay: very slow — only records that were used and then forgotten
+_DECAY_STEP = 0.02
+_DECAY_INTERVAL_DAYS = 90
+_DECAY_MIN_CONFIDENCE = 0.15
+
+# Per-type candidate timeout windows
+_CANDIDATE_TTL_EPISODIC_DAYS = 7
+_CANDIDATE_TTL_PRECIOUS_DAYS = 30
+_CANDIDATE_TTL_DEFAULT_DAYS = 7
 
 # Per-type stale/archive thresholds (days since updated_at)
 _STALE_DAYS_EPISODIC = 14
 _ARCHIVE_DAYS_EPISODIC = 30
-_STALE_DAYS_DEFAULT = 365     # was 60 — preserve everything else for a year
-_ARCHIVE_DAYS_DEFAULT = 730   # was 120 — 2 years before archiving
+_STALE_DAYS_DEFAULT = 365
+_ARCHIVE_DAYS_DEFAULT = 730
 
-# High-value types — never auto-stale regardless of importance
+# contradicted auto-archive after no access
+_CONTRADICTED_ARCHIVE_DAYS = 90
+
+# High-value types — immune to auto-stale unless feedback very negative
 _PRECIOUS_TYPES = {"user_profile", "environment_fact", "decision", "project_memory", "skill_candidate"}
 
-# Auto-promote candidates with high importance
+# Auto-promote candidates
 _PROMOTE_IMPORTANCE_THRESHOLD = 0.75
+_PROMOTE_INJECTED_THRESHOLD = 3
 
 
 def consolidate(dry_run: bool = True, limit: int = 50) -> dict[str, Any]:
@@ -80,11 +95,12 @@ def curator_report(
         "SELECT * FROM memories WHERE status IN ('active','candidate')"
         " AND feedback_score < -1.0"
         " AND type NOT IN ('user_profile','environment_fact','decision','project_memory','skill_candidate')"
+        " AND decay_policy != 'freeze'"
         " LIMIT ?",
         (cap,),
     )
 
-    # Decay: only truly forgotten, low-effectiveness memories
+    # Decay: only truly forgotten records that were once used
     decay_cutoff = (now_dt - timedelta(days=_DECAY_INTERVAL_DAYS)).isoformat()
     auto_decay_candidates = _managed_query(
         """SELECT * FROM memories WHERE status = 'active'
@@ -92,12 +108,13 @@ def curator_report(
              AND (last_accessed_at IS NULL OR last_accessed_at < ?)
              AND effectiveness_score < 0.3
              AND importance < 0.5
+             AND injected_count > 0
              AND confidence > ?
            ORDER BY confidence DESC LIMIT ?""",
         (decay_cutoff, _DECAY_MIN_CONFIDENCE, cap),
     )
 
-    # Episodic stale: fast turnover for ephemeral memories
+    # ── Episodic stale/archive ────────────────────────────────────────────────
     episodic_stale_cutoff = (now_dt - timedelta(days=_STALE_DAYS_EPISODIC)).isoformat()
     episodic_archive_cutoff = (now_dt - timedelta(days=_ARCHIVE_DAYS_EPISODIC)).isoformat()
     episodic_stale_candidates = _managed_query(
@@ -105,6 +122,7 @@ def curator_report(
              AND status = 'active'
              AND datetime(updated_at) < datetime(?)
              AND importance < 0.65
+             AND decay_policy != 'freeze'
            ORDER BY updated_at ASC LIMIT ?""",
         (episodic_stale_cutoff, cap),
     )
@@ -116,18 +134,46 @@ def curator_report(
         (episodic_archive_cutoff, cap),
     )
 
-    # Old candidates (not episodic): keep for 48h, then archive if still candidate
-    dead_candidate_cutoff = (now_dt - timedelta(hours=48)).isoformat()
-    dead_candidates = _managed_query(
+    # ── Candidate timeouts (tiered by type) ──────────────────────────────────
+    episodic_candidate_cutoff = (now_dt - timedelta(days=_CANDIDATE_TTL_EPISODIC_DAYS)).isoformat()
+    precious_candidate_cutoff = (now_dt - timedelta(days=_CANDIDATE_TTL_PRECIOUS_DAYS)).isoformat()
+    default_candidate_cutoff = (now_dt - timedelta(days=_CANDIDATE_TTL_DEFAULT_DAYS)).isoformat()
+
+    # episodic candidates: 7-day window
+    dead_candidates_episodic = _managed_query(
         """SELECT * FROM memories WHERE status = 'candidate'
-             AND type != 'episodic_memory'
+             AND type = 'episodic_memory'
+             AND datetime(updated_at) < datetime(?)
+             AND importance < 0.65
+             AND decay_policy != 'freeze'
+           ORDER BY updated_at ASC LIMIT ?""",
+        (episodic_candidate_cutoff, cap),
+    )
+    # precious type candidates: 30-day window, only if importance and feedback both low
+    dead_candidates_precious = _managed_query(
+        """SELECT * FROM memories WHERE status = 'candidate'
+             AND type IN ('user_profile','environment_fact','decision','project_memory','skill_candidate')
+             AND datetime(updated_at) < datetime(?)
+             AND importance < 0.4
+             AND feedback_score < 0
+             AND decay_policy != 'freeze'
+           ORDER BY updated_at ASC LIMIT ?""",
+        (precious_candidate_cutoff, cap),
+    )
+    # other candidate types: 7-day window
+    dead_candidates_default = _managed_query(
+        """SELECT * FROM memories WHERE status = 'candidate'
+             AND type NOT IN ('episodic_memory','user_profile','environment_fact',
+                              'decision','project_memory','skill_candidate')
              AND datetime(updated_at) < datetime(?)
              AND importance < 0.5
+             AND decay_policy != 'freeze'
            ORDER BY updated_at ASC LIMIT ?""",
-        (dead_candidate_cutoff, cap),
+        (default_candidate_cutoff, cap),
     )
+    dead_candidates = dead_candidates_episodic + dead_candidates_precious + dead_candidates_default
 
-    # Default stale: precious types immune; everything else after stale_after_days
+    # ── Default stale: non-precious, non-episodic, long-lived active ──────────
     stale_cutoff = (now_dt - timedelta(days=max(1, int(stale_after_days)))).isoformat()
     stale_candidates = _managed_query(
         """SELECT * FROM memories WHERE status = 'active'
@@ -135,11 +181,23 @@ def curator_report(
              AND datetime(updated_at) < datetime(?)
              AND importance < 0.45
              AND feedback_score <= -0.5
+             AND decay_policy NOT IN ('freeze', 'stable')
            ORDER BY updated_at ASC LIMIT ?""",
         (stale_cutoff, cap),
     )
 
-    # Default archive: stale memories past archive_after_days
+    # precious type stale: only when feedback very negative (stable/freeze immune)
+    precious_stale_candidates = _managed_query(
+        """SELECT * FROM memories WHERE status = 'active'
+             AND type IN ('user_profile','environment_fact','decision','project_memory','skill_candidate')
+             AND feedback_score < -2.0
+             AND importance < 0.3
+             AND decay_policy NOT IN ('freeze', 'stable')
+           ORDER BY feedback_score ASC LIMIT ?""",
+        (cap,),
+    )
+
+    # ── Default archive: stale past archive threshold ─────────────────────────
     archive_cutoff = (now_dt - timedelta(days=max(1, int(archive_after_days)))).isoformat()
     archive_candidates = _managed_query(
         """SELECT * FROM memories WHERE status = 'stale'
@@ -149,16 +207,39 @@ def curator_report(
         (archive_cutoff, cap),
     )
 
-    # Auto-promote: high-importance candidates → active
-    promote_candidates = _managed_query(
-        """SELECT * FROM memories WHERE status = 'candidate'
-             AND importance >= ?
-             AND feedback_score >= 0
-           ORDER BY importance DESC LIMIT ?""",
-        (_PROMOTE_IMPORTANCE_THRESHOLD, cap),
+    # ── contradicted auto-archive ─────────────────────────────────────────────
+    contradicted_cutoff = (now_dt - timedelta(days=_CONTRADICTED_ARCHIVE_DAYS)).isoformat()
+    contradicted_archive_candidates = _managed_query(
+        """SELECT * FROM memories WHERE status = 'contradicted'
+             AND (last_accessed_at IS NULL OR last_accessed_at < ?)
+           ORDER BY last_accessed_at ASC LIMIT ?""",
+        (contradicted_cutoff, cap),
     )
 
-    # Skill promotions
+    # ── stale → active revival ────────────────────────────────────────────────
+    revival_cutoff = (now_dt - timedelta(days=7)).isoformat()
+    revival_candidates = _managed_query(
+        """SELECT * FROM memories WHERE status = 'stale'
+             AND type != 'episodic_memory'
+             AND last_injected_at >= ?
+             AND effectiveness_score >= 0.5
+             AND feedback_score >= 0
+           ORDER BY effectiveness_score DESC LIMIT ?""",
+        (revival_cutoff, cap),
+    )
+
+    # ── Auto-promote: high-importance candidates or frequently used ───────────
+    promote_candidates = _managed_query(
+        """SELECT * FROM memories WHERE status = 'candidate'
+             AND (
+               (importance >= ? AND feedback_score >= 0)
+               OR injected_count >= ?
+             )
+           ORDER BY importance DESC LIMIT ?""",
+        (_PROMOTE_IMPORTANCE_THRESHOLD, _PROMOTE_INJECTED_THRESHOLD, cap),
+    )
+
+    # ── Skill promotions ──────────────────────────────────────────────────────
     skill_promotion_candidates = _managed_query(
         """SELECT * FROM memories WHERE type = 'skill_candidate'
              AND status IN ('active','candidate') AND importance >= 0.65 AND feedback_score >= 0
@@ -166,7 +247,7 @@ def curator_report(
         (cap,),
     )
 
-    # Contradiction detection
+    # ── Contradiction detection ───────────────────────────────────────────────
     evolution_candidates = _managed_query(
         """SELECT * FROM memories WHERE status IN ('active','candidate')
              AND (LENGTH(content) < 50 OR feedback_score < -1.5)
@@ -192,7 +273,7 @@ def curator_report(
                 "contradicted": contradicted_by_key[key],
             })
 
-    # Build action plan
+    # ── Build action plan ─────────────────────────────────────────────────────
     allow_set = set(normalize_list(allow_actions))
     deny_set = set(normalize_list(deny_actions))
     action_plan: list[dict[str, Any]] = []
@@ -215,8 +296,15 @@ def curator_report(
             "rollback": {"status": row.get("status")},
         })
 
+    # Revival first — takes priority over other stale rules
+    for r in revival_candidates:
+        _plan(r, "revive", "stale_revival", "active")
+    for r in promote_candidates:
+        _plan(r, "promote", "high_importance_candidate", "active")
     for r in low_feedback_candidates:
         _plan(r, "mark_stale", "low_feedback", "stale")
+    for r in precious_stale_candidates:
+        _plan(r, "mark_stale", "precious_negative_feedback", "stale")
     for r in episodic_stale_candidates:
         _plan(r, "mark_stale", "episodic_aged", "stale")
     for r in stale_candidates:
@@ -227,8 +315,8 @@ def curator_report(
         _plan(r, "archive", "archive_candidate", "archived")
     for r in dead_candidates:
         _plan(r, "archive", "dead_candidate", "archived")
-    for r in promote_candidates:
-        _plan(r, "promote", "high_importance_candidate", "active")
+    for r in contradicted_archive_candidates:
+        _plan(r, "archive", "contradicted_expired", "archived")
 
     actions: list[dict[str, Any]] = []
 
@@ -254,8 +342,9 @@ def curator_report(
             decay_applied = len(decay_rows)
             from local_memory_mcp.storage.db import connect as _connect
             _connect().execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
         for planned in action_plan:
-            if planned["action"] == "promote":
+            if planned["action"] in ("promote", "revive"):
                 update_status(planned["id"], "active")
             else:
                 update_status(planned["id"], planned["target_status"])
@@ -264,15 +353,18 @@ def curator_report(
                 "action": planned["action"],
                 "title": planned.get("title"),
             })
+
         stale_count = sum(1 for a in actions if a["action"] == "mark_stale")
         archive_count = sum(1 for a in actions if a["action"] == "archive")
         promote_count = sum(1 for a in actions if a["action"] == "promote")
+        revive_count = sum(1 for a in actions if a["action"] == "revive")
         log_audit_event(
             "curator_apply",
             detail={
                 "stale": stale_count,
                 "archived": archive_count,
                 "promoted": promote_count,
+                "revived": revive_count,
                 "auto_decay": decay_applied,
                 "total_actions": len(actions),
                 "actions": action_plan,
@@ -280,29 +372,33 @@ def curator_report(
         )
 
     total_scanned = _managed_query("SELECT COUNT(*) as cnt FROM memories", ())[0]["cnt"]
+    all_stale = stale_candidates + episodic_stale_candidates + precious_stale_candidates
+    all_archive = archive_candidates + episodic_archive_candidates + list(contradicted_archive_candidates)
     return {
         "dry_run": dry_run,
         "generated_at": now(),
         "scanned": total_scanned,
         "duplicate_title_groups": duplicate_title_groups,
         "low_feedback_candidates": low_feedback_candidates,
-        "stale_candidates": stale_candidates + episodic_stale_candidates,
-        "archive_candidates": archive_candidates + episodic_archive_candidates,
+        "stale_candidates": all_stale,
+        "archive_candidates": all_archive,
         "contradiction_candidates": contradiction_candidates,
         "skill_promotion_candidates": skill_promotion_candidates,
         "auto_decay_candidates": auto_decay_candidates,
         "promote_candidates": promote_candidates,
+        "revival_candidates": revival_candidates,
         "action_plan": action_plan,
         "actions": actions,
         "summary": {
             "duplicates": len(duplicate_title_groups),
             "low_feedback": len(low_feedback_candidates),
-            "stale": len(stale_candidates) + len(episodic_stale_candidates),
-            "archive": len(archive_candidates) + len(episodic_archive_candidates) + len(dead_candidates),
+            "stale": len(all_stale),
+            "archive": len(all_archive) + len(dead_candidates),
             "contradictions": len(contradiction_candidates),
             "skill_promotions": len(skill_promotion_candidates),
             "auto_decay_candidates": len(auto_decay_candidates),
             "promote_candidates": len(promote_candidates),
+            "revival_candidates": len(revival_candidates),
             "planned_actions": len(action_plan),
             "actions": len(actions),
         },

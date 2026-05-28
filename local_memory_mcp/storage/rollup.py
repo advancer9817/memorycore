@@ -178,7 +178,7 @@ def rollup_report(
     min_age_count = max(1, int(min_age_count))
     max_age_hours = max(0.0, float(max_age_hours))
 
-    clauses = ["type = 'episodic_memory'", "status IN ('candidate','active')", "source = 'extraction'"]
+    clauses = ["type = 'episodic_memory'", "status IN ('candidate','active')"]
     params: list[Any] = []
     if source_agent:
         clauses.append("source_agent = ?")

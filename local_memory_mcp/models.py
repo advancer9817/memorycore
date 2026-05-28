@@ -78,7 +78,7 @@ MEMORY_TYPES: set[str] = {
     "raw_event",
 }
 
-STATUSES: set[str] = {"active", "stale", "archived", "contradicted", "promoted", "candidate"}
+STATUSES: set[str] = {"active", "stale", "archived", "contradicted", "candidate"}
 
 VALID_RELATION_TYPES: frozenset[str] = frozenset({
     "related_to",

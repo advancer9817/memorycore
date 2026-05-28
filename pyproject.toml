@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "local-memory-mcp"
-version = "0.21.0"
+version = "0.24.0"
 description = "Structured agent memory with SQLite/FTS5 + optional Qdrant vector search, exposed via MCP"
 readme = "README.md"
 license = "MIT"

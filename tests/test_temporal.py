@@ -79,7 +79,7 @@ def _set_last_accessed(memory_id: str, days_ago: int) -> None:
     ts = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
     with managed_conn() as conn:
         conn.execute(
-            "UPDATE memories SET last_accessed_at=?, updated_at=?, effectiveness_score=0.2, importance=0.4 WHERE id=?",
+            "UPDATE memories SET last_accessed_at=?, updated_at=?, effectiveness_score=0.2, importance=0.4, injected_count=1 WHERE id=?",
             (ts, ts, memory_id),
         )
 

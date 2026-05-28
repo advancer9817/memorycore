@@ -59,7 +59,7 @@ def test_curator_stale_and_archive_candidates():
 
 
 def test_curator_archives_dead_candidates_and_promotes_important_candidates():
-    dead_candidate = (datetime.now(timezone.utc) - timedelta(hours=49)).isoformat(timespec="seconds")
+    dead_candidate = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat(timespec="seconds")
     fresh_candidate = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(timespec="seconds")
     promoted_candidate = (datetime.now(timezone.utc) - timedelta(hours=49)).isoformat(timespec="seconds")
     lm.add_memory_record(

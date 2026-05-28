@@ -271,6 +271,31 @@ Claude Code `~/.claude.json`（user scope，全局可用）：
 }
 ```
 
+## Agent Session Hook 部署
+
+三端（Claude Code / Codex / Hermes）会话结束时自动将对话摘要写回 lmmcp，由统一脚本处理：
+
+```bash
+# 一键部署所有 agent 的 session-end hook
+bash scripts/setup-hooks.sh
+```
+
+或通过 `connect_agents.py`：
+
+```bash
+python3 scripts/connect_agents.py --register-hooks
+```
+
+**Hook 脚本**：`scripts/hooks/lmmcp-ingest.py`
+
+| 参数 | 适用 | 读取来源 |
+|---|---|---|
+| `--agent claude` | Claude Code | `CLAUDE_SESSION_FILE` 或 `~/.claude/projects/**/*.jsonl` |
+| `--agent codex` | Codex | `CODEX_SESSION_FILE` 或 `~/.codex/sessions/**/*.jsonl` |
+| `--agent hermes` | Hermes | hook stdin `session_id` → `~/.hermes/sessions/` |
+
+调用 `memory_ingest` 采用 `curl --max-time 10` fire-and-forget，不阻塞 agent 退出。
+
 ## 服务脚本
 
 仓库提供可选脚本 `scripts/lmmcp`：
@@ -361,13 +386,15 @@ scripts/init_local_memory.sh
 
 ## 设计边界
 
-当前 v0 解决“统一结构化存储 + MCP 工具 + context pack + 多 agent 共享记忆互通”问题。
+当前 v0 解决”统一结构化存储 + MCP 工具 + context pack + 多 agent 共享记忆互通”问题。
 
 不是完整自进化系统，不是 agent 调度框架，不是完整 SaaS memory platform。
 
+已完成：P0 稳定化（injection guard、隐私脱敏、审计日志、degraded/fallback）、Context Pack v2（sections/records/warnings/trace）、Agent Mailbox（TTL、广播、cleanup）、Temporal Memory（valid_from/until、auto-decay）、Episodic Rollup、Hooks 统一化。
+
 下一阶段计划按优先级推进：
 
-1. **P0 稳定化**：文档-工具-测试一致性、context injection guard（已实现基础版）、隐私脱敏、审计日志、degraded/fallback response contract。
-2. **Context Pack v2**：在保留 legacy `context` 字段的同时增加 sections / records / warnings / trace。
-3. **Graph / Warning 增强**：扩展 relation types，支持 blocked_by / causes / failure-pattern warnings。
-4. **Agent Mailbox 增强**：在 MVP 基础上增加了 TTL 过期（`expires_at`/`ttl_seconds`）、广播消息（`to_agent="*"`）、`agent_messages_cleanup` 清理工具。
+1. **Phase 11 存储层强化**：`managed_conn` 嵌套事务修复（S-2）、WAL 自动检查点、context_quality_events 写入节流。
+2. **Phase 12 提取与去重增强**：语义去重阈值按 type 差异化、中文提取 prompt 双语支持。
+3. **Phase 13 Agent 协作增强**：handoff 超时与重试、`memory_context` v2 结构化响应完善、能力匹配自动路由。
+4. **Phase 14 发布准备**：PyPI 正式发布、Docker Compose 一键启动、跨版本兼容性测试、多工作区支持。
