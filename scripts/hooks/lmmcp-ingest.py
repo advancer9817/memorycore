@@ -22,6 +22,27 @@ def _log(message: str) -> None:
         pass
 
 
+def _spawn_background(agent: str, force: bool) -> None:
+    cmd = [sys.executable or "python3", str(Path(__file__).resolve()), "--agent", agent]
+    if force:
+        cmd.append("--force")
+    env = os.environ.copy()
+    env["LMMCP_INGEST_BACKGROUND_CHILD"] = "1"
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+            close_fds=True,
+            start_new_session=True,
+        )
+        _log(f"background_spawned agent={agent} pid={proc.pid}")
+    except Exception as exc:
+        _log(f"background_spawn_failed agent={agent} error={type(exc).__name__}")
+
+
 def _lmmcp_url() -> str:
     host = os.environ.get("LMMCP_HOST", "127.0.0.1")
     port = os.environ.get("LMMCP_PORT", "8318")
@@ -205,6 +226,7 @@ def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:
         _log(f"skip_empty_messages agent={agent_id}")
         return
     try:
+        ingest_timeout = float(os.environ.get("LMMCP_INGEST_TIMEOUT", "120"))
         _log(f"ingest_start agent={agent_id} messages={len(messages)}")
         headers, _ = _curl_post(
             {
@@ -234,7 +256,7 @@ def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:
                 },
             },
             session_id=session_id,
-            timeout=20,
+            timeout=ingest_timeout,
         )
         preview = " ".join(body.split())[:500]
         _log(f"ingest_done agent={agent_id} messages={len(messages)} response={preview}")
@@ -270,9 +292,15 @@ def _messages_for_agent(agent: str) -> list[dict[str, str]]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ingest recent agent transcript messages into lmmcp")
     parser.add_argument("--agent", default=os.environ.get("LMMCP_AGENT_ID", "claude"))
+    parser.add_argument("--background", action="store_true", help="Spawn ingest in the background and exit immediately")
+    parser.add_argument("--force", action="store_true", help="Compatibility flag; Stop ingest always sends the transcript")
     args = parser.parse_args()
     agent = args.agent.strip().lower()
-    _ingest(_messages_for_agent(agent), agent)
+    if args.background and os.environ.get("LMMCP_INGEST_BACKGROUND_CHILD") != "1":
+        _spawn_background(agent, args.force)
+        return
+    messages = _messages_for_agent(agent)
+    _ingest(messages, agent)
 
 
 if __name__ == "__main__":

@@ -1699,3 +1699,53 @@ This is an automated multi-repository sync. Generated/runtime artifacts already 
 ### Rollback
 
 Use `git revert <commit>` on this repository, then push the revert commit to the same remote/branch.
+
+## 2026-05-28T15:04:51+08:00 - Codex memory read path moved from hook to AGENTS.md
+
+- Branch: `main`
+- HEAD before change: `0efecfd`
+
+### Purpose
+
+Adjust Codex integration so memory read/injection is driven by the explicit `/home/advancer/AGENTS.md` MCP rule instead of the Codex `UserPromptSubmit` hook, while keeping automatic writeback on session stop.
+
+### Change summary
+
+- `scripts/connect_agents.py`
+  - `register_hooks_codex()` now removes Codex `UserPromptSubmit` entries that invoke `lmmcp-context.sh`.
+  - Codex registration preserves/adds only the `Stop` hook:
+    `python3 /home/advancer/project/local-memory-mcp/scripts/hooks/lmmcp-ingest.py --agent codex`.
+  - Added a reusable hook-entry removal helper for targeted cleanup.
+- `scripts/setup-hooks.sh`
+  - Setup now removes Codex `UserPromptSubmit` `lmmcp-context.sh` entries instead of adding them.
+  - Setup continues to add/trust the Codex `Stop` ingest hook for writeback.
+
+### Reason
+
+Codex had two competing memory read paths:
+
+1. `UserPromptSubmit` hook called `lmmcp-context.sh` and injected retrieved memory into the prompt path.
+2. `/home/advancer/AGENTS.md` instructs Codex to call `mcp__local_memory__memory_context` on every user request.
+
+This caused duplicate memory retrieval and visible hook-context output in the UI. The new rule makes Codex reads explicit and model-visible through `AGENTS.md`, while avoiding noisy hook injection. Writeback remains hook-based because it happens after the turn via `Stop`, does not duplicate the read path, and preserves durable session ingestion.
+
+### Validation
+
+```text
+python3 -m py_compile scripts/connect_agents.py scripts/hooks/lmmcp-ingest.py
+bash -n scripts/setup-hooks.sh scripts/hooks/session-start.sh
+git diff --check
+.venv/bin/python -m pytest tests/test_deployment.py tests/test_config.py tests/test_config_validation.py tests/test_context_injection_guard.py
+```
+
+All checks above passed. A full `.venv/bin/python -m pytest` run was attempted, but it stalled after reaching `tests/test_frontend.py`; it was interrupted and replaced with the targeted regression set above.
+
+### Impact scope
+
+- Codex read/injection behavior only.
+- Claude/Hermes hook behavior is unchanged.
+- Codex durable writeback remains active through the `Stop` hook.
+
+### Rollback
+
+Revert this change to restore Codex `UserPromptSubmit` registration for `lmmcp-context.sh`.

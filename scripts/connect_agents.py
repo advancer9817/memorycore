@@ -202,6 +202,9 @@ HOOK_SESSION_START = str(HOOKS_DIR / "session-start.sh")
 HOOK_LMMCP_CONTEXT = str(HOOKS_DIR / "lmmcp-context.sh")
 HOOK_LMMCP_INGEST = str(HOOKS_DIR / "lmmcp-ingest.py")
 OLD_HOOK_FRAGMENTS = ("session-end.sh", "codex-session-end.sh", "lmmcp-session-end.py")
+CODEX_LMMCP_CONTEXT_FRAGMENTS = ("lmmcp-context.sh",)
+LMMCP_INGEST_FRAGMENTS = ("lmmcp-ingest.py",)
+LMMCP_SESSION_START_FRAGMENTS = ("session-start.sh",)
 
 
 def detect_agents() -> dict[str, Path]:
@@ -231,29 +234,30 @@ def _remove_old_hook_entries(hooks: dict, event: str) -> bool:
     return True
 
 
+def _remove_hook_entries(hooks: dict, event: str, fragments: tuple[str, ...]) -> bool:
+    entries = hooks.get(event, [])
+    if not isinstance(entries, list):
+        return False
+    filtered = [entry for entry in entries if not any(fragment in str(entry) for fragment in fragments)]
+    if filtered:
+        hooks[event] = filtered
+    elif event in hooks:
+        hooks.pop(event, None)
+    return filtered != entries
+
+
 def register_hooks_claude(path: Path, backup_dir: Path, dry_run: bool) -> bool:
-    """Register memory hooks in Claude Code settings.json."""
+    """Register Claude Code writeback hook; reads use explicit MCP calls."""
     data = read_json(path)
     hooks = data.setdefault("hooks", {})
-    start_hook = {
-        "hooks": [{"type": "command", "command": f"bash {HOOK_SESSION_START}"}]
-    }
-    context_hook = {
-        "hooks": [{"type": "command", "command": f"bash {HOOK_LMMCP_CONTEXT}", "timeout": 3}]
-    }
-    end_command = f"python3 {HOOK_LMMCP_INGEST} --agent claude"
+    end_command = f"python3 {HOOK_LMMCP_INGEST} --agent claude --background"
     end_hook = {
         "hooks": [{"type": "command", "command": end_command, "timeout": 30}]
     }
-    changed = _remove_old_hook_entries(hooks, "Stop")
-    existing_start = hooks.get("SessionStart", [])
-    if not any(HOOK_SESSION_START in str(h) for h in existing_start):
-        hooks["SessionStart"] = existing_start + [start_hook]
-        changed = True
-    existing_context = hooks.get("UserPromptSubmit", [])
-    if not any(HOOK_LMMCP_CONTEXT in str(h) for h in existing_context):
-        hooks["UserPromptSubmit"] = existing_context + [context_hook]
-        changed = True
+    changed = _remove_hook_entries(hooks, "SessionStart", LMMCP_SESSION_START_FRAGMENTS)
+    changed = _remove_old_hook_entries(hooks, "Stop") or changed
+    changed = _remove_hook_entries(hooks, "Stop", LMMCP_INGEST_FRAGMENTS) or changed
+    changed = _remove_hook_entries(hooks, "UserPromptSubmit", CODEX_LMMCP_CONTEXT_FRAGMENTS) or changed
     existing_stop = hooks.get("Stop", [])
     if not any(end_command in str(h) for h in existing_stop):
         hooks["Stop"] = existing_stop + [end_hook]
@@ -414,22 +418,21 @@ def trust_codex_hooks(config_path: Path, hooks_path: Path, backup_dir: Path, dry
 
 
 def register_hooks_codex(path: Path, backup_dir: Path, dry_run: bool) -> bool:
-    """Register hooks in Codex config.toml and hooks.json."""
+    """Register Codex writeback hook only; reads use AGENTS.md MCP rules."""
     old_config = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
     new_config = enable_codex_hooks_feature(old_config)
     hooks_path = path.parent / "hooks.json"
     hooks_data = read_json(hooks_path)
     root = hooks_data.setdefault("hooks", {})
     changed = old_config != new_config
+    changed = _remove_hook_entries(root, "UserPromptSubmit", CODEX_LMMCP_CONTEXT_FRAGMENTS) or changed
     changed = _remove_old_hook_entries(root, "Stop") or changed
-    for event, command, timeout in (
-        ("UserPromptSubmit", f"bash {HOOK_LMMCP_CONTEXT}", 3),
-        ("Stop", f"python3 {HOOK_LMMCP_INGEST} --agent codex", 30),
-    ):
-        entries = root.setdefault(event, [])
-        if not any(command in json.dumps(entry, ensure_ascii=False) for entry in entries):
-            entries.append({"hooks": [{"type": "command", "command": command, "timeout": timeout}]})
-            changed = True
+    changed = _remove_hook_entries(root, "Stop", LMMCP_INGEST_FRAGMENTS) or changed
+    end_command = f"python3 {HOOK_LMMCP_INGEST} --agent codex --background"
+    entries = root.setdefault("Stop", [])
+    if not any(end_command in json.dumps(entry, ensure_ascii=False) for entry in entries):
+        entries.append({"hooks": [{"type": "command", "command": end_command, "timeout": 30}]})
+        changed = True
     if not changed:
         return trust_codex_hooks(path, hooks_path, backup_dir, dry_run)
     if dry_run:

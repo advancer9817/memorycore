@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# session-start.sh — Hook: ensure lmmcp is running, optionally fetch context.
+# session-start.sh — Hook: ensure lmmcp is running and mark session start.
 # Called by Agent hooks at SessionStart / before_session.
-# Exits 0 always (non-blocking; failure must not break agent startup).
+# Exits 0 always; failure must not break agent startup.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,13 +14,5 @@ LMMCP_URL="http://${LMMCP_HOST}:${LMMCP_PORT}/mcp"
 ensure_lmmcp_running 2>/dev/null || true
 
 touch /tmp/lmmcp-session-mark 2>/dev/null || true
-
-TASK="${CLAUDE_TASK:-${HERMES_TASK:-${OPENCODE_TASK:-general}}}"
-AGENT="${LMMCP_AGENT_ID:-unknown}"
-
-curl -sf -X POST "$LMMCP_URL" \
-  -H "Content-Type: application/json" \
-  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"memory_context\",\"arguments\":{\"task\":\"$TASK\",\"agent\":\"$AGENT\",\"token_budget\":1500}}}" \
-  > /tmp/lmmcp-context.json 2>/dev/null || true
 
 exit 0
