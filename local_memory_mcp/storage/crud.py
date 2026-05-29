@@ -41,19 +41,27 @@ except Exception:
 
 
 def _sync_to_vector(record: dict[str, Any]) -> None:
-    """Fire-and-forget Qdrant upsert after SQLite write. Never raises."""
+    """Fire-and-forget Qdrant sync after SQLite write. Never raises.
+
+    Non-active records are deleted from the vector index so they never surface
+    in semantic search results. Active records are upserted with fresh payload.
+    """
     try:
         if _get_vector_store is None:
+            return
+        vs = _get_vector_store(load_config())
+        status = record.get("status", "active")
+        if status != "active":
+            vs.delete(record["id"])
             return
         text = f"{record.get('title', '')} {record.get('content', '')}".strip()
         payload = {
             "type": record.get("type", ""),
             "scope": record.get("scope", ""),
-            "status": record.get("status", "active"),
+            "status": status,
             "source_agent": record.get("source_agent", ""),
             "tags": record.get("tags", []),
         }
-        vs = _get_vector_store(load_config())
         vs.upsert(record["id"], text, payload)
     except Exception as exc:
         logger.warning("_sync_to_vector: failed for id=%s: %s", record.get("id"), exc)
@@ -186,6 +194,11 @@ def update_status_batch(conn, updates: list[tuple[str, str]]) -> None:
     for memory_id, status in updates:
         validate_status(status)
         conn.execute("UPDATE memories SET status=?, updated_at=? WHERE id=?", (status, ts, memory_id))
+    # Sync changed records to Qdrant after the batch (fire-and-forget per record)
+    for memory_id, status in updates:
+        row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
+        if row:
+            _sync_to_vector(row_to_dict(row))
 
 
 def add_feedback(

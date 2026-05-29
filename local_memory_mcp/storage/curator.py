@@ -27,9 +27,9 @@ from local_memory_mcp.models import local_now, normalize_list, normalize_title_k
 from local_memory_mcp.storage.db import _managed_query, managed_conn
 from local_memory_mcp.storage.audit import log_audit_event
 
-# Decay: very slow — only records that were used and then forgotten
-_DECAY_STEP = 0.02
-_DECAY_INTERVAL_DAYS = 90
+# Decay: records that were used and then forgotten
+_DECAY_STEP = 0.05
+_DECAY_INTERVAL_DAYS = 30
 _DECAY_MIN_CONFIDENCE = 0.15
 
 # Per-type candidate timeout windows
@@ -45,6 +45,9 @@ _ARCHIVE_DAYS_DEFAULT = 730
 
 # contradicted auto-archive after no access
 _CONTRADICTED_ARCHIVE_DAYS = 90
+
+# Never-accessed candidate auto-archive
+_NEVER_ACCESSED_CANDIDATE_DAYS = 14
 
 # High-value types — immune to auto-stale unless feedback very negative
 _PRECIOUS_TYPES = {"user_profile", "environment_fact", "decision", "project_memory", "skill_candidate"}
@@ -171,6 +174,19 @@ def curator_report(
         (default_candidate_cutoff, cap),
     )
     dead_candidates = dead_candidates_episodic + dead_candidates_precious + dead_candidates_default
+
+    # ── Never-accessed candidate auto-archive ─────────────────────────────
+    never_accessed_cutoff = (now_dt - timedelta(days=_NEVER_ACCESSED_CANDIDATE_DAYS)).isoformat()
+    never_accessed_candidates = _managed_query(
+        """SELECT * FROM memories WHERE status = 'candidate'
+             AND last_accessed_at IS NULL
+             AND injected_count = 0
+             AND datetime(updated_at) < datetime(?)
+             AND type NOT IN ('user_profile','environment_fact','decision','project_memory','skill_candidate')
+             AND decay_policy != 'freeze'
+           ORDER BY updated_at ASC LIMIT ?""",
+        (never_accessed_cutoff, cap),
+    )
 
     # ── Default stale: non-precious, non-episodic, long-lived active ──────────
     stale_cutoff = (now_dt - timedelta(days=max(1, int(stale_after_days)))).isoformat()
@@ -314,6 +330,8 @@ def curator_report(
         _plan(r, "archive", "archive_candidate", "archived")
     for r in dead_candidates:
         _plan(r, "archive", "dead_candidate", "archived")
+    for r in never_accessed_candidates:
+        _plan(r, "archive", "never_accessed_candidate", "archived")
     for r in contradicted_archive_candidates:
         _plan(r, "archive", "contradicted_expired", "archived")
 
@@ -386,6 +404,7 @@ def curator_report(
         "low_feedback_candidates": low_feedback_candidates,
         "stale_candidates": all_stale,
         "archive_candidates": all_archive,
+        "never_accessed_candidates": never_accessed_candidates,
         "contradiction_candidates": contradiction_candidates,
         "skill_promotion_candidates": skill_promotion_candidates,
         "auto_decay_candidates": auto_decay_candidates,
@@ -397,7 +416,7 @@ def curator_report(
             "duplicates": len(duplicate_title_groups),
             "low_feedback": len(low_feedback_candidates),
             "stale": len(all_stale),
-            "archive": len(all_archive) + len(dead_candidates),
+            "archive": len(all_archive) + len(dead_candidates) + len(never_accessed_candidates),
             "contradictions": len(contradiction_candidates),
             "skill_promotions": len(skill_promotion_candidates),
             "auto_decay_candidates": len(auto_decay_candidates),

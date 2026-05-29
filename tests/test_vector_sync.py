@@ -39,7 +39,21 @@ def test_update_content_triggers_upsert(isolated_memory_db):
     assert "New content" in args[0][1]
 
 
-def test_update_status_triggers_upsert(isolated_memory_db):
+def test_update_status_active_triggers_upsert(isolated_memory_db):
+    from local_memory_mcp.storage import add_memory_record, update_status
+
+    mock_vs = make_mock_vs()
+    with patch("local_memory_mcp.storage.crud._get_vector_store", return_value=mock_vs):
+        rec = add_memory_record("feedback", "Feedback", "body")
+        mock_vs.reset_mock()
+        # Updating to active (from active) still upserts
+        update_status(rec["id"], "active")
+
+    mock_vs.upsert.assert_called_once()
+
+
+def test_update_status_non_active_triggers_delete(isolated_memory_db):
+    """Non-active status changes must delete the vector, not upsert."""
     from local_memory_mcp.storage import add_memory_record, update_status
 
     mock_vs = make_mock_vs()
@@ -48,7 +62,8 @@ def test_update_status_triggers_upsert(isolated_memory_db):
         mock_vs.reset_mock()
         update_status(rec["id"], "stale")
 
-    mock_vs.upsert.assert_called_once()
+    mock_vs.delete.assert_called_once_with(rec["id"])
+    mock_vs.upsert.assert_not_called()
 
 
 def test_sync_failure_does_not_raise(isolated_memory_db):

@@ -1,6 +1,7 @@
 """FTS5 search, context pack, and active-warning helpers."""
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from typing import Any
@@ -12,6 +13,8 @@ from local_memory_mcp.injection_guard import (
 )
 from local_memory_mcp.models import as_json, fts_phrase, normalize_list, now, row_to_dict
 from local_memory_mcp.storage.db import _managed_query, managed_conn
+
+logger = logging.getLogger(__name__)
 
 _GREETINGS = {"hi", "hello", "hey", "你好", "嗯", "好", "ok", "okay", "yes", "no"}
 
@@ -126,14 +129,18 @@ def search_memory_records(
     clauses = []
     params: list[Any] = []
     base = "SELECT m.* FROM memories m"
+    fts_active = False
     if query.strip():
         terms = re.findall(r"[\w一-鿿]+", query, flags=re.UNICODE)
         if not terms:
             return []
         base += " JOIN memories_fts f ON f.id = m.id"
-        fts_query = " OR ".join(fts_phrase(term) for term in terms)
+        # AND for multi-term queries to reduce false positives; OR for single term
+        connector = " AND " if len(terms) >= 2 else " OR "
+        fts_query = connector.join(fts_phrase(term) for term in terms)
         clauses.append("memories_fts MATCH ?")
         params.append(fts_query)
+        fts_active = True
     if types_list:
         clauses.append("m.type IN (%s)" % ",".join("?" for _ in types_list))
         params.extend(types_list)
@@ -157,7 +164,17 @@ def search_memory_records(
     sql = base
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY m.importance DESC, m.effectiveness_score DESC, m.feedback_score DESC, m.updated_at DESC LIMIT ?"
+    # When FTS is active, blend text relevance (rank, lower=better) with importance/effectiveness.
+    # rank is negative in FTS5 so we negate it: -rank gives a positive relevance score.
+    if fts_active:
+        sql += (
+            " ORDER BY "
+            "(-f.rank * 0.4 + m.importance * 0.3 + m.effectiveness_score * 0.2 + m.feedback_score * 0.1) DESC, "
+            "m.updated_at DESC"
+        )
+    else:
+        sql += " ORDER BY m.importance DESC, m.effectiveness_score DESC, m.feedback_score DESC, m.updated_at DESC"
+    sql += " LIMIT ?"
     params.append(max(1, min(int(limit), 100)))
     with managed_conn() as conn:
         rows = [row_to_dict(r) for r in conn.execute(sql, params).fetchall()]
@@ -226,6 +243,25 @@ def get_active_warnings(
     return warnings[:max_warnings]
 
 
+def _vector_search_ids(task: str, top_k: int = 20, score_threshold: float = 0.25) -> list[tuple[str, float]]:
+    """Return [(id, score)] from Qdrant semantic search. Empty list if unavailable."""
+    try:
+        from local_memory_mcp.vector_store import get_vector_store, _store
+        # If singleton not yet initialized with config, load config now
+        if _store is None:
+            from local_memory_mcp.models import load_config
+            vs = get_vector_store(load_config())
+        else:
+            vs = get_vector_store()
+        if not vs.available:
+            return []
+        results = vs.search(task, top_k=top_k, score_threshold=score_threshold)
+        return [(r.id, r.score) for r in results]
+    except Exception as exc:
+        logger.debug("vector search unavailable: %s", exc)
+        return []
+
+
 def build_context_pack(
     task: str,
     agent: str = "agent",
@@ -234,10 +270,40 @@ def build_context_pack(
     token_budget: int = 2000,
 ) -> dict[str, Any]:
     max_chars = max(800, int(token_budget) * 4)
-    records = search_memory_records(task, scope=scope, project_path=project_path, status="active", limit=40)
+
+    # --- Dual retrieval: FTS5 + Qdrant vector search ---
+    fts_records = search_memory_records(task, scope=scope, project_path=project_path, status="active", limit=40)
+    vector_hits: dict[str, float] = dict(_vector_search_ids(task, top_k=20))
+
+    # Merge: start with FTS results, append any vector-only hits fetched from DB
+    seen_ids: set[str] = {r["id"] for r in fts_records}
+    extra_ids = [mid for mid in vector_hits if mid not in seen_ids]
+    extra_records: list[dict[str, Any]] = []
+    if extra_ids:
+        with managed_conn() as conn:
+            placeholders = ",".join("?" for _ in extra_ids)
+            rows = conn.execute(
+                f"SELECT * FROM memories WHERE id IN ({placeholders}) AND status = 'active'",
+                extra_ids,
+            ).fetchall()
+            extra_records = [row_to_dict(r) for r in rows]
+
+    records = fts_records + extra_records
+
+    # Unified re-ranking: vector_score * 0.45 + importance * 0.30 + effectiveness * 0.15 + feedback * 0.10
+    # Records not in Qdrant results get vector_score=0
+    def _rank_score(r: dict[str, Any]) -> float:
+        vscore = vector_hits.get(r["id"], 0.0)
+        return (
+            vscore * 0.45
+            + float(r.get("importance") or 0) * 0.30
+            + float(r.get("effectiveness_score") or 0) * 0.15
+            + float(r.get("feedback_score") or 0) * 0.10
+        )
+
     fallback_used = False
     if not records and len(task.strip()) > 10 and not _is_greeting(task):
-        records = search_memory_records("", scope=scope, project_path=project_path, status="active", limit=20)
+        records = search_memory_records("", scope=scope, project_path=project_path, status="active", limit=8)
         fallback_used = bool(records)
     task_type = _classify_task(task)
     type_weights = _type_weights(task_type)
@@ -245,8 +311,7 @@ def build_context_pack(
         records,
         key=lambda r: (
             float(type_weights.get(r.get("type"), 1.0)),
-            float(r.get("importance") or 0),
-            float(r.get("effectiveness_score") or 0),
+            _rank_score(r),
         ),
         reverse=True,
     )
@@ -328,14 +393,31 @@ def build_context_pack(
     }
     _record_context_quality_event(task, task_type, agent, project_path, scope, quality, type_weights)
     used_id_set = set(used_ids)
+    used_record_map = {r["id"]: r for r in records if r["id"] in used_id_set}
+    # records: slim view of injected records only (no content field to avoid bloat)
+    slim_records = [
+        {
+            "id": r["id"],
+            "type": r["type"],
+            "title": r["title"],
+            "importance": r["importance"],
+            "scope": r["scope"],
+            "tags": r.get("tags", []),
+        }
+        for mid in used_ids
+        if (r := used_record_map.get(mid))
+    ]
     sections: list[dict[str, Any]] = []
     for group in groups_order:
         group_records = [r for r in grouped.get(group, []) if r["id"] in used_id_set]
         if group_records:
-            sections.append({"type": group, "records": group_records})
+            sections.append({"type": group, "records": [
+                {"id": r["id"], "title": r["title"], "importance": r["importance"]}
+                for r in group_records
+            ]})
     return {
         "context": text,
-        "records": records,
+        "records": slim_records,
         "used_ids": used_ids,
         "filtered_ids": filtered_ids,
         "warnings": warnings,
@@ -347,6 +429,7 @@ def build_context_pack(
             "used_count": len(used_ids),
             "filtered_count": len(filtered_ids),
             "fallback_used": fallback_used,
+            "vector_hits": len(vector_hits),
             "task_type": task_type,
             "type_weights": type_weights,
         },

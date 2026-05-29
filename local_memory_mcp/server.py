@@ -987,6 +987,13 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load_config()
         for warn in validate_config(cfg):
             logger.warning("config validation: %s", warn)
+        # Pre-initialize vector store singleton with config so build_context_pack
+        # picks up the correct Ollama URL / Qdrant path on first call.
+        try:
+            from local_memory_mcp.vector_store import get_vector_store
+            get_vector_store(cfg)
+        except Exception as _vs_err:
+            logger.warning("vector store init skipped: %s", _vs_err)
         configure_frontend(
             host=args.host,
             port=args.port,

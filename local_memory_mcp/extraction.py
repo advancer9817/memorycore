@@ -64,12 +64,19 @@ Rules:
 Output format:
 {
   "memory": [
-    {"id": "0", "text": "...", "linked_memory_ids": ["<existing-uuid>"]},
-    {"id": "1", "text": "..."}
+    {"id": "0", "text": "...", "importance": 0.7, "linked_memory_ids": ["<existing-uuid>"]},
+    {"id": "1", "text": "...", "importance": 0.4}
   ]
 }
 linked_memory_ids is optional — include only when the new fact clearly relates to
 an existing memory (same entity, update, contradiction, continuation).
+
+importance is a float 0.0–1.0 rating how durable and reusable this fact is:
+  0.8–1.0: identity, long-term preferences, decisions, environment facts
+  0.5–0.7: project context, tools, workflows, plans
+  0.2–0.4: ephemeral context, transient debugging details, one-off mentions
+  0.0–0.1: greetings, filler, chat noise — DO NOT extract these
+Only extract facts with importance >= 0.3. Skip trivial or transient information.
 """
 
 
@@ -152,6 +159,7 @@ class ExtractedFact:
     text: str
     linked_memory_ids: list[str] = field(default_factory=list)
     raw_id: str = ""          # sequential id from LLM response ("0", "1", ...)
+    importance: float = 0.5   # LLM-assigned importance 0.0–1.0
 
 
 # ---------------------------------------------------------------------------
@@ -326,10 +334,18 @@ def _parse_response(raw: str) -> list[ExtractedFact]:
             linked = item.get("linked_memory_ids", [])
             if isinstance(linked, str):
                 linked = [linked]
+            imp = item.get("importance", 0.5)
+            try:
+                imp = max(0.0, min(1.0, float(imp)))
+            except (TypeError, ValueError):
+                imp = 0.5
+            if imp < 0.3:
+                continue
             facts.append(ExtractedFact(
                 text=text,
                 linked_memory_ids=[str(x) for x in linked if x],
                 raw_id=str(item.get("id", "")),
+                importance=imp,
             ))
 
     return facts
