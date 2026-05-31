@@ -17,6 +17,16 @@ from local_memory_mcp.storage.db import _managed_query, managed_conn
 logger = logging.getLogger(__name__)
 
 _GREETINGS = {"hi", "hello", "hey", "你好", "嗯", "好", "ok", "okay", "yes", "no"}
+_VECTOR_SEARCH_THRESHOLD = 0.35
+_MIN_CONTEXT_RELEVANCE_SCORE = 0.22
+_MIN_VECTOR_ONLY_RELEVANCE_SCORE = 0.45
+_MIN_KEYWORD_LEXICAL_RELEVANCE_SCORE = 0.08
+_STOP_TERMS = {
+    "a", "an", "and", "are", "as", "at", "be", "for", "from", "how", "i", "in",
+    "is", "it", "of", "on", "or", "that", "the", "this", "to", "with", "you",
+    "帮我", "一下", "这个", "那个", "当前", "进行", "实现", "问题",
+}
+_CJK_STOP_CHARS = set("的一是在了和与及或把给让后前中上下来去也都就很")
 
 _TASK_TYPE_WEIGHTS: dict[str, dict[str, float]] = {
     "feedback": {"feedback": 1.5, "user_profile": 1.2, "project_memory": 0.9},
@@ -41,6 +51,52 @@ def _type_weights(task_type: str) -> dict[str, float]:
     weights = {"project_memory": 1.0, "feedback": 1.0, "user_profile": 1.0, "decision": 1.0, "timeline_event": 1.0}
     weights.update(_TASK_TYPE_WEIGHTS.get(task_type, {}))
     return weights
+
+
+def _query_terms(text: str) -> list[str]:
+    """Extract relevance terms for lightweight prompt/record lexical scoring."""
+    lowered = text.lower()
+    terms: list[str] = []
+    seen: set[str] = set()
+
+    def add(term: str) -> None:
+        term = term.strip().lower()
+        if not term or term in seen or term in _STOP_TERMS:
+            return
+        if len(term) <= 1 and not ("\u4e00" <= term <= "\u9fff"):
+            return
+        seen.add(term)
+        terms.append(term)
+
+    for term in re.findall(r"[a-z0-9_][a-z0-9_.+-]*", lowered):
+        add(term)
+
+    for span in re.findall(r"[\u4e00-\u9fff]+", lowered):
+        if 2 <= len(span) <= 8:
+            add(span)
+        for width in (3, 2):
+            for idx in range(0, max(len(span) - width + 1, 0)):
+                gram = span[idx:idx + width]
+                if any(char in _CJK_STOP_CHARS for char in gram):
+                    continue
+                add(gram)
+
+    return terms[:24]
+
+
+def _lexical_relevance(task: str, record: dict[str, Any]) -> float:
+    terms = _query_terms(task)
+    if not terms:
+        return 0.0
+    title = str(record.get("title") or "").lower()
+    content = str(record.get("content") or "").lower()
+    tags = " ".join(str(t).lower() for t in record.get("tags", []))
+    haystack = f"{title} {content} {tags}"
+    matched = sum(1 for term in terms if term in haystack)
+    title_matched = sum(1 for term in terms if term in title)
+    phrase = task.strip().lower()
+    phrase_bonus = 0.15 if len(phrase) >= 4 and phrase in haystack else 0.0
+    return min(1.0, (matched / len(terms)) * 0.75 + (title_matched / len(terms)) * 0.20 + phrase_bonus)
 
 
 def _record_context_quality_event(
@@ -113,6 +169,76 @@ def get_context_quality_stats(limit: int = 500) -> dict[str, Any]:
 
 def _is_greeting(task: str) -> bool:
     return task.strip().lower() in _GREETINGS
+
+
+def _fallback_candidate_count(scope: str = "", project_path: str = "", limit: int = 8) -> int:
+    clauses = ["status = 'active'", "(valid_until IS NULL OR valid_until > ?)"]
+    params: list[Any] = [now()]
+    if scope:
+        clauses.append("(scope = ? OR scope = 'global')")
+        params.append(scope)
+    if project_path:
+        clauses.append("(project_path = ? OR project_path = '')")
+        params.append(project_path)
+    params.append(max(1, min(int(limit), 100)))
+    with managed_conn() as conn:
+        rows = conn.execute(
+            f"SELECT id FROM memories WHERE {' AND '.join(clauses)} LIMIT ?",
+            params,
+        ).fetchall()
+    return len(rows)
+
+
+def _keyword_scan_records(
+    task: str,
+    scope: str = "",
+    project_path: str = "",
+    limit: int = 40,
+) -> list[dict[str, Any]]:
+    """Context-only relaxed recall when strict FTS has no hits.
+
+    This avoids falling back to unrelated high-importance memories while still
+    recovering relevant rows when FTS5 is missing legacy backfill or a long
+    prompt contains extra terms that make the AND query too strict.
+    """
+    terms = _query_terms(task)
+    if not terms:
+        return []
+    clauses = ["status = 'active'", "(valid_until IS NULL OR valid_until > ?)"]
+    params: list[Any] = [now()]
+    if scope:
+        clauses.append("(scope = ? OR scope = 'global')")
+        params.append(scope)
+    if project_path:
+        clauses.append("(project_path = ? OR project_path = '')")
+        params.append(project_path)
+    term_clauses: list[str] = []
+    for term in terms[:8]:
+        term_clauses.append(
+            "(lower(title) LIKE ? OR lower(content) LIKE ? OR lower(tags_json) LIKE ?)"
+        )
+        like = f"%{term}%"
+        params.extend([like, like, like])
+    if term_clauses:
+        clauses.append("(" + " OR ".join(term_clauses) + ")")
+    params.append(max(1, min(int(limit), 100)))
+    with managed_conn() as conn:
+        rows = conn.execute(
+            f"""SELECT * FROM memories
+                WHERE {' AND '.join(clauses)}
+                ORDER BY importance DESC, effectiveness_score DESC, feedback_score DESC, updated_at DESC
+                LIMIT ?""",
+            params,
+        ).fetchall()
+    records = [row_to_dict(row) for row in rows]
+    matched = [
+        record for record in records
+        if _lexical_relevance(task, record) >= _MIN_KEYWORD_LEXICAL_RELEVANCE_SCORE
+    ]
+    matched.sort(key=lambda record: _lexical_relevance(task, record), reverse=True)
+    for record in matched:
+        record["_retrieval_sources"] = ["keyword"]
+    return matched[:limit]
 
 
 def search_memory_records(
@@ -243,7 +369,11 @@ def get_active_warnings(
     return warnings[:max_warnings]
 
 
-def _vector_search_ids(task: str, top_k: int = 20, score_threshold: float = 0.25) -> list[tuple[str, float]]:
+def _vector_search_ids(
+    task: str,
+    top_k: int = 20,
+    score_threshold: float = _VECTOR_SEARCH_THRESHOLD,
+) -> list[tuple[str, float]]:
     """Return [(id, score)] from Qdrant semantic search. Empty list if unavailable."""
     try:
         from local_memory_mcp.vector_store import get_vector_store, _store
@@ -273,7 +403,13 @@ def build_context_pack(
 
     # --- Dual retrieval: FTS5 + Qdrant vector search ---
     fts_records = search_memory_records(task, scope=scope, project_path=project_path, status="active", limit=40)
+    if not fts_records:
+        fts_records = _keyword_scan_records(task, scope=scope, project_path=project_path, limit=40)
     vector_hits: dict[str, float] = dict(_vector_search_ids(task, top_k=20))
+    for record in fts_records:
+        record["_retrieval_sources"] = record.get("_retrieval_sources") or ["fts"]
+        if record["id"] in vector_hits:
+            record["_retrieval_sources"].append("vector")
 
     # Merge: start with FTS results, append any vector-only hits fetched from DB
     seen_ids: set[str] = {r["id"] for r in fts_records}
@@ -282,39 +418,73 @@ def build_context_pack(
     if extra_ids:
         with managed_conn() as conn:
             placeholders = ",".join("?" for _ in extra_ids)
+            extra_clauses = [
+                f"id IN ({placeholders})",
+                "status = 'active'",
+                "(valid_until IS NULL OR valid_until > ?)",
+            ]
+            extra_params: list[Any] = [*extra_ids, now()]
+            if scope:
+                extra_clauses.append("(scope = ? OR scope = 'global')")
+                extra_params.append(scope)
+            if project_path:
+                extra_clauses.append("(project_path = ? OR project_path = '')")
+                extra_params.append(project_path)
             rows = conn.execute(
-                f"SELECT * FROM memories WHERE id IN ({placeholders}) AND status = 'active'",
-                extra_ids,
+                f"SELECT * FROM memories WHERE {' AND '.join(extra_clauses)}",
+                extra_params,
             ).fetchall()
             extra_records = [row_to_dict(r) for r in rows]
+            for record in extra_records:
+                record["_retrieval_sources"] = ["vector"]
 
     records = fts_records + extra_records
 
-    # Unified re-ranking: vector_score * 0.45 + importance * 0.30 + effectiveness * 0.15 + feedback * 0.10
-    # Records not in Qdrant results get vector_score=0
+    # Unified re-ranking.  Relevance evidence dominates; type weighting is a
+    # small multiplier so generic high-priority memories cannot outrank clearly
+    # task-matching records.
     def _rank_score(r: dict[str, Any]) -> float:
         vscore = vector_hits.get(r["id"], 0.0)
-        return (
-            vscore * 0.45
-            + float(r.get("importance") or 0) * 0.30
-            + float(r.get("effectiveness_score") or 0) * 0.15
-            + float(r.get("feedback_score") or 0) * 0.10
+        lexical = _lexical_relevance(task, r)
+        sources = r.get("_retrieval_sources", [])
+        source_bonus = 0.08 if ("fts" in sources or "keyword" in sources) else 0.0
+        feedback = max(-1.0, min(1.0, float(r.get("feedback_score") or 0)))
+        return max(
+            0.0,
+            vscore * 0.42
+            + lexical * 0.36
+            + source_bonus
+            + float(r.get("importance") or 0) * 0.07
+            + float(r.get("effectiveness_score") or 0) * 0.05
+            + feedback * 0.02
         )
 
     fallback_used = False
+    fallback_candidates = 0
     if not records and len(task.strip()) > 10 and not _is_greeting(task):
-        records = search_memory_records("", scope=scope, project_path=project_path, status="active", limit=8)
-        fallback_used = bool(records)
+        fallback_candidates = _fallback_candidate_count(scope=scope, project_path=project_path, limit=8)
+        fallback_used = bool(fallback_candidates)
+        records = []
     task_type = _classify_task(task)
     type_weights = _type_weights(task_type)
-    records = sorted(
-        records,
-        key=lambda r: (
-            float(type_weights.get(r.get("type"), 1.0)),
-            _rank_score(r),
+    scored_records: list[tuple[dict[str, Any], float]] = []
+    for record in records:
+        score = _rank_score(record)
+        sources = record.get("_retrieval_sources", [])
+        lexical = _lexical_relevance(task, record)
+        if "keyword" in sources and lexical < _MIN_KEYWORD_LEXICAL_RELEVANCE_SCORE:
+            continue
+        min_score = _MIN_VECTOR_ONLY_RELEVANCE_SCORE if sources == ["vector"] else _MIN_CONTEXT_RELEVANCE_SCORE
+        if score >= min_score:
+            scored_records.append((record, score))
+    records = [record for record, _ in sorted(
+        scored_records,
+        key=lambda item: (
+            item[1] * float(type_weights.get(item[0].get("type"), 1.0)),
+            item[1],
         ),
         reverse=True,
-    )
+    )]
     groups_order = [
         "skill_candidate", "user_profile", "environment_fact", "agent_architecture",
         "project_memory", "decision", "timeline_event", "episodic_memory", "feedback",
@@ -429,7 +599,11 @@ def build_context_pack(
             "used_count": len(used_ids),
             "filtered_count": len(filtered_ids),
             "fallback_used": fallback_used,
+            "fallback_candidates": fallback_candidates,
             "vector_hits": len(vector_hits),
+            "min_relevance_score": _MIN_CONTEXT_RELEVANCE_SCORE,
+            "min_vector_only_relevance_score": _MIN_VECTOR_ONLY_RELEVANCE_SCORE,
+            "min_keyword_lexical_relevance_score": _MIN_KEYWORD_LEXICAL_RELEVANCE_SCORE,
             "task_type": task_type,
             "type_weights": type_weights,
         },

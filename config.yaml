@@ -10,6 +10,8 @@ qdrant:
 embedding:
   provider: ollama
   model: nomic-embed-text
+  fallback_provider: sentence-transformers
+  sentence_transformers_model: sentence-transformers/all-mpnet-base-v2
   dim: 768
   ollama_url: http://127.0.0.1:11434
   timeout: 30

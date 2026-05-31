@@ -108,6 +108,7 @@ def memory_import(
     inserted: dict[str, int] = {}
 
     tables_in_payload = [t for t in _TRANSFER_TABLES if t in data]
+    ignored_tables = sorted(t for t in data.keys() if t not in _TRANSFER_TABLES)
 
     with managed_conn() as conn:
         for table in tables_in_payload:
@@ -168,11 +169,13 @@ def memory_import(
             "inserted": inserted,
             "conflict_policy": conflict_policy,
             "newer_wins": newer_wins,
+            "ignored_tables": ignored_tables,
         })
     return {
         "dry_run": dry_run,
         "applied": not dry_run,
         "conflict_policy": conflict_policy,
+        "ignored_tables": ignored_tables,
         "conflicts": conflicts,
         "newer_wins": newer_wins,
         "planned": planned,

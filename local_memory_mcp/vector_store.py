@@ -3,7 +3,8 @@
 Single vector backend for both semantic search and dedup comparison.
 No sqlite-vec, no Mem0 Qdrant instance — one store, one source of truth.
 
-Embeddings via Ollama nomic-embed-text (httpx, no ollama SDK).
+Embeddings via Ollama nomic-embed-text (httpx, no ollama SDK), with
+sentence-transformers and hashing fallbacks.
 
 Public API
 ----------
@@ -34,15 +35,19 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class EmbedConfig:
-    provider: str = "ollama"          # "ollama" | "hashing" (fallback)
+    provider: str = "ollama"          # "ollama" | "sentence-transformers" | "hashing"
     model: str = "nomic-embed-text"
     ollama_url: str = "http://127.0.0.1:11434"
+    fallback_provider: str = "sentence-transformers"
+    sentence_transformers_model: str = "sentence-transformers/all-mpnet-base-v2"
     dim: int = 768
     timeout: int = 30
 
     def __post_init__(self):
         # Allow override via env
-        if os.environ.get("OLLAMA_HOST"):
+        if os.environ.get("LOCAL_MEMORY_OLLAMA_URL"):
+            self.ollama_url = os.environ["LOCAL_MEMORY_OLLAMA_URL"]
+        elif os.environ.get("OLLAMA_HOST"):
             host = os.environ["OLLAMA_HOST"]
             if not host.startswith("http"):
                 host = f"http://{host}"
@@ -51,13 +56,25 @@ class EmbedConfig:
 
 def embed_config_from_dict(cfg: dict[str, Any]) -> EmbedConfig:
     emb = cfg.get("embedding", {})
+    dim = os.environ.get("LOCAL_MEMORY_EMBEDDING_DIM", emb.get("dim", 768))
+    timeout = os.environ.get("LOCAL_MEMORY_OLLAMA_TIMEOUT", emb.get("timeout", 30))
     return EmbedConfig(
-        provider=emb.get("provider", "ollama"),
-        model=emb.get("model", "nomic-embed-text"),
-        ollama_url=emb.get("ollama_url",
-                   os.environ.get("OLLAMA_HOST", "http://127.0.0.1:12434")),
-        dim=int(emb.get("dim", 768)),
-        timeout=int(emb.get("timeout", 30)),
+        provider=os.environ.get("LOCAL_MEMORY_EMBEDDING_PROVIDER", emb.get("provider", "ollama")),
+        model=os.environ.get("LOCAL_MEMORY_EMBEDDING_MODEL", emb.get("model", "nomic-embed-text")),
+        ollama_url=os.environ.get(
+            "LOCAL_MEMORY_OLLAMA_URL",
+            emb.get("ollama_url", os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")),
+        ),
+        fallback_provider=os.environ.get(
+            "LOCAL_MEMORY_EMBEDDING_FALLBACK_PROVIDER",
+            emb.get("fallback_provider", "sentence-transformers"),
+        ),
+        sentence_transformers_model=os.environ.get(
+            "LOCAL_MEMORY_SENTENCE_TRANSFORMERS_MODEL",
+            emb.get("sentence_transformers_model", "sentence-transformers/all-mpnet-base-v2"),
+        ),
+        dim=int(dim),
+        timeout=int(timeout),
     )
 
 
@@ -66,16 +83,47 @@ def embed_config_from_dict(cfg: dict[str, Any]) -> EmbedConfig:
 # ---------------------------------------------------------------------------
 
 def embed_text(text: str, config: EmbedConfig | None = None) -> list[float]:
-    """Return a float vector for text.  Falls back to hashing if Ollama unavailable."""
+    """Return a float vector for text.
+
+    Default chain:
+    Ollama -> sentence-transformers -> deterministic hashing.
+    """
     if config is None:
         config = EmbedConfig()
-    if config.provider == "hashing":
+    provider = _normalize_provider(config.provider)
+    if provider == "hashing":
+        return _embed_hashing(text, config.dim)
+    if provider == "sentence-transformers":
+        try:
+            return _embed_sentence_transformers(text, config)
+        except Exception as exc:
+            logger.warning("embed_text: sentence-transformers failed (%s), using hashing fallback", exc)
+            return _embed_hashing(text, config.dim)
+    if provider != "ollama":
+        logger.warning("embed_text: unknown provider %r, using hashing fallback", config.provider)
         return _embed_hashing(text, config.dim)
     try:
         return _embed_ollama(text, config)
     except Exception as exc:
-        logger.warning("embed_text: Ollama failed (%s), using hashing fallback", exc)
-        return _embed_hashing(text, config.dim)
+        logger.warning("embed_text: Ollama failed (%s), using %s fallback", exc, config.fallback_provider)
+        return _embed_fallback(text, config)
+
+
+def _normalize_provider(provider: str) -> str:
+    value = str(provider or "").strip().lower().replace("_", "-")
+    if value in {"sentence-transformer", "sentence-transformers", "st"}:
+        return "sentence-transformers"
+    return value
+
+
+def _embed_fallback(text: str, config: EmbedConfig) -> list[float]:
+    fallback = _normalize_provider(config.fallback_provider)
+    if fallback == "sentence-transformers":
+        try:
+            return _embed_sentence_transformers(text, config)
+        except Exception as exc:
+            logger.warning("embed_text: sentence-transformers fallback failed (%s), using hashing fallback", exc)
+    return _embed_hashing(text, config.dim)
 
 
 def _embed_ollama(text: str, config: EmbedConfig) -> list[float]:
@@ -101,7 +149,35 @@ def _embed_ollama(text: str, config: EmbedConfig) -> list[float]:
         vec = data["embeddings"][0]
     else:
         vec = data["embedding"]
-    return [float(x) for x in vec]
+    return _fit_dim([float(x) for x in vec], config.dim)
+
+
+_ST_MODELS: dict[str, Any] = {}
+
+
+def _embed_sentence_transformers(text: str, config: EmbedConfig) -> list[float]:
+    """Embed text with sentence-transformers when the optional dependency exists."""
+    from sentence_transformers import SentenceTransformer
+
+    model_name = config.sentence_transformers_model
+    model = _ST_MODELS.get(model_name)
+    if model is None:
+        model = SentenceTransformer(model_name)
+        _ST_MODELS[model_name] = model
+    vector = model.encode(text, normalize_embeddings=True)
+    if hasattr(vector, "tolist"):
+        vector = vector.tolist()
+    return _fit_dim([float(x) for x in vector], config.dim)
+
+
+def _fit_dim(vec: list[float], dim: int) -> list[float]:
+    """Coerce embedding length to the configured Qdrant collection dimension."""
+    if len(vec) > dim:
+        vec = vec[:dim]
+    elif len(vec) < dim:
+        vec = vec + [0.0] * (dim - len(vec))
+    norm = sum(v * v for v in vec) ** 0.5 or 1.0
+    return [v / norm for v in vec]
 
 
 def _embed_hashing(text: str, dim: int = 768) -> list[float]:
@@ -338,6 +414,8 @@ class VectorStore:
             "dim": self.config.dim,
             "embed_provider": self.config.embed.provider,
             "embed_model": self.config.embed.model,
+            "embed_fallback_provider": self.config.embed.fallback_provider,
+            "sentence_transformers_model": self.config.embed.sentence_transformers_model,
             "ollama_url": self.config.embed.ollama_url,
             "count": self.count(),
         }

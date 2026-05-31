@@ -37,6 +37,7 @@ def _spawn_background(agent: str, force: bool) -> None:
     except Exception:
         payload = ""
     if payload:
+        env["LMMCP_INGEST_HOOK_PAYLOAD"] = payload[:20000]
         env["LMMCP_HERMES_HOOK_PAYLOAD"] = payload[:20000]
     try:
         proc = subprocess.Popen(
@@ -137,8 +138,64 @@ def _text_from_blocks(content: object) -> str:
     return " ".join(
         block.get("text", "")
         for block in content
-        if isinstance(block, dict) and block.get("type") == "text"
+        if isinstance(block, dict) and (block.get("type") in (None, "text")) and block.get("text")
     )
+
+
+def _parse_json_text(value: object) -> dict:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return {}
+    try:
+        parsed = json.loads(value)
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _hook_payload() -> dict:
+    raw = os.environ.get("LMMCP_INGEST_HOOK_PAYLOAD") or os.environ.get("LMMCP_HERMES_HOOK_PAYLOAD")
+    if not raw:
+        try:
+            raw = sys.stdin.read()
+        except Exception:
+            raw = ""
+    return _parse_json_text(raw or "{}")
+
+
+def _payload_session_id(payload: dict) -> str:
+    candidates = [
+        payload.get("session_id"),
+        payload.get("sessionID"),
+        payload.get("sessionId"),
+        payload.get("id"),
+    ]
+    session = payload.get("session")
+    if isinstance(session, dict):
+        candidates.extend([session.get("id"), session.get("session_id"), session.get("sessionID")])
+    for value in candidates:
+        if value:
+            return str(value)
+    return ""
+
+
+def _payload_transcript_path(payload: dict) -> Path | None:
+    candidates = [
+        payload.get("transcript_path"),
+        payload.get("transcriptPath"),
+        payload.get("transcript"),
+    ]
+    session = payload.get("session")
+    if isinstance(session, dict):
+        candidates.extend([session.get("transcript_path"), session.get("transcriptPath")])
+    for value in candidates:
+        if not value:
+            continue
+        path = Path(str(value)).expanduser()
+        if path.is_file():
+            return path
+    return None
 
 
 def _extract_claude(path: Path) -> list[dict[str, str]]:
@@ -254,6 +311,172 @@ def _extract_hermes(session_id: str) -> list[dict[str, str]]:
     return _extract_hermes_from_state_db(session_id)
 
 
+def _extract_jsonl_messages(path: Path) -> list[dict[str, str]]:
+    messages: list[dict[str, str]] = []
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines()[-300:]:
+        item = _parse_json_text(line)
+        if not item:
+            continue
+        role = str(item.get("role") or item.get("author") or item.get("speaker") or "")
+        if role not in ("user", "assistant", "model"):
+            continue
+        content = item.get("content", item.get("text", item.get("message", "")))
+        text = _text_from_blocks(content).strip() if isinstance(content, list) else str(content or "").strip()
+        if text:
+            messages.append({"role": "assistant" if role == "model" else role, "content": text[:800]})
+    return messages[-40:]
+
+
+def _message_text_from_obj(item: dict) -> str:
+    content = (
+        item.get("content")
+        or item.get("text")
+        or item.get("message")
+        or item.get("parts")
+        or item.get("value")
+        or ""
+    )
+    if isinstance(content, list):
+        return _text_from_blocks(content).strip()
+    if isinstance(content, dict):
+        nested = content.get("text") or content.get("content") or content.get("message") or ""
+        return str(nested or "").strip()
+    return str(content or "").strip()
+
+
+def _messages_from_json_obj(obj: object) -> list[dict[str, str]]:
+    raw_items: list[object]
+    if isinstance(obj, list):
+        raw_items = obj
+    elif isinstance(obj, dict):
+        for key in ("messages", "history", "turns", "entries"):
+            value = obj.get(key)
+            if isinstance(value, list):
+                raw_items = value
+                break
+        else:
+            raw_items = [obj]
+    else:
+        raw_items = []
+
+    messages: list[dict[str, str]] = []
+    for raw in raw_items[-300:]:
+        item = raw if isinstance(raw, dict) else _parse_json_text(raw)
+        if not isinstance(item, dict):
+            continue
+        nested = item.get("message")
+        if isinstance(nested, dict):
+            merged = dict(nested)
+            merged.update({k: v for k, v in item.items() if k not in merged})
+            item = merged
+        role = str(
+            item.get("role")
+            or item.get("author")
+            or item.get("speaker")
+            or item.get("type")
+            or ""
+        )
+        if role not in ("user", "assistant", "model"):
+            continue
+        text = _message_text_from_obj(item)
+        if text:
+            messages.append({"role": "assistant" if role == "model" else role, "content": text[:800]})
+    return messages[-40:]
+
+
+def _extract_gemini(path: Path) -> list[dict[str, str]]:
+    raw = path.read_text(encoding="utf-8", errors="ignore")
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return _extract_jsonl_messages(path)
+    return _messages_from_json_obj(parsed)
+
+
+def _find_gemini_transcript(payload: dict) -> Path | None:
+    payload_path = _payload_transcript_path(payload)
+    if payload_path:
+        return payload_path
+    return _find_transcript(Path.home() / ".gemini", "GEMINI_SESSION_FILE", "**/*.jsonl")
+
+
+
+def _opencode_data_dir() -> Path:
+    return Path(os.environ.get("OPENCODE_DATA_DIR", str(Path.home() / ".local" / "share" / "opencode")))
+
+
+def _extract_opencode_part_text(data: dict) -> str:
+    part_type = data.get("type")
+    if part_type != "text":
+        return ""
+    return str(data.get("text", "")).strip()
+
+
+def _extract_opencode_from_db(session_id: str = "") -> list[dict[str, str]]:
+    db_path = Path(os.environ.get("OPENCODE_DB", str(_opencode_data_dir() / "opencode.db")))
+    if not db_path.exists():
+        _log(f"opencode_db_missing path={db_path}")
+        return []
+
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
+        conn.row_factory = sqlite3.Row
+        if not session_id:
+            row = conn.execute("SELECT id FROM session ORDER BY time_updated DESC LIMIT 1").fetchone()
+            session_id = str(row["id"]) if row else ""
+        if not session_id:
+            _log("opencode_session_missing")
+            return []
+        rows = conn.execute(
+            """
+            SELECT m.id AS message_id, m.data AS message_data, p.data AS part_data
+            FROM message m
+            LEFT JOIN part p ON p.message_id = m.id
+            WHERE m.session_id = ?
+            ORDER BY m.time_created ASC, p.time_created ASC
+            """,
+            (session_id,),
+        ).fetchall()
+    except Exception as exc:
+        _log(f"opencode_db_error type={type(exc).__name__}")
+        return []
+    finally:
+        try:
+            conn.close()  # type: ignore[name-defined]
+        except Exception:
+            pass
+
+    grouped: dict[str, dict[str, object]] = {}
+    order: list[str] = []
+    for row in rows:
+        message_id = str(row["message_id"])
+        message = grouped.get(message_id)
+        if message is None:
+            info = _parse_json_text(row["message_data"])
+            message = {"role": str(info.get("role", "")), "parts": []}
+            grouped[message_id] = message
+            order.append(message_id)
+        part_text = _extract_opencode_part_text(_parse_json_text(row["part_data"]))
+        if part_text:
+            parts = message["parts"]
+            if isinstance(parts, list):
+                parts.append(part_text)
+
+    messages: list[dict[str, str]] = []
+    for message_id in order:
+        message = grouped[message_id]
+        role = str(message.get("role", ""))
+        if role not in ("user", "assistant"):
+            continue
+        parts = message.get("parts", [])
+        text = " ".join(str(part) for part in parts if str(part).strip()).strip()
+        if text:
+            messages.append({"role": role, "content": text[:800]})
+    if messages:
+        _log(f"opencode_transcript session={session_id} messages={len(messages)}")
+    return messages[-40:]
+
+
 def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:
     if not messages:
         _log(f"skip_empty_messages agent={agent_id}")
@@ -299,12 +522,7 @@ def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:
 
 def _messages_for_agent(agent: str) -> list[dict[str, str]]:
     if agent == "hermes":
-        try:
-            payload = os.environ.get("LMMCP_HERMES_HOOK_PAYLOAD") or sys.stdin.read() or "{}"
-            data = json.loads(payload)
-        except Exception:
-            return []
-        session_id = str(data.get("session_id", "")) if isinstance(data, dict) else ""
+        session_id = _payload_session_id(_hook_payload())
         return _extract_hermes(session_id) if session_id else []
 
     if agent == "codex":
@@ -319,6 +537,19 @@ def _messages_for_agent(agent: str) -> list[dict[str, str]]:
     if agent == "claude":
         path = _find_transcript(Path.home() / ".claude" / "projects", "CLAUDE_SESSION_FILE", "*/*.jsonl")
         return _extract_claude(path) if path else []
+
+    if agent == "opencode":
+        session_id = _payload_session_id(_hook_payload())
+        return _extract_opencode_from_db(session_id)
+
+    if agent == "gemini":
+        path = _find_gemini_transcript(_hook_payload())
+        if path:
+            messages = _extract_gemini(path)
+            _log(f"gemini_transcript path={path} messages={len(messages)}")
+            return messages
+        _log("gemini_transcript_missing")
+        return []
 
     return []
 

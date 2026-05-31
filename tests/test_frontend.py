@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import sys
+import types
+from types import SimpleNamespace
+
 from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.testclient import TestClient
@@ -103,3 +107,41 @@ def test_frontend_remote_bind_requires_token_or_explicit_insecure():
 
     validate_frontend_bind("0.0.0.0", auth_token="secret")
     validate_frontend_bind("0.0.0.0", allow_insecure_remote=True)
+
+
+def test_frontend_vector_search_passes_score_threshold_as_keyword(monkeypatch):
+    calls = []
+
+    class FakeVectorStore:
+        def search(self, text, top_k=10, filters=None, score_threshold=0.0):
+            calls.append({
+                "text": text,
+                "top_k": top_k,
+                "filters": filters,
+                "score_threshold": score_threshold,
+            })
+            return [
+                SimpleNamespace(
+                    id="vector-hit",
+                    score=0.81234,
+                    text=text,
+                    payload={"source": "fake"},
+                )
+            ]
+
+    fake_module = types.ModuleType("local_memory_mcp.vector_store")
+    fake_store = FakeVectorStore()
+    fake_module.get_vector_store = lambda cfg: fake_store
+    monkeypatch.setitem(sys.modules, "local_memory_mcp.vector_store", fake_module)
+
+    with _client() as client:
+        response = client.get("/api/vector/search?query=semantic&top_k=3&score_threshold=0.72")
+
+    assert response.status_code == 200
+    assert response.json()["data"][0]["score"] == 0.8123
+    assert calls == [{
+        "text": "semantic",
+        "top_k": 3,
+        "filters": None,
+        "score_threshold": 0.72,
+    }]

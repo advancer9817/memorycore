@@ -42,6 +42,19 @@ class TestEmbedConfig:
         assert cfg.provider == "hashing"
         assert cfg.dim == 384
 
+    def test_from_dict_env_overrides(self, monkeypatch):
+        monkeypatch.setenv("LOCAL_MEMORY_EMBEDDING_PROVIDER", "hashing")
+        monkeypatch.setenv("LOCAL_MEMORY_EMBEDDING_DIM", "128")
+        monkeypatch.setenv("LOCAL_MEMORY_EMBEDDING_FALLBACK_PROVIDER", "hashing")
+        monkeypatch.setenv("LOCAL_MEMORY_SENTENCE_TRANSFORMERS_MODEL", "sentence-transformers/all-mpnet-base-v2")
+
+        cfg = embed_config_from_dict({"embedding": {"provider": "ollama", "dim": 768}})
+
+        assert cfg.provider == "hashing"
+        assert cfg.dim == 128
+        assert cfg.fallback_provider == "hashing"
+        assert cfg.sentence_transformers_model == "sentence-transformers/all-mpnet-base-v2"
+
 
 # ---------------------------------------------------------------------------
 # Hashing embed tests
@@ -80,10 +93,27 @@ class TestEmbedText:
         assert len(vec) == 64
 
     @patch("local_memory_mcp.vector_store._embed_ollama", side_effect=Exception("connection refused"))
-    def test_ollama_failure_falls_back_to_hashing(self, mock_ollama):
-        cfg = EmbedConfig(provider="ollama", dim=64)
+    def test_ollama_failure_can_fall_back_to_hashing(self, mock_ollama):
+        cfg = EmbedConfig(provider="ollama", fallback_provider="hashing", dim=64)
         vec = embed_text("hello", cfg)
         assert len(vec) == 64  # hashing fallback
+
+    @patch("local_memory_mcp.vector_store._embed_sentence_transformers", return_value=[1.0] + [0.0] * 63)
+    @patch("local_memory_mcp.vector_store._embed_ollama", side_effect=Exception("connection refused"))
+    def test_ollama_failure_prefers_sentence_transformers(self, mock_ollama, mock_st):
+        cfg = EmbedConfig(provider="ollama", fallback_provider="sentence-transformers", dim=64)
+        vec = embed_text("hello", cfg)
+        assert len(vec) == 64
+        assert vec[0] == 1.0
+        mock_st.assert_called_once()
+
+    @patch("local_memory_mcp.vector_store._embed_sentence_transformers", side_effect=ImportError("missing"))
+    @patch("local_memory_mcp.vector_store._embed_ollama", side_effect=Exception("connection refused"))
+    def test_sentence_transformers_failure_falls_back_to_hashing(self, mock_ollama, mock_st):
+        cfg = EmbedConfig(provider="ollama", fallback_provider="sentence-transformers", dim=64)
+        vec = embed_text("hello", cfg)
+        assert len(vec) == 64
+        mock_st.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

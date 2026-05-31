@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from local_memory_mcp.storage import add_memory_record, managed_conn, memory_backup, memory_export, memory_import
+from local_memory_mcp.storage import (
+    add_memory_record,
+    get_audit_log,
+    log_audit_event,
+    managed_conn,
+    memory_backup,
+    memory_export,
+    memory_import,
+)
 
 
 def test_memory_export_contains_schema_and_core_tables():
@@ -69,6 +78,19 @@ def test_memory_import_applies_missing_rows():
     with managed_conn() as conn:
         row = conn.execute("SELECT title FROM memories WHERE id='imported-1'").fetchone()
     assert row[0] == "Imported"
+
+
+def test_memory_import_reports_ignored_audit_events():
+    log_audit_event("test_audit_export", detail={"x": 1})
+    payload = memory_export(include_audit=True)
+
+    assert "audit_events" in payload["data"]
+    result = memory_import(payload, dry_run=False, conflict_policy="newer")
+
+    assert result["ignored_tables"] == ["audit_events"]
+    audit_rows = get_audit_log(event_type="memory_import", limit=1)
+    assert audit_rows
+    assert json.loads(audit_rows[0]["detail_json"])["ignored_tables"] == ["audit_events"]
 
 
 def test_memory_import_rejects_newer_schema():

@@ -256,7 +256,11 @@ async def _dispatch_api(request: Request, parts: list[str], query: dict[str, lis
         return get_vector_store(load_config()).status()
     if parts == ["vector", "search"] and method == "GET":
         from local_memory_mcp.vector_store import get_vector_store
-        results = get_vector_store(load_config()).search(_str_q(query, "query", _str_q(query, "q", "")), _int_q(query, "top_k", 10), float(_str_q(query, "score_threshold", "0")))
+        results = get_vector_store(load_config()).search(
+            _str_q(query, "query", _str_q(query, "q", "")),
+            top_k=_int_q(query, "top_k", 10),
+            score_threshold=float(_str_q(query, "score_threshold", "0") or 0),
+        )
         return [{"id": r.id, "score": round(r.score, 4), "text": r.text, "payload": r.payload} for r in results]
     if parts == ["vector", "rebuild"] and method == "POST":
         return memory_rebuild_vectors(body.get("dry_run", True), body.get("limit", 5000))

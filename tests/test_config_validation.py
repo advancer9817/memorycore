@@ -15,6 +15,18 @@ def test_invalid_embedding_provider():
     assert any("provider" in w for w in warns)
 
 
+def test_sentence_transformers_embedding_provider_is_valid():
+    cfg = {"embedding": {"provider": "sentence-transformers", "dim": 768, "timeout": 30}}
+    warns = validate_config(cfg)
+    assert not any("embedding.provider" in w for w in warns)
+
+
+def test_invalid_embedding_fallback_provider():
+    cfg = {"embedding": {"provider": "ollama", "fallback_provider": "ollama", "dim": 768, "timeout": 30}}
+    warns = validate_config(cfg)
+    assert any("fallback_provider" in w for w in warns)
+
+
 def test_invalid_dim():
     cfg = {"embedding": {"provider": "ollama", "dim": -1, "timeout": 30}}
     warns = validate_config(cfg)

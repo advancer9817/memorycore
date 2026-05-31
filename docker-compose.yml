@@ -3,25 +3,36 @@ services:
     build:
       context: .
       args:
-        INSTALL_VECTOR: "false"   # set to "true" to include qdrant-client
+        INSTALL_EXTRAS: "all"
     ports:
       - "8318:8318"
     volumes:
       - lmmcp_data:/data
     environment:
       LOCAL_MEMORY_DB: /data/memory.sqlite3
-      # LOCAL_MEMORY_CONFIG: /data/config.yaml
+      LOCAL_MEMORY_CONFIG: /data/config.yaml
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: agent_memory
+      LOCAL_MEMORY_EMBEDDING_PROVIDER: ${LOCAL_MEMORY_EMBEDDING_PROVIDER:-hashing}
+      LOCAL_MEMORY_EMBEDDING_FALLBACK_PROVIDER: ${LOCAL_MEMORY_EMBEDDING_FALLBACK_PROVIDER:-hashing}
+    depends_on:
+      - qdrant
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8318/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
     restart: unless-stopped
 
-  # Optional: uncomment to run a local Qdrant instance for vector search
-  # qdrant:
-  #   image: qdrant/qdrant:latest
-  #   ports:
-  #     - "6333:6333"
-  #   volumes:
-  #     - qdrant_data:/qdrant/storage
-  #   restart: unless-stopped
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
 
 volumes:
   lmmcp_data:
-  # qdrant_data:
+  qdrant_data:

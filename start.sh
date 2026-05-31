@@ -4,7 +4,7 @@
 # 适用场景：新设备 clone 仓库后第一次启动，或日常启动。
 # 执行步骤：
 #   1. 创建/复用 Python venv
-#   2. 安装/更新依赖
+#   2. 安装/更新完整依赖（含 extraction + Qdrant vector）
 #   3. 初始化 SQLite DB（幂等）
 #   4. 导入 memory-sync/memories.json（冲突策略 newer，有则导入无则跳过）
 #   4.5 配置 Agent hooks / 软注入规则（幂等）
@@ -49,6 +49,28 @@ PID_FILE="${LMMCP_PID_FILE:-/tmp/lmmcp.pid}"
 _log()  { echo "[start.sh] $*"; }
 _warn() { echo "[start.sh] WARNING: $*" >&2; }
 
+venv_needs_rebuild() {
+  local venv="$1"
+  local expected_python="$venv/bin/python"
+  if [[ ! -x "$expected_python" ]]; then
+    return 0
+  fi
+  if ! "$expected_python" -c 'import sys' >/dev/null 2>&1; then
+    _warn "Existing venv python is not runnable: $expected_python"
+    return 0
+  fi
+  local script first_line
+  for script in "$venv/bin/pip" "$venv/bin/pytest"; do
+    [[ -f "$script" ]] || continue
+    IFS= read -r first_line < "$script" || first_line=""
+    if [[ "$first_line" == "#!"*"/.venv/bin/python"* && "$first_line" != "#!$expected_python"* ]]; then
+      _warn "Detected venv path drift in $script: $first_line"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # ── 1. Python venv ─────────────────────────────────────────────────────────────
 if [[ -z "$PYTHON_BIN" ]]; then
   for candidate in python3.11 python3.12 python3.13 python3; do
@@ -61,7 +83,11 @@ fi
 [[ -n "$PYTHON_BIN" ]] || { echo "[start.sh] ERROR: Python 3.11+ not found" >&2; exit 1; }
 
 VENV="$SCRIPT_DIR/.venv"
-if [[ ! -x "$VENV/bin/python" ]]; then
+if venv_needs_rebuild "$VENV"; then
+  if [[ -d "$VENV" ]]; then
+    _log "Rebuilding venv because existing scripts point outside this checkout ..."
+    rm -rf "$VENV"
+  fi
   _log "Creating venv with $PYTHON_BIN ..."
   "$PYTHON_BIN" -m venv "$VENV"
 fi
@@ -69,7 +95,7 @@ PY="$VENV/bin/python"
 
 # ── 2. 依赖 ───────────────────────────────────────────────────────────────────
 _log "Installing/updating dependencies ..."
-"$PY" -m pip install -q -e ".[extraction]"
+"$PY" -m pip install -q -e ".[all]"
 
 # ── 3. 初始化 DB（幂等）──────────────────────────────────────────────────────
 _log "Initializing database ..."

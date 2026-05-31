@@ -1,4 +1,7 @@
 import json
+from dataclasses import dataclass, field
+import sys
+import types
 
 import local_memory_mcp as lm
 
@@ -29,13 +32,84 @@ def test_main_init_add_search_context_curator_and_html(tmp_path, capsys):
     summary = read_json(capsys)
     assert "duplicates" in summary
 
-    # semantic-status now returns a deprecation notice (sqlite-vec removed)
-    assert lm.main(["semantic-status"]) == 0
-    semantic = read_json(capsys)
-    assert "error" in semantic
-
     out = tmp_path / "cli-dashboard.html"
     assert lm.main(["html", str(out)]) == 0
     html_out = capsys.readouterr().out.strip()
     assert html_out == str(out)
     assert out.exists()
+
+
+def test_semantic_cli_uses_qdrant_vector_store(monkeypatch, capsys):
+    calls = []
+
+    @dataclass
+    class FakeHit:
+        id: str = "vec-1"
+        score: float = 0.87654
+        text: str = "semantic memory"
+        payload: dict = field(default_factory=lambda: {"status": "active"})
+
+    class FakeVectorStore:
+        def status(self):
+            return {"available": True, "collection": "agent_memory", "count": 7}
+
+        def search(self, text, top_k=10, filters=None, score_threshold=0.0):
+            calls.append({
+                "text": text,
+                "top_k": top_k,
+                "filters": filters,
+                "score_threshold": score_threshold,
+            })
+            return [FakeHit()]
+
+    fake_vs_mod = types.ModuleType("local_memory_mcp.vector_store")
+    fake_vs_mod.get_vector_store = lambda cfg=None: FakeVectorStore()
+    monkeypatch.setitem(sys.modules, "local_memory_mcp.vector_store", fake_vs_mod)
+
+    assert lm.main(["semantic-status"]) == 0
+    status = read_json(capsys)
+    assert status["available"] is True
+    assert status["count"] == 7
+
+    assert lm.main(["semantic-search", "semantic query", "--limit", "3", "--score-threshold", "0.42"]) == 0
+    results = read_json(capsys)
+    assert results == [
+        {
+            "id": "vec-1",
+            "score": 0.8765,
+            "text": "semantic memory",
+            "payload": {"status": "active"},
+        }
+    ]
+    assert calls == [
+        {
+            "text": "semantic query",
+            "top_k": 3,
+            "filters": {"status": "active"},
+            "score_threshold": 0.42,
+        }
+    ]
+
+
+def test_semantic_index_rebuilds_vectors_only_with_force(monkeypatch, capsys):
+    import local_memory_mcp.server as srv
+
+    calls = []
+
+    def fake_rebuild(dry_run=True, limit=5000):
+        calls.append({"dry_run": dry_run, "limit": limit})
+        return {"dry_run": dry_run, "planned": 2, "rebuilt": 0 if dry_run else 2}
+
+    monkeypatch.setattr(srv, "rebuild_memory_vectors", fake_rebuild)
+
+    assert lm.main(["semantic-index", "--limit", "2"]) == 0
+    dry_run = read_json(capsys)
+    assert dry_run == {"dry_run": True, "planned": 2, "rebuilt": 0}
+
+    assert lm.main(["semantic-index", "--limit", "2", "--force"]) == 0
+    applied = read_json(capsys)
+    assert applied == {"dry_run": False, "planned": 2, "rebuilt": 2}
+    assert calls == [
+        {"dry_run": True, "limit": 2},
+        {"dry_run": False, "limit": 2},
+    ]

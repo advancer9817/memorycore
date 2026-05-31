@@ -14,13 +14,46 @@ try:
     data = json.load(sys.stdin)
 except Exception:
     data = {}
+tool_input = data.get("tool_input") if isinstance(data.get("tool_input"), dict) else {}
+extra = data.get("extra") if isinstance(data.get("extra"), dict) else {}
 prompt = (
-    data.get("tool_input", {}).get("prompt")
+    tool_input.get("prompt")
     or data.get("prompt")
+    or data.get("user_prompt")
     or data.get("message")
+    or data.get("input")
+    or extra.get("user_message")
     or ""
 )
 print(str(prompt))
+' 2>/dev/null || true)"
+
+PROJECT_PATH="$(printf '%s' "$STDIN_JSON" | python3 -c '
+import json, os, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    data = {}
+extra = data.get("extra") if isinstance(data.get("extra"), dict) else {}
+value = (
+    data.get("project_path")
+    or data.get("cwd")
+    or data.get("working_directory")
+    or data.get("workspace")
+    or extra.get("cwd")
+    or extra.get("project_path")
+    or os.environ.get("PWD", "")
+)
+print(str(value))
+' 2>/dev/null || true)"
+
+HOOK_EVENT="$(printf '%s' "$STDIN_JSON" | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    data = {}
+print(str(data.get("hook_event_name") or data.get("hookEventName") or ""))
 ' 2>/dev/null || true)"
 
 touch /tmp/lmmcp-session-mark 2>/dev/null || true
@@ -51,11 +84,11 @@ payload = {
     "method": "tools/call",
     "params": {
         "name": "memory_context",
-        "arguments": {"task": prompt, "agent": agent, "token_budget": 1500},
+        "arguments": {"task": prompt, "agent": agent, "project_path": sys.argv[3], "token_budget": 1500},
     },
 }
 print(json.dumps(payload, ensure_ascii=False))
-' "$PROMPT" "$AGENT" 2>/dev/null || true)"
+' "$PROMPT" "$AGENT" "$PROJECT_PATH" 2>/dev/null || true)"
 
 [ -z "$PAYLOAD" ] && exit 0
 
@@ -86,6 +119,9 @@ try:
     except Exception:
         inner = {"context": text}
     ctx = inner.get("context") or inner.get("text") or ""
+    used_ids = inner.get("used_ids")
+    if isinstance(used_ids, list) and not used_ids:
+        ctx = ""
     if str(ctx).strip():
         print(str(ctx))
 except Exception:
@@ -96,12 +132,19 @@ except Exception:
 
 python3 -c '
 import json, sys
-print(json.dumps({
-    "hookSpecificOutput": {
-        "hookEventName": "UserPromptSubmit",
-        "additionalContext": sys.argv[1],
+context = sys.argv[1]
+event = sys.argv[2]
+if event == "pre_llm_call":
+    payload = {"context": context}
+else:
+    hook_event_name = "BeforeAgent" if event == "BeforeAgent" else "UserPromptSubmit"
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": hook_event_name,
+            "additionalContext": context,
+        }
     }
-}, ensure_ascii=False))
-' "$CONTEXT" 2>/dev/null || true
+print(json.dumps(payload, ensure_ascii=False))
+' "$CONTEXT" "$HOOK_EVENT" 2>/dev/null || true
 
 exit 0

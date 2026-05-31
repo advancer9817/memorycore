@@ -60,6 +60,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "embedding": {
         "provider": "ollama",
         "model": "nomic-embed-text",
+        "fallback_provider": "sentence-transformers",
+        "sentence_transformers_model": "sentence-transformers/all-mpnet-base-v2",
         "dim": 768,
         "ollama_url": "http://127.0.0.1:11434",
         "timeout": 30,
@@ -162,8 +164,12 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
 
     # embedding
     emb = cfg.get("embedding", {})
-    if emb.get("provider") not in ("ollama", "hashing"):
-        _warn(f"embedding.provider={emb.get('provider')!r} unknown, expected ollama|hashing")
+    valid_embedding_providers = ("ollama", "sentence-transformers", "hashing")
+    if emb.get("provider") not in valid_embedding_providers:
+        _warn(f"embedding.provider={emb.get('provider')!r} unknown, expected ollama|sentence-transformers|hashing")
+    fallback_provider = emb.get("fallback_provider", "sentence-transformers")
+    if fallback_provider not in ("sentence-transformers", "hashing"):
+        _warn(f"embedding.fallback_provider={fallback_provider!r} unknown, expected sentence-transformers|hashing")
     _pos_int("embedding", "dim", emb.get("dim"))
     _pos_int("embedding", "timeout", emb.get("timeout"))
     ollama_url = emb.get("ollama_url", "")

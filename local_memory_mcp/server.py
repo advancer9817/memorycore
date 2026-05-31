@@ -862,6 +862,7 @@ def main(argv: list[str] | None = None) -> int:
     p_sem_search.add_argument("query")
     p_sem_search.add_argument("--limit", type=int, default=10)
     p_sem_search.add_argument("--status", default="active")
+    p_sem_search.add_argument("--score-threshold", type=float, default=0.0)
     sub.add_parser("semantic-status")
     p_html = sub.add_parser("html")
     p_html.add_argument("out", nargs="?", default=str(DEFAULT_ROOT / "dashboard.html"))
@@ -949,13 +950,35 @@ def main(argv: list[str] | None = None) -> int:
         )
         payload = report["summary"] if args.summary_only else report
         print(json.dumps(payload, ensure_ascii=False, indent=2))
-    elif args.cmd in ("semantic-status", "semantic-index", "semantic-search"):
-        print(
-            json.dumps(
-                {"error": "sqlite-vec removed; use memory_vector_search / memory_vector_status MCP tools"},
-                indent=2,
+    elif args.cmd == "semantic-status":
+        from local_memory_mcp.vector_store import get_vector_store
+
+        try:
+            payload = get_vector_store(load_config()).status()
+        except Exception as exc:
+            payload = {"available": False, "degraded": True, "reason": f"{type(exc).__name__}: {exc}"}
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    elif args.cmd == "semantic-search":
+        from local_memory_mcp.vector_store import get_vector_store
+
+        try:
+            filters = {"status": args.status} if args.status else None
+            results = get_vector_store(load_config()).search(
+                args.query,
+                top_k=args.limit,
+                filters=filters,
+                score_threshold=args.score_threshold,
             )
-        )
+            payload = [
+                {"id": r.id, "score": round(r.score, 4), "text": r.text, "payload": r.payload}
+                for r in results
+            ]
+        except Exception as exc:
+            payload = [{"degraded": True, "reason": f"vector store unavailable: {type(exc).__name__}: {exc}"}]
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    elif args.cmd == "semantic-index":
+        payload = rebuild_memory_vectors(dry_run=not args.force, limit=args.limit)
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
     elif args.cmd == "html":
         export_html(Path(args.out))
     elif args.cmd == "export":

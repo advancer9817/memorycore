@@ -51,7 +51,7 @@ bash start.sh
 `start.sh` 自动完成：
 
 1. 创建/复用 `.venv`（自动查找 python3.11/3.12/3.13）
-2. 安装依赖（`pip install -e .[extraction]`）
+2. 安装完整依赖（`pip install -e .[all]`，包含 extraction、Qdrant vector 与 sentence-transformers fallback 支持）
 3. 初始化 SQLite 数据库（幂等）
 4. 导入 `memory-sync/memories.json`（若存在，使用 `newer` 冲突策略）
 5. 启动 HTTP MCP 服务（默认 `127.0.0.1:8318`）
@@ -141,7 +141,7 @@ scripts/sync-memory.sh status
 4. **Curator**：重复标题、低反馈、stale、archive、矛盾候选、skill_candidate 推广候选检测；默认 dry-run。
 5. **Feedback / effectiveness**：`memory_feedback` 记录反馈事件并更新 feedback_score、injected_count、ineffective_count、effectiveness_score。
 6. **Memory links / warnings**：支持 `related_to`、`supersedes`、`contradicts`、`supports`、`part_of`；`memory_warnings` 可根据 active links 产生冲突/替代提示。
-7. **Qdrant 语义检索**：`memory_vector_search` / `memory_vector_status` 通过 `vector_store.py` 使用 Qdrant + Ollama embedding；Ollama embedding 不可用时使用 hashing fallback。
+7. **Qdrant 语义检索**：`memory_vector_search` / `memory_vector_status` 通过 `vector_store.py` 使用 Qdrant + Ollama embedding；Ollama embedding 不可用时优先降级到 sentence-transformers，再失败时使用 hashing fallback。
 8. **Dashboard**：本地交互式 HTML 面板，Alpine.js，无构建步骤；展示记录、时间线、反馈健康和 curator 候选摘要。
 9. **多客户端接入方向**：Hermes / Codex / Claude Code / Gemini / OpenCode 都应作为普通 MCP 客户端接入；lmmcp 核心不依赖任一客户端配置仓库或私有 transcript。
 
@@ -152,7 +152,7 @@ Optional / degraded：
 
 Removed / not current core：
 
-- sqlite-vec CLI 语义命令已移除；CLI `semantic-*` 子命令仅返回提示，请使用 MCP `memory_vector_search` / `memory_vector_status`。
+- sqlite-vec 已移除；CLI `semantic-*` 子命令现在走 Qdrant，与 MCP `memory_vector_search` / `memory_vector_status` 使用同一向量层。
 - Mem0 不是当前核心部署的一部分；不要从旧配置或旧文档重新引入 Mem0/OpenMemory 假设。
 
 ## MCP 工具列表
@@ -210,7 +210,14 @@ PY="$MEM_ROOT/.venv/bin/python"
 "$PY" -m local_memory_mcp curator --summary-only
 ```
 
-`semantic-status` / `semantic-index` / `semantic-search` CLI 子命令保留为兼容提示；实际语义检索通过 MCP 工具 `memory_vector_search` / `memory_vector_status`。
+语义 CLI 子命令：
+
+```bash
+"$PY" -m local_memory_mcp semantic-status
+"$PY" -m local_memory_mcp semantic-search "多 agent 记忆检索" --limit 5 --score-threshold 0.35
+"$PY" -m local_memory_mcp semantic-index --limit 5000        # dry-run
+"$PY" -m local_memory_mcp semantic-index --limit 5000 --force # 重建 Qdrant 向量
+```
 
 ## MCP 与前端控制台
 
@@ -273,28 +280,37 @@ Claude Code `~/.claude.json`（user scope，全局可用）：
 
 ## Agent Session Hook 部署
 
-三端（Claude Code / Codex / Hermes）会话结束时自动将对话摘要写回 lmmcp，由统一脚本处理：
+Claude Code / Codex 会在 `SessionStart` 阶段更新 agent presence 并注册默认 capability，在 `UserPromptSubmit` 阶段自动调用 `memory_context`；Gemini 通过 `BeforeAgent` hook 注入 `memory_context`，并通过 `SessionEnd` hook 传入 `transcript_path` 写回；Hermes 通过 `pre_llm_call` shell hook 在模型调用前注入 `memory_context`；opencode 通过 plugin 在 `experimental.chat.system.transform` 阶段调用 `memory_context`。这些读前上下文会注入回答前上下文；Claude Code / Codex / Gemini / Hermes / opencode 会话结束时自动将对话摘要写回 lmmcp，由统一脚本处理：
 
 ```bash
-# 一键部署所有 agent 的 session-end hook
+# 部署 Claude/Codex/Hermes session hooks
 bash scripts/setup-hooks.sh
 ```
 
 或通过 `connect_agents.py`：
 
 ```bash
+# 注册所有已检测 agent 的 MCP server 与 session hooks
 python3 scripts/connect_agents.py --register-hooks
 ```
 
-**Hook 脚本**：`scripts/hooks/lmmcp-ingest.py`
+**读前注入脚本**：`scripts/hooks/lmmcp-context.sh`
+
+**opencode 读前注入插件**：`scripts/hooks/opencode-lmmcp-plugin.js`
+
+**启动注册脚本**：`scripts/hooks/session-start.sh`
+
+**结束写回脚本**：`scripts/hooks/lmmcp-ingest.py`
 
 | 参数 | 适用 | 读取来源 |
 |---|---|---|
 | `--agent claude` | Claude Code | `CLAUDE_SESSION_FILE` 或 `~/.claude/projects/**/*.jsonl` |
 | `--agent codex` | Codex | `CODEX_SESSION_FILE` 或 `~/.codex/sessions/**/*.jsonl` |
-| `--agent hermes` | Hermes | hook stdin `session_id` → `~/.hermes/sessions/` |
+| `--agent hermes` | Hermes | hook stdin `session_id` → `~/.hermes/state.db` |
+| `--agent opencode` | opencode | hook stdin `session_id` 或最新 `~/.local/share/opencode/opencode.db` session |
+| `--agent gemini` | Gemini | `SessionEnd` hook stdin `transcript_path` 或 `GEMINI_SESSION_FILE` JSON/JSONL |
 
-调用 `memory_ingest` 采用 `curl --max-time 10` fire-and-forget，不阻塞 agent 退出。
+`session-start.sh` 使用短 timeout 调用 `agent_presence_update` 和 `agent_capability_register`，服务不可用时静默跳过；`lmmcp-context.sh` 使用短 timeout 调用 `memory_context`，并按调用方输出 Claude/Codex/Gemini 的 `additionalContext` 或 Hermes 的 `{"context": ...}`，服务不可用时静默跳过，不阻塞用户输入；`lmmcp-ingest.py` 后台调用 `memory_ingest`，失败不阻塞 agent 退出。
 
 ## 服务脚本
 
@@ -329,7 +345,7 @@ scripts/lmmcp stop
 MEM_ROOT="${LOCAL_MEMORY_ROOT:-$(pwd)}"
 cd "$MEM_ROOT"
 python3.11 -m venv .venv
-.venv/bin/python -m pip install -e .[extraction]
+.venv/bin/python -m pip install -e .[all]
 ```
 
 运行测试：
@@ -347,18 +363,24 @@ cd /path/to/local-memory-mcp
 scripts/deploy.sh
 ```
 
-它会完成：创建/更新 `.venv`、安装 Python 依赖、生成/保留 `config.yaml`、初始化 SQLite、生成 dashboard、可选补齐系统依赖（`--bootstrap-deps`）、可选安装/启动 Ollama 并拉取 embedding 模型（`--with-ollama`）、安装并启动用户级 systemd 服务（Qdrant、lmmcp HTTP MCP server、curator timer）、预拉取 Qdrant 镜像、运行健康检查和 pytest。
+它会完成：默认补齐系统依赖（apt/dnf/yum/brew 可用时）、创建/更新 `.venv`、安装 Python 依赖、生成/保留 `config.yaml`、初始化 SQLite、生成 dashboard、安装/启动 Ollama 并拉取 embedding 模型、安装并启动用户级 systemd 服务（Docker Qdrant、lmmcp HTTP MCP server、curator timer）、预拉取 Qdrant 镜像、运行健康检查和 pytest。
 
 常用选项：
 
 ```bash
 scripts/deploy.sh --force-config
 scripts/deploy.sh --root /opt/local-memory-mcp --port 8318
-scripts/deploy.sh --bootstrap-deps --assume-yes  # apt/dnf/yum/brew 可用时补齐 host 依赖
-scripts/deploy.sh --with-ollama                 # 确保 Ollama 可用并拉取 embedding 模型
+scripts/deploy.sh --no-bootstrap-deps           # 不自动安装 host 依赖
+scripts/deploy.sh --no-ollama                   # 不安装/启动 Ollama，依赖 fallback embedding
 scripts/deploy.sh --no-systemd                  # 只初始化，不安装服务
 scripts/deploy.sh --no-qdrant                   # 使用外部 Qdrant
 scripts/deploy.sh --skip-tests                  # 部署时跳过 pytest
+```
+
+Docker Compose 快速启动会同时启动 lmmcp 和 Qdrant，并安装完整 Python extras：
+
+```bash
+docker compose up --build
 ```
 
 部署后 endpoint：
@@ -382,7 +404,7 @@ scripts/init_local_memory.sh
 
 当前语义层通过 `vector_store.py` 使用 Qdrant。配置位于 `config.yaml` 的 `qdrant` 和 `embedding` 段，也可由环境变量覆盖部分 embedding 设置。
 
-默认 embedding provider 是 Ollama `nomic-embed-text`。Ollama 不可用时，`embed_text` 会使用 deterministic hashing fallback，保证语义相关能力可降级而不阻断基础 SQLite/FTS5 能力。
+默认 embedding provider 是 Ollama `nomic-embed-text`。Ollama 不可用时，`embed_text` 会先尝试 sentence-transformers fallback；如果本地模型或依赖也不可用，再使用 deterministic hashing fallback，保证语义相关能力可降级而不阻断基础 SQLite/FTS5 能力。
 
 ## 设计边界
 

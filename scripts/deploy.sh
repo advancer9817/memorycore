@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # One-command installer for local-memory-mcp.
 #
-# Installs Python deps, writes config, initializes SQLite, optionally installs
-# user systemd services for Qdrant + lmmcp + curator, and verifies health.
+# Installs missing host deps, Python deps, writes config, initializes SQLite,
+# installs user systemd services for Qdrant + lmmcp + curator, and verifies health.
 set -euo pipefail
 
 usage() {
@@ -22,12 +22,14 @@ Options:
   --skip-tests             Skip pytest verification.
   --no-systemd             Do not install user systemd services.
   --no-qdrant              Do not install/start Qdrant service.
-  --bootstrap-deps         Install missing host deps where supported (apt/dnf/yum/brew).
-  --no-bootstrap-deps      Disable host dependency bootstrap even if env enables it.
-  --with-ollama            Ensure Ollama is installed/running and pull embedding model.
+  --bootstrap-deps         Install missing host deps where supported (default).
+  --no-bootstrap-deps      Disable host dependency bootstrap.
+  --with-ollama            Ensure Ollama is installed/running and pull embedding model (default).
+  --no-ollama              Do not install/start Ollama; rely on configured fallback embedding.
   --no-pull-images         Do not pre-pull Docker images.
   --no-pull-models         Do not pre-pull Ollama embedding model.
-  --assume-yes             Non-interactive package manager installs where supported.
+  --assume-yes             Non-interactive package manager installs where supported (default).
+  --no-assume-yes          Allow package manager prompts during dependency bootstrap.
   --qdrant-image IMAGE     Qdrant Docker image. Default: qdrant/qdrant
   --qdrant-http-port PORT  Qdrant HTTP port. Default: 6333
   --qdrant-grpc-port PORT  Qdrant gRPC port. Default: 6334
@@ -43,8 +45,9 @@ Options:
 Environment overrides are also supported: LOCAL_MEMORY_ROOT, LMMCP_HOST,
 LMMCP_PORT, LOCAL_MEMORY_DB, LOCAL_MEMORY_CONFIG, QDRANT_URL,
 QDRANT_COLLECTION, LOCAL_MEMORY_EMBEDDING_PROVIDER, LOCAL_MEMORY_EMBEDDING_MODEL,
+LOCAL_MEMORY_EMBEDDING_FALLBACK_PROVIDER, LOCAL_MEMORY_SENTENCE_TRANSFORMERS_MODEL,
 LOCAL_MEMORY_EMBEDDING_DIM, LOCAL_MEMORY_OLLAMA_URL, LMMCP_BOOTSTRAP_DEPS,
-LMMCP_WITH_OLLAMA, LMMCP_PULL_IMAGES, LMMCP_PULL_MODELS.
+LMMCP_WITH_OLLAMA, LMMCP_ASSUME_YES, LMMCP_PULL_IMAGES, LMMCP_PULL_MODELS.
 USAGE
 }
 
@@ -190,13 +193,20 @@ CURATOR_LIMIT="${LOCAL_MEMORY_CURATOR_LIMIT:-500}"
 STALE_AFTER_DAYS="${LOCAL_MEMORY_STALE_AFTER_DAYS:-60}"
 ARCHIVE_AFTER_DAYS="${LOCAL_MEMORY_ARCHIVE_AFTER_DAYS:-120}"
 PYTHON_BIN="${PYTHON_BIN:-}"
-BOOTSTRAP_DEPS=0
-WITH_OLLAMA=0
+BOOTSTRAP_DEPS=1
+WITH_OLLAMA=1
 PULL_IMAGES=1
 PULL_MODELS=1
-ASSUME_YES=0
-as_bool "${LMMCP_BOOTSTRAP_DEPS:-0}" && BOOTSTRAP_DEPS=1
-as_bool "${LMMCP_WITH_OLLAMA:-0}" && WITH_OLLAMA=1
+ASSUME_YES=1
+if [ -n "${LMMCP_BOOTSTRAP_DEPS:-}" ]; then
+  if as_bool "$LMMCP_BOOTSTRAP_DEPS"; then BOOTSTRAP_DEPS=1; else BOOTSTRAP_DEPS=0; fi
+fi
+if [ -n "${LMMCP_WITH_OLLAMA:-}" ]; then
+  if as_bool "$LMMCP_WITH_OLLAMA"; then WITH_OLLAMA=1; else WITH_OLLAMA=0; fi
+fi
+if [ -n "${LMMCP_ASSUME_YES:-}" ]; then
+  if as_bool "$LMMCP_ASSUME_YES"; then ASSUME_YES=1; else ASSUME_YES=0; fi
+fi
 if ! as_bool "${LMMCP_PULL_IMAGES:-1}"; then PULL_IMAGES=0; fi
 if ! as_bool "${LMMCP_PULL_MODELS:-1}"; then PULL_MODELS=0; fi
 DRY_RUN=0
@@ -216,9 +226,11 @@ while [ "$#" -gt 0 ]; do
     --bootstrap-deps) BOOTSTRAP_DEPS=1; shift ;;
     --no-bootstrap-deps) BOOTSTRAP_DEPS=0; shift ;;
     --with-ollama) WITH_OLLAMA=1; shift ;;
+    --no-ollama) WITH_OLLAMA=0; shift ;;
     --no-pull-images) PULL_IMAGES=0; shift ;;
     --no-pull-models) PULL_MODELS=0; shift ;;
     --assume-yes) ASSUME_YES=1; shift ;;
+    --no-assume-yes) ASSUME_YES=0; shift ;;
     --qdrant-image) QDRANT_IMAGE="${2:?--qdrant-image requires a value}"; shift 2 ;;
     --qdrant-http-port) QDRANT_HTTP_PORT="${2:?--qdrant-http-port requires a value}"; shift 2 ;;
     --qdrant-grpc-port) QDRANT_GRPC_PORT="${2:?--qdrant-grpc-port requires a value}"; shift 2 ;;
@@ -299,12 +311,13 @@ if [ "$SKIP_INSTALL" -eq 0 ]; then
   msg deps "Installing requirements"
   "$PY" -m pip install -U pip
   "$PY" -m pip install -r requirements.txt
+  "$PY" -m pip install -e ".[all]"
 fi
 
 if [ "$WITH_OLLAMA" -eq 1 ]; then
   ensure_ollama_ready
 elif [ "${LOCAL_MEMORY_EMBEDDING_PROVIDER:-ollama}" = "ollama" ] && ! curl -fsS "${LOCAL_MEMORY_OLLAMA_URL:-http://127.0.0.1:11434}/api/tags" >/dev/null 2>&1; then
-  warn "Ollama is not reachable; vector embedding will use hashing fallback where supported. Use --with-ollama to install/start/pull the model."
+  warn "Ollama is not reachable; vector embedding will use fallback providers. Remove --no-ollama or set LMMCP_WITH_OLLAMA=1 to install/start/pull the model."
 fi
 
 if [ ! -f "$CONFIG" ] || [ "$FORCE_CONFIG" -eq 1 ]; then
@@ -322,6 +335,8 @@ qdrant:
 embedding:
   provider: ${LOCAL_MEMORY_EMBEDDING_PROVIDER:-ollama}
   model: ${LOCAL_MEMORY_EMBEDDING_MODEL:-nomic-embed-text}
+  fallback_provider: ${LOCAL_MEMORY_EMBEDDING_FALLBACK_PROVIDER:-sentence-transformers}
+  sentence_transformers_model: ${LOCAL_MEMORY_SENTENCE_TRANSFORMERS_MODEL:-sentence-transformers/all-mpnet-base-v2}
   dim: ${LOCAL_MEMORY_EMBEDDING_DIM:-768}
   ollama_url: ${LOCAL_MEMORY_OLLAMA_URL:-http://127.0.0.1:11434}
   timeout: ${LOCAL_MEMORY_OLLAMA_TIMEOUT:-30}

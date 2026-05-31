@@ -20,13 +20,13 @@ scripts/deploy.sh
 
 The default deployment:
 
-1. Optionally installs missing host packages with `--bootstrap-deps`.
+1. Installs missing host packages where supported; use `--no-bootstrap-deps` to disable.
 2. Creates `.venv` with Python 3.11+.
 3. Installs `requirements.txt`.
 4. Writes `config.yaml` if missing.
 5. Initializes `memory.sqlite3`.
 6. Renders `dashboard.html`.
-7. Optionally ensures Ollama and pulls the embedding model with `--with-ollama`.
+7. Ensures Ollama is installed/running and pulls the embedding model; use `--no-ollama` to rely on fallback embeddings.
 8. Installs user systemd services:
    - `qdrant.service`
    - `lmmcp.service`
@@ -64,9 +64,6 @@ http://127.0.0.1:8318/mcp
 # Full deployment, preserving existing config.yaml
 scripts/deploy.sh
 
-# Also install missing OS packages where supported, then deploy
-scripts/deploy.sh --bootstrap-deps --assume-yes
-
 # Regenerate config.yaml for this machine/root
 scripts/deploy.sh --force-config
 
@@ -79,8 +76,9 @@ scripts/deploy.sh --no-systemd
 # Use an externally managed Qdrant
 QDRANT_URL=http://127.0.0.1:6333 scripts/deploy.sh --no-qdrant
 
-# Ensure Ollama is installed/running and pull nomic-embed-text
-scripts/deploy.sh --bootstrap-deps --with-ollama
+# Disable host dependency bootstrap or Ollama on constrained machines
+scripts/deploy.sh --no-bootstrap-deps
+scripts/deploy.sh --no-ollama
 
 # Skip tests on constrained machines
 scripts/deploy.sh --skip-tests
@@ -96,6 +94,21 @@ scripts/init_local_memory.sh
 ```
 
 `init_local_memory.sh` now delegates to `scripts/deploy.sh --no-systemd`.
+
+## Docker Compose
+
+For container-only deployment, `docker-compose.yml` starts both lmmcp and
+Qdrant with persistent volumes:
+
+```bash
+docker compose up --build
+```
+
+The lmmcp image installs `.[all]` by default so Qdrant, extraction, and local
+embedding fallback dependencies are present. Compose defaults
+`LOCAL_MEMORY_EMBEDDING_PROVIDER=hashing` because the Ollama daemon is usually
+outside the container; override the environment if you provide an Ollama
+endpoint reachable from the container network.
 
 ## Prerequisites
 
@@ -114,10 +127,12 @@ For the default service deployment:
 Optional but recommended:
 
 - Ollama with `nomic-embed-text` pulled.
+- `sentence-transformers` model cache for local fallback when Ollama is offline.
 
-If Ollama is unavailable, lmmcp falls back to deterministic hashing embeddings for
-some vector operations, while SQLite/FTS/context pack still work. To force this
-portable fallback explicitly:
+If Ollama is unavailable, lmmcp tries the configured sentence-transformers
+fallback first, then falls back to deterministic hashing embeddings if the local
+model or dependency is unavailable. SQLite/FTS/context pack still work. To force
+the fully portable fallback explicitly:
 
 ```bash
 export LOCAL_MEMORY_EMBEDDING_PROVIDER=hashing
@@ -135,11 +150,11 @@ CLI options have priority over environment defaults.
 | `--port` / `LMMCP_PORT` | `8318` | lmmcp HTTP port |
 | `--db` / `LOCAL_MEMORY_DB` | `$ROOT/memory.sqlite3` | SQLite DB path |
 | `--config` / `LOCAL_MEMORY_CONFIG` | `$ROOT/config.yaml` | Config file path |
-| `--bootstrap-deps` / `LMMCP_BOOTSTRAP_DEPS=1` | off | Install missing host packages with apt/dnf/yum/brew when possible |
-| `--with-ollama` / `LMMCP_WITH_OLLAMA=1` | off | Ensure Ollama is present/reachable and pull the embedding model |
+| `--bootstrap-deps` / `--no-bootstrap-deps` / `LMMCP_BOOTSTRAP_DEPS=0/1` | on | Install missing host packages with apt/dnf/yum/brew when possible |
+| `--with-ollama` / `--no-ollama` / `LMMCP_WITH_OLLAMA=0/1` | on | Ensure Ollama is present/reachable and pull the embedding model |
 | `--no-pull-images` / `LMMCP_PULL_IMAGES=0` | pull enabled | Skip Docker image pre-pull |
 | `--no-pull-models` / `LMMCP_PULL_MODELS=0` | pull enabled | Skip Ollama model pull |
-| `--assume-yes` | off | Pass non-interactive yes flags to supported package managers |
+| `--assume-yes` / `--no-assume-yes` / `LMMCP_ASSUME_YES=0/1` | on | Pass non-interactive yes flags to supported package managers |
 | `--qdrant-image` / `QDRANT_IMAGE` | `qdrant/qdrant` | Docker image |
 | `--qdrant-http-port` / `QDRANT_HTTP_PORT` | `6333` | Qdrant HTTP host port |
 | `--qdrant-grpc-port` / `QDRANT_GRPC_PORT` | `6334` | Qdrant gRPC host port |
@@ -148,6 +163,8 @@ CLI options have priority over environment defaults.
 | `QDRANT_COLLECTION` | `agent_memory` | Qdrant collection |
 | `LOCAL_MEMORY_EMBEDDING_PROVIDER` | `ollama` | Embedding provider |
 | `LOCAL_MEMORY_EMBEDDING_MODEL` | `nomic-embed-text` | Embedding model |
+| `LOCAL_MEMORY_EMBEDDING_FALLBACK_PROVIDER` | `sentence-transformers` | Embedding fallback after Ollama failure |
+| `LOCAL_MEMORY_SENTENCE_TRANSFORMERS_MODEL` | `sentence-transformers/all-mpnet-base-v2` | sentence-transformers fallback model |
 | `LOCAL_MEMORY_EMBEDDING_DIM` | `768` | Embedding dimension |
 | `LOCAL_MEMORY_OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama URL |
 | `--curator-apply` / `LOCAL_MEMORY_CURATOR_APPLY` | `1` | Apply low-risk stale/archive transitions |
@@ -224,9 +241,9 @@ Qdrant starts is `available: true`.
 | Risk | Impact | Mitigation |
 |---|---|---|
 | Python < 3.11 | dependency install fails | Install Python 3.11+ before running deploy; on apt systems `--bootstrap-deps` also installs venv support |
-| Docker unavailable | Qdrant service cannot be installed | Run `scripts/deploy.sh --bootstrap-deps`, install Docker manually, or run with `--no-qdrant` and provide `QDRANT_URL` |
+| Docker unavailable | Qdrant service cannot be installed | Default deploy tries to install Docker where supported; otherwise install Docker manually, or run with `--no-qdrant` and provide `QDRANT_URL` |
 | Docker image missing/offline | Qdrant startup fails | Default deploy pre-pulls `qdrant/qdrant`; pre-seed the image for offline installs or use `--no-pull-images` only when already cached |
 | User systemd unavailable | services cannot be installed | Run with `--no-systemd`, or install as a platform-specific service manually |
 | Port conflict | Qdrant/lmmcp health checks fail | Override `--port`, `--qdrant-http-port`, or `--qdrant-grpc-port` |
 | Copying live SQLite files | database locks or stale data | Use the generated DB or export/import intentionally; do not overwrite a live DB |
-| Ollama unavailable | embedding quality degrades | Run `scripts/deploy.sh --bootstrap-deps --with-ollama`, install Ollama + pull model manually, or rely on hashing fallback temporarily |
+| Ollama unavailable | embedding quality degrades | Default deploy tries to install/start Ollama and pull the model; use `--no-ollama` only when relying on fallback embeddings intentionally |

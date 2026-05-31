@@ -778,6 +778,482 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
+## [迭代 45] 2026-05-31 — 修复 prompt 检索弱相关记忆注入
+
+### 变更
+
+- `local_memory_mcp/storage/search.py`: 为 `build_context_pack()` 增加显式检索来源标记、轻量 lexical relevance 评分、中文 prompt 关键词/ngram 提取、相关性阈值过滤和 trace 阈值字段。
+- `local_memory_mcp/storage/search.py`: FTS 无命中时改用关键词扫描兜底；空结果 fallback 只记录候选数量，不再把无关高权重记忆直接注入上下文。
+- `tests/test_context_relevance.py`: 新增 prompt 相关性回归测试，覆盖中文 prompt 正向召回、无关 fallback 不注入、弱相关 vector-only 命中过滤。
+- `TODO.md`: 将 prompt 后自动/显式 `memory_context` 检索相关性问题标记为已完成。
+
+### 修复
+
+- 修复输入提示词后，`memory_context` 可能因为空查询 fallback、向量低阈值或高 importance/type weighting 把弱相关记忆注入上下文的问题；现在相关性证据优先于泛化权重。
+
+### 验证
+
+- 语法检查: `.venv/bin/python -m py_compile local_memory_mcp/storage/search.py` 通过。
+- 测试: `.venv/bin/python -m pytest tests/test_context_relevance.py tests/test_context_quality_metrics.py tests/test_context_pack_v2.py tests/test_phase10.py tests/test_context_injection_guard.py -q`，43/43 pass。
+
+### 回滚
+
+`git checkout -- local_memory_mcp/storage/search.py tests/test_context_relevance.py TODO.md ITERATION.md`
+
+---
+
+## [迭代 46] 2026-05-31 — 输出系统流程梳理并补充审计待办
+
+### 变更
+
+- `TODO.md`: 补充全盘扫描中发现的目标差距：context pack vector-only 范围隔离、多 agent 对话前自动检索注入统一、Gemini/opencode 回答后 transcript 写回、agent presence/capability 默认心跳与能力注册。
+- `/mnt/d/Advancer/Desktop/output/lmmcp-system-flow-2026-05-31.html`: 生成自包含 HTML 流程梳理页，包含端到端流程、检索注入链路、回答后写回链路、状态流转、多 agent 协作、部署能力和缺口矩阵。
+
+### 验证
+
+- 文件检查: `test -s /mnt/d/Advancer/Desktop/output/lmmcp-system-flow-2026-05-31.html` 通过。
+- 内容检查: `rg "目标端到端流程|本轮扫描写入 TODO 的新增缺口" /mnt/d/Advancer/Desktop/output/lmmcp-system-flow-2026-05-31.html` 通过。
+
+### 已知问题
+
+- 本轮仅完成系统流程梳理和待办记录，尚未开始修复新增 TODO 中的自动注入、写回覆盖、vector-only 范围隔离和自动心跳问题。
+
+### 回滚
+
+`git checkout -- TODO.md ITERATION.md && rm -f /mnt/d/Advancer/Desktop/output/lmmcp-system-flow-2026-05-31.html`
+
+---
+
+## [迭代 47] 2026-05-31 — 修复 vector-only 上下文召回范围隔离
+
+### 变更
+
+- `local_memory_mcp/storage/search.py`: `build_context_pack()` 合并 Qdrant vector-only 命中时，回 SQLite 取记录同步应用 `status='active'`、`valid_until`、`scope` 和 `project_path` 条件，和 FTS/keyword 路径保持一致。
+- `tests/test_context_relevance.py`: 新增 vector-only 命中范围隔离回归测试，覆盖同 scope/project 可注入、global/空 project 可注入、错误 scope 或错误 project 不注入。
+- `TODO.md`: 将 context pack 向量召回隔离问题标记为已完成。
+
+### 修复
+
+- 修复多 agent/多项目共享记忆库下，Qdrant 返回的 vector-only 记录可能绕过 `scope` / `project_path` 过滤，被注入到不相关 agent 或项目上下文的问题。
+
+### 验证
+
+- 语法检查: `.venv/bin/python -m py_compile local_memory_mcp/storage/search.py` 通过。
+- 测试: `.venv/bin/python -m pytest tests/test_context_relevance.py tests/test_context_quality_metrics.py tests/test_context_pack_v2.py tests/test_phase10.py tests/test_context_injection_guard.py -q`，44/44 pass。
+
+### 回滚
+
+`git checkout -- local_memory_mcp/storage/search.py tests/test_context_relevance.py TODO.md ITERATION.md`
+
+---
+
+## [迭代 48] 2026-05-31 — start.sh 默认安装完整依赖
+
+### 变更
+
+- `start.sh`: 一键启动依赖安装从 `pip install -e .[extraction]` 改为 `pip install -e .[all]`，默认包含 extraction 与 Qdrant vector 依赖。
+- `README.md`: 快速开始和手动安装说明同步改为 `.[all]`，避免文档继续引导新设备只安装抽取依赖。
+- `tests/test_deployment.py`: 新增回归测试，确保 `start.sh` 默认安装完整 extras，README 也同步描述完整安装。
+- `TODO.md`: 将 `start.sh` 默认安装完整依赖 `.[all]` 标记为已完成。
+
+### 修复
+
+- 修复新设备按 `bash start.sh` 快速启动时只安装 `.[extraction]`，导致 Qdrant client 缺失、语义检索/vector 能力降级的问题。
+
+### 验证
+
+- Shell 语法: `bash -n start.sh` 通过。
+- 测试: `.venv/bin/python -m pytest tests/test_deployment.py -q`，6/6 pass。
+
+### 回滚
+
+`git checkout -- start.sh README.md tests/test_deployment.py TODO.md ITERATION.md`
+
+---
+
+## [迭代 49] 2026-05-31 — 修复前端向量搜索阈值参数
+
+### 变更
+
+- `local_memory_mcp/frontend.py`: `/api/vector/search` 调用 `VectorStore.search()` 时改用 `top_k=` 和 `score_threshold=` 关键字参数，避免第三个位置参数被解释为 `filters`。
+- `tests/test_frontend.py`: 新增前端 vector search 回归测试，使用 fake vector store 验证 `score_threshold` 进入关键字参数且 `filters` 保持 `None`。
+- `TODO.md`: 将前端 `/api/vector/search` 的 `score_threshold` 参数传递问题标记为已完成。
+
+### 修复
+
+- 修复前端控制台/API 调用语义搜索时 `score_threshold` 实际未生效的问题；该问题会影响向量检索结果过滤，导致前端看到低于阈值的弱相关结果。
+
+### 验证
+
+- 语法检查: `.venv/bin/python -m py_compile local_memory_mcp/frontend.py` 通过。
+- 测试: `.venv/bin/python -m pytest tests/test_frontend.py -q`，8/8 pass（1 个 httpx 测试客户端弃用警告）。
+
+### 回滚
+
+`git checkout -- local_memory_mcp/frontend.py tests/test_frontend.py TODO.md ITERATION.md`
+
+---
+
+## [迭代 50] 2026-05-31 — 默认启用对话前自动记忆注入
+
+### 变更
+
+- `scripts/hooks/lmmcp-context.sh`: 扩展 prompt 字段读取，支持 `user_prompt` / `input`，并从 hook payload 的 `project_path` / `cwd` / `working_directory` / `workspace` 提取项目路径传给 `memory_context`。
+- `scripts/setup-hooks.sh`: 默认为 Claude Code 和 Codex 注册 `UserPromptSubmit -> lmmcp-context.sh`，保留 Stop hook 后台调用 `memory_ingest` 写回 transcript。
+- `scripts/setup-hooks.sh`: 更新写入 CLAUDE.md / AGENTS.md 的记忆规则，改为自动注入为主，显式 `memory_context` 仅作为自动上下文缺失或弱相关时的兜底。
+- `scripts/connect_agents.py`: `--register-hooks` 同步默认注册 Claude/Codex 的 UserPromptSubmit context hook，并继续注册 Stop 写回 hook。
+- `README.md`: Agent hook 部署说明补充回答前自动 context 注入脚本和回答后写回脚本。
+- `tests/test_deployment.py`: 增加回归测试，锁定 setup-hooks/connect_agents 默认注册 prompt context injection，并验证 context hook 传递 `project_path`。
+- `TODO.md`: 将 Claude/Codex 对话前自动检索注入问题标记为已完成，并新增 Hermes/Gemini/opencode pre-prompt 注入支持矩阵待办。
+
+### 修复
+
+- 修复 hook 初始化脚本虽然存在 `lmmcp-context.sh`，但默认移除/不注册 `UserPromptSubmit`，导致对话前无法自动语义检索并注入相关记忆的问题。
+
+### 验证
+
+- Shell 语法: `bash -n scripts/setup-hooks.sh scripts/hooks/lmmcp-context.sh` 通过。
+- Python 编译: `.venv/bin/python -m py_compile scripts/connect_agents.py` 通过。
+- 测试: `.venv/bin/python -m pytest tests/test_deployment.py -q`，7/7 pass。
+
+### 已知问题
+
+- Hermes 当前仍只注册 `on_session_end` 写回；Gemini/opencode 也尚未验证 pre-prompt 注入能力，后续需要补齐各 agent 的自动注入支持矩阵。
+
+### 回滚
+
+`git checkout -- scripts/hooks/lmmcp-context.sh scripts/setup-hooks.sh scripts/connect_agents.py README.md tests/test_deployment.py TODO.md ITERATION.md`
+
+---
+
+## [迭代 51] 2026-06-01 — SessionStart 自动注册 agent presence 与 capability
+
+### 变更
+
+- `scripts/hooks/session-start.sh`: 保留启动/标记会话行为，并在 SessionStart hook 中初始化 MCP session，使用短 timeout 调用 `agent_presence_update` 将当前 agent 标记为 `online`，再调用 `agent_capability_register` 注册默认能力；支持 `LMMCP_AGENT_ID`、`LMMCP_AGENT_NAMESPACE`、`LMMCP_AGENT_CAPABILITIES` 和 timeout 环境变量覆盖。
+- `scripts/setup-hooks.sh`: 一键 hook 部署新增 Claude/Codex `SessionStart -> session-start.sh` 注册，命令中显式传入 `LMMCP_AGENT_ID`。
+- `scripts/connect_agents.py`: `--register-hooks` 同步新增 Claude/Codex SessionStart hook；opencode 的 `session_start` 命令改为带 `LMMCP_AGENT_ID=opencode`。
+- `README.md`: Agent Session Hook 部署说明补充启动注册脚本，以及 presence/capability 注册、读前注入、结束写回三段流程。
+- `tests/test_deployment.py`: 增加部署回归测试，锁定 `session-start.sh` 的 MCP presence/capability 调用、短 timeout、非阻塞失败策略，以及 setup/connect 脚本的 SessionStart 注册。
+- `TODO.md`: 将 agent presence/capability 自动心跳与能力注册入口标记为已完成。
+
+### 修复
+
+- 修复 handoff 自动路由依赖在线状态和能力注册、但 agent 启动时不会自动上报 presence/capability 的问题；现在 Claude/Codex/opencode 启动链路会带 agent id 进入 `session-start.sh`，默认能力可用于后续 `agent_handoff_create(auto_route=True)` 路由。
+
+### 验证
+
+- Shell 语法: `bash -n scripts/hooks/session-start.sh scripts/setup-hooks.sh` 通过。
+- Python 编译: `.venv/bin/python -m py_compile scripts/connect_agents.py` 通过。
+- 测试: `.venv/bin/python -m pytest tests/test_deployment.py tests/test_handoff.py tests/test_mailbox.py tests/test_mailbox_enhanced.py -q`，62/62 pass。
+
+### 已知问题
+
+- 本轮只补齐启动时 presence/capability 注册；Hermes/Gemini/opencode 的 pre-prompt 自动 `memory_context` 注入覆盖面仍按 TODO 后续处理。
+
+### 回滚
+
+`git checkout -- scripts/hooks/session-start.sh scripts/setup-hooks.sh scripts/connect_agents.py README.md tests/test_deployment.py TODO.md ITERATION.md`
+
+---
+
+## [迭代 52] 2026-06-01 — Embedding 降级链补齐 sentence-transformers
+
+### 变更
+
+- `local_memory_mcp/vector_store.py`: `EmbedConfig` 增加 `fallback_provider` 与 `sentence_transformers_model`；`embed_text()` 从单层 Ollama -> hashing 降级改为 Ollama -> sentence-transformers -> hashing，支持 `LOCAL_MEMORY_EMBEDDING_PROVIDER`、`LOCAL_MEMORY_EMBEDDING_FALLBACK_PROVIDER`、`LOCAL_MEMORY_SENTENCE_TRANSFORMERS_MODEL`、`LOCAL_MEMORY_EMBEDDING_DIM`、`LOCAL_MEMORY_OLLAMA_URL` 等环境变量覆盖。
+- `local_memory_mcp/vector_store.py`: 新增 sentence-transformers 本地模型缓存和 embedding 维度规整，保证 fallback 输出与 Qdrant collection 维度一致。
+- `local_memory_mcp/models.py` / `config.yaml`: 配置默认值与校验规则加入 `sentence-transformers` provider、fallback provider 和默认 fallback model。
+- `pyproject.toml`: 新增 `embedding` optional extra，并将 `all` 扩展为 `vector + extraction + embedding`。
+- `scripts/deploy.sh`: 写入 config 时同步 fallback provider/model；安装依赖时在 `requirements.txt` 后继续安装 `.[all]`，确保一键部署补齐 Qdrant、extraction 与 sentence-transformers fallback 依赖。
+- `README.md` / `docs/deployment.md`: 更新语义检索降级说明和相关环境变量。
+- `tests/test_vector_store.py` / `tests/test_config_validation.py` / `tests/test_deployment.py`: 增加 fallback 顺序、环境变量覆盖、配置校验和部署安装完整 extras 的回归测试。
+- `TODO.md`: 将 Embedding sentence-transformers 降级和 `deploy.sh` 完整 extras 安装标记为已完成。
+
+### 修复
+
+- 修复 Ollama 不可用时只能降级到 hashing，导致语义检索质量明显变弱的问题；现在本机有 sentence-transformers 依赖/模型时会优先使用真实本地 embedding。
+- 修复 `embed_config_from_dict()` 的默认 Ollama URL 回退值误写为 `127.0.0.1:12434` 的问题，统一为 `127.0.0.1:11434`。
+- 修复 `deploy.sh` 只安装 `requirements.txt`，可能漏装 `qdrant-client`、`httpx` optional extra 和本地 embedding fallback 依赖的问题。
+
+### 验证
+
+- 语法检查: `.venv/bin/python -m py_compile local_memory_mcp/vector_store.py local_memory_mcp/models.py` 通过。
+- Shell 语法: `bash -n scripts/deploy.sh` 通过。
+- 测试: `.venv/bin/python -m pytest tests/test_vector_store.py tests/test_config_validation.py tests/test_deployment.py -q`，48/48 pass。
+- 回归组合: `.venv/bin/python -m pytest tests/test_context_relevance.py tests/test_context_quality_metrics.py tests/test_context_pack_v2.py tests/test_phase10.py tests/test_context_injection_guard.py tests/test_vector_store.py tests/test_config_validation.py tests/test_deployment.py -q`，92/92 pass。
+
+### 已知问题
+
+- sentence-transformers fallback 依赖较重；`.[all]` 会补齐依赖，但首次使用具体模型时仍可能需要本机已有模型缓存或网络下载。
+
+### 回滚
+
+`git checkout -- local_memory_mcp/vector_store.py local_memory_mcp/models.py config.yaml pyproject.toml scripts/deploy.sh README.md docs/deployment.md tests/test_vector_store.py tests/test_config_validation.py tests/test_deployment.py TODO.md ITERATION.md`
+
+---
+
+## [迭代 53] 2026-06-01 — opencode 会话结束写回覆盖
+
+### 变更
+
+- `scripts/hooks/lmmcp-ingest.py`: 后台模式新增通用 `LMMCP_INGEST_HOOK_PAYLOAD` 透传，保留 Hermes 兼容变量；新增 hook payload session id 解析工具。
+- `scripts/hooks/lmmcp-ingest.py`: 新增 opencode SQLite transcript 抽取，默认从 `~/.local/share/opencode/opencode.db` 读取最新 session 或 hook payload 指定 session，只保留 user/assistant 的 text part，过滤 tool/reasoning/step part。
+- `scripts/hooks/lmmcp-ingest.py`: 新增 Gemini JSONL transcript 解析入口，支持 `GEMINI_SESSION_FILE`，将 Gemini `model` role 归一为 assistant。
+- `scripts/connect_agents.py`: opencode `session_end` hook 改为 `python3 lmmcp-ingest.py --agent opencode --background`，避免写回阻塞 agent 退出。
+- `tests/test_lmmcp_ingest_hook.py`: 新增 opencode SQLite 抽取和 Gemini JSONL 抽取回归测试。
+- `tests/test_deployment.py`: 增加 opencode session_end 后台写回部署断言。
+- `README.md`: 更新 Agent Session Hook 部署说明，补充 opencode 与 Gemini transcript 来源。
+- `TODO.md`: 将 opencode 回答后自动写回覆盖标记为已完成，并拆出 Gemini 自动 session_end hook 待办。
+
+### 修复
+
+- 修复 opencode 虽然通过 `connect_agents.py --register-hooks` 写入了 `session_end`，但 `lmmcp-ingest.py` 不识别 `--agent opencode`，导致会话结束无法自动抽取并写回 lmmcp 的问题。
+
+### 验证
+
+- Python 编译: `.venv/bin/python -m py_compile scripts/hooks/lmmcp-ingest.py scripts/connect_agents.py` 通过。
+- 测试: `.venv/bin/python -m pytest tests/test_lmmcp_ingest_hook.py tests/test_deployment.py tests/test_handoff.py tests/test_mailbox.py tests/test_mailbox_enhanced.py -q`，65/65 pass。
+- Dry-run: `.venv/bin/python scripts/connect_agents.py --agents opencode --register-hooks --dry-run --no-probe` 正确显示会更新并注册 `/home/advancer/.config/opencode/opencode.json`。
+
+### 已知问题
+
+- Gemini 目前只有 `GEMINI_SESSION_FILE` 解析能力，本机未发现可验证的 Gemini CLI session_end hook/历史文件格式，自动 hook 注册仍在 TODO。
+- Hermes/Gemini/opencode 对话前 pre-prompt/pre-LLM 自动 `memory_context` 注入矩阵仍未完成。
+
+### 回滚
+
+`git checkout -- scripts/hooks/lmmcp-ingest.py scripts/connect_agents.py README.md tests/test_lmmcp_ingest_hook.py tests/test_deployment.py TODO.md ITERATION.md`
+
+---
+
+## [迭代 54] 2026-06-01 — opencode 对话前自动 memory_context 注入
+
+### 变更
+
+- `scripts/hooks/opencode-lmmcp-plugin.js`: 新增 opencode plugin，通过 `experimental.chat.system.transform` 在 LLM 调用前读取当前 session 最近用户消息，按 MCP streamable HTTP 初始化 session 并调用 `memory_context`，将返回 context 追加到 system context。
+- `scripts/connect_agents.py`: opencode hook 注册新增 plugin 配置写入，`--register-hooks` 会把 `opencode-lmmcp-plugin.js` 以 `plugin` 条目注册到 opencode config，并使用当前 `--endpoint` 作为 plugin 调用的 lmmcp URL。
+- `tests/test_deployment.py`: 增加 opencode pre-LLM context 注入 plugin 注册与实现断言。
+- `README.md`: Agent Session Hook 部署说明补充 opencode plugin 读前注入链路。
+- `TODO.md`: 将 opencode 对话前自动检索注入标记为已完成，并将剩余 Hermes/Gemini pre-prompt 注入缺口拆分保留。
+
+### 修复
+
+- 修复 opencode 只有 MCP server、session_start 和 session_end，缺少对话前自动 `memory_context` 注入的问题；现在 opencode 在模型调用前会自动读取 lmmcp 相关记忆作为不可信背景上下文。
+
+### 验证
+
+- Python 编译: `.venv/bin/python -m py_compile scripts/connect_agents.py` 通过。
+- JS 语法: `node --check scripts/hooks/opencode-lmmcp-plugin.js` 通过。
+- 测试: `.venv/bin/python -m pytest tests/test_deployment.py -q`，11/11 pass。
+- 回归组合: `.venv/bin/python -m pytest tests/test_deployment.py tests/test_lmmcp_ingest_hook.py tests/test_handoff.py tests/test_mailbox.py tests/test_mailbox_enhanced.py -q`，66/66 pass。
+- Dry-run: `.venv/bin/python scripts/connect_agents.py --agents opencode --register-hooks --dry-run --no-probe` 正确显示会更新并注册 `/home/advancer/.config/opencode/opencode.json`。
+
+### 已知问题
+
+- Hermes/Gemini 的对话前 pre-prompt/pre-LLM 自动 `memory_context` 注入仍待补齐；Gemini 的自动 session_end hook 仍待确认可验证 hook 机制。
+
+### 回滚
+
+`git checkout -- scripts/hooks/opencode-lmmcp-plugin.js scripts/connect_agents.py README.md tests/test_deployment.py TODO.md ITERATION.md`
+
+---
+
+## [迭代 55] 2026-06-01 — Hermes 对话前自动 memory_context 注入与弱相关过滤收紧
+
+### 变更
+
+- `scripts/hooks/lmmcp-context.sh`: 兼容 Hermes `pre_llm_call` shell hook payload，从 `extra.user_message` 读取用户提示词，并在 Hermes 场景输出 `{"context": ...}`；Claude/Codex 仍输出 `additionalContext`。
+- `scripts/hooks/lmmcp-context.sh`: 当 `memory_context` 返回 `used_ids=[]` 时静默跳过，避免注入只有 header 的空上下文。
+- `scripts/connect_agents.py`: Hermes hook 注册补齐 `pre_llm_call -> lmmcp-context.sh`，继续注册 `on_session_end -> lmmcp-ingest.py --agent hermes --background`，并同步写入 shell hook allowlist。
+- `scripts/setup-hooks.sh`: 一键 hook 部署会复制 Hermes context hook 到 `~/.hermes/agent-hooks/lmmcp-context.sh`，注册 `pre_llm_call` 与 allowlist。
+- `local_memory_mcp/storage/search.py`: 收紧 context pack 相关性阈值，`min_relevance_score` 调整为 `0.22`，`min_vector_only_relevance_score` 调整为 `0.45`，新增 keyword lexical 最低阈值 `0.08`，过滤 medium-score vector-only 与弱中文 keyword overlap。
+- `scripts/hooks/opencode-lmmcp-plugin.js`: 与 shell hook 一致，`used_ids=[]` 时不向 opencode system context 注入空记忆块。
+- `tests/test_deployment.py` / `tests/test_context_relevance.py`: 增加 Hermes pre-LLM 注入注册、Hermes 输出格式、空 context 跳过、中文弱 keyword overlap 和 medium-score vector-only 过滤回归断言。
+- `README.md`: 更新 Agent Session Hook 部署说明，补充 Hermes `pre_llm_call` 读前注入链路。
+- `TODO.md`: 将 Hermes 对话前自动检索注入标记为完成，保留 Gemini 对话前注入缺口；新增 prompt 检索相关性持续评测集待办。
+
+### 修复
+
+- 修复 Hermes 只有 MCP server 与 `on_session_end` 写回、缺少回答前自动 `memory_context` 注入的问题。
+- 修复短中文提示下，中等向量分数但零 lexical 命中的 vector-only 记录，以及只命中少量中文 ngram 的 keyword 兜底记录仍可能进入 context pack 的问题。
+- 修复自动注入链路在无相关记忆时仍注入空 `memory_context` header 的问题。
+
+### 验证
+
+- Shell 语法: `bash -n scripts/setup-hooks.sh scripts/hooks/lmmcp-context.sh scripts/hooks/session-start.sh` 通过。
+- Python 编译: `.venv/bin/python -m py_compile local_memory_mcp/storage/search.py scripts/connect_agents.py` 通过。
+- JS 语法: `node --check scripts/hooks/opencode-lmmcp-plugin.js` 通过。
+- 测试: `.venv/bin/python -m pytest tests/test_context_relevance.py tests/test_context_quality_metrics.py tests/test_context_pack_v2.py tests/test_phase10.py tests/test_context_injection_guard.py tests/test_deployment.py tests/test_lmmcp_ingest_hook.py -q`，60/60 pass。
+- 真实 hook: 使用 Hermes `pre_llm_call` 形状 payload 调用 `scripts/hooks/lmmcp-context.sh`，在无相关记忆时输出 0 字节，不再注入弱相关记录或空 header。
+- 服务状态: `systemctl --user restart lmmcp.service` 后 `scripts/lmmcp status` 显示 `http://127.0.0.1:8318/mcp` running。
+
+### 已知问题
+
+- Gemini 对话前自动 `memory_context` 注入和 Gemini 回答后自动 session_end hook 仍未完成，继续保留在 `TODO.md`。
+- prompt 检索相关性仍需要真实失败样例沉淀为持续评测集，避免后续阈值/排序回退。
+
+### 回滚
+
+`git checkout -- local_memory_mcp/storage/search.py scripts/hooks/lmmcp-context.sh scripts/hooks/opencode-lmmcp-plugin.js scripts/connect_agents.py scripts/setup-hooks.sh README.md tests/test_deployment.py tests/test_context_relevance.py TODO.md ITERATION.md`
+
+---
+
+## [迭代 56] 2026-06-01 — Gemini 自动读前/写后 hooks 与 Docker Compose Qdrant 默认启用
+
+### 变更
+
+- `scripts/hooks/lmmcp-context.sh`: `BeforeAgent` hook 场景输出 Gemini 可识别的 `hookSpecificOutput.hookEventName=BeforeAgent` 与 `additionalContext`。
+- `scripts/hooks/lmmcp-ingest.py`: Gemini 写回优先读取 hook stdin / background payload 里的 `transcript_path`，并支持 Gemini JSON transcript 与 JSONL transcript 两种格式。
+- `scripts/connect_agents.py`: `--register-hooks` 新增 Gemini `SessionStart`、`BeforeAgent`、`SessionEnd` 注册，分别接入 presence/capability、读前 `memory_context` 注入和后台 `memory_ingest` 写回。
+- `scripts/setup-hooks.sh`: 一键 hook 初始化同步写入 `~/.gemini/settings.json` 的 `mcpServers.local_memory`、`SessionStart`、`BeforeAgent`、`SessionEnd`。
+- `Dockerfile`: 容器镜像改为从源码安装 `.[all]`，默认带 Qdrant client、extraction 与 embedding fallback 依赖，并设置容器内 Qdrant endpoint。
+- `docker-compose.yml`: 默认启动 lmmcp + Qdrant，启用 `qdrant_data` / `lmmcp_data` 持久化 volume，lmmcp 依赖 Qdrant 服务并暴露健康检查。
+- `README.md` / `docs/deployment.md`: 更新 Gemini hooks、Docker Compose 快速启动和 Qdrant 默认启用说明。
+- `tests/test_deployment.py` / `tests/test_lmmcp_ingest_hook.py`: 增加 Gemini hook 注册、Gemini `transcript_path` JSON transcript 抽取、Docker Compose Qdrant/full extras 回归测试。
+- `TODO.md`: 将 Gemini 对话前注入、Gemini 回答后写回和 Docker Compose Qdrant 默认启用标记为完成；新增 Gemini 真实 CLI 现场验证待办。
+
+### 修复
+
+- 修复 Gemini 仅配置 MCP server、但缺少自动读前 `memory_context` 注入和回答后自动 `memory_ingest` 写回的问题。
+- 修复 Docker Compose 默认只启动 lmmcp、Qdrant 被注释且 Dockerfile 未安装完整 extras，导致容器部署缺少语义检索依赖的问题。
+
+### 验证
+
+- Shell 语法: `bash -n scripts/setup-hooks.sh scripts/hooks/lmmcp-context.sh` 通过。
+- Python 编译: `.venv/bin/python -m py_compile scripts/connect_agents.py scripts/hooks/lmmcp-ingest.py` 通过。
+- Docker Compose 配置: `docker compose config` 通过。
+- 测试: `.venv/bin/python -m pytest tests/test_deployment.py tests/test_lmmcp_ingest_hook.py -q`，17/17 pass。
+- 回归组合: `.venv/bin/python -m pytest tests/test_context_relevance.py tests/test_context_quality_metrics.py tests/test_context_pack_v2.py tests/test_phase10.py tests/test_context_injection_guard.py tests/test_deployment.py tests/test_lmmcp_ingest_hook.py tests/test_vector_store.py tests/test_config_validation.py -q`，102/102 pass。
+- Dry-run: `.venv/bin/python scripts/connect_agents.py --agents gemini --register-hooks --dry-run --no-probe` 正确显示会更新 WSL 与 Windows Gemini settings，并注册 Gemini hooks。
+
+### 已知问题
+
+- 本机当前没有 `gemini` 命令，Gemini 真实 CLI BeforeAgent/SessionEnd 现场验证仍保留在 `TODO.md`。
+- Docker Compose 已通过配置解析，但未执行真实 `docker compose up --build`，仍需在可接受拉取/构建耗时的窗口做一次容器端到端验证。
+
+### 回滚
+
+`git checkout -- Dockerfile docker-compose.yml scripts/hooks/lmmcp-context.sh scripts/hooks/lmmcp-ingest.py scripts/connect_agents.py scripts/setup-hooks.sh README.md docs/deployment.md tests/test_deployment.py tests/test_lmmcp_ingest_hook.py TODO.md ITERATION.md`
+
+---
+
+## [迭代 57] 2026-06-01 — start.sh venv 漂移自修复与 audit import 忽略策略显式化
+
+### 变更
+
+- `start.sh`: 新增 `venv_needs_rebuild()`，启动前检查 `.venv/bin/python` 是否可运行，以及 `.venv/bin/pip` / `.venv/bin/pytest` shebang 是否指向当前 checkout 的 `.venv/bin/python`。
+- `start.sh`: 检测到 venv 路径漂移或 python 不可运行时，自动删除并重建 `.venv`，避免跨目录迁移后 `bad interpreter` 阻断一键启动。
+- `local_memory_mcp/storage/transfer.py`: `memory_import()` 对 payload 中不支持导入的表返回 `ignored_tables`，并把该字段写入 `memory_import` 审计事件 detail。
+- `tests/test_deployment.py`: 增加 `start.sh` venv 漂移检测回归断言。
+- `tests/test_transfer.py`: 增加 `audit_events` 导出后导入被显式报告为 ignored 的回归测试。
+- `TODO.md`: 将 `start.sh` venv 路径漂移检测和 audit 导入策略标记为完成。
+
+### 修复
+
+- 修复 `.venv` 从旧 checkout 迁移/复用时，pip/pytest 等入口脚本 shebang 指向旧路径导致一键启动失败的问题。
+- 修复 `memory_export(include_audit=True)` 导出的 `audit_events` 在 `memory_import()` 中被静默忽略的问题；现在策略明确为不导入本机审计日志，但返回和审计记录都会报告 `ignored_tables=["audit_events"]`。
+
+### 验证
+
+- Shell 语法: `bash -n start.sh scripts/setup-hooks.sh scripts/hooks/lmmcp-context.sh` 通过。
+- Python 编译: `.venv/bin/python -m py_compile local_memory_mcp/storage/transfer.py` 通过。
+- 测试: `.venv/bin/python -m pytest tests/test_transfer.py tests/test_sync.py tests/test_deployment.py -q`，32/32 pass。
+
+### 已知问题
+
+- Docker Compose 真实容器端到端验证仍未执行，仅完成静态 `docker compose config`。
+- Gemini 真实 CLI BeforeAgent/SessionEnd 验证仍受限于本机没有 `gemini` 命令。
+
+### 回滚
+
+`git checkout -- start.sh local_memory_mcp/storage/transfer.py tests/test_deployment.py tests/test_transfer.py TODO.md ITERATION.md`
+
+---
+
+## [迭代 58] 2026-06-01 — lmmcp 端到端应用流程扫描第一版
+
+### 变更
+
+- `TODO.md`: 将用户反馈“输入提示词后，检索到的记忆相关性不强”明确并入 prompt 后记忆检索相关性持续评测专项。
+- `/mnt/d/Advancer/Desktop/output/lmmcp-system-flow-2026-06-01.html`: 生成第一版可视化系统流程梳理，覆盖部署、agent 接入、读前检索注入、回答后抽取写回、Qdrant/SQLite 双存储、curator/rollup 状态流转、agent 协作与当前符合度缺口，供用户确认。
+
+### 验证
+
+- 文档检查: `TODO.md` 已保留该问题的开放评测项，未新增重复待办。
+- 输出文件: HTML 已按用户约定写入 `/mnt/d/Advancer/Desktop/output`。
+
+### 已知问题
+
+- 本轮只完成全盘流程梳理第一版；`semantic-*` CLI 仍是兼容提示、Gemini 真实 CLI 现场验证、Docker Compose 容器端到端验证仍保留在 `TODO.md`。
+
+### 回滚
+
+`git checkout -- TODO.md ITERATION.md && rm -f /mnt/d/Advancer/Desktop/output/lmmcp-system-flow-2026-06-01.html`
+
+---
+
+## [迭代 59] 2026-06-01 — semantic-* CLI 接入真实 Qdrant 向量层
+
+### 变更
+
+- `local_memory_mcp/server.py`: `semantic-status` 改为调用 `VectorStore.status()`，输出当前 Qdrant collection、embedding provider、count 等状态。
+- `local_memory_mcp/server.py`: `semantic-search` 改为调用 Qdrant `VectorStore.search()`，支持 `--limit`、`--status` 和 `--score-threshold`，输出命中 id、score、text、payload。
+- `local_memory_mcp/server.py`: `semantic-index` 改为调用 `memory_rebuild_vectors()`，默认 dry-run，传入 `--force` 后才实际从 SQLite 重建 Qdrant 向量。
+- `tests/test_cli.py`: 增加 CLI 回归测试，使用 fake vector store/rebuild 函数验证 status/search/index 参数与输出，不依赖真实 Qdrant。
+- `README.md`: 删除 `semantic-*` 仅返回兼容提示的过时说明，补充真实语义 CLI 用法。
+- `TODO.md`: 将 `semantic-*` CLI 改为真实 Qdrant 功能标记为完成。
+
+### 修复
+
+- 修复 CLI 语义命令仍提示 sqlite-vec 已移除、无法作为部署和排障入口验证 Qdrant 语义层的问题。
+
+### 验证
+
+- 语法检查: `.venv/bin/python -m py_compile local_memory_mcp/server.py tests/test_cli.py` 通过。
+- 测试: `.venv/bin/python -m pytest tests/test_cli.py tests/test_vector_store.py tests/test_degraded.py -q`，32/32 pass。
+
+### 已知问题
+
+- `semantic-search --status` 依赖 Qdrant payload 里的 `status` 字段；如果历史 payload 与 SQLite 状态失同步，需要先运行 `semantic-index --force` 或 `memory_rebuild_vectors(dry_run=False)` 重建向量。
+
+### 回滚
+
+`git checkout -- local_memory_mcp/server.py tests/test_cli.py README.md TODO.md ITERATION.md`
+
+---
+
+## [迭代 60] 2026-06-01 — deploy.sh 默认补齐 Docker/Ollama/Qdrant 运行时依赖
+
+### 变更
+
+- `scripts/deploy.sh`: 一键部署默认开启 host dependency bootstrap、Ollama 安装/启动与 embedding 模型拉取、非交互 package manager yes flag，和默认 Qdrant systemd service 形成完整运行时依赖补齐链路。
+- `scripts/deploy.sh`: 新增 `--no-ollama` 与 `--no-assume-yes`，并让 `LMMCP_BOOTSTRAP_DEPS`、`LMMCP_WITH_OLLAMA`、`LMMCP_ASSUME_YES` 支持显式 `0/1` 覆盖默认策略。
+- `tests/test_deployment.py`: 增加部署策略回归测试，锁定默认 `BOOTSTRAP_DEPS=1`、`WITH_OLLAMA=1`、`ASSUME_YES=1`、Docker/Qdrant/Ollama 补齐入口和关闭开关。
+- `README.md` / `docs/deployment.md`: 更新一键部署说明，从“可选补齐依赖”改为“默认补齐依赖，可显式关闭”。
+- `TODO.md`: 将 `deploy.sh` 默认自动补齐运行时依赖标记为完成。
+
+### 修复
+
+- 修复 `scripts/deploy.sh` 虽名为一键部署，但默认不启用 `--bootstrap-deps` / `--with-ollama`，在缺少 Docker/Ollama 的新机器上仍需用户额外理解并手动补参数的问题。
+
+### 验证
+
+- Shell 语法: `bash -n scripts/deploy.sh` 通过。
+- Dry-run: `scripts/deploy.sh --dry-run --skip-tests` 显示默认 `bootstrap deps: 1 (assume_yes=1)`、`qdrant: 1`、`ollama: 1`、`pull images: 1`、`pull_models=1`。
+- 测试: `.venv/bin/python -m pytest tests/test_deployment.py -q`，16/16 pass。
+
+### 已知问题
+
+- Docker Compose 真实容器端到端验证仍未执行。
+- 默认自动安装 Docker/Ollama 仍依赖系统存在可用包管理器和 sudo/root 权限；受限环境需要使用 `--no-bootstrap-deps`、`--no-ollama` 或外部 Qdrant/Ollama。
+
+### 回滚
+
+`git checkout -- scripts/deploy.sh tests/test_deployment.py README.md docs/deployment.md TODO.md ITERATION.md`
+
+---
+
 ## 日志格式规范
 
 每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：

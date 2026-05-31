@@ -2,21 +2,28 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install core deps first for layer caching
-COPY pyproject.toml requirements.txt ./
-RUN pip install --no-cache-dir mcp==1.27.1
+ENV PIP_NO_CACHE_DIR=1 \
+    PYTHONUNBUFFERED=1
 
-# Optional: vector support
-ARG INSTALL_VECTOR=false
-RUN if [ "$INSTALL_VECTOR" = "true" ]; then \
-      pip install --no-cache-dir "qdrant-client>=1.18.0,<2.0"; \
-    fi
-
+# Install from the checked-in source so package metadata and optional extras
+# stay in sync with pyproject.toml.
+COPY pyproject.toml README.md ./
 COPY local_memory_mcp/ ./local_memory_mcp/
+
+ARG INSTALL_EXTRAS=all
+RUN if [ "$INSTALL_EXTRAS" = "none" ]; then \
+      pip install -e .; \
+    else \
+      pip install -e ".[${INSTALL_EXTRAS}]"; \
+    fi
 
 # Data directory — mount a volume here to persist memory.sqlite3
 RUN mkdir -p /data
-ENV LOCAL_MEMORY_DB=/data/memory.sqlite3
+ENV LOCAL_MEMORY_DB=/data/memory.sqlite3 \
+    LOCAL_MEMORY_CONFIG=/data/config.yaml \
+    QDRANT_URL=http://qdrant:6333 \
+    QDRANT_COLLECTION=agent_memory \
+    LOCAL_MEMORY_EMBEDDING_PROVIDER=hashing
 
 EXPOSE 8318
 
