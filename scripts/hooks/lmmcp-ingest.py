@@ -5,6 +5,7 @@ import argparse
 from datetime import datetime
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -28,6 +29,15 @@ def _spawn_background(agent: str, force: bool) -> None:
         cmd.append("--force")
     env = os.environ.copy()
     env["LMMCP_INGEST_BACKGROUND_CHILD"] = "1"
+    # Hermes on_session_end passes hook metadata on stdin.  A detached child
+    # cannot read the parent's stdin after we redirect it to DEVNULL, so carry
+    # the small JSON payload through the environment for background mode.
+    try:
+        payload = sys.stdin.read()
+    except Exception:
+        payload = ""
+    if payload:
+        env["LMMCP_HERMES_HOOK_PAYLOAD"] = payload[:20000]
     try:
         proc = subprocess.Popen(
             cmd,
@@ -198,27 +208,50 @@ def _extract_codex(path: Path) -> list[dict[str, str]]:
     return messages[-40:]
 
 
-def _extract_hermes(session_id: str) -> list[dict[str, str]]:
-    session_file = Path.home() / ".hermes" / "sessions" / f"session_{session_id}.json"
-    if not session_file.exists():
-        return []
-    try:
-        data = json.loads(session_file.read_text(encoding="utf-8"))
-    except Exception:
+def _extract_hermes_from_state_db(session_id: str) -> list[dict[str, str]]:
+    db_path = Path(os.environ.get("HERMES_STATE_DB", str(Path.home() / ".hermes" / "state.db")))
+    if not db_path.exists():
+        _log(f"hermes_state_db_missing path={db_path}")
         return []
 
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT role, content
+            FROM messages
+            WHERE session_id = ?
+              AND role IN ('user', 'assistant')
+              AND content IS NOT NULL
+              AND trim(content) != ''
+            ORDER BY id DESC
+            LIMIT 80
+            """,
+            (session_id,),
+        ).fetchall()
+    except Exception as exc:
+        _log(f"hermes_state_db_error type={type(exc).__name__}")
+        return []
+    finally:
+        try:
+            conn.close()  # type: ignore[name-defined]
+        except Exception:
+            pass
+
     messages: list[dict[str, str]] = []
-    for msg in data.get("messages", [])[-40:]:
-        if not isinstance(msg, dict):
-            continue
-        role = msg.get("role", "")
-        if role not in ("user", "assistant"):
-            continue
-        text = _text_from_blocks(msg.get("content", ""))
-        text = text.strip()
+    for row in reversed(rows):
+        role = str(row["role"])
+        text = str(row["content"] or "").strip()
         if text:
             messages.append({"role": role, "content": text[:800]})
-    return messages
+    if messages:
+        _log(f"hermes_state_db_transcript session={session_id} messages={len(messages)}")
+    return messages[-40:]
+
+
+def _extract_hermes(session_id: str) -> list[dict[str, str]]:
+    return _extract_hermes_from_state_db(session_id)
 
 
 def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:
@@ -267,7 +300,8 @@ def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:
 def _messages_for_agent(agent: str) -> list[dict[str, str]]:
     if agent == "hermes":
         try:
-            data = json.loads(sys.stdin.read() or "{}")
+            payload = os.environ.get("LMMCP_HERMES_HOOK_PAYLOAD") or sys.stdin.read() or "{}"
+            data = json.loads(payload)
         except Exception:
             return []
         session_id = str(data.get("session_id", "")) if isinstance(data, dict) else ""

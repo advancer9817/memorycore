@@ -702,6 +702,82 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
+## [迭代 42] 2026-05-30 — 更新至最新版本 + 重新执行初始化脚本
+
+### 变更
+
+- `git pull --rebase origin main`：从 `89f07af` 更新到 `163c302`（5 个新提交，含 v3 记忆状态机 tiered TTL / revival / freeze/stable / contradicted archive）
+- `memory-sync/memories.json`：冲突时以远程版本为准，重新导入 537 条记忆（149 条以 newer wins 策略更新）
+- `scripts/setup-hooks.sh`：重新运行，更新 Claude `~/.claude/settings.json` Stop hook、`CLAUDE.md` 记忆规则段、`AGENTS.md` 规则段、Codex hooks.json
+- `scripts/install_curator_timer.sh`：修复 service 文件占位符未替换问题（`__ROOT__`/`__LMMCP_SERVICE__` 等），手动生成正确的 `lmmcp-curator.service`，timer 已启用（首次触发：22:02 CST）
+- `scripts/init_local_memory.sh --skip-install --skip-tests`：重新初始化 SQLite + dashboard，config.yaml 保留不覆盖，Qdrant 不可用（无 Docker）走 hashing fallback
+
+### 验证
+
+- `lmmcp status`：running (pid 6398, endpoint http://127.0.0.1:8318/mcp)
+- `cpa status`：running (pid 5968, port :8317)
+- `systemctl --user list-timers lmmcp-curator.timer`：1 timer listed，35min 后首次触发
+- setup-hooks.sh 输出：`lmmcp hooks configured`
+- init_local_memory.sh 输出：`[done] local-memory-mcp deployed`
+
+---
+
+## [迭代 43] 2026-05-30 — WSL 安装 Docker + Qdrant 向量存储上线
+
+### 变更
+
+- WSL Ubuntu 24.04 安装 Docker Engine 29.5.2（阿里云镜像源）
+- 配置 dockerd 代理 `http://127.0.0.1:7890`（继承 WSL Clash 代理），解决 Docker Hub 拉取超时
+- 启动 Qdrant 容器（`docker.io/qdrant/qdrant:latest`，端口 6333/6334，存储 `~/.agent-memory/qdrant_storage`，`restart: unless-stopped`）
+- 重新执行 `init_local_memory.sh --skip-install --skip-tests`，Qdrant 连接成功，集合 `agent_memory` (dim=768) 已创建
+- 向量 embedding 仍走 hashing fallback（Ollama 未安装），语义搜索功能待后续安装 Ollama 后启用
+
+### 验证
+
+- `docker ps`：qdrant Up，healthz check passed
+- `init_local_memory.sh` 输出：`available: True, collection: agent_memory, dim: 768`
+- `lmmcp status`：running (pid 6398, endpoint http://127.0.0.1:8318/mcp)
+
+**后续补充（同日）：Ollama + 向量语义搜索上线**
+
+- 安装 Ollama 0.23.2，拉取 `nomic-embed-text` 模型
+- `memory_rebuild_vectors` 重建 509 条记忆向量，写入 Qdrant `agent_memory` collection
+- 语义搜索验证：`memory_vector_search` 返回评分结果，embed_provider=ollama 正常工作
+- `.zshrc` `_wsl_services_start` 补充 `docker start qdrant`，确保 WSL 重启后 Qdrant 自动拉起
+
+---
+
+## [迭代 44] 2026-05-30 — Hermes hook 初始化脚本切换为 SQLite session
+
+### 变更
+
+- `scripts/hooks/lmmcp-ingest.py`: 同步运行时修复版本；Hermes transcript 抽取移除旧 `~/.hermes/sessions/session_<id>.json` 兼容，只读取当前 `~/.hermes/state.db` 的 `messages` 表。
+- `scripts/hooks/lmmcp-ingest.py`: 后台模式启动子进程前保存 hook stdin JSON 到 `LMMCP_HERMES_HOOK_PAYLOAD`，避免 detached child 因 stdin=DEVNULL 丢失 `session_id`。
+- `scripts/setup-hooks.sh`: Hermes `on_session_end` 初始化改为安装 `python3 ~/.hermes/agent-hooks/lmmcp-ingest.py --agent hermes --background`，timeout 降为 10 秒，并清理旧的不带 `--background` 的 lmmcp Hermes hook/allowlist 条目。
+- `TODO.md`: 记录并完成 hooks 初始化脚本未跟进 Hermes SQLite session 存储变化的问题。
+
+### 修复
+
+- 修复重新运行 `scripts/setup-hooks.sh` 会把 Hermes hook 回退到旧 JSON session 抽取逻辑的问题；现在初始化脚本和 hook 均只按 `state.db` 新机制处理 Hermes。
+- 修复 Hermes 后台 session_end hook 无法把 stdin payload 传给子进程，导致 `skip_empty_messages agent=hermes` 的问题。
+
+### 验证
+
+- 语法检查: `python3 -m py_compile scripts/hooks/lmmcp-ingest.py` 通过。
+- 手动 hook: 使用当前 Hermes session id 调用 `lmmcp-ingest.py --agent hermes`，日志显示 `hermes_state_db_transcript ... messages=4` 与 `ingest_done ... errors=0 ... degraded=false`。
+- 后台 hook: 使用 `--background` 调用后，日志显示 `background_spawned`、`hermes_state_db_transcript ... messages=4` 与 `ingest_done ... errors=0 ... degraded=false`。
+- MCP 连接: `hermes mcp test local_memory` 连接成功，发现 36 tools；`lmmcp status` 显示 `http://127.0.0.1:8318/mcp` running。
+
+### 已知问题
+
+- 未运行全量 pytest；本次只修改 hook 初始化/脚本逻辑，未改服务端存储或 MCP tool。
+
+### 回滚
+
+`git checkout -- scripts/hooks/lmmcp-ingest.py scripts/setup-hooks.sh TODO.md ITERATION.md`
+
+---
+
 ## 日志格式规范
 
 每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：

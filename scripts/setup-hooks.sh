@@ -272,25 +272,40 @@ except Exception:
 if hermes_config.exists() and yaml is not None:
     data = yaml.safe_load(hermes_config.read_text(encoding="utf-8") or "{}") or {}
     hooks_cfg = data.setdefault("hooks", {})
-    command = f"python3 {hermes_dest} --agent hermes"
+    # Hermes stores current CLI transcripts in ~/.hermes/state.db.  The hook
+    # runs in the background and carries stdin metadata to the detached child via
+    # LMMCP_HERMES_HOOK_PAYLOAD so session_id is not lost.
+    command = f"python3 {hermes_dest} --agent hermes --background"
     entries = hooks_cfg.get("on_session_end")
     if entries is None:
-        hooks_cfg["on_session_end"] = [{"command": command, "timeout": 120}]
+        hooks_cfg["on_session_end"] = [{"command": command, "timeout": 10}]
     elif isinstance(entries, list):
-        entries = [entry for entry in entries if not any(fragment in str(entry) for fragment in old_hook_fragments)]
+        entries = [
+            entry for entry in entries
+            if not (
+                any(fragment in str(entry) for fragment in old_hook_fragments)
+                or ("lmmcp-ingest.py" in str(entry) and "--agent hermes" in str(entry))
+            )
+        ]
         if not any(command in str(entry) for entry in entries):
-            entries.append({"command": command, "timeout": 120})
+            entries.append({"command": command, "timeout": 10})
         hooks_cfg["on_session_end"] = entries
     elif isinstance(entries, str):
-        hooks_cfg["on_session_end"] = [{"command": command, "timeout": 120}]
+        hooks_cfg["on_session_end"] = [{"command": command, "timeout": 10}]
     hermes_config.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 allow = load_json(hermes_allowlist)
 approvals = allow.setdefault("approvals", [])
-command = f"python3 {hermes_dest} --agent hermes"
+command = f"python3 {hermes_dest} --agent hermes --background"
 approvals[:] = [
     item for item in approvals
-    if not (isinstance(item, dict) and any(fragment in str(item.get("command", "")) for fragment in old_hook_fragments))
+    if not (
+        isinstance(item, dict)
+        and (
+            any(fragment in str(item.get("command", "")) for fragment in old_hook_fragments)
+            or ("lmmcp-ingest.py" in str(item.get("command", "")) and "--agent hermes" in str(item.get("command", "")))
+        )
+    )
 ]
 if not any(item.get("command") == command and item.get("event") == "on_session_end" for item in approvals if isinstance(item, dict)):
     approvals.append({

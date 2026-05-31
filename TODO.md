@@ -13,6 +13,7 @@
 
 ## 功能
 
+- [x] 修复 hooks 初始化脚本未同步 Hermes SQLite session 存储变化：`scripts/setup-hooks.sh` 现在安装带 `--background` 的 Hermes on_session_end hook，`scripts/hooks/lmmcp-ingest.py` 只从 `~/.hermes/state.db` 读取 transcript，并在后台模式保留 stdin payload。
 - [ ] Embedding sentence-transformers 降级（Ollama 不可用时自动切换）
 - [ ] 修复 rollup 测试隔离问题：`test_rollup_processes_manual_source_episodic` 在本机全量测试中会因真实 extraction 配置触发外部 LLM 调用并超时；应让 dry-run/force 测试使用 stub summarizer 或隔离测试配置，避免依赖外部服务。
 
