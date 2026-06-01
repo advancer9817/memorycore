@@ -43,7 +43,7 @@
 
 ## 发布与部署
 
-- [ ] PyPI 首次发布（打 tag 触发 publish workflow，验证安装可用）：本地 `python -m build`、`twine check`、Python 3.11 wheel 安装验证均已通过；main/tag CI 均已通过。Publish workflow 已越过 checkout/build，但 PyPI 返回 `invalid-publisher`，说明 PyPI 端还没有匹配的 Trusted Publisher；当前 OIDC claims 为 repository `advancer9817-crypto/local-memory-mcp`、workflow `.github/workflows/publish.yml`、ref `refs/tags/v0.25.0`、environment `MISSING`。2026-06-01 11:22 CST 复验 `pip index versions local-memory-mcp` 仍显示 PyPI 尚无该包。配置 PyPI Trusted Publisher 后需 rerun publish，并验证 `pip install "local-memory-mcp[all]"`。
+- [ ] PyPI 首次发布（打 tag 触发 publish workflow，验证安装可用）：本地 `python -m build`、`twine check`、Python 3.11 wheel 安装验证均已通过；main/tag CI 均已通过。Trusted Publishing 路线仍被 PyPI `invalid-publisher` 拒绝，OIDC claims 为 repository `advancer9817-crypto/local-memory-mcp`、workflow `.github/workflows/publish.yml`、ref `refs/tags/v0.25.0`、environment `MISSING`。2026-06-01 改为支持 GitHub Secret `PYPI_API_TOKEN` 发布；用户已暴露过一个 PyPI token，必须先在 PyPI 撤销该 token、重新生成新 token，并只写入 GitHub Actions secret 后再 rerun publish，最后验证 `pip install "local-memory-mcp[all]"`。
 - [x] 修复 CI 并发写入偶发锁库失败：GitHub Actions main/tag CI 中 `test_concurrent_writes_no_corruption` 偶发 `sqlite3.OperationalError: database is locked`；已提高 SQLite busy timeout，并用进程内 reentrant lock 串行化 `managed_conn()` 写事务，保留 commit retry。
 - [x] 修复 GitHub Actions CI 依赖安装缺口：tag/main CI 只安装 `requirements.txt`，缺少项目依赖导致 `ModuleNotFoundError: No module named 'yaml'`；已改为安装 `.[dev,all]`，让 CI 与当前 package metadata 对齐。
 - [x] 修复 PyPI publish workflow checkout 权限缺口：publish job 只声明 `id-token: write` 会覆盖默认权限，tag workflow 中 `actions/checkout` 无法读取私有仓库并报 repository not found；已补 `contents: read`。

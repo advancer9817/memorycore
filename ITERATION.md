@@ -1804,6 +1804,34 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
+## [迭代 80] 2026-06-01 — PyPI API Token 发布路径接入
+
+### 变更
+
+- `.github/workflows/publish.yml`: `pypa/gh-action-pypi-publish` 增加 `password: ${{ secrets.PYPI_API_TOKEN }}`，支持通过 GitHub Actions secret 使用 PyPI API token 发布。
+- `tests/test_deployment.py`: 增加 publish workflow 回归测试，锁定只引用 `PYPI_API_TOKEN` secret，并禁止把 `password: pypi-...` 这类明文 token 写进 workflow。
+- `TODO.md`: 更新 PyPI 首发状态，记录 Trusted Publishing 仍为 `invalid-publisher`，改接 API token secret 路线，并标注已暴露 token 必须撤销后重新生成。
+
+### 修复
+
+- 修复用户已创建 PyPI API token 但 publish workflow 仍只走 Trusted Publishing OIDC，导致 GitHub Secret/API token 路线无法生效的问题。
+- 避免将已暴露的 PyPI token 写入仓库；workflow 只引用 GitHub Secret 名称。
+
+### 验证
+
+- 焦点测试: `tests/test_deployment.py` 18/18 pass。
+- GitHub Secrets: 当前仓库尚未配置 `PYPI_API_TOKEN` secret，需用户撤销已暴露 token、重新生成新 token 并写入 secret 后再触发 tag publish。
+
+### 已知问题
+
+- PyPI 首发仍未完成；等待新的 PyPI API token 写入 GitHub Actions secret `PYPI_API_TOKEN` 后 rerun publish。
+
+### 回滚
+
+`git checkout -- .github/workflows/publish.yml tests/test_deployment.py TODO.md ITERATION.md`
+
+---
+
 ## 日志格式规范
 
 每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：

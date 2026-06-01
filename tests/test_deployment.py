@@ -111,6 +111,15 @@ def test_docker_compose_enables_qdrant_and_runtime_extras():
     assert "LOCAL_MEMORY_FRONTEND_TOKEN: ${LOCAL_MEMORY_FRONTEND_TOKEN:-change-me}" in compose
 
 
+def test_publish_workflow_uses_pypi_token_secret():
+    workflow = (ROOT / ".github" / "workflows" / "publish.yml").read_text(encoding="utf-8")
+
+    assert "pypa/gh-action-pypi-publish@release/v1" in workflow
+    assert "password: ${{ secrets.PYPI_API_TOKEN }}" in workflow
+    assert "PYPI_API_TOKEN" in workflow
+    assert "password: pypi-" not in workflow
+
+
 def test_hook_setup_registers_prompt_context_injection():
     setup = (ROOT / "scripts" / "setup-hooks.sh").read_text(encoding="utf-8")
     connect_agents = (ROOT / "scripts" / "connect_agents.py").read_text(encoding="utf-8")
