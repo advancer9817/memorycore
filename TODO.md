@@ -44,6 +44,8 @@
 ## 发布与部署
 
 - [ ] PyPI 首次发布（打 tag 触发 publish workflow，验证安装可用）：publish workflow 已存在；本地 `python -m build` 和 `twine check` 已通过，Python 3.11 临时 venv 安装 wheel 验证通过；2026-06-01 11:00 CST 复验 `pip index versions local-memory-mcp` 仍显示 PyPI 尚无该包，远端仅有 `v0.20.0` tag。实际发布还需提交当前改动、打/推 `v0.25.0` tag，并确认 PyPI Trusted Publishing 已配置。
+- [x] 修复 GitHub Actions CI 依赖安装缺口：tag/main CI 只安装 `requirements.txt`，缺少项目依赖导致 `ModuleNotFoundError: No module named 'yaml'`；已改为安装 `.[dev,all]`，让 CI 与当前 package metadata 对齐。
+- [x] 修复 PyPI publish workflow checkout 权限缺口：publish job 只声明 `id-token: write` 会覆盖默认权限，tag workflow 中 `actions/checkout` 无法读取私有仓库并报 repository not found；已补 `contents: read`。
 - [x] Docker Compose 完善：`docker-compose.yml` 默认启动 lmmcp + Qdrant，Dockerfile 安装 `.[all]`，Compose 环境设置 Qdrant endpoint 与持久化 volume。
 - [ ] Docker Compose 容器端到端验证：已通过 `docker compose config` 静态解析；2026-06-01 使用临时 18318/16333/16334 端口执行 `docker compose up --build` 时，Docker mirror 拉取 `python:3.11-slim` metadata 返回 unexpected EOF，本机也无该基础镜像缓存；已单独尝试 `docker.1ms.run`、`docker.m.daocloud.io`、`dockerproxy.com`、`registry.dockermirror.com` 均失败；2026-06-01 11:00 CST 复验 `docker pull python:3.11-slim` 仍在 `docker.1ms.run` metadata HEAD 阶段返回 `unexpected EOF`。待 Docker registry 可用后继续验证 `/health`、`/mcp`、`memory_vector_status`。
 - [x] README 补充 PyPI 安装说明；Docker Compose 快速启动文档已补，README 已补发布后可用的 `pip install "local-memory-mcp[all]"` / `"[full]"` 安装命令。

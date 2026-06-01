@@ -1519,6 +1519,58 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
+## [迭代 70] 2026-06-01 — GitHub Actions CI 依赖安装修复
+
+### 变更
+
+- `.github/workflows/ci.yml`: CI 依赖安装从 `requirements.txt` 改为 `pip install -e ".[dev,all]"`，确保 GitHub Actions 安装项目 runtime deps、默认 extras 与测试依赖。
+- `TODO.md`: 记录并完成 CI 缺少项目依赖导致发布候选检查失败的问题。
+
+### 修复
+
+- 修复 main/tag CI 只安装 `requirements.txt` 时缺少 `pyyaml` 等 `pyproject.toml` runtime 依赖，导致 `tests/conftest.py` import package 失败的问题。
+
+### 验证
+
+- 远端失败证据: GitHub Actions run `26732839095` 在 `python -m pytest tests/ -q` 阶段报 `ModuleNotFoundError: No module named 'yaml'`。
+- 本地文档/部署门禁: `.venv/bin/python -m pytest tests/test_docs_consistency.py tests/test_deployment.py -q`，20/20 pass。
+
+### 已知问题
+
+- 需推送修复提交后复验 GitHub Actions CI。
+
+### 回滚
+
+`git checkout -- .github/workflows/ci.yml TODO.md ITERATION.md`
+
+---
+
+## [迭代 71] 2026-06-01 — PyPI Publish Workflow 权限修复
+
+### 变更
+
+- `.github/workflows/publish.yml`: publish job permissions 增加 `contents: read`，保留 `id-token: write` 供 PyPI Trusted Publishing 使用。
+- `TODO.md`: 记录并完成 publish workflow checkout 权限缺口。
+
+### 修复
+
+- 修复 job 级 `permissions` 只声明 `id-token: write` 后覆盖默认权限，导致 tag workflow 中 `actions/checkout` 无法读取仓库并报 `repository not found` 的问题。
+
+### 验证
+
+- 远端失败证据: GitHub Actions run `26732849249` 在 `actions/checkout@v4` 阶段对 `v0.25.0` tag fetch 报 `fatal: repository 'https://github.com/advancer9817-crypto/local-memory-mcp/' not found`。
+- 权限修复: publish workflow 现在同时声明 `contents: read` 与 `id-token: write`。
+
+### 已知问题
+
+- 需推送修复提交，并在确认 `v0.25.0` 尚未发布到 PyPI 后，将 `v0.25.0` tag 移到修复后的提交重新触发发布。
+
+### 回滚
+
+`git checkout -- .github/workflows/publish.yml TODO.md ITERATION.md`
+
+---
+
 ## 日志格式规范
 
 每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：
