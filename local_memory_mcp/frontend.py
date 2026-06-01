@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 import time
 from dataclasses import dataclass
 from ipaddress import ip_address
@@ -220,6 +221,8 @@ async def _dispatch_api(request: Request, parts: list[str], query: dict[str, lis
             stale_after_days=_int_q(query, "stale_after_days", 60), archive_after_days=_int_q(query, "archive_after_days", 120),
             allow_actions=_list_q(query, "allow_actions"), deny_actions=_list_q(query, "deny_actions"),
         )
+    if parts == ["curator", "status"] and method == "GET":
+        return _curator_status_payload(limit=_int_q(query, "limit", 200))
     if parts == ["curator", "apply"] and method == "POST":
         return curator_report(
             dry_run=False, limit=int(body.get("limit", 500)),
@@ -357,6 +360,8 @@ def _dispatch_openmemory_compat(
         ids = body.get("memory_ids") or []
         archived = [update_status(str(memory_id), "archived") for memory_id in ids]
         return {"archived": [item["id"] for item in archived], "count": len(archived)}
+    if parts == ["memories", "categories"] and method == "GET":
+        return _openmemory_categories()
     if len(parts) == 2 and parts[0] == "memories" and method == "GET":
         record = get_record(parts[1])
         if record is None:
@@ -391,8 +396,6 @@ def _dispatch_openmemory_compat(
         ids = body.get("memory_ids") or []
         updated = [update_status(str(memory_id), status) for memory_id in ids]
         return {"updated": [item["id"] for item in updated], "state": state}
-    if parts == ["memories", "categories"] and method == "GET":
-        return _openmemory_categories()
     if parts == ["stats"] and method == "GET":
         stats = get_memory_stats()
         apps = _openmemory_apps(limit=1000)["apps"]
@@ -407,13 +410,21 @@ def _dispatch_openmemory_compat(
     if parts == ["context-traces"] and method == "GET":
         return get_context_quality_stats(_int_q(query, "limit", 500))
     if len(parts) == 1 and parts[0] == "apps" and method == "GET":
-        return _openmemory_apps(limit=_int_q(query, "page_size", 50), name=_str_q(query, "name", "") or "")
+        return _openmemory_apps(
+            limit=_int_q(query, "page_size", 50),
+            name=_str_q(query, "name", "") or "",
+            is_active=_str_q(query, "is_active", ""),
+            sort_by=_str_q(query, "sort_by", "name") or "name",
+            sort_direction=_str_q(query, "sort_direction", "asc") or "asc",
+        )
     if len(parts) == 2 and parts[0] == "apps" and method == "GET":
         return _openmemory_app_details(parts[1])
     if len(parts) == 3 and parts[0] == "apps" and parts[2] == "memories" and method == "GET":
-        rows = search_memory_records(status="active", limit=_int_q(query, "page_size", 50))
+        page = _int_q(query, "page", 1)
+        page_size = _int_q(query, "page_size", 50)
+        rows = search_memory_records(status="active", limit=max(page * page_size, 1000))
         rows = [row for row in rows if (row.get("source_agent") or "manual") == parts[1]]
-        return {"memories": [_openmemory_memory_item(row) for row in rows], "total": len(rows), "page": _int_q(query, "page", 1), "page_size": _int_q(query, "page_size", 50)}
+        return {"memories": [_openmemory_memory_item(row) for row in rows], "total": len(rows), "page": page, "page_size": page_size}
     if len(parts) == 3 and parts[0] == "apps" and parts[2] == "accessed" and method == "GET":
         return {"memories": [], "total": 0, "page": _int_q(query, "page", 1), "page_size": _int_q(query, "page_size", 50)}
     if len(parts) == 2 and parts[0] == "apps" and method == "PUT":
@@ -467,18 +478,60 @@ def _openmemory_categories() -> dict[str, Any]:
     return {"categories": categories, "total": len(categories)}
 
 
-def _openmemory_apps(limit: int = 50, name: str = "") -> dict[str, Any]:
+def _openmemory_apps(
+    limit: int = 50,
+    name: str = "",
+    is_active: str | None = "",
+    sort_by: str = "name",
+    sort_direction: str = "asc",
+) -> dict[str, Any]:
     rows = search_memory_records(status="active", limit=1000)
-    counts: dict[str, int] = {}
+    apps_by_id: dict[str, dict[str, Any]] = {}
     for row in rows:
         app = str(row.get("source_agent") or "manual")
         if name and name.lower() not in app.lower():
             continue
-        counts[app] = counts.get(app, 0) + 1
-    apps = [
-        {"id": app, "name": app, "total_memories_created": count, "total_memories_accessed": 0, "is_active": True}
-        for app, count in sorted(counts.items(), key=lambda item: item[0])[:limit]
-    ]
+        current = apps_by_id.setdefault(app, {
+            "id": app,
+            "name": app,
+            "total_memories_created": 0,
+            "total_memories_accessed": 0,
+            "is_active": True,
+            "status": "unknown",
+            "last_activity_at": "",
+            "last_seen_at": "",
+        })
+        current["total_memories_created"] += 1
+        updated_at = str(row.get("updated_at") or row.get("created_at") or "")
+        if updated_at > str(current.get("last_activity_at") or ""):
+            current["last_activity_at"] = updated_at
+
+    presence_by_id = {item["agent_id"]: item for item in list_agent_presence(limit=500)}
+    for app, item in apps_by_id.items():
+        presence = presence_by_id.get(app)
+        if presence:
+            item["status"] = presence.get("status") or "unknown"
+            item["last_seen_at"] = presence.get("last_seen_at") or ""
+            item["is_active"] = item["status"] in {"online", "idle", "busy"}
+            if str(item["last_seen_at"]) > str(item.get("last_activity_at") or ""):
+                item["last_activity_at"] = item["last_seen_at"]
+
+    if is_active in {"true", "false"}:
+        expected = is_active == "true"
+        apps_by_id = {key: item for key, item in apps_by_id.items() if bool(item["is_active"]) is expected}
+
+    sort_map = {
+        "name": lambda item: str(item["name"]).lower(),
+        "memories": lambda item: int(item["total_memories_created"]),
+        "memories_accessed": lambda item: int(item["total_memories_accessed"]),
+        "last_activity": lambda item: str(item.get("last_activity_at") or ""),
+        "status": lambda item: str(item.get("status") or ""),
+    }
+    apps = sorted(
+        apps_by_id.values(),
+        key=sort_map.get(sort_by, sort_map["name"]),
+        reverse=sort_direction == "desc",
+    )[:limit]
     return {"apps": apps, "total": len(apps), "page": 1, "page_size": limit}
 
 
@@ -491,6 +544,57 @@ def _openmemory_app_details(app_id: str) -> dict[str, Any]:
         "total_memories_accessed": 0,
         "first_accessed": None,
         "last_accessed": None,
+    }
+
+
+def _systemctl_user_show(unit: str, properties: list[str]) -> dict[str, str]:
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "show", unit, *[f"--property={prop}" for prop in properties]],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except Exception as exc:
+        return {"error": str(exc)}
+    if result.returncode != 0:
+        return {"error": (result.stderr or result.stdout or f"systemctl exited {result.returncode}").strip()}
+    parsed: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            parsed[key] = value
+    return parsed
+
+
+def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
+    stats = get_memory_stats()
+    report = curator_report(dry_run=True, limit=limit)
+    timer = _systemctl_user_show("lmmcp-curator.timer", [
+        "ActiveState",
+        "SubState",
+        "NextElapseUSecRealtime",
+        "LastTriggerUSec",
+    ])
+    service = _systemctl_user_show("lmmcp-curator.service", [
+        "ActiveState",
+        "SubState",
+        "Result",
+        "ExecMainStatus",
+        "ExecMainStartTimestamp",
+        "ExecMainExitTimestamp",
+    ])
+    return {
+        "stats": stats,
+        "curator": {
+            "generated_at": report.get("generated_at"),
+            "scanned": report.get("scanned", 0),
+            "summary": report.get("summary", {}),
+            "planned_actions": report.get("action_plan", [])[:10],
+        },
+        "timer": timer,
+        "service": service,
     }
 
 
@@ -523,7 +627,13 @@ def _check_origin(request: Request) -> Response | None:
     if not origin:
         return None
     host = request.headers.get("host") or ""
-    if host and host not in origin:
+    if not host:
+        return None
+    # Compare hostnames only (strip port) so that the UI on a different port
+    # (e.g. localhost:3000) can still POST to the API (e.g. localhost:8318).
+    origin_host = origin.split("://")[-1].split(":")[0].split("/")[0]
+    server_host = host.split(":")[0]
+    if origin_host and server_host and origin_host != server_host:
         return _json_error("bad_origin", "mutating requests must use same origin", 403)
     return None
 

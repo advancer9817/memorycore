@@ -20,6 +20,7 @@ import {
   setAccessedMemoriesError,
   setSelectedAppError,
 } from '@/store/appsSlice';
+import { getApiBaseUrl } from '@/lib/api-url';
 
 interface ApiResponse {
   total: number;
@@ -45,7 +46,7 @@ interface AccessedMemoriesResponse {
 interface FetchAppsParams {
   name?: string;
   is_active?: boolean;
-  sort_by?: 'name' | 'memories' | 'memories_accessed';
+  sort_by?: 'name' | 'memories' | 'memories_accessed' | 'last_activity' | 'status';
   sort_direction?: 'asc' | 'desc';
   page?: number;
   page_size?: number;
@@ -66,8 +67,6 @@ export const useAppsApi = (): UseAppsApiReturn => {
   const [error, setError] = useState<string | null>(null);
   const dispatch = useDispatch<AppDispatch>();
   const user_id = useSelector((state: RootState) => state.profile.userId);
-
-  const URL = process.env.NEXT_PUBLIC_API_URL || "";
 
   const fetchApps = useCallback(async (params: FetchAppsParams = {}): Promise<{ apps: App[], total: number }> => {
     const {
@@ -93,7 +92,7 @@ export const useAppsApi = (): UseAppsApiReturn => {
       if (sort_direction) queryParams.append('sort_direction', sort_direction);
 
       const response = await axios.get<ApiResponse>(
-        `${URL}/api/v1/apps/?${queryParams.toString()}`
+        `${getApiBaseUrl()}/api/v1/apps/?${queryParams.toString()}`
       );
 
       setIsLoading(false);
@@ -116,7 +115,7 @@ export const useAppsApi = (): UseAppsApiReturn => {
     dispatch(setSelectedAppLoading());
     try {
       const response = await axios.get<AppDetails>(
-        `${URL}/api/v1/apps/${appId}`
+        `${getApiBaseUrl()}/api/v1/apps/${appId}`
       );
       dispatch(setSelectedAppDetails(response.data));
       setIsLoading(false);
@@ -134,7 +133,7 @@ export const useAppsApi = (): UseAppsApiReturn => {
     dispatch(setCreatedMemoriesLoading());
     try {
       const response = await axios.get<MemoriesResponse>(
-        `${URL}/api/v1/apps/${appId}/memories?page=${page}&page_size=${pageSize}`
+        `${getApiBaseUrl()}/api/v1/apps/${appId}/memories?page=${page}&page_size=${pageSize}`
       );
       dispatch(setCreatedMemoriesSuccess({
         items: response.data.memories,
@@ -155,7 +154,7 @@ export const useAppsApi = (): UseAppsApiReturn => {
     dispatch(setAccessedMemoriesLoading());
     try {
       const response = await axios.get<AccessedMemoriesResponse>(
-        `${URL}/api/v1/apps/${appId}/accessed?page=${page}&page_size=${pageSize}`
+        `${getApiBaseUrl()}/api/v1/apps/${appId}/accessed?page=${page}&page_size=${pageSize}`
       );
       dispatch(setAccessedMemoriesSuccess({
         items: response.data.memories,
@@ -175,7 +174,7 @@ export const useAppsApi = (): UseAppsApiReturn => {
     setIsLoading(true);
     try {
       const response = await axios.put(
-        `${URL}/api/v1/apps/${appId}?is_active=${details.is_active}`
+        `${getApiBaseUrl()}/api/v1/apps/${appId}?is_active=${details.is_active}`
       );
       setIsLoading(false);
       return response.data;

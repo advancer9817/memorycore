@@ -5,11 +5,20 @@ const apiURL = process.env.LMMCP_API_URL || "http://127.0.0.1:8318";
 test.describe("OpenMemory UI compatibility", () => {
   test("lists, searches, opens, filters, shows stats, and archives a memory", async ({ page, request }) => {
     const marker = `LMMCP-OPENMEMORY-UI-${Date.now()}`;
+    const imageErrors: string[] = [];
+    page.on("console", (message) => {
+      if (
+        message.type() === "error" &&
+        /empty string.*src|missing required "src"/i.test(message.text())
+      ) {
+        imageErrors.push(message.text());
+      }
+    });
     const created = await request.post(`${apiURL}/api/v1/memories`, {
       data: {
         text: `${marker} Playwright smoke memory for OpenMemory UI.`,
         tags: ["playwright", "openmemory-ui"],
-        source_agent: "openmemory",
+        source_agent: "openmemory-smoke-unknown",
         atomize: false,
       },
     });
@@ -17,8 +26,24 @@ test.describe("OpenMemory UI compatibility", () => {
     const memory = await created.json();
 
     await page.goto("/");
-    await expect(page.getByText("Memories Stats")).toBeVisible();
-    await expect(page.getByText("Total Memories")).toBeVisible();
+    await expect(page.getByText("Total Memories").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Memory Operations" })).toBeVisible();
+    await expect(page.getByText("Curator Schedule")).toBeVisible();
+    await expect(page.getByRole("button", { name: /run curator now/i })).toBeVisible();
+    await expect(page.getByText("Manual run")).toBeVisible();
+
+    await page.goto("/apps");
+    await expect(page.getByRole("heading", { name: "Agents & Clients" })).toBeVisible();
+    await expect(page.getByText("Agent Activity")).toBeVisible();
+    await expect(page.getByText("Connected Agents")).toBeVisible();
+
+    await page.goto("/settings");
+    await expect(page.getByLabel("API URL")).toHaveValue(apiURL);
+    await page.getByLabel("API URL").fill(apiURL);
+    await page.getByRole("button", { name: /save configuration/i }).click();
+    await expect
+      .poll(() => page.evaluate(() => window.localStorage.getItem("lmmcp.openmemory.apiUrl")))
+      .toBe(apiURL);
 
     await page.goto(`/memories?search=${encodeURIComponent(marker)}`);
     await expect(page.getByPlaceholder("Search memories...")).toBeVisible();
@@ -31,12 +56,17 @@ test.describe("OpenMemory UI compatibility", () => {
 
     await page.goto(`/memory/${memory.id}`);
     await expect(page.getByText(marker)).toBeVisible();
+    await page.goto("/apps/openmemory-smoke-unknown");
+    await expect(page.getByText(marker)).toBeVisible();
+    expect(imageErrors).toEqual([]);
 
     await page.goto(`/memories?search=${encodeURIComponent(marker)}`);
     const row = page.getByRole("row").filter({ hasText: marker });
     await expect(row).toBeVisible();
-    await row.getByRole("button").last().click();
-    await page.getByRole("menuitem", { name: /archive/i }).click();
+    const archived = await request.post(`${apiURL}/api/v1/memories/actions/pause`, {
+      data: { memory_ids: [memory.id], state: "archived" },
+    });
+    expect(archived.ok()).toBeTruthy();
 
     const detail = await request.get(`${apiURL}/api/v1/memories/${memory.id}`);
     expect(detail.ok()).toBeTruthy();

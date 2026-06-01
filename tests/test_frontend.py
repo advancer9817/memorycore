@@ -85,8 +85,11 @@ def test_frontend_v1_memory_compat_routes():
         filtered = client.post("/api/v1/memories/filter", json={"search_query": "lmmcp", "page": 1, "size": 5})
         detail = client.get(f"/api/v1/memories/{memory_id}")
         updated = client.put(f"/api/v1/memories/{memory_id}", json={"memory_content": "updated lmmcp compat API content"})
+        categories = client.get("/api/v1/memories/categories?user_id=test")
         entities = client.get("/api/v1/entities?query=local_memory")
         stats = client.get("/api/v1/stats")
+        apps = client.get("/api/v1/apps/?sort_by=last_activity&sort_direction=desc&page_size=100")
+        curator_status = client.get("/api/curator/status?limit=5")
         deleted = client.delete(f"/api/v1/memories/{memory_id}")
 
     assert created.status_code == 200
@@ -95,9 +98,19 @@ def test_frontend_v1_memory_compat_routes():
     assert filtered.json()["total"] >= 1
     assert detail.json()["id"] == memory_id
     assert updated.json()["id"] == memory_id
+    assert categories.status_code == 200
+    assert isinstance(categories.json()["categories"], list)
     assert entities.status_code == 200
     assert any(hit["memory_id"] == memory_id for hit in entities.json())
     assert stats.json()["total_memories"] >= 1
+    app = next(row for row in apps.json()["apps"] if row["id"] == "openmemory-ui")
+    assert app["total_memories_created"] >= 1
+    assert "last_activity_at" in app
+    assert "status" in app
+    assert curator_status.status_code == 200
+    assert "stats" in curator_status.json()["data"]
+    assert "curator" in curator_status.json()["data"]
+    assert "timer" in curator_status.json()["data"]
     assert deleted.json()["status"] == "archived"
 
 

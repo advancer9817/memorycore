@@ -4,6 +4,8 @@ import { useState, useEffect } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { SaveIcon, RotateCcw } from "lucide-react"
 import { FormView } from "@/components/form-view"
 import { JsonEditor } from "@/components/json-editor"
@@ -22,6 +24,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { DEFAULT_API_URL, getApiBaseUrl, setApiBaseUrl } from "@/lib/api-url"
 
 export default function SettingsPage() {
   const { toast } = useToast()
@@ -33,9 +36,11 @@ export default function SettingsPage() {
     mem0: configState.mem0
   })
   const [viewMode, setViewMode] = useState<"form" | "json">("form")
+  const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL)
   const { fetchConfig, saveConfig, resetConfig, isLoading, error } = useConfig()
 
   useEffect(() => {
+    setApiUrl(getApiBaseUrl())
     // Load config from API on component mount
     const loadConfig = async () => {
       try {
@@ -63,6 +68,7 @@ export default function SettingsPage() {
 
   const handleSave = async () => {
     try {
+      setApiUrl(setApiBaseUrl(apiUrl))
       await saveConfig({ 
         openmemory: settings.openmemory,
         mem0: settings.mem0 
@@ -82,6 +88,7 @@ export default function SettingsPage() {
 
   const handleReset = async () => {
     try {
+      setApiUrl(setApiBaseUrl(DEFAULT_API_URL))
       await resetConfig()
       toast({
         title: "Settings reset",
@@ -136,6 +143,24 @@ export default function SettingsPage() {
             </Button>
           </div>
         </div>
+
+        <Card className="mb-8 animate-fade-slide-down delay-1">
+          <CardHeader>
+            <CardTitle>API Connection</CardTitle>
+            <CardDescription>Configure the lmmcp backend used by this OpenMemory UI</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <Label htmlFor="api-url">API URL</Label>
+              <Input
+                id="api-url"
+                value={apiUrl}
+                placeholder="http://127.0.0.1:8318"
+                onChange={(event) => setApiUrl(event.target.value)}
+              />
+            </div>
+          </CardContent>
+        </Card>
 
         <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as "form" | "json")} className="w-full animate-fade-slide-down delay-1">
           <TabsList className="grid w-full grid-cols-2 mb-8">

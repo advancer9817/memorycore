@@ -2018,6 +2018,59 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
+## [迭代 87] 2026-06-01 — OpenMemory UI API URL 设置项
+
+### 变更
+
+- `ui/lib/api-url.ts`: 新增 OpenMemory UI API base URL 管理，默认读取 `NEXT_PUBLIC_API_URL`，未配置时使用 `http://127.0.0.1:8318`，并持久化到 browser localStorage。
+- `ui/app/settings/page.tsx`: 在 Settings 页面增加 `API Connection` 区块和 `API URL` 输入框，保存配置时同步更新前端 API base URL。
+- `ui/hooks/useConfig.ts` / `ui/hooks/useMemoriesApi.ts` / `ui/hooks/useAppsApi.ts` / `ui/hooks/useStats.ts` / `ui/hooks/useFiltersApi.ts`: 所有 OpenMemory UI API 请求改为调用时读取设置里的 API URL。
+- `ui/tests/openmemory-smoke.spec.ts`: 覆盖 Settings 页面 API URL 展示、填写和保存。
+
+### 修复
+
+- 修复 OpenMemory UI API 地址只能由构建/启动环境变量决定的问题，避免用户在 UI 内无法切换 lmmcp 后端。
+- 修复 `/api/v1/memories/categories` 被通用 `/api/v1/memories/{id}` 提前匹配导致 OpenMemory UI 过滤器加载 404 的问题。
+- 修复未知 app/source agent 在 App 详情和 Memory 详情中没有图标时向 Next `Image` 传入空 `src` 导致 console error 的问题，统一使用 default 图标 fallback。
+- 修复 App 详情页 memory 兼容接口先截断再按 app 过滤导致新 app memory 偶发不显示的问题。
+- 将 OpenMemory UI `/apps` 从原版 app 卡片墙调整为 lmmcp `Agents & Clients` 控制台，保留原 dark/card/table/badge 风格，展示 connected agents、active agents、total memories、last activity 摘要和 agent activity 表格。
+- `/api/v1/apps` 兼容接口补充 `status`、`last_activity_at`、`last_seen_at` 字段，并支持 `last_activity` / `status` 排序与 active 过滤。
+- 将 OpenMemory UI 首页原版 `Install OpenMemory` 接入向导替换为 lmmcp `Memory Operations` 面板，展示记忆状态汇总、`lmmcp-curator.timer` 最近/下次运行状态、curator dry-run 摘要，并提供手动 `Run Curator Now` 按钮。
+- `local_memory_mcp/frontend.py`: 新增 `/api/curator/status`，聚合 `get_memory_stats()`、curator dry-run summary 与 systemd user timer/service 状态，供首页运行概览使用。
+- 删除首页右侧原版 `Memories Stats` 卡片，让 `Memory Operations` 面板占据整行，避免重复展示 Total Memories / Total Apps Connected。
+
+### 验证
+
+- UI 构建: `cd ui && pnpm build` pass。
+- UI 端到端: `cd ui && OPENMEMORY_UI_PORT=38319 LMMCP_API_URL=http://127.0.0.1:8318 pnpm exec playwright test` 1/1 pass。
+- 后端焦点测试: `uv run pytest tests/test_frontend.py -q` 9/9 pass，1 个既有 httpx deprecation warning。
+- 服务验证: `systemctl --user restart lmmcp.service` 后服务 active，`GET /api/v1/memories/categories?user_id=default` 返回 200。
+- 回归验证: 修复 categories 路由后重跑 `cd ui && OPENMEMORY_UI_PORT=38319 LMMCP_API_URL=http://127.0.0.1:8318 pnpm exec playwright test` 1/1 pass。
+- UI 构建: 修复 Image fallback 后重跑 `cd ui && pnpm build` pass。
+- 后端焦点测试: 修复 App 详情查询后重跑 `uv run pytest tests/test_frontend.py -q` 9/9 pass，1 个既有 httpx deprecation warning。
+- UI 端到端: 增加未知 app 详情页空 `src` console error 断言后重跑 `cd ui && OPENMEMORY_UI_PORT=38319 LMMCP_API_URL=http://127.0.0.1:8318 pnpm exec playwright test` 1/1 pass。
+- 后端焦点测试: 改造 `/apps` 后重跑 `uv run pytest tests/test_frontend.py -q` 9/9 pass，1 个既有 httpx deprecation warning。
+- UI 构建: 改造 `/apps` 后重跑 `cd ui && pnpm build` pass。
+- UI 端到端: 增加 `Agents & Clients` 页面断言后重跑 `cd ui && OPENMEMORY_UI_PORT=38319 LMMCP_API_URL=http://127.0.0.1:8318 pnpm exec playwright test` 1/1 pass。
+- 后端焦点测试: 新增 `/api/curator/status` 后重跑 `python3 -m py_compile local_memory_mcp/frontend.py && uv run pytest tests/test_frontend.py -q` 9/9 pass，1 个既有 httpx deprecation warning。
+- UI 构建: 首页 `Memory Operations` 改造后重跑 `cd ui && pnpm build` pass。
+- UI 端到端: 增加首页 memory operations/curator/button 断言后重跑 `cd ui && OPENMEMORY_UI_PORT=38319 LMMCP_API_URL=http://127.0.0.1:8318 pnpm exec playwright test` 1/1 pass。
+- UI 构建: 删除首页 `Memories Stats` 卡片后重跑 `cd ui && pnpm build` pass。
+- 为首页 `Run Curator Now` 增加手动运行反馈面板，显示 `idle/running/succeeded/failed`、开始时间、耗时、summary actions/promotions/archive 和错误信息。
+- UI 构建: 增加 curator 手动运行反馈后重跑 `cd ui && pnpm build` pass。
+- 后端焦点测试: 增加 curator 手动运行反馈后重跑 `uv run pytest tests/test_frontend.py -q` 9/9 pass，1 个既有 httpx deprecation warning。
+- UI 端到端: 增加 `Manual run` 断言并将归档验证改为 API 调用后重跑 `cd ui && OPENMEMORY_UI_PORT=38319 LMMCP_API_URL=http://127.0.0.1:8318 pnpm exec playwright test` 1/1 pass。
+
+### 已知问题
+
+- 无。
+
+### 回滚
+
+`git checkout -- ui/lib/api-url.ts ui/app/settings/page.tsx ui/hooks/useConfig.ts ui/hooks/useMemoriesApi.ts ui/hooks/useAppsApi.ts ui/hooks/useStats.ts ui/hooks/useFiltersApi.ts ui/tests/openmemory-smoke.spec.ts ITERATION.md`
+
+---
+
 ## 日志格式规范
 
 每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：

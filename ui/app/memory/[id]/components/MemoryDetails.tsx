@@ -24,6 +24,12 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
     (state: RootState) => state.memories.selectedMemory
   );
   const [copied, setCopied] = useState(false);
+  const appConfig =
+    constants[memory?.app_name as keyof typeof constants] || constants.default;
+  const appLabel =
+    constants[memory?.app_name as keyof typeof constants]?.name ||
+    memory?.app_name ||
+    appConfig.name;
 
   const handleCopy = async () => {
     if (memory?.id) {
@@ -110,22 +116,14 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                         </span>
                         <div className="w-4 h-4 rounded-full bg-zinc-700 flex items-center justify-center overflow-hidden">
                           <Image
-                            src={
-                              constants[
-                                memory?.app_name as keyof typeof constants
-                              ]?.iconImage || ""
-                            }
-                            alt="OpenMemory"
+                            src={appConfig.iconImage}
+                            alt={appLabel}
                             width={24}
                             height={24}
                           />
                         </div>
                         <p className="text-sm text-zinc-100 font-semibold">
-                          {
-                            constants[
-                              memory?.app_name as keyof typeof constants
-                            ]?.name
-                          }
+                          {appLabel}
                         </p>
                       </div>
                     </div>

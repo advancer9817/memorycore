@@ -36,6 +36,8 @@ const sortOptions = [
   { value: "name", label: "Name" },
   { value: "memories", label: "Memories Created" },
   { value: "memories_accessed", label: "Memories Accessed" },
+  { value: "last_activity", label: "Last Activity" },
+  { value: "status", label: "Status" },
 ];
 
 export function AppFilters() {
@@ -61,7 +63,7 @@ export function AppFilters() {
     dispatch(setActiveFilter(value === "all" ? "all" : value === "true"));
   };
 
-  const setSorting = (sortBy: "name" | "memories" | "memories_accessed") => {
+  const setSorting = (sortBy: "name" | "memories" | "memories_accessed" | "last_activity" | "status") => {
     const newDirection =
       filters.sortBy === sortBy && filters.sortDirection === "asc"
         ? "desc"
@@ -83,7 +85,7 @@ export function AppFilters() {
       <div className="relative flex-1">
         <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
         <Input
-          placeholder="Search Apps..."
+          placeholder="Search agents or clients..."
           className="pl-8 bg-zinc-950 border-zinc-800 max-w-[500px]"
           value={localSearch}
           onChange={handleSearchChange}
@@ -127,9 +129,7 @@ export function AppFilters() {
               <DropdownMenuItem
                 key={option.value}
                 onClick={() =>
-                  setSorting(
-                    option.value as "name" | "memories" | "memories_accessed"
-                  )
+                  setSorting(option.value as "name" | "memories" | "memories_accessed" | "last_activity" | "status")
                 }
                 className="cursor-pointer flex justify-between items-center"
               >

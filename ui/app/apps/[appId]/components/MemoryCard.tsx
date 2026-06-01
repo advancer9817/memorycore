@@ -24,6 +24,11 @@ export function MemoryCard({
   app_name,
   state,
 }: MemoryCardProps) {
+  const appConfig =
+    constants[app_name as keyof typeof constants] || constants.default;
+  const appLabel =
+    constants[app_name as keyof typeof constants]?.name || app_name || appConfig.name;
+
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900 overflow-hidden">
       <div className="p-4">
@@ -93,17 +98,14 @@ export function MemoryCard({
                 <span className="text-sm text-zinc-400">Created by:</span>
                 <div className="w-5 h-5 rounded-full bg-zinc-700 flex items-center justify-center overflow-hidden">
                   <Image
-                    src={
-                      constants[app_name as keyof typeof constants]
-                        ?.iconImage || ""
-                    }
-                    alt="OpenMemory"
+                    src={appConfig.iconImage}
+                    alt={appLabel}
                     width={24}
                     height={24}
                   />
                 </div>
                 <p className="text-sm text-zinc-100 font-semibold">
-                  {constants[app_name as keyof typeof constants]?.name}
+                  {appLabel}
                 </p>
               </div>
             </div>

@@ -35,6 +35,9 @@ export interface App {
   total_memories_created: number;
   total_memories_accessed: number;
   is_active?: boolean;
+  status?: string;
+  last_activity_at?: string;
+  last_seen_at?: string;
 }
 
 interface MemoriesState {
@@ -60,7 +63,7 @@ interface AppsState {
   filters: {
     searchQuery: string;
     isActive: 'all' | true | false;
-    sortBy: 'name' | 'memories' | 'memories_accessed';
+    sortBy: 'name' | 'memories' | 'memories_accessed' | 'last_activity' | 'status';
     sortDirection: 'asc' | 'desc';
   };
   selectedApp: {
@@ -191,7 +194,7 @@ const appsSlice = createSlice({
     setActiveFilter: (state, action: PayloadAction<'all' | true | false>) => {
       state.filters.isActive = action.payload;
     },
-    setSortBy: (state, action: PayloadAction<'name' | 'memories' | 'memories_accessed'>) => {
+    setSortBy: (state, action: PayloadAction<'name' | 'memories' | 'memories_accessed' | 'last_activity' | 'status'>) => {
       state.filters.sortBy = action.payload;
     },
     setSortDirection: (state, action: PayloadAction<'asc' | 'desc'>) => {

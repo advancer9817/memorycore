@@ -11,6 +11,7 @@ import {
   setSelectedApps,
   setSelectedCategories
 } from '@/store/filtersSlice';
+import { getApiBaseUrl } from '@/lib/api-url';
 
 interface CategoriesResponse {
   categories: Category[];
@@ -32,14 +33,12 @@ export const useFiltersApi = (): UseFiltersApiReturn => {
   const dispatch = useDispatch<AppDispatch>();
   const user_id = useSelector((state: RootState) => state.profile.userId);
 
-  const URL = process.env.NEXT_PUBLIC_API_URL || "";
-
   const fetchCategories = useCallback(async (): Promise<void> => {
     setIsLoading(true);
     dispatch(setCategoriesLoading());
     try {
       const response = await axios.get<CategoriesResponse>(
-        `${URL}/api/v1/memories/categories?user_id=${user_id}`
+        `${getApiBaseUrl()}/api/v1/memories/categories?user_id=${user_id}`
       );
 
       dispatch(setCategoriesSuccess({
@@ -76,4 +75,4 @@ export const useFiltersApi = (): UseFiltersApiReturn => {
     updateCategories,
     updateSort
   };
-}; 
+};
