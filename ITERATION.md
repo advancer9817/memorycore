@@ -1891,6 +1891,33 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
+## [迭代 83] 2026-06-01 — Mem0/OpenMemory 融合方案落档
+
+### 变更
+
+- `docs/plans/2026-06-01-mem0-openmemory-fusion-plan.md`: 新增 Mem0/OpenMemory 融合源方案，记录长记忆拆分、child facts、实体/别名索引、混合召回、OpenMemory UI fork、REST compatibility layer、测试与回滚策略。
+- `TODO.md`: 新增 `Mem0/OpenMemory 融合` 任务组，把 atomization、parent/child links、entity index、Qdrant child vector、hybrid retrieval、OpenMemory UI fork、兼容 API 和召回评测拆成可跟踪条目。
+- `ITERATION.md`: 记录本轮规划落档，后续功能实现需继续按条目逐项完成。
+
+### 修复
+
+- 明确当前问题不是单条 `local_memory` 记忆漏查，而是系统缺少“保留 parent 原文 + 拆 child facts + child 单独向量化 + entity/alias 融合召回”的记忆处理层。
+
+### 验证
+
+- 文档检查: `git diff --check` pass。
+- 焦点测试: `tests/test_docs_consistency.py` 3/3 pass。
+
+### 已知问题
+
+- 本轮只落档方案和 TODO；尚未实现 atomization、entity index、OpenMemory UI fork 或新 REST API。
+
+### 回滚
+
+`git checkout -- TODO.md ITERATION.md docs/plans/2026-06-01-mem0-openmemory-fusion-plan.md`
+
+---
+
 ## 日志格式规范
 
 每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：

@@ -14,6 +14,23 @@
 - [x] 补强 context pack 的向量召回隔离：`build_context_pack()` 的 vector-only 命中回 SQLite 时已同步校验 `scope` / `project_path` / `valid_until`，避免多 agent/多项目共享库里跨范围注入。
 - [x] 建立 prompt 后记忆检索相关性持续评测集：已将用户反馈“输入提示词后，检索到的记忆相关性不强”沉淀为 `tests/fixtures/context_relevance_cases.json`，并用 `tests/test_context_relevance.py` 跟踪 expected/rejected ids、`hit_rate`、`filter_rate` 与 trace，避免阈值和排序后续回退。
 
+## Mem0/OpenMemory 融合
+
+- [ ] 对 Mem0 后端关键文件做代码审计：memory add/search、prompts、entity extraction、scoring、OpenMemory API/UI。
+- [ ] 新增 memory atomization pipeline：parent 原文保留，长记忆生成 atomic child facts。
+- [ ] 使用现有 `memory_links` 建立 parent/child 关系：`child -> parent` 为 `part_of`，`parent -> child` 为 `supports`。
+- [ ] 给 child facts 写入 metadata：`parent_id`、`fact_hash`、`source_span`、`atomizer_version`、`kind=atomic_fact`。
+- [ ] child facts 单独写入 SQLite/FTS5 并同步 Qdrant 向量。
+- [ ] 新增实体/别名索引，覆盖 `local_memory`、`local-memory-mcp`、`lmmcp` 等同义实体。
+- [ ] 改造 `memory_context`：默认优先召回 atomic facts，必要时再展开 parent。
+- [ ] 增加 semantic + lexical + entity boost 融合排序，减少弱相关注入。
+- [ ] 增加 existing long memories backfill 工具，幂等拆分历史长记忆。
+- [ ] 新增 `memory_atomize_report`、`memory_entity_search`、`memory_vector_audit` 工具。
+- [ ] fork OpenMemory UI 到本仓库 `ui/`，保留 Apache-2.0 license 和上游 attribution。
+- [ ] 增加 OpenMemory UI 兼容 REST API 层，后端仍读写 lmmcp。
+- [ ] 用 Playwright 验证 UI：列表、搜索、详情、过滤、统计、归档/删除。
+- [ ] 增加召回评测集，覆盖长记忆局部事实、别名查询、跨项目隔离、弱相关过滤。
+
 ## 功能
 
 - [x] 修复前端测试卡死：`tests/test_frontend.py` 单独运行会卡在第一个 `TestClient` 用例；当前在重启真实 `lmmcp.service` 并清理遗留 pytest/脚本进程后已恢复，`tests/test_frontend.py` 8/8 pass，保留为运行态验证记录。
