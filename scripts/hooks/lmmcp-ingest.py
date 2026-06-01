@@ -317,13 +317,13 @@ def _extract_jsonl_messages(path: Path) -> list[dict[str, str]]:
         item = _parse_json_text(line)
         if not item:
             continue
-        role = str(item.get("role") or item.get("author") or item.get("speaker") or "")
-        if role not in ("user", "assistant", "model"):
+        role = str(item.get("role") or item.get("author") or item.get("speaker") or item.get("type") or "")
+        if role not in ("user", "assistant", "model", "gemini"):
             continue
-        content = item.get("content", item.get("text", item.get("message", "")))
+        content = item.get("displayContent") or item.get("content", item.get("text", item.get("message", "")))
         text = _text_from_blocks(content).strip() if isinstance(content, list) else str(content or "").strip()
         if text:
-            messages.append({"role": "assistant" if role == "model" else role, "content": text[:800]})
+            messages.append({"role": "assistant" if role in ("model", "gemini") else role, "content": text[:800]})
     return messages[-40:]
 
 
@@ -376,11 +376,11 @@ def _messages_from_json_obj(obj: object) -> list[dict[str, str]]:
             or item.get("type")
             or ""
         )
-        if role not in ("user", "assistant", "model"):
+        if role not in ("user", "assistant", "model", "gemini"):
             continue
         text = _message_text_from_obj(item)
         if text:
-            messages.append({"role": "assistant" if role == "model" else role, "content": text[:800]})
+            messages.append({"role": "assistant" if role in ("model", "gemini") else role, "content": text[:800]})
     return messages[-40:]
 
 

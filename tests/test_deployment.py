@@ -149,7 +149,7 @@ def test_hook_setup_registers_session_start_presence_hook():
     assert "hooks[\"session_start\"] = f\"LMMCP_AGENT_ID=opencode bash {HOOK_SESSION_START}\"" in connect_agents
 
 
-def test_gemini_hooks_register_context_and_session_end_ingest():
+def test_gemini_hooks_register_context_and_write_after_ingest():
     setup = (ROOT / "scripts" / "setup-hooks.sh").read_text(encoding="utf-8")
     connect_agents = (ROOT / "scripts" / "connect_agents.py").read_text(encoding="utf-8")
     ingest_hook = (ROOT / "scripts" / "hooks" / "lmmcp-ingest.py").read_text(encoding="utf-8")
@@ -157,10 +157,12 @@ def test_gemini_hooks_register_context_and_session_end_ingest():
     assert 'GEMINI_SETTINGS="${GEMINI_SETTINGS:-$HOME/.gemini/settings.json}"' in setup
     assert 'gemini_servers["local_memory"] = {"httpUrl": endpoint, "timeout": 60000}' in setup
     assert 'add_hook(gemini_hooks, "BeforeAgent", f"LMMCP_AGENT_ID=gemini bash {lmmcp_context}", 5000)' in setup
+    assert 'add_hook(gemini_hooks, "AfterAgent", f"python3 {lmmcp_ingest} --agent gemini --background", 30000)' in setup
     assert 'add_hook(gemini_hooks, "SessionEnd", f"python3 {lmmcp_ingest} --agent gemini --background", 30000)' in setup
 
     assert "def register_hooks_gemini" in connect_agents
     assert '"BeforeAgent", CODEX_LMMCP_CONTEXT_FRAGMENTS' in connect_agents
+    assert '"AfterAgent", LMMCP_INGEST_FRAGMENTS' in connect_agents
     assert 'context_command = f"LMMCP_AGENT_ID=gemini bash {HOOK_LMMCP_CONTEXT}"' in connect_agents
     assert 'end_command = f"python3 {HOOK_LMMCP_INGEST} --agent gemini --background"' in connect_agents
     assert 'register_hooks_gemini(detected["gemini"], backup_dir, dry_run)' in connect_agents

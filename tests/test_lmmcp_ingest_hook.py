@@ -95,6 +95,41 @@ def test_generic_jsonl_extractor_supports_gemini_model_role(tmp_path):
     ]
 
 
+def test_gemini_cli_jsonl_extractor_supports_real_type_fields(tmp_path):
+    hook = _load_hook()
+    transcript = tmp_path / "gemini-cli.jsonl"
+    transcript.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "user",
+                        "content": [
+                            {"text": "真实 Gemini 用户提示"},
+                            {"text": "<hook_context>ignore injected context</hook_context>"},
+                        ],
+                        "displayContent": [{"text": "真实 Gemini 用户提示"}],
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "type": "gemini",
+                        "content": "真实 Gemini 模型回答",
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert hook._extract_gemini(transcript) == [
+        {"role": "user", "content": "真实 Gemini 用户提示"},
+        {"role": "assistant", "content": "真实 Gemini 模型回答"},
+    ]
+
+
 def test_gemini_json_transcript_and_hook_payload_path(tmp_path, monkeypatch):
     hook = _load_hook()
     transcript = tmp_path / "gemini-transcript.json"

@@ -584,6 +584,7 @@ def register_hooks_gemini(path: Path, backup_dir: Path, dry_run: bool) -> bool:
     changed = False
     changed = _remove_hook_entries(hooks, "SessionStart", LMMCP_SESSION_START_FRAGMENTS) or changed
     changed = _remove_hook_entries(hooks, "BeforeAgent", CODEX_LMMCP_CONTEXT_FRAGMENTS) or changed
+    changed = _remove_hook_entries(hooks, "AfterAgent", LMMCP_INGEST_FRAGMENTS) or changed
     changed = _remove_hook_entries(hooks, "SessionEnd", LMMCP_INGEST_FRAGMENTS) or changed
 
     start_command = f"LMMCP_AGENT_ID=gemini bash {HOOK_SESSION_START}"
@@ -599,6 +600,11 @@ def register_hooks_gemini(path: Path, backup_dir: Path, dry_run: bool) -> bool:
         changed = True
 
     end_command = f"python3 {HOOK_LMMCP_INGEST} --agent gemini --background"
+    after_entries = hooks.setdefault("AfterAgent", [])
+    if not any(end_command in json.dumps(entry, ensure_ascii=False) for entry in after_entries):
+        after_entries.append({"hooks": [{"type": "command", "command": end_command, "timeout": 30000}]})
+        changed = True
+
     end_entries = hooks.setdefault("SessionEnd", [])
     if not any(end_command in json.dumps(entry, ensure_ascii=False) for entry in end_entries):
         end_entries.append({"hooks": [{"type": "command", "command": end_command, "timeout": 30000}]})

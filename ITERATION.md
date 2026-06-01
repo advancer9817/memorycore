@@ -1598,6 +1598,115 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
+## [迭代 73] 2026-06-01 — Gemini AfterAgent 写回补强
+
+### 变更
+
+- `scripts/setup-hooks.sh`: Gemini hook 注册增加 `AfterAgent -> lmmcp-ingest.py --agent gemini --background`，并在重装时清理旧的 lmmcp AfterAgent 写回项。
+- `scripts/connect_agents.py`: `register_hooks_gemini()` 同步注册 `AfterAgent` 写回，保留 `SessionEnd` 作为退出兜底。
+- `README.md`: 更新 Gemini 写回说明为 `AfterAgent` / `SessionEnd` 双 hook。
+- `TODO.md`: 更新 Gemini 真实 CLI 验证状态，记录真实 `BeforeAgent` 已通过、headless `SessionEnd` 写回未稳定触发，并补 `AfterAgent` 作为回答后写回路径。
+- `tests/test_deployment.py`: 增加 Gemini `AfterAgent` 写回注册门禁。
+
+### 修复
+
+- 修复 Gemini headless `gemini -p` 真实现场中只看到 `BeforeAgent` 注入、未看到 `SessionEnd` 触发写回的问题；回答后写回现在挂到更接近模型响应完成时机的 `AfterAgent`，`SessionEnd` 继续保留。
+
+### 验证
+
+- Gemini prompt: `gemini -p 'Return exactly: LMMCP-GEMINI-E2E-20260601-1115' --extensions '' --output-format json` 成功返回 marker。
+- BeforeAgent 证据: Gemini transcript `session-2026-06-01T03-14-e5bca9e3.jsonl` 中用户消息包含 `<hook_context># memory_context for gemini`，证明真实 CLI prompt 前注入生效。
+- SessionEnd 反证: 11:15 后 `journalctl --user -u lmmcp.service` 无 `memory_ingest` / extraction 写回调用，marker 也未进入 SQLite，说明只依赖 `SessionEnd` 不能证明 headless prompt 写回。
+
+### 已知问题
+
+- 需重新注册 Gemini hooks 后，复验 `AfterAgent` 是否能在真实 Gemini CLI headless prompt 后触发写回。
+- PyPI 首发等待 PyPI 账号侧配置 Trusted Publisher。
+- Docker Compose 容器端到端验证继续等待可用 Docker registry/mirror 或本机预先缓存 `python:3.11-slim`。
+
+### 回滚
+
+`git checkout -- scripts/setup-hooks.sh scripts/connect_agents.py README.md TODO.md tests/test_deployment.py ITERATION.md`
+
+---
+
+## [迭代 74] 2026-06-01 — Gemini CLI JSONL Transcript 真实格式解析修复
+
+### 变更
+
+- `scripts/hooks/lmmcp-ingest.py`: Gemini JSONL extractor 现在识别真实 CLI transcript 里的 `type: "gemini"` 为 assistant，并优先使用 `displayContent` 读取用户原始提示，避免把 `<hook_context>` 一起写入待抽取消息。
+- `tests/test_lmmcp_ingest_hook.py`: 增加真实 Gemini CLI JSONL 形状回归测试，覆盖 `type=user` + `displayContent` 和 `type=gemini`。
+- `TODO.md`: 更新 Gemini 写回 hook 说明，记录真实 JSONL 格式已纳入解析。
+
+### 修复
+
+- 修复 Gemini `AfterAgent` / `SessionEnd` hook 实际触发后，`lmmcp-ingest.py` 对真实 transcript 解析出 `messages=0` 并跳过写回的问题。
+
+### 验证
+
+- 现场证据: `/tmp/lmmcp-ingest.log` 显示 Gemini hook 已 spawn background，但真实 transcript `session-2026-06-01T03-17-aa4d3543.jsonl` 被解析为 `messages=0`。
+- 真实格式: Gemini CLI JSONL 使用 `type: "user"` / `type: "gemini"`，用户消息另带 `displayContent`。
+
+### 已知问题
+
+- 需重新运行 Gemini 真实 prompt 复验写回链路。
+- PyPI 首发等待 PyPI 账号侧配置 Trusted Publisher。
+- Docker Compose 容器端到端验证继续等待可用 Docker registry/mirror 或本机预先缓存 `python:3.11-slim`。
+
+### 回滚
+
+`git checkout -- scripts/hooks/lmmcp-ingest.py tests/test_lmmcp_ingest_hook.py TODO.md ITERATION.md`
+
+---
+
+## [迭代 75] 2026-06-01 — Gemini 真实 CLI 读前写后 E2E 通过
+
+### 变更
+
+- `TODO.md`: 将 Gemini 真实 CLI 端到端现场验证标记为完成，记录 BeforeAgent 注入、AfterAgent 写回、SQLite marker 三类证据。
+
+### 验证
+
+- Gemini MCP: `gemini mcp list` 显示 `local_memory` connected。
+- Gemini BeforeAgent: `gemini -p 'Return exactly: LMMCP-GEMINI-E2E-20260601-1115' --extensions '' --output-format json` 成功返回；对应 transcript `session-2026-06-01T03-14-e5bca9e3.jsonl` 中包含 `<hook_context># memory_context for gemini`。
+- Gemini AfterAgent 写回: `gemini -p 'State this factual note exactly ... LMMCP-GEMINI-WRITEBACK-20260601-1120 ...' --extensions '' --output-format json` 成功返回。
+- Hook 日志: `/tmp/lmmcp-ingest.log` 显示 `gemini_transcript ... session-2026-06-01T03-20-908ac36f.jsonl messages=2`、`ingest_start agent=gemini messages=2`、`ingest_done ... updated=1`。
+- SQLite: `memory.sqlite3` 中存在 `source_agent='gemini'` 的 candidate 记忆，内容包含 `LMMCP-GEMINI-WRITEBACK-20260601-1120`。
+
+### 已知问题
+
+- PyPI 首发等待 PyPI 账号侧配置 Trusted Publisher。
+- Docker Compose 容器端到端验证继续等待可用 Docker registry/mirror 或本机预先缓存 `python:3.11-slim`。
+
+### 回滚
+
+`git checkout -- TODO.md ITERATION.md`
+
+---
+
+## [迭代 76] 2026-06-01 — 全量回归与剩余发布/容器阻塞复验
+
+### 变更
+
+- `TODO.md`: 更新 PyPI 与 Docker Compose 两个剩余未完成项的 2026-06-01 11:22 CST 复验证据。
+
+### 验证
+
+- 全量测试: `.venv/bin/python -m pytest -q`，392/392 pass，1 个 httpx raw content deprecation warning。
+- PyPI 查询: `.venv/bin/python -m pip index versions local-memory-mcp` 仍返回 no matching distribution，期间 PyPI/simple 请求出现一次 SSL EOF retry，但最终仍无包。
+- Docker 基础镜像: `docker pull python:3.11-slim` 仍失败于 `docker.1ms.run` metadata HEAD `unexpected EOF`。
+
+### 已知问题
+
+- PyPI 首发等待 PyPI 账号侧配置 Trusted Publisher；当前 publish workflow 已能 checkout/build，但被 PyPI `invalid-publisher` 拒绝。
+- Docker Compose 容器端到端验证继续等待可用 Docker registry/mirror 或本机预先缓存 `python:3.11-slim`。
+
+### 回滚
+
+`git checkout -- TODO.md ITERATION.md`
+
+---
+
 ## 日志格式规范
 
 每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：

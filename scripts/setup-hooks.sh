@@ -284,9 +284,11 @@ gemini_servers["local_memory"] = {"httpUrl": endpoint, "timeout": 60000}
 gemini_hooks = gemini_data.setdefault("hooks", {})
 remove_hook_entries(gemini_hooks, "SessionStart", lmmcp_session_start_fragments)
 remove_hook_entries(gemini_hooks, "BeforeAgent", codex_lmmcp_context_fragments)
+remove_hook_entries(gemini_hooks, "AfterAgent", lmmcp_ingest_fragments)
 remove_hook_entries(gemini_hooks, "SessionEnd", lmmcp_ingest_fragments)
 add_hook(gemini_hooks, "SessionStart", f"LMMCP_AGENT_ID=gemini bash {lmmcp_session_start}", 5000)
 add_hook(gemini_hooks, "BeforeAgent", f"LMMCP_AGENT_ID=gemini bash {lmmcp_context}", 5000)
+add_hook(gemini_hooks, "AfterAgent", f"python3 {lmmcp_ingest} --agent gemini --background", 30000)
 add_hook(gemini_hooks, "SessionEnd", f"python3 {lmmcp_ingest} --agent gemini --background", 30000)
 write_json(gemini_settings, gemini_data)
 
