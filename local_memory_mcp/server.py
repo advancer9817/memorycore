@@ -38,6 +38,7 @@ from local_memory_mcp.storage import (
     agent_capability_search as search_agent_capabilities,
     agent_handoff_create as create_agent_handoff,
     agent_handoff_update as update_agent_handoff,
+    atomize_report,
     build_context_pack,
     cleanup_expired_messages,
     curator_report,
@@ -48,12 +49,14 @@ from local_memory_mcp.storage import (
     get_context_quality_stats,
     get_memory_stats,
     get_record,
+    entity_search,
     list_agent_presence,
     list_recent,
     memory_backup as create_memory_backup,
     memory_export as export_memory_payload,
     memory_import as import_memory_payload,
     memory_rebuild_vectors as rebuild_memory_vectors,
+    memory_vector_audit as audit_memory_vectors,
     query_links,
     rollup_report,
     search_memory_records,
@@ -81,7 +84,7 @@ async def _frontend_index_route(request):
     return await frontend_index(request)
 
 
-@mcp.custom_route("/api/{path:path}", methods=["GET", "POST", "PATCH"], include_in_schema=False)
+@mcp.custom_route("/api/{path:path}", methods=["GET", "POST", "PATCH", "DELETE"], include_in_schema=False)
 async def _frontend_api_route(request):
     return await frontend_api(request)
 
@@ -134,12 +137,14 @@ def memory_add(
     metadata: dict[str, Any] | None = None,
     valid_from: str | None = None,
     valid_until: str | None = None,
+    atomize: str | bool = "auto",
 ) -> dict[str, Any]:
     """Add a structured memory record to local SQLite memory."""
     return add_memory_record(
         type, title, content, scope, tags, source, source_agent,
         project_path, confidence, importance, status, decay_policy,
         related_ids, metadata, valid_from=valid_from, valid_until=valid_until,
+        atomize=atomize,
     )
 
 
@@ -166,9 +171,21 @@ def memory_context(
     project_path: str = "",
     scope: str = "global",
     token_budget: int = 2000,
+    retrieval_mode: str = "strict",
+    prefer_atomic: bool = True,
+    include_parent: bool = False,
 ) -> dict[str, Any]:
     """Return a compact context pack for a task, grouped by memory class."""
-    return build_context_pack(task, agent, project_path, scope, token_budget)
+    return build_context_pack(
+        task,
+        agent,
+        project_path,
+        scope,
+        token_budget,
+        retrieval_mode=retrieval_mode,
+        prefer_atomic=prefer_atomic,
+        include_parent=include_parent,
+    )
 
 
 @mcp.tool()
@@ -245,6 +262,25 @@ def memory_rollup_report(
         project_path=project_path,
         force=force,
     )
+
+
+@mcp.tool()
+@_safe_tool
+def memory_atomize_report(
+    record_id: str = "",
+    dry_run: bool = True,
+    limit: int = 100,
+    min_chars: int = 600,
+) -> dict[str, Any]:
+    """Plan or apply parent-memory atomization into linked atomic child facts."""
+    return atomize_report(record_id=record_id, dry_run=dry_run, limit=limit, min_chars=min_chars)
+
+
+@mcp.tool()
+@_safe_tool
+def memory_entity_search(query: str, limit: int = 20) -> list[dict[str, Any]]:
+    """Search active memories by deterministic entity and alias index."""
+    return entity_search(query, limit=limit)
 
 
 @mcp.tool()
@@ -350,6 +386,13 @@ def memory_vector_status() -> dict[str, Any]:
         return vs.status()
     except Exception as exc:
         return {"available": False, "degraded": True, "reason": f"{type(exc).__name__}: {exc}"}
+
+
+@mcp.tool()
+@_safe_tool
+def memory_vector_audit(dry_run: bool = True, limit: int = 100) -> dict[str, Any]:
+    """Audit SQLite active memories against Qdrant points and optionally rebuild missing vectors."""
+    return audit_memory_vectors(dry_run=dry_run, limit=limit)
 
 
 @mcp.tool()

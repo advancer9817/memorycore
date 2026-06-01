@@ -8,7 +8,7 @@ qdrant:
   timeout: 30
 
 embedding:
-  provider: ollama
+  provider: auto
   model: nomic-embed-text
   fallback_provider: hashing
   api_url: ""

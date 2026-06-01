@@ -58,7 +58,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "backend": {"primary": "sqlite", "fallback": "sqlite"},
     "qdrant": {"url": "http://127.0.0.1:6333", "collection": "agent_memory", "timeout": 30},
     "embedding": {
-        "provider": "ollama",
+        "provider": "auto",
         "model": "nomic-embed-text",
         "fallback_provider": "hashing",
         "api_url": "",
@@ -166,9 +166,9 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
 
     # embedding
     emb = cfg.get("embedding", {})
-    valid_embedding_providers = ("ollama", "openai", "api", "sentence-transformers", "hashing")
+    valid_embedding_providers = ("auto", "ollama", "openai", "api", "sentence-transformers", "hashing")
     if emb.get("provider") not in valid_embedding_providers:
-        _warn(f"embedding.provider={emb.get('provider')!r} unknown, expected ollama|openai|api|sentence-transformers|hashing")
+        _warn(f"embedding.provider={emb.get('provider')!r} unknown, expected auto|ollama|openai|api|sentence-transformers|hashing")
     fallback_provider = emb.get("fallback_provider", "hashing")
     if fallback_provider not in ("openai", "api", "sentence-transformers", "hashing"):
         _warn(f"embedding.fallback_provider={fallback_provider!r} unknown, expected openai|api|sentence-transformers|hashing")

@@ -23,7 +23,7 @@ def _client(token: str = "") -> TestClient:
     app = Starlette(routes=[
         Route("/", frontend_index, methods=["GET"]),
         Route("/health", frontend_health, methods=["GET"]),
-        Route("/api/{path:path}", frontend_api, methods=["GET", "POST", "PATCH"]),
+        Route("/api/{path:path}", frontend_api, methods=["GET", "POST", "PATCH", "DELETE"]),
     ])
     return TestClient(app)
 
@@ -70,6 +70,27 @@ def test_frontend_memory_create_get_and_patch():
     assert created.status_code == 200
     assert fetched.json()["data"]["title"] == "Created from UI"
     assert updated.json()["data"]["title"] == "Updated from UI"
+
+
+def test_frontend_v1_memory_compat_routes():
+    with _client() as client:
+        created = client.post("/api/v1/memories", json={
+            "type": "project_memory",
+            "title": "OpenMemory compat",
+            "content": "lmmcp compat API content",
+            "atomize": False,
+        })
+        memory_id = created.json()["data"]["id"]
+        listed = client.get("/api/v1/memories?query=lmmcp")
+        entities = client.get("/api/v1/entities?query=local_memory")
+        deleted = client.delete(f"/api/v1/memories/{memory_id}")
+
+    assert created.status_code == 200
+    assert listed.status_code == 200
+    assert any(row["id"] == memory_id for row in listed.json()["data"])
+    assert entities.status_code == 200
+    assert any(hit["memory_id"] == memory_id for hit in entities.json()["data"])
+    assert deleted.json()["data"]["status"] == "archived"
 
 
 def test_frontend_invalid_json_returns_400():

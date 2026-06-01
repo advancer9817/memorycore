@@ -28,14 +28,14 @@ from local_memory_mcp.vector_store import (
 class TestEmbedConfig:
     def test_defaults(self):
         cfg = EmbedConfig()
-        assert cfg.provider == "ollama"
+        assert cfg.provider == "auto"
         assert cfg.model == "nomic-embed-text"
         assert cfg.api_url == ""
         assert cfg.dim == 768
 
     def test_from_dict_empty(self):
         cfg = embed_config_from_dict({})
-        assert cfg.provider == "ollama"
+        assert cfg.provider == "auto"
         assert cfg.dim == 768
 
     def test_from_dict_custom(self):
@@ -104,6 +104,20 @@ class TestEmbedText:
         cfg = EmbedConfig(provider="ollama", fallback_provider="hashing", dim=64)
         vec = embed_text("hello", cfg)
         assert len(vec) == 64  # hashing fallback
+
+    @patch("local_memory_mcp.vector_store._embed_openai", return_value=[1.0] + [0.0] * 63)
+    @patch("local_memory_mcp.vector_store._embed_ollama")
+    def test_auto_prefers_configured_openai_compatible_api(self, mock_ollama, mock_openai):
+        cfg = EmbedConfig(
+            provider="auto",
+            api_url="http://127.0.0.1:8317/v1",
+            model="text-embedding-3-small",
+            dim=64,
+        )
+        vec = embed_text("hello", cfg)
+        assert len(vec) == 64
+        mock_openai.assert_called_once()
+        mock_ollama.assert_not_called()
 
     @patch("local_memory_mcp.vector_store._embed_sentence_transformers", return_value=[1.0] + [0.0] * 63)
     @patch("local_memory_mcp.vector_store._embed_ollama", side_effect=Exception("connection refused"))

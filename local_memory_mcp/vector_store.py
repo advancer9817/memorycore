@@ -3,8 +3,8 @@
 Single vector backend for both semantic search and dedup comparison.
 No sqlite-vec, no Mem0 Qdrant instance — one store, one source of truth.
 
-Embeddings via Ollama /api/embed by default, with optional OpenAI-compatible
-embedding APIs, optional sentence-transformers, and hashing fallbacks.
+Embeddings via configurable API adapters: OpenAI-compatible APIs, Ollama
+/api/embed, optional sentence-transformers, and hashing fallbacks.
 
 Public API
 ----------
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class EmbedConfig:
-    provider: str = "ollama"          # "ollama" | "openai" | "sentence-transformers" | "hashing"
+    provider: str = "auto"            # "auto" | "ollama" | "openai" | "sentence-transformers" | "hashing"
     model: str = "nomic-embed-text"
     ollama_url: str = "http://127.0.0.1:11434"
     api_url: str = ""
@@ -68,7 +68,7 @@ def embed_config_from_dict(cfg: dict[str, Any]) -> EmbedConfig:
         os.environ.get("LOCAL_MEMORY_OLLAMA_TIMEOUT", emb.get("timeout", 30)),
     )
     return EmbedConfig(
-        provider=os.environ.get("LOCAL_MEMORY_EMBEDDING_PROVIDER", emb.get("provider", "ollama")),
+        provider=os.environ.get("LOCAL_MEMORY_EMBEDDING_PROVIDER", emb.get("provider", "auto")),
         model=os.environ.get("LOCAL_MEMORY_EMBEDDING_MODEL", emb.get("model", "nomic-embed-text")),
         ollama_url=os.environ.get(
             "LOCAL_MEMORY_OLLAMA_URL",
@@ -103,12 +103,23 @@ def embed_text(text: str, config: EmbedConfig | None = None) -> list[float]:
     """Return a float vector for text.
 
     Default chain:
-    Ollama -> deterministic hashing. Configure provider=openai to use an
-    external OpenAI-compatible embedding API instead.
+    configured OpenAI-compatible API -> Ollama API -> configured fallback.
+    Configure provider explicitly to force one adapter.
     """
     if config is None:
         config = EmbedConfig()
     provider = _normalize_provider(config.provider)
+    if provider == "auto":
+        if config.api_url:
+            try:
+                return _embed_openai(text, config)
+            except Exception as exc:
+                logger.warning("embed_text: OpenAI-compatible embedding failed (%s), trying Ollama API", exc)
+        try:
+            return _embed_ollama(text, config)
+        except Exception as exc:
+            logger.warning("embed_text: Ollama failed (%s), using %s fallback", exc, config.fallback_provider)
+            return _embed_fallback(text, config)
     if provider == "hashing":
         return _embed_hashing(text, config.dim)
     if provider == "sentence-transformers":

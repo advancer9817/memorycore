@@ -21,6 +21,7 @@ from local_memory_mcp.storage import (
     agent_capability_search,
     agent_handoff_create,
     agent_handoff_update,
+    atomize_report,
     build_context_pack,
     cleanup_expired_messages,
     curator_report,
@@ -31,12 +32,14 @@ from local_memory_mcp.storage import (
     get_context_quality_stats,
     get_memory_stats,
     get_record,
+    entity_search,
     list_agent_presence,
     list_recent,
     memory_backup,
     memory_export,
     memory_import,
     memory_rebuild_vectors,
+    memory_vector_audit,
     query_links,
     search_memory_records,
     send_agent_message,
@@ -154,6 +157,9 @@ async def _dispatch_api(request: Request, parts: list[str], query: dict[str, lis
     if parts == ["schema", "enums"] and method == "GET":
         return {"memory_types": sorted(MEMORY_TYPES), "statuses": sorted(STATUSES), "relation_types": sorted(VALID_RELATION_TYPES)}
 
+    if parts[:1] == ["v1"]:
+        return _dispatch_openmemory_compat(method, parts[1:], query, body)
+
     if parts == ["memories"] and method == "GET":
         return search_memory_records(
             query=_str_q(query, "query", _str_q(query, "q", "")),
@@ -181,6 +187,7 @@ async def _dispatch_api(request: Request, parts: list[str], query: dict[str, lis
             confidence=body.get("confidence", 0.7), importance=body.get("importance", 0.5),
             status=body.get("status", "active"), decay_policy=body.get("decay_policy", "review"),
             related_ids=body.get("related_ids"), metadata=body.get("metadata"),
+            atomize=body.get("atomize", "auto"),
         )
     if len(parts) == 2 and parts[0] == "memories" and method == "PATCH":
         return update_memory_content(parts[1], body.get("content"), body.get("title"), body.get("status"), body.get("confidence"), body.get("importance"))
@@ -190,7 +197,16 @@ async def _dispatch_api(request: Request, parts: list[str], query: dict[str, lis
         return add_feedback(parts[1], body.get("score", 0), body.get("note", ""), body.get("source_agent", "frontend"))
 
     if parts == ["context"] and method == "POST":
-        return build_context_pack(body.get("task", ""), body.get("agent", "frontend"), body.get("project_path", ""), body.get("scope", "global"), body.get("token_budget", 2000))
+        return build_context_pack(
+            body.get("task", ""),
+            body.get("agent", "frontend"),
+            body.get("project_path", ""),
+            body.get("scope", "global"),
+            body.get("token_budget", 2000),
+            retrieval_mode=body.get("retrieval_mode", "strict"),
+            prefer_atomic=bool(body.get("prefer_atomic", True)),
+            include_parent=bool(body.get("include_parent", False)),
+        )
     if parts == ["context", "stats"] and method == "GET":
         return get_context_quality_stats(_int_q(query, "limit", 500))
     if parts == ["curator"] and method == "GET":
@@ -252,8 +268,74 @@ async def _dispatch_api(request: Request, parts: list[str], query: dict[str, lis
         return [{"id": r.id, "score": round(r.score, 4), "text": r.text, "payload": r.payload} for r in results]
     if parts == ["vector", "rebuild"] and method == "POST":
         return memory_rebuild_vectors(body.get("dry_run", True), body.get("limit", 5000))
+    if parts == ["vector", "audit"] and method == "GET":
+        return memory_vector_audit(_bool_q(query, "dry_run", True), _int_q(query, "limit", 100))
+    if parts == ["atomize"] and method == "GET":
+        return atomize_report(
+            record_id=_str_q(query, "record_id", "") or "",
+            dry_run=_bool_q(query, "dry_run", True),
+            limit=_int_q(query, "limit", 100),
+            min_chars=_int_q(query, "min_chars", 600),
+        )
+    if parts == ["entities"] and method == "GET":
+        return entity_search(_str_q(query, "query", _str_q(query, "q", "")) or "", _int_q(query, "limit", 20))
 
     raise LookupError(f"route not found: /api/{'/'.join(parts)}")
+
+
+def _dispatch_openmemory_compat(
+    method: str,
+    parts: list[str],
+    query: dict[str, list[str]],
+    body: dict[str, Any],
+) -> Any:
+    """Small REST compatibility surface for OpenMemory-style clients."""
+    if parts == ["memories"] and method == "GET":
+        return search_memory_records(
+            query=_str_q(query, "query", _str_q(query, "q", "")),
+            types=_list_q(query, "type") or _list_q(query, "types"),
+            scope=_str_q(query, "scope", ""),
+            project_path=_str_q(query, "project_path", ""),
+            tags=_list_q(query, "tag") or _list_q(query, "tags"),
+            status=_str_q(query, "status", "active"),
+            limit=_int_q(query, "limit", 50),
+        )
+    if parts == ["memories", "filter"] and method == "GET":
+        return search_memory_records(
+            query=_str_q(query, "query", _str_q(query, "q", "")),
+            types=_list_q(query, "type") or _list_q(query, "types"),
+            scope=_str_q(query, "scope", ""),
+            project_path=_str_q(query, "project_path", ""),
+            tags=_list_q(query, "tag") or _list_q(query, "tags"),
+            status=_str_q(query, "status", "active"),
+            limit=_int_q(query, "limit", 50),
+        )
+    if parts == ["memories"] and method == "POST":
+        return add_memory_record(
+            body.get("type", "project_memory"), body.get("title", ""), body.get("content", ""),
+            scope=body.get("scope", "global"), tags=body.get("tags"), source=body.get("source", "openmemory-compat"),
+            source_agent=body.get("source_agent", "openmemory-ui"), project_path=body.get("project_path", ""),
+            confidence=body.get("confidence", 0.7), importance=body.get("importance", 0.5),
+            status=body.get("status", "active"), decay_policy=body.get("decay_policy", "review"),
+            related_ids=body.get("related_ids"), metadata=body.get("metadata"),
+            atomize=body.get("atomize", "auto"),
+        )
+    if len(parts) == 2 and parts[0] == "memories" and method == "PATCH":
+        return update_memory_content(parts[1], body.get("content"), body.get("title"), body.get("status"), body.get("confidence"), body.get("importance"))
+    if len(parts) == 2 and parts[0] == "memories" and method == "DELETE":
+        return update_status(parts[1], body.get("status", "archived"))
+    if parts == ["stats"] and method == "GET":
+        return get_memory_stats()
+    if parts == ["entities"] and method == "GET":
+        return entity_search(
+            _str_q(query, "query", _str_q(query, "q", "")) or "",
+            _int_q(query, "limit", 20),
+            scope=_str_q(query, "scope", "") or "",
+            project_path=_str_q(query, "project_path", "") or "",
+        )
+    if parts == ["context-traces"] and method == "GET":
+        return get_context_quality_stats(_int_q(query, "limit", 500))
+    raise LookupError(f"route not found: /api/v1/{'/'.join(parts)}")
 
 
 async def _json_body(request: Request) -> dict[str, Any]:

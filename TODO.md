@@ -16,26 +16,26 @@
 
 ## Mem0/OpenMemory 融合
 
-- [ ] 对 Mem0 后端关键文件做代码审计：memory add/search、prompts、entity extraction、scoring、OpenMemory API/UI。
-- [ ] 新增 memory atomization pipeline：parent 原文保留，长记忆生成 atomic child facts。
-- [ ] 使用现有 `memory_links` 建立 parent/child 关系：`child -> parent` 为 `part_of`，`parent -> child` 为 `supports`。
-- [ ] 给 child facts 写入 metadata：`parent_id`、`fact_hash`、`source_span`、`atomizer_version`、`kind=atomic_fact`。
-- [ ] child facts 单独写入 SQLite/FTS5 并同步 Qdrant 向量。
-- [ ] 新增实体/别名索引，覆盖 `local_memory`、`local-memory-mcp`、`lmmcp` 等同义实体。
-- [ ] 改造 `memory_context`：默认优先召回 atomic facts，必要时再展开 parent。
-- [ ] 增加 semantic + lexical + entity boost 融合排序，减少弱相关注入。
-- [ ] 增加 existing long memories backfill 工具，幂等拆分历史长记忆。
-- [ ] 新增 `memory_atomize_report`、`memory_entity_search`、`memory_vector_audit` 工具。
+- [x] 对 Mem0 后端关键文件做代码审计：memory add/search、prompts、entity extraction、scoring、OpenMemory API/UI；审计结论已落到 `docs/plans/2026-06-01-mem0-openmemory-fusion-plan.md`。
+- [x] 新增 memory atomization pipeline：parent 原文保留，长记忆生成 atomic child facts。
+- [x] 使用现有 `memory_links` 建立 parent/child 关系：`child -> parent` 为 `part_of`，`parent -> child` 为 `supports`。
+- [x] 给 child facts 写入 metadata：`parent_id`、`fact_hash`、`source_span`、`atomizer_version`、`kind=atomic_fact`。
+- [x] child facts 单独写入 SQLite/FTS5 并同步 Qdrant 向量。
+- [x] 新增实体/别名索引，覆盖 `local_memory`、`local-memory-mcp`、`lmmcp` 等同义实体。
+- [x] 改造 `memory_context`：默认优先召回 atomic facts，必要时再展开 parent。
+- [x] 增加 semantic + lexical + entity boost 融合排序，减少弱相关注入。
+- [x] 增加 existing long memories backfill 工具，幂等拆分历史长记忆。
+- [x] 新增 `memory_atomize_report`、`memory_entity_search`、`memory_vector_audit` 工具。
 - [ ] fork OpenMemory UI 到本仓库 `ui/`，保留 Apache-2.0 license 和上游 attribution。
-- [ ] 增加 OpenMemory UI 兼容 REST API 层，后端仍读写 lmmcp。
+- [x] 增加 OpenMemory UI 兼容 REST API 层，后端仍读写 lmmcp。
 - [ ] 用 Playwright 验证 UI：列表、搜索、详情、过滤、统计、归档/删除。
-- [ ] 增加召回评测集，覆盖长记忆局部事实、别名查询、跨项目隔离、弱相关过滤。
+- [x] 增加召回评测集，覆盖长记忆局部事实、别名查询、跨项目隔离、弱相关过滤。
 
 ## 功能
 
 - [x] 修复前端测试卡死：`tests/test_frontend.py` 单独运行会卡在第一个 `TestClient` 用例；当前在重启真实 `lmmcp.service` 并清理遗留 pytest/脚本进程后已恢复，`tests/test_frontend.py` 8/8 pass，保留为运行态验证记录。
 - [x] 修复 hooks 初始化脚本未同步 Hermes SQLite session 存储变化：`scripts/setup-hooks.sh` 现在安装带 `--background` 的 Hermes on_session_end hook，`scripts/hooks/lmmcp-ingest.py` 只从 `~/.hermes/state.db` 读取 transcript，并在后台模式保留 stdin payload。
-- [x] Embedding sentence-transformers 降级（Ollama 不可用时自动切换）：`embed_text()` 现在按 Ollama -> sentence-transformers -> hashing 顺序降级，支持环境变量覆盖 fallback provider/model。
+- [x] Embedding 外接 API / Ollama API / hashing 降级：`embed_text()` 默认 `auto`，优先配置的 OpenAI-compatible embedding API，未配置时尝试 Ollama `/api/embed`，失败后使用 hashing；不再默认安装或调用 sentence-transformers/PyTorch/CUDA 依赖链。
 - [x] 修复 rollup 测试隔离问题：`test_rollup_processes_manual_source_episodic` 和 extraction source 对应用例已传入 stub summarizer，避免 dry-run/force 扫描测试依赖真实 extraction LLM。
 - [x] 默认启用 Claude 对话前自动检索注入：`setup-hooks.sh` 和 `connect_agents.py --register-hooks` 已默认给 Claude 注册 `UserPromptSubmit -> lmmcp-context.sh`，并保留显式 `memory_context` 作为自动注入缺失时的兜底。
 - [x] 停用 Codex 对话前自动检索注入：Codex 不再注册 `UserPromptSubmit -> lmmcp-context.sh`，本机 `~/.codex/hooks.json` 已移除该读前 hook；Codex 读记忆改为按 `AGENTS.md` 规则显式调用 MCP `memory_context`，只保留 `SessionStart` presence/capability 与 `Stop` 写回 hook，避免可见 hook 输出和弱相关记忆污染对话。

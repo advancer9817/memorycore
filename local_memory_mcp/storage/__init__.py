@@ -32,6 +32,8 @@ from local_memory_mcp.storage.search import (
     get_active_warnings,
     get_context_quality_stats,
 )
+from local_memory_mcp.storage.atomization import atomize_record, atomize_report
+from local_memory_mcp.storage.entities import entity_search
 from local_memory_mcp.storage.links import add_link, query_links
 from local_memory_mcp.storage.curator import curator_report
 from local_memory_mcp.storage.rollup import rollup_report
@@ -47,6 +49,7 @@ from local_memory_mcp.storage.transfer import (
     memory_export,
     memory_import,
     memory_rebuild_vectors,
+    memory_vector_audit,
 )
 from local_memory_mcp.storage.handoff import (
     agent_capability_register,
@@ -64,6 +67,9 @@ __all__ = [
     "update_memory_content",
     "search_memory_records",
     "build_context_pack",
+    "atomize_record",
+    "atomize_report",
+    "entity_search",
     "update_status",
     "add_feedback",
     "list_recent",
@@ -87,6 +93,7 @@ __all__ = [
     "memory_export",
     "memory_import",
     "memory_rebuild_vectors",
+    "memory_vector_audit",
     "agent_capability_register",
     "agent_capability_search",
     "agent_handoff_create",

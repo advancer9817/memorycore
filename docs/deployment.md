@@ -127,20 +127,20 @@ For the default service deployment:
 Optional but recommended:
 
 - Ollama with `nomic-embed-text` pulled.
-- `sentence-transformers` extra and model cache for local fallback when Ollama is offline.
+- External OpenAI-compatible embedding API if you do not want to use local Ollama.
 
-If Ollama is unavailable, lmmcp tries the configured sentence-transformers
-fallback first, then falls back to deterministic hashing embeddings if the local
-model or dependency is unavailable. SQLite/FTS/context pack still work. To force
-the fully portable fallback explicitly:
+The default embedding provider is `auto`: configured OpenAI-compatible API first,
+then Ollama `/api/embed`, then deterministic hashing fallback. SQLite/FTS/context
+pack still work when vector embedding is degraded. To force the fully portable
+fallback explicitly:
 
 ```bash
 export LOCAL_MEMORY_EMBEDDING_PROVIDER=hashing
 export LOCAL_MEMORY_EMBEDDING_DIM=384
 ```
 
-Install the local sentence-transformers fallback only when you explicitly want
-that heavier offline embedding path:
+Default package extras do not install sentence-transformers, PyTorch, or CUDA.
+The old embedding/full extras remain as compatibility entry points:
 
 ```bash
 .venv/bin/python -m pip install -e .[embedding]
@@ -170,9 +170,9 @@ CLI options have priority over environment defaults.
 | `--qdrant-storage` / `QDRANT_STORAGE` | `~/.agent-memory/qdrant_storage` | Persistent Qdrant storage |
 | `QDRANT_URL` | `http://127.0.0.1:$QDRANT_HTTP_PORT` | Qdrant URL written to config |
 | `QDRANT_COLLECTION` | `agent_memory` | Qdrant collection |
-| `LOCAL_MEMORY_EMBEDDING_PROVIDER` | `ollama` | Embedding provider |
+| `LOCAL_MEMORY_EMBEDDING_PROVIDER` | `auto` | Embedding provider |
 | `LOCAL_MEMORY_EMBEDDING_MODEL` | `nomic-embed-text` | Embedding model |
-| `LOCAL_MEMORY_EMBEDDING_FALLBACK_PROVIDER` | `sentence-transformers` | Embedding fallback after Ollama failure |
+| `LOCAL_MEMORY_EMBEDDING_FALLBACK_PROVIDER` | `hashing` | Embedding fallback after API/Ollama failure |
 | `LOCAL_MEMORY_SENTENCE_TRANSFORMERS_MODEL` | `sentence-transformers/all-mpnet-base-v2` | sentence-transformers fallback model |
 | `LOCAL_MEMORY_EMBEDDING_DIM` | `768` | Embedding dimension |
 | `LOCAL_MEMORY_OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama URL |

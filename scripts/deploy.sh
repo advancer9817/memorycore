@@ -135,7 +135,7 @@ ensure_ollama_ready() {
       msg deps "Installing Ollama"
       curl -fsSL https://ollama.com/install.sh | sh
     else
-      die "ollama not found; rerun with --bootstrap-deps --with-ollama, install Ollama, or set LOCAL_MEMORY_EMBEDDING_PROVIDER=hashing"
+      die "ollama not found; rerun with --bootstrap-deps --with-ollama, install Ollama, or set LOCAL_MEMORY_EMBEDDING_PROVIDER=api or hashing"
     fi
   fi
   if ! curl -fsS "${LOCAL_MEMORY_OLLAMA_URL:-http://127.0.0.1:11434}/api/tags" >/dev/null 2>&1; then
@@ -316,7 +316,7 @@ fi
 
 if [ "$WITH_OLLAMA" -eq 1 ]; then
   ensure_ollama_ready
-elif [ "${LOCAL_MEMORY_EMBEDDING_PROVIDER:-ollama}" = "ollama" ] && ! curl -fsS "${LOCAL_MEMORY_OLLAMA_URL:-http://127.0.0.1:11434}/api/tags" >/dev/null 2>&1; then
+elif [[ "${LOCAL_MEMORY_EMBEDDING_PROVIDER:-auto}" =~ ^(auto|ollama)$ ]] && ! curl -fsS "${LOCAL_MEMORY_OLLAMA_URL:-http://127.0.0.1:11434}/api/tags" >/dev/null 2>&1; then
   warn "Ollama is not reachable; vector embedding will use fallback providers. Remove --no-ollama or set LMMCP_WITH_OLLAMA=1 to install/start/pull the model."
 fi
 
@@ -333,9 +333,9 @@ qdrant:
   timeout: 30
 
 embedding:
-  provider: ${LOCAL_MEMORY_EMBEDDING_PROVIDER:-ollama}
+  provider: ${LOCAL_MEMORY_EMBEDDING_PROVIDER:-auto}
   model: ${LOCAL_MEMORY_EMBEDDING_MODEL:-nomic-embed-text}
-  fallback_provider: ${LOCAL_MEMORY_EMBEDDING_FALLBACK_PROVIDER:-sentence-transformers}
+  fallback_provider: ${LOCAL_MEMORY_EMBEDDING_FALLBACK_PROVIDER:-hashing}
   sentence_transformers_model: ${LOCAL_MEMORY_SENTENCE_TRANSFORMERS_MODEL:-sentence-transformers/all-mpnet-base-v2}
   dim: ${LOCAL_MEMORY_EMBEDDING_DIM:-768}
   ollama_url: ${LOCAL_MEMORY_OLLAMA_URL:-http://127.0.0.1:11434}

@@ -51,7 +51,7 @@ bash start.sh
 `start.sh` 自动完成：
 
 1. 创建/复用 `.venv`（自动查找 python3.11/3.12/3.13）
-2. 安装默认运行依赖（`pip install -e .[all]`，包含 extraction 与 Qdrant vector；本地 sentence-transformers fallback 需显式安装 `.[embedding]` 或 `.[full]`）
+2. 安装默认运行依赖（`pip install -e .[all]`，包含 extraction 与 Qdrant vector；不安装 PyTorch/CUDA/本地 ML 大依赖）
 3. 初始化 SQLite 数据库（幂等）
 4. 导入 `memory-sync/memories.json`（若存在，使用 `newer` 冲突策略）
 5. 启动 HTTP MCP 服务（默认 `127.0.0.1:8318`）
@@ -136,18 +136,18 @@ scripts/sync-memory.sh status
 已验证：
 
 1. **SQLite + FTS5 结构化记忆层**：支持 type/scope/tags/status/importance/confidence/source_agent/effectiveness 等字段，FTS5 全文检索。
-2. **HTTP MCP server**：32 个工具，Hermes 可通过 `http://127.0.0.1:8318/mcp` 作为普通 HTTP MCP 客户端连接。
+2. **HTTP MCP server**：35 个工具，Hermes 可通过 `http://127.0.0.1:8318/mcp` 作为普通 HTTP MCP 客户端连接。
 3. **Context Pack**：`memory_context` 按任务生成 compact 上下文包，支持 token budget 控制，按记忆类型分组，集成 active contradicts/supersedes warning，并将检索记忆标记为 untrusted data；命中注入特征的记忆会从普通 context body 过滤到 warnings。
 4. **Curator**：重复标题、低反馈、stale、archive、矛盾候选、skill_candidate 推广候选检测；默认 dry-run。
 5. **Feedback / effectiveness**：`memory_feedback` 记录反馈事件并更新 feedback_score、injected_count、ineffective_count、effectiveness_score。
 6. **Memory links / warnings**：支持 `related_to`、`supersedes`、`contradicts`、`supports`、`part_of`；`memory_warnings` 可根据 active links 产生冲突/替代提示。
-7. **Qdrant 语义检索**：`memory_vector_search` / `memory_vector_status` 通过 `vector_store.py` 使用 Qdrant + Ollama embedding；Ollama embedding 不可用时优先降级到 sentence-transformers，再失败时使用 hashing fallback。
+7. **Qdrant 语义检索**：`memory_vector_search` / `memory_vector_status` / `memory_vector_audit` 通过 `vector_store.py` 使用 Qdrant + 可配置 embedding API；`auto` provider 优先使用配置的 OpenAI-compatible API，未配置时尝试 Ollama API，最后使用 hashing fallback。
 8. **Dashboard**：本地交互式 HTML 面板，Alpine.js，无构建步骤；展示记录、时间线、反馈健康和 curator 候选摘要。
 9. **多客户端接入方向**：Hermes / Codex / Claude Code / Gemini / OpenCode 都应作为普通 MCP 客户端接入；lmmcp 核心不依赖任一客户端配置仓库或私有 transcript。
 
 Optional / degraded：
 
-- Qdrant、Ollama、外部 extraction LLM 都是可选增强；不可用时核心 SQLite/FTS5/context pack 仍应可用。
+- Qdrant、外部 embedding API、Ollama、外部 extraction LLM 都是可选增强；不可用时核心 SQLite/FTS5/context pack 仍应可用。
 - `memory_ingest` 会调用 extraction + dedup pipeline；外部模型或向量服务不可用时应视为降级能力，不影响基础 CRUD/search/context。
 
 Removed / not current core：
@@ -169,9 +169,12 @@ Removed / not current core：
 | `memory_timeline` | 决策/事件时间线 |
 | `memory_curator_report` | curator 候选报告，可选标记 stale/archive |
 | `memory_rollup_report` | 将累计 episodic 记忆滚动总结为长期记忆 |
+| `memory_atomize_report` | 规划或执行 parent memory 到 atomic child facts 的拆分 |
+| `memory_entity_search` | 按实体/别名索引搜索 active memories |
 | `memory_ingest` | 从显式传入的对话消息抽取并去重写入 candidate |
 | `memory_vector_search` | Qdrant 语义向量搜索 |
 | `memory_vector_status` | Qdrant 向量存储状态 |
+| `memory_vector_audit` | 检查 SQLite active memories 与 Qdrant points 的一致性 |
 | `memory_link_add` | 创建/更新记忆之间的有向关系 |
 | `memory_link_query` | 查询某条记忆的 incoming/outgoing links |
 | `memory_warnings` | 根据 active links 返回冲突/替代 warning |
@@ -344,7 +347,7 @@ python3.11 -m venv .venv
 .venv/bin/python -m pip install -e .[all]
 ```
 
-如需在 Ollama 不可用时优先使用本地 sentence-transformers fallback，而不是直接降级到 hashing：
+默认安装不包含 sentence-transformers/PyTorch/CUDA。`.[embedding]` 和 `.[full]` 保留为兼容入口；如果后续自行安装本地模型 fallback，可配合这些命令管理环境：
 
 ```bash
 .venv/bin/python -m pip install -e .[embedding]
@@ -365,7 +368,7 @@ python3.11 -m pip install "local-memory-mcp[all]"
 local-memory-mcp serve --host 127.0.0.1 --port 8318
 ```
 
-如果需要本地 sentence-transformers fallback：
+如果需要保留完整可选安装入口：
 
 ```bash
 python3.11 -m pip install "local-memory-mcp[full]"
@@ -421,7 +424,7 @@ scripts/init_local_memory.sh
 
 当前语义层通过 `vector_store.py` 使用 Qdrant。配置位于 `config.yaml` 的 `qdrant` 和 `embedding` 段，也可由环境变量覆盖部分 embedding 设置。
 
-默认 embedding provider 是 Ollama `nomic-embed-text`。Ollama 不可用时，`embed_text` 会先尝试 sentence-transformers fallback；如果本地模型或依赖未安装，再使用 deterministic hashing fallback，保证语义相关能力可降级而不阻断基础 SQLite/FTS5 能力。默认 `.[all]` 不安装 `sentence-transformers` 大依赖；需要该本地 fallback 时显式安装 `.[embedding]` 或 `.[full]`。
+默认 embedding provider 是 `auto`，不是固定绑定 Ollama。`auto` 会优先使用 `LOCAL_MEMORY_EMBEDDING_API_URL` / `embedding.api_url` 指向的 OpenAI-compatible embedding API；未配置外部 API 时尝试 Ollama `/api/embed`；再失败则使用 deterministic hashing fallback，保证 SQLite/FTS5/context pack 不被 embedding 服务阻断。默认 `.[all]` 不安装 `sentence-transformers`、PyTorch 或 CUDA 大依赖。
 
 ## 设计边界
 

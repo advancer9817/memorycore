@@ -13,6 +13,7 @@ from local_memory_mcp.injection_guard import (
 )
 from local_memory_mcp.models import as_json, fts_phrase, normalize_list, now, row_to_dict
 from local_memory_mcp.storage.db import _managed_query, managed_conn
+from local_memory_mcp.storage.entities import entity_search
 
 logger = logging.getLogger(__name__)
 
@@ -392,20 +393,66 @@ def _vector_search_ids(
         return []
 
 
+def _metadata(record: dict[str, Any]) -> dict[str, Any]:
+    metadata = record.get("metadata") or {}
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _is_atomic_fact(record: dict[str, Any]) -> bool:
+    return _metadata(record).get("kind") == "atomic_fact"
+
+
+def _parent_id(record: dict[str, Any]) -> str:
+    return str(_metadata(record).get("parent_id") or "")
+
+
 def build_context_pack(
     task: str,
     agent: str = "agent",
     project_path: str = "",
     scope: str = "global",
     token_budget: int = 2000,
+    retrieval_mode: str = "strict",
+    prefer_atomic: bool = True,
+    include_parent: bool = False,
 ) -> dict[str, Any]:
     max_chars = max(800, int(token_budget) * 4)
+    mode = str(retrieval_mode or "strict").strip().lower()
+    if mode not in {"strict", "balanced", "recall"}:
+        mode = "strict"
+    mode_settings = {
+        "strict": {
+            "vector_top_k": 20,
+            "entity_limit": 30,
+            "min_context_score": _MIN_CONTEXT_RELEVANCE_SCORE,
+            "min_vector_only_score": _MIN_VECTOR_ONLY_RELEVANCE_SCORE,
+        },
+        "balanced": {
+            "vector_top_k": 30,
+            "entity_limit": 40,
+            "min_context_score": 0.18,
+            "min_vector_only_score": 0.42,
+        },
+        "recall": {
+            "vector_top_k": 50,
+            "entity_limit": 60,
+            "min_context_score": 0.14,
+            "min_vector_only_score": 0.36,
+        },
+    }[mode]
 
-    # --- Dual retrieval: FTS5 + Qdrant vector search ---
+    # --- Hybrid retrieval: FTS5 + Qdrant vector search + entity aliases ---
     fts_records = search_memory_records(task, scope=scope, project_path=project_path, status="active", limit=40)
     if not fts_records:
         fts_records = _keyword_scan_records(task, scope=scope, project_path=project_path, limit=40)
-    vector_hits: dict[str, float] = dict(_vector_search_ids(task, top_k=20))
+    vector_hits: dict[str, float] = dict(_vector_search_ids(task, top_k=mode_settings["vector_top_k"]))
+    entity_hits = entity_search(
+        task,
+        limit=mode_settings["entity_limit"],
+        scope=scope,
+        project_path=project_path,
+    )
+    entity_boosts: dict[str, float] = {}
     for record in fts_records:
         record["_retrieval_sources"] = record.get("_retrieval_sources") or ["fts"]
         if record["id"] in vector_hits:
@@ -439,6 +486,30 @@ def build_context_pack(
                 record["_retrieval_sources"] = ["vector"]
 
     records = fts_records + extra_records
+    records_by_id = {record["id"]: record for record in records}
+    for hit in entity_hits:
+        memory_id = str(hit.get("memory_id") or "")
+        if not memory_id:
+            continue
+        entity_boosts[memory_id] = max(entity_boosts.get(memory_id, 0.0), float(hit.get("boost") or 0.0))
+        record = records_by_id.get(memory_id)
+        if record is None:
+            record = dict(hit["memory"])
+            record["_retrieval_sources"] = ["entity"]
+            records.append(record)
+            records_by_id[memory_id] = record
+        else:
+            sources = record.get("_retrieval_sources") or []
+            if "entity" not in sources:
+                sources.append("entity")
+            record["_retrieval_sources"] = sources
+        matches = record.setdefault("_entity_matches", [])
+        matches.append({
+            "entity": hit.get("entity"),
+            "normalized_entity": hit.get("normalized_entity"),
+            "entity_type": hit.get("entity_type"),
+            "weight": hit.get("weight"),
+        })
 
     # Unified re-ranking.  Relevance evidence dominates; type weighting is a
     # small multiplier so generic high-priority memories cannot outrank clearly
@@ -448,12 +519,18 @@ def build_context_pack(
         lexical = _lexical_relevance(task, r)
         sources = r.get("_retrieval_sources", [])
         source_bonus = 0.08 if ("fts" in sources or "keyword" in sources) else 0.0
+        source_bonus += 0.06 if "entity" in sources else 0.0
+        atomic_bonus = 0.07 if prefer_atomic and _is_atomic_fact(r) else 0.0
+        parent_penalty = -0.05 if prefer_atomic and not include_parent and _metadata(r).get("kind") == "parent_memory" else 0.0
         feedback = max(-1.0, min(1.0, float(r.get("feedback_score") or 0)))
         return max(
             0.0,
             vscore * 0.42
             + lexical * 0.36
+            + entity_boosts.get(r["id"], 0.0)
             + source_bonus
+            + atomic_bonus
+            + parent_penalty
             + float(r.get("importance") or 0) * 0.07
             + float(r.get("effectiveness_score") or 0) * 0.05
             + feedback * 0.02
@@ -474,7 +551,11 @@ def build_context_pack(
         lexical = _lexical_relevance(task, record)
         if "keyword" in sources and lexical < _MIN_KEYWORD_LEXICAL_RELEVANCE_SCORE:
             continue
-        min_score = _MIN_VECTOR_ONLY_RELEVANCE_SCORE if sources == ["vector"] else _MIN_CONTEXT_RELEVANCE_SCORE
+        min_score = (
+            mode_settings["min_vector_only_score"]
+            if sources == ["vector"]
+            else mode_settings["min_context_score"]
+        )
         if score >= min_score:
             scored_records.append((record, score))
     records = [record for record, _ in sorted(
@@ -485,6 +566,22 @@ def build_context_pack(
         ),
         reverse=True,
     )]
+    if prefer_atomic:
+        child_parent_ids = {_parent_id(record) for record in records if _is_atomic_fact(record) and _parent_id(record)}
+        child_counts: dict[str, int] = {}
+        pruned: list[dict[str, Any]] = []
+        for record in records:
+            parent_id = _parent_id(record)
+            if parent_id:
+                if child_counts.get(parent_id, 0) >= 3:
+                    continue
+                child_counts[parent_id] = child_counts.get(parent_id, 0) + 1
+                pruned.append(record)
+                continue
+            if not include_parent and record["id"] in child_parent_ids:
+                continue
+            pruned.append(record)
+        records = pruned
     groups_order = [
         "skill_candidate", "user_profile", "environment_fact", "agent_architecture",
         "project_memory", "decision", "timeline_event", "episodic_memory", "feedback",
@@ -601,8 +698,12 @@ def build_context_pack(
             "fallback_used": fallback_used,
             "fallback_candidates": fallback_candidates,
             "vector_hits": len(vector_hits),
-            "min_relevance_score": _MIN_CONTEXT_RELEVANCE_SCORE,
-            "min_vector_only_relevance_score": _MIN_VECTOR_ONLY_RELEVANCE_SCORE,
+            "entity_hits": len(entity_hits),
+            "retrieval_mode": mode,
+            "prefer_atomic": prefer_atomic,
+            "include_parent": include_parent,
+            "min_relevance_score": mode_settings["min_context_score"],
+            "min_vector_only_relevance_score": mode_settings["min_vector_only_score"],
             "min_keyword_lexical_relevance_score": _MIN_KEYWORD_LEXICAL_RELEVANCE_SCORE,
             "task_type": task_type,
             "type_weights": type_weights,

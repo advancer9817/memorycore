@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from local_memory_mcp.models import DEFAULT_ROOT, now
+from local_memory_mcp.models import DEFAULT_ROOT, load_config, now
 from local_memory_mcp.storage.audit import log_audit_event
 from local_memory_mcp.storage.db import connect, db_path, managed_conn
 
@@ -210,3 +210,89 @@ def memory_rebuild_vectors(dry_run: bool = True, limit: int = 5000) -> dict[str,
         rebuilt += 1
     log_audit_event("memory_vector_rebuild", detail={"rebuilt": rebuilt})
     return {"dry_run": False, "planned": len(rows), "rebuilt": rebuilt}
+
+
+def memory_vector_audit(dry_run: bool = True, limit: int = 100) -> dict[str, Any]:
+    """Compare active SQLite memories with Qdrant points and optionally rebuild missing points."""
+    cap = max(1, min(int(limit), 1000))
+    with managed_conn() as conn:
+        sqlite_active = int(conn.execute(
+            "SELECT COUNT(*) FROM memories WHERE status = 'active'"
+        ).fetchone()[0] or 0)
+        rows = [dict(row) for row in conn.execute(
+            "SELECT * FROM memories WHERE status = 'active' ORDER BY updated_at DESC LIMIT ?",
+            (cap,),
+        ).fetchall()]
+    ids = [str(row["id"]) for row in rows]
+
+    try:
+        from local_memory_mcp.vector_store import get_vector_store
+
+        vs = get_vector_store(load_config())
+        status = vs.status()
+        if not status.get("available"):
+            return {
+                "dry_run": dry_run,
+                "available": False,
+                "sqlite_active": sqlite_active,
+                "checked": len(ids),
+                "missing_vectors": ids,
+                "rebuilt": 0,
+                "status": status,
+            }
+        client = getattr(vs, "_client", None)
+        if client is None or not hasattr(client, "retrieve"):
+            return {
+                "dry_run": dry_run,
+                "available": True,
+                "degraded": True,
+                "reason": "qdrant client does not expose retrieve",
+                "sqlite_active": sqlite_active,
+                "checked": len(ids),
+                "missing_vectors": [],
+                "rebuilt": 0,
+                "status": status,
+            }
+        retrieved = client.retrieve(
+            collection_name=vs.config.collection,
+            ids=ids,
+            with_payload=True,
+            with_vectors=False,
+        ) if ids else []
+        present_ids = {str(point.id) for point in retrieved}
+        missing = [memory_id for memory_id in ids if memory_id not in present_ids]
+        rebuilt = 0
+        if not dry_run and missing:
+            from local_memory_mcp.storage.crud import _sync_to_vector
+
+            by_id = {str(row["id"]): row for row in rows}
+            for memory_id in missing:
+                row = by_id.get(memory_id)
+                if row is None:
+                    continue
+                _sync_to_vector(row)
+                rebuilt += 1
+            log_audit_event("memory_vector_audit", detail={"checked": len(ids), "missing": len(missing), "rebuilt": rebuilt})
+        return {
+            "dry_run": dry_run,
+            "available": True,
+            "sqlite_active": sqlite_active,
+            "checked": len(ids),
+            "missing_vectors": missing,
+            "rebuilt": rebuilt,
+            "vector_count": status.get("count", 0),
+            "dimension": status.get("dim"),
+            "collection": status.get("collection"),
+            "status": status,
+        }
+    except Exception as exc:
+        return {
+            "dry_run": dry_run,
+            "available": False,
+            "degraded": True,
+            "reason": f"{type(exc).__name__}: {exc}",
+            "sqlite_active": sqlite_active,
+            "checked": len(ids),
+            "missing_vectors": ids,
+            "rebuilt": 0,
+        }

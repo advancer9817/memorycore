@@ -19,6 +19,8 @@ from local_memory_mcp.models import (
 from local_memory_mcp.privacy import redact_record_fields
 from local_memory_mcp.storage.db import _managed_query, managed_conn
 from local_memory_mcp.storage.audit import log_audit_event
+from local_memory_mcp.storage.atomization import atomize_record, should_atomize
+from local_memory_mcp.storage.entities import sync_memory_entities
 
 logger = logging.getLogger(__name__)
 
@@ -54,16 +56,62 @@ def _sync_to_vector(record: dict[str, Any]) -> None:
             vs.delete(record["id"])
             return
         text = f"{record.get('title', '')} {record.get('content', '')}".strip()
+        metadata = record.get("metadata") or {}
         payload = {
             "type": record.get("type", ""),
             "scope": record.get("scope", ""),
             "status": status,
             "source_agent": record.get("source_agent", ""),
             "tags": record.get("tags", []),
+            "kind": metadata.get("kind", ""),
+            "parent_id": metadata.get("parent_id", ""),
         }
         vs.upsert(record["id"], text, payload)
     except Exception as exc:
         logger.warning("_sync_to_vector: failed for id=%s: %s", record.get("id"), exc)
+
+
+def _sync_entities(record: dict[str, Any], conn: Any | None = None) -> None:
+    """Best-effort entity index sync after SQLite writes."""
+    try:
+        sync_memory_entities(record, conn=conn)
+    except Exception as exc:
+        logger.warning("_sync_entities: failed for id=%s: %s", record.get("id"), exc)
+
+
+def _sync_record_indexes(record: dict[str, Any], conn: Any | None = None) -> None:
+    _sync_to_vector(record)
+    _sync_entities(record, conn=conn)
+
+
+def _cascade_child_status(parent_id: str, status: str, conn: Any | None = None) -> list[dict[str, Any]]:
+    if status == "active":
+        return []
+    ts = now()
+    def _run(target_conn: Any) -> list[dict[str, Any]]:
+        target_conn.execute(
+            """
+            UPDATE memories
+            SET status=?, updated_at=?
+            WHERE json_extract(metadata_json, '$.parent_id') = ?
+              AND json_extract(metadata_json, '$.kind') = 'atomic_fact'
+              AND status != ?
+            """,
+            (status, ts, parent_id, status),
+        )
+        rows = target_conn.execute(
+            """
+            SELECT * FROM memories
+            WHERE json_extract(metadata_json, '$.parent_id') = ?
+              AND json_extract(metadata_json, '$.kind') = 'atomic_fact'
+            """,
+            (parent_id,),
+        ).fetchall()
+        return [row_to_dict(row) for row in rows]
+    if conn is not None:
+        return _run(conn)
+    with managed_conn() as managed:
+        return _run(managed)
 
 
 def add_memory_record(
@@ -84,6 +132,7 @@ def add_memory_record(
     memory_id: str | None = None,
     valid_from: str | None = None,
     valid_until: str | None = None,
+    atomize: str | bool = "auto",
 ) -> dict[str, Any]:
     validate_type(memory_type)
     validate_status(status)
@@ -116,7 +165,17 @@ def add_memory_record(
         row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
     result = row_to_dict(row)
     log_audit_event("memory_add", memory_id=memory_id, agent=source_agent, detail={"type": memory_type})
-    _sync_to_vector(result)
+    _sync_record_indexes(result)
+    if should_atomize(result, atomize):
+        try:
+            atomize_record(
+                result["id"],
+                dry_run=False,
+                atomize=atomize,
+                add_memory_fn=add_memory_record,
+            )
+        except Exception as exc:
+            logger.warning("atomize_record: failed for id=%s: %s", result.get("id"), exc)
     return result
 
 
@@ -162,7 +221,11 @@ def update_memory_content(
         row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
     result = row_to_dict(row)
     log_audit_event("memory_update", memory_id=memory_id, detail={"fields": updates[1:]})
-    _sync_to_vector(result)
+    changed_records = [result]
+    if new_status is not None:
+        changed_records.extend(_cascade_child_status(memory_id, new_status))
+    for record in changed_records:
+        _sync_record_indexes(record)
     return result
 
 
@@ -175,7 +238,9 @@ def update_status(memory_id: str, status: str) -> dict[str, Any]:
         raise ValueError(f"memory not found: {memory_id}")
     result = row_to_dict(row)
     log_audit_event("memory_status_change", memory_id=memory_id, detail={"status": status})
-    _sync_to_vector(result)
+    changed_records = [result, *_cascade_child_status(memory_id, status)]
+    for record in changed_records:
+        _sync_record_indexes(record)
     return result
 
 
@@ -194,7 +259,11 @@ def update_status_batch(conn, updates: list[tuple[str, str]]) -> None:
     for memory_id, status in updates:
         row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
         if row:
-            _sync_to_vector(row_to_dict(row))
+            result = row_to_dict(row)
+            changed_records = [result]
+            changed_records.extend(_cascade_child_status(memory_id, status, conn=conn))
+            for record in changed_records:
+                _sync_record_indexes(record, conn=conn)
 
 
 def add_feedback(

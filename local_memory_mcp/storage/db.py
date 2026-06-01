@@ -169,6 +169,23 @@ def init_db(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_links_relation ON memory_links(relation_type);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_links_unique ON memory_links(source_id, target_id, relation_type);
 
+        CREATE TABLE IF NOT EXISTS memory_entities (
+          id TEXT PRIMARY KEY,
+          memory_id TEXT NOT NULL,
+          entity TEXT NOT NULL,
+          normalized_entity TEXT NOT NULL,
+          aliases_json TEXT NOT NULL DEFAULT '[]',
+          entity_type TEXT NOT NULL DEFAULT 'concept',
+          weight REAL NOT NULL DEFAULT 1.0,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(memory_id) REFERENCES memories(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_memory_entities_memory ON memory_entities(memory_id);
+        CREATE INDEX IF NOT EXISTS idx_memory_entities_norm ON memory_entities(normalized_entity);
+        CREATE INDEX IF NOT EXISTS idx_memory_entities_type ON memory_entities(entity_type);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_entities_unique ON memory_entities(memory_id, normalized_entity);
+
         CREATE TABLE IF NOT EXISTS audit_events (
           id TEXT PRIMARY KEY,
           event_type TEXT NOT NULL,

@@ -1949,6 +1949,42 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
+## [迭代 85] 2026-06-01 — 原子事实、实体召回与 OpenMemory 兼容接口
+
+### 变更
+
+- `local_memory_mcp/storage/atomization.py`: 新增 Mem0-inspired atomization v1，保留 parent memory，按路径、端口、URL、服务名等高信号句行生成 atomic child facts，并用 `fact_hash` 幂等去重。
+- `local_memory_mcp/storage/entities.py` / `storage/db.py`: 新增 `memory_entities` 表与实体/别名索引，覆盖 `local_memory`、`local-memory-mcp`、`lmmcp`、Qdrant、SQLite、Ollama、MCP、OpenMemory/Mem0 等别名。
+- `local_memory_mcp/storage/crud.py`: `memory_add` 支持 `atomize="auto"|true|false`，写入后同步 Qdrant 与 entity index；child facts 单独进入 SQLite/FTS5/Qdrant，并通过 `memory_links` 写入 `child -> parent part_of` 与 `parent -> child supports`。
+- `local_memory_mcp/storage/search.py`: `memory_context` 融合 FTS/keyword、Qdrant semantic、entity boost，新增 `retrieval_mode`、`prefer_atomic`、`include_parent`，默认优先注入 atomic child facts 并压制同 parent 原文。
+- `local_memory_mcp/storage/transfer.py` / `server.py`: 新增 `memory_atomize_report`、`memory_entity_search`、`memory_vector_audit` 工具，支持历史长记忆 dry-run/apply 回扫、实体召回和 SQLite/Qdrant point 一致性审计。
+- `local_memory_mcp/frontend.py`: 增加 `/api/v1/memories`、`/api/v1/memories/filter`、`/api/v1/entities`、`/api/v1/stats`、`/api/v1/context-traces` 等 OpenMemory UI 兼容 REST 入口，后端仍读写 lmmcp SQLite/Qdrant。
+- `local_memory_mcp/vector_store.py` / `models.py` / `config.yaml` / `scripts/deploy.sh`: 默认 embedding provider 改为中性的 `auto`，优先外接 OpenAI-compatible embedding API，未配置时尝试 Ollama `/api/embed`，再失败使用 hashing；默认安装仍不引入 PyTorch/CUDA/本地 ML 依赖。
+- `README.md` / `docs/deployment.md` / `docs/tools.md` / `TODO.md`: 同步 35 个 MCP 工具、auto embedding 语义、已完成的 Mem0/OpenMemory 后端任务和仍未完成的 UI fork/Playwright 验证。
+
+### 修复
+
+- 修复长 parent memory 局部事实被整体 embedding 稀释的问题：路径、端口、DB、endpoint 等事实现在可作为 atomic child facts 独立召回、独立排序、独立向量化。
+- 修复 `local_memory` / `local-memory-mcp` / `lmmcp` 等同义查询依赖文本碰巧命中的问题：entity/alias index 会给相关 memory 加分并进入 context trace。
+- 修复 “Ollama 被当成包级默认 embedding provider” 的表达和默认配置问题：Ollama 现在只是 `auto` 链路中的一个 API 适配选项，本机仍可通过 Ollama 提供 embedding。
+
+### 验证
+
+- 全量测试: `uv run pytest -q` 407/407 pass，1 个既有 httpx deprecation warning。
+- 依赖解析: `uv lock --dry-run` pass，显示 `No lockfile changes detected`。
+- 依赖检查: `rg -n 'torch|sentence-transformers|nvidia-|cuda' uv.lock pyproject.toml` 无命中。
+- 语法检查: `python3 -m py_compile` 覆盖新增/改动的 storage、server、frontend、models、vector_store 模块。
+
+### 已知问题
+
+- OpenMemory UI 尚未 fork 到本仓库 `ui/`，Apache-2.0 attribution 和 Playwright UI 验证仍保留在 TODO。
+
+### 回滚
+
+`git revert HEAD`
+
+---
+
 ## 日志格式规范
 
 每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：
