@@ -1735,6 +1735,75 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
+## [迭代 78] 2026-06-01 — Docker Daemon 代理修复与 Compose 远程绑定配置补齐
+
+### 变更
+
+- `/etc/docker/daemon.json`: 本机 Docker daemon 代理从过期 WSL host IP `172.27.176.1:7890` 改为当前默认网关 `172.20.0.1:7890`；registry mirrors 收敛为现场可响应的 `docker.1ms.run` 与 `docker.m.daocloud.io`。
+- `Dockerfile`: 容器默认设置 `LOCAL_MEMORY_FRONTEND_TOKEN=change-me`，满足 `0.0.0.0` 绑定安全检查。
+- `docker-compose.yml`: Compose 默认注入 `LOCAL_MEMORY_FRONTEND_TOKEN`，可由宿主环境覆盖。
+- `tests/test_deployment.py`: 增加 Dockerfile/Compose frontend token 配置门禁。
+- `TODO.md`: 更新 Docker Compose E2E 当前进展。
+
+### 修复
+
+- 修复 Docker daemon 使用旧 WSL 网关代理导致 mirror manifest HEAD 阶段 `unexpected EOF`，无法拉取 `python:3.11-slim` 的问题。
+- 修复 Compose 容器绑定 `0.0.0.0` 但未配置 frontend auth token，启动时报 `remote frontend bind requires --auth-token or --allow-insecure-remote` 的问题。
+
+### 验证
+
+- `curl --proxy http://172.20.0.1:7890 https://registry-1.docker.io/v2/` 返回 Docker registry 401 challenge。
+- `docker pull python:3.11-slim` 成功，digest `sha256:a3ab0b966bc4e91546a033e22093cb840908979487a9fc0e6e38295747e49ac0`。
+- 临时 Compose build 已成功完成 Python 依赖安装与镜像构建。
+- 临时 Compose 首次启动失败证据: `lmmcp-e2e-lmmcp-1` 日志显示 `ValueError: remote frontend bind requires --auth-token or --allow-insecure-remote`。
+
+### 已知问题
+
+- 需重建 Compose 镜像后复验 `/health`、`/mcp`、`memory_vector_status`。
+- PyPI 首发等待 PyPI 账号侧配置 Trusted Publisher。
+
+### 回滚
+
+`sudo cp /etc/docker/daemon.json.bak.<timestamp> /etc/docker/daemon.json && sudo systemctl restart docker`
+
+`git checkout -- Dockerfile docker-compose.yml tests/test_deployment.py TODO.md ITERATION.md`
+
+---
+
+## [迭代 79] 2026-06-01 — Docker Compose Qdrant 环境覆盖与 E2E 闭环
+
+### 变更
+
+- `local_memory_mcp/vector_store.py`: `vector_store_config_from_dict()` 支持 `LOCAL_MEMORY_QDRANT_URL` / `QDRANT_URL`、`LOCAL_MEMORY_QDRANT_COLLECTION` / `QDRANT_COLLECTION`、`LOCAL_MEMORY_QDRANT_PATH` / `QDRANT_PATH` 环境变量覆盖，并在 `memory_vector_status` 结果中暴露 `url`。
+- `Dockerfile`: 增加 `PIP_DEFAULT_TIMEOUT=120`、`PIP_RETRIES=10`、`PIP_DISABLE_PIP_VERSION_CHECK=1`，降低 Compose build 期间 Python wheel 下载读超时概率。
+- `tests/test_vector_store.py`: 增加 Qdrant 环境变量覆盖与 `LOCAL_MEMORY_*` 优先级回归测试。
+- `tests/test_deployment.py`: 增加 Dockerfile pip timeout/retries 门禁。
+- `TODO.md`: 将 Docker Compose 容器端到端验证标记为完成。
+
+### 修复
+
+- 修复 Compose 已设置 `QDRANT_URL=http://qdrant:6333`，但服务端配置只读取 config file/default，导致容器内 `memory_vector_status.available=false` 并退回本地 `/root/.agent-memory/qdrant` 的问题。
+- 修复 Compose build 下载 `numpy` 等依赖时遇到 `ReadTimeoutError` 后没有足够重试/超时余量的问题。
+
+### 验证
+
+- 焦点测试: `tests/test_vector_store.py tests/test_deployment.py` 43/43 pass。
+- 全量测试: 394/394 pass，1 个既有 `httpx` deprecation warning。
+- Docker Compose E2E: `docker compose -p lmmcp-e2e -f /tmp/lmmcp-e2e-compose.yml up --build -d` 成功，`lmmcp-e2e-lmmcp-1` healthy，Qdrant `/healthz` 返回 `healthz check passed`。
+- HTTP health: `http://127.0.0.1:18318/health` 返回 `{"ok":true,"data":{"status":"ok","total_memories":0}}`。
+- MCP: `/mcp` `initialize` 返回 200，`memory_vector_status` 返回 `available=true`、`url=http://qdrant:6333`、`collection=agent_memory`、`embed_provider=hashing`。
+- Vector 写读: 通过 MCP `memory_add` 写入 `LMMCP-DOCKER-E2E-QDRANT-20260601-1311` 后，`memory_vector_search` 可查回同一条记录，随后 `memory_vector_status.count=1`。
+
+### 已知问题
+
+- PyPI 首发等待 PyPI 账号侧配置 Trusted Publisher。
+
+### 回滚
+
+`git checkout -- Dockerfile docker-compose.yml local_memory_mcp/vector_store.py tests/test_deployment.py tests/test_vector_store.py TODO.md ITERATION.md`
+
+---
+
 ## 日志格式规范
 
 每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：

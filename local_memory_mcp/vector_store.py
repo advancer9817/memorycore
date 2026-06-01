@@ -214,13 +214,23 @@ class VectorStoreConfig:
 def vector_store_config_from_dict(cfg: dict[str, Any]) -> VectorStoreConfig:
     qs = cfg.get("qdrant", {})
     embed_cfg = embed_config_from_dict(cfg)
+    env_url = _env_first("LOCAL_MEMORY_QDRANT_URL", "QDRANT_URL")
+    env_path = _env_first("LOCAL_MEMORY_QDRANT_PATH", "QDRANT_PATH")
+    env_collection = _env_first("LOCAL_MEMORY_QDRANT_COLLECTION", "QDRANT_COLLECTION")
     return VectorStoreConfig(
-        path=qs.get("path", ""),
-        url=qs.get("url", ""),
-        collection=qs.get("collection", "agent_memory"),
+        path=env_path if env_path is not None else qs.get("path", ""),
+        url=env_url if env_url is not None else qs.get("url", ""),
+        collection=env_collection if env_collection is not None else qs.get("collection", "agent_memory"),
         dim=embed_cfg.dim,
         embed=embed_cfg,
     )
+
+
+def _env_first(*names: str) -> str | None:
+    for name in names:
+        if name in os.environ:
+            return os.environ[name]
+    return None
 
 
 @dataclass
@@ -410,6 +420,7 @@ class VectorStore:
         return {
             "available": self.available,
             "path": self.config.path,
+            "url": self.config.url,
             "collection": self.config.collection,
             "dim": self.config.dim,
             "embed_provider": self.config.embed.provider,

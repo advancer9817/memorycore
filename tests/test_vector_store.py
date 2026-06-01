@@ -134,6 +134,28 @@ class TestVectorStoreConfig:
         assert cfg.collection == "test_col"
         assert cfg.dim == 384
 
+    def test_from_dict_env_overrides_qdrant(self, monkeypatch):
+        monkeypatch.setenv("QDRANT_URL", "http://qdrant:6333")
+        monkeypatch.setenv("QDRANT_COLLECTION", "compose_memory")
+
+        cfg = vector_store_config_from_dict({
+            "qdrant": {"url": "http://127.0.0.1:6333", "collection": "agent_memory"},
+        })
+
+        assert cfg.url == "http://qdrant:6333"
+        assert cfg.collection == "compose_memory"
+
+    def test_from_dict_prefers_local_memory_qdrant_env(self, monkeypatch):
+        monkeypatch.setenv("QDRANT_URL", "http://qdrant:6333")
+        monkeypatch.setenv("LOCAL_MEMORY_QDRANT_URL", "http://custom-qdrant:6333")
+        monkeypatch.setenv("QDRANT_COLLECTION", "compose_memory")
+        monkeypatch.setenv("LOCAL_MEMORY_QDRANT_COLLECTION", "custom_memory")
+
+        cfg = vector_store_config_from_dict({"qdrant": {}})
+
+        assert cfg.url == "http://custom-qdrant:6333"
+        assert cfg.collection == "custom_memory"
+
 
 # ---------------------------------------------------------------------------
 # VectorStore with mocked Qdrant client

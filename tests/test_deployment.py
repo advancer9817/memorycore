@@ -103,8 +103,12 @@ def test_docker_compose_enables_qdrant_and_runtime_extras():
 
     assert "ARG INSTALL_EXTRAS=all" in dockerfile
     assert 'pip install -e ".[${INSTALL_EXTRAS}]"' in dockerfile
+    assert "PIP_DEFAULT_TIMEOUT=120" in dockerfile
+    assert "PIP_RETRIES=10" in dockerfile
     assert "QDRANT_URL=http://qdrant:6333" in dockerfile
     assert "LOCAL_MEMORY_EMBEDDING_PROVIDER=hashing" in dockerfile
+    assert "LOCAL_MEMORY_FRONTEND_TOKEN=change-me" in dockerfile
+    assert "LOCAL_MEMORY_FRONTEND_TOKEN: ${LOCAL_MEMORY_FRONTEND_TOKEN:-change-me}" in compose
 
 
 def test_hook_setup_registers_prompt_context_injection():

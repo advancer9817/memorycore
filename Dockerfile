@@ -3,6 +3,9 @@ FROM python:3.11-slim
 WORKDIR /app
 
 ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=10 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONUNBUFFERED=1
 
 # Install from the checked-in source so package metadata and optional extras
@@ -23,7 +26,8 @@ ENV LOCAL_MEMORY_DB=/data/memory.sqlite3 \
     LOCAL_MEMORY_CONFIG=/data/config.yaml \
     QDRANT_URL=http://qdrant:6333 \
     QDRANT_COLLECTION=agent_memory \
-    LOCAL_MEMORY_EMBEDDING_PROVIDER=hashing
+    LOCAL_MEMORY_EMBEDDING_PROVIDER=hashing \
+    LOCAL_MEMORY_FRONTEND_TOKEN=change-me
 
 EXPOSE 8318
 
