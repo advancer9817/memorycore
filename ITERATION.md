@@ -1832,6 +1832,34 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
+## [迭代 81] 2026-06-01 — PyPI v0.25.0 首发完成
+
+### 变更
+
+- `TODO.md`: 将 PyPI 首次发布标记为完成，记录发布 workflow、PyPI 版本可见性与临时 venv 安装验证结果。
+- `ITERATION.md`: 记录 PyPI 首发完成状态与后续 Trusted Publishing 可选改进。
+
+### 修复
+
+- 通过重新写入有效的 GitHub Actions secret `PYPI_API_TOKEN`，修复上一轮发布中 PyPI API token 无效导致的 `403 Invalid or non-existent authentication information`。
+
+### 验证
+
+- GitHub Actions: `Publish to PyPI` run `26746195311` completed success，head `4f98155a08f612d0c4c4af85d2f2356450b43f8c`。
+- GitHub Actions: tag CI run `26746195314` completed success。
+- PyPI index: `pip index versions local-memory-mcp` 显示 `local-memory-mcp (0.25.0)`、`Available versions: 0.25.0`。
+- PyPI install: 临时 Python 3.11 venv 执行 `pip install "local-memory-mcp[all]==0.25.0"` 成功，`importlib.metadata.version("local-memory-mcp")` 返回 `0.25.0`，import 路径为 venv `site-packages/local_memory_mcp/__init__.py`。
+
+### 已知问题
+
+- Trusted Publishing 仍未配置成功；当前 PyPI 发布依赖 GitHub Secret `PYPI_API_TOKEN`。后续可在 PyPI project publishing 页面补齐 GitHub publisher，再移除 token secret 路线。
+
+### 回滚
+
+`git checkout -- TODO.md ITERATION.md`
+
+---
+
 ## 日志格式规范
 
 每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：
