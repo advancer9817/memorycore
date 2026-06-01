@@ -104,8 +104,8 @@ Qdrant with persistent volumes:
 docker compose up --build
 ```
 
-The lmmcp image installs `.[all]` by default so Qdrant, extraction, and local
-embedding fallback dependencies are present. Compose defaults
+The lmmcp image installs `.[all]` by default so Qdrant and extraction
+dependencies are present without pulling the large sentence-transformers stack. Compose defaults
 `LOCAL_MEMORY_EMBEDDING_PROVIDER=hashing` because the Ollama daemon is usually
 outside the container; override the environment if you provide an Ollama
 endpoint reachable from the container network.
@@ -127,7 +127,7 @@ For the default service deployment:
 Optional but recommended:
 
 - Ollama with `nomic-embed-text` pulled.
-- `sentence-transformers` model cache for local fallback when Ollama is offline.
+- `sentence-transformers` extra and model cache for local fallback when Ollama is offline.
 
 If Ollama is unavailable, lmmcp tries the configured sentence-transformers
 fallback first, then falls back to deterministic hashing embeddings if the local
@@ -137,6 +137,15 @@ the fully portable fallback explicitly:
 ```bash
 export LOCAL_MEMORY_EMBEDDING_PROVIDER=hashing
 export LOCAL_MEMORY_EMBEDDING_DIM=384
+```
+
+Install the local sentence-transformers fallback only when you explicitly want
+that heavier offline embedding path:
+
+```bash
+.venv/bin/python -m pip install -e .[embedding]
+# or all optional features including the heavy embedding fallback:
+.venv/bin/python -m pip install -e .[full]
 ```
 
 ## Configuration knobs

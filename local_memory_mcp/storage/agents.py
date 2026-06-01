@@ -8,7 +8,6 @@ from typing import Any
 from local_memory_mcp.models import as_json, from_json, local_now, now
 from local_memory_mcp.storage.db import managed_conn
 from local_memory_mcp.storage.audit import log_audit_event
-from local_memory_mcp.storage.permissions import check_agent_permission, get_agent_namespace
 
 _MESSAGE_PRIORITIES = {"low", "normal", "high", "urgent"}
 _PRESENCE_STATUSES = {"online", "idle", "busy", "offline"}
@@ -31,21 +30,12 @@ def send_agent_message(
         expires_at = (local_now() + timedelta(seconds=int(ttl_seconds))).isoformat(timespec="seconds")
 
     if to_agent == "*":
-        permission = check_agent_permission(from_agent, "agent.broadcast")
-        if not permission["allowed"]:
-            return {"error": "permission_denied", "decision": permission}
-        sender_namespace = permission.get("namespace") or get_agent_namespace(from_agent)
         with managed_conn() as conn:
             rows = conn.execute(
-                "SELECT agent_id, metadata_json FROM agent_presence WHERE status IN ('online', 'idle') AND agent_id != ?",
+                "SELECT agent_id FROM agent_presence WHERE status IN ('online', 'idle') AND agent_id != ?",
                 (from_agent,),
             ).fetchall()
-        recipients = []
-        for row in rows:
-            recipient_meta = from_json(row["metadata_json"], {})
-            if sender_namespace and recipient_meta.get("namespace") != sender_namespace:
-                continue
-            recipients.append(row["agent_id"])
+        recipients = [row["agent_id"] for row in rows]
         ts = now()
         meta_json = as_json(metadata or {})
         if recipients:
@@ -130,9 +120,6 @@ def update_agent_presence(
     if status not in _PRESENCE_STATUSES:
         return {"error": f"invalid status '{status}', must be one of {sorted(_PRESENCE_STATUSES)}"}
     metadata = dict(metadata or {})
-    namespace = get_agent_namespace(agent_id)
-    if namespace and "namespace" not in metadata:
-        metadata = {**metadata, "namespace": namespace}
     ts = now()
     with managed_conn() as conn:
         conn.execute(

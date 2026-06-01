@@ -95,15 +95,14 @@ def test_curator_archives_dead_candidates_and_promotes_important_candidates():
     assert important_record["status"] == "active"
 
 
-def test_consolidate_dry_run_reports_duplicates_and_low_feedback():
-    record = lm.add_memory_record("project_memory", "Same", "one", memory_id="same-1")
-    lm.add_memory_record("project_memory", "Same", "two", memory_id="same-2")
-    lm.add_feedback(record["id"], -1)
+def test_curator_report_replaces_consolidate_for_duplicates_and_low_feedback():
+    record = lm.add_memory_record("feedback", "Same", "one", memory_id="same-1")
+    lm.add_memory_record("feedback", "Same", "two", memory_id="same-2")
+    lm.add_feedback(record["id"], -2)
 
-    report = lm.consolidate(dry_run=True)
+    report = lm.curator_report(dry_run=True)
 
     assert report["dry_run"] is True
-    assert report["applied"] is False
     assert len(report["duplicate_title_groups"]) == 1
     assert [r["id"] for r in report["low_feedback_candidates"]] == ["same-1"]
 

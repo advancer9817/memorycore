@@ -23,17 +23,14 @@ from local_memory_mcp.storage import (
     agent_handoff_update,
     build_context_pack,
     cleanup_expired_messages,
-    consolidate,
     curator_report,
     dashboard_payload,
     get_active_warnings,
     get_agent_inbox,
-    get_agent_permission,
     get_audit_log,
     get_context_quality_stats,
     get_memory_stats,
     get_record,
-    grant_agent_permission,
     list_agent_presence,
     list_recent,
     memory_backup,
@@ -136,8 +133,6 @@ async def frontend_api(request: Request) -> Response:
         data = await _dispatch_api(request, parts, query)
         if isinstance(data, Response):
             return data
-        if isinstance(data, dict) and data.get("error") == "permission_denied":
-            return _json_error("permission_denied", "permission denied", 403, data)
         return _json_ok(data)
     except json.JSONDecodeError:
         return _json_error("bad_json", "request body must be valid JSON", 400)
@@ -210,9 +205,6 @@ async def _dispatch_api(request: Request, parts: list[str], query: dict[str, lis
             stale_after_days=int(body.get("stale_after_days", 60)), archive_after_days=int(body.get("archive_after_days", 120)),
             allow_actions=body.get("allow_actions"), deny_actions=body.get("deny_actions"),
         )
-    if parts == ["consolidate"] and method == "POST":
-        return consolidate(bool(body.get("dry_run", True)), int(body.get("limit", 50)))
-
     if parts == ["links"] and method == "POST":
         return add_link(body.get("source_id", ""), body.get("target_id", ""), body.get("relation_type", "related_to"), body.get("weight", 1.0), body.get("note", ""), body.get("source_agent", "frontend"))
     if len(parts) == 2 and parts[0] == "links" and method == "GET":
@@ -230,10 +222,6 @@ async def _dispatch_api(request: Request, parts: list[str], query: dict[str, lis
         return send_agent_message(body.get("from_agent", "frontend"), body.get("to_agent", ""), body.get("subject", ""), body.get("body", ""), body.get("priority", "normal"), body.get("metadata"), body.get("ttl_seconds"))
     if parts == ["agents", "messages", "cleanup"] and method == "POST":
         return {"deleted": cleanup_expired_messages()}
-    if len(parts) == 3 and parts[0] == "agents" and parts[2] == "permission" and method == "GET":
-        return get_agent_permission(parts[1])
-    if len(parts) == 3 and parts[0] == "agents" and parts[2] == "permission" and method == "POST":
-        return grant_agent_permission(parts[1], body.get("namespace", "default"), body.get("can_read", True), body.get("can_write", True), body.get("can_broadcast", True), body.get("scopes"), body.get("types"), body.get("tags"))
     if len(parts) == 3 and parts[0] == "agents" and parts[2] == "capabilities" and method == "POST":
         return agent_capability_register(parts[1], body.get("capabilities", []), body.get("namespace", "default"), body.get("metadata"))
     if parts == ["agents", "capabilities"] and method == "GET":

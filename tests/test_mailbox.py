@@ -43,6 +43,20 @@ class TestSendAgentMessage:
         events = get_audit_log(event_type="agent_message_send", limit=5)
         assert any(e["detail_json"] and msg["id"] in e["detail_json"] for e in events)
 
+    def test_broadcast_sends_to_all_online_or_idle_agents(self):
+        update_agent_presence("sender", status="online")
+        update_agent_presence("same-namespace", status="online", metadata={"namespace": "team-a"})
+        update_agent_presence("other-namespace", status="idle", metadata={"namespace": "team-b"})
+        update_agent_presence("offline-agent", status="offline")
+
+        result = send_agent_message("sender", "*", "broadcast")
+
+        assert result["broadcast"] is True
+        assert result["sent_to"] == ["same-namespace", "other-namespace"]
+        assert len(get_agent_inbox("same-namespace")) == 1
+        assert len(get_agent_inbox("other-namespace")) == 1
+        assert get_agent_inbox("offline-agent") == []
+
 
 class TestAgentInbox:
     def test_inbox_returns_messages_for_recipient(self):
@@ -114,6 +128,10 @@ class TestUpdateAgentPresence:
     def test_metadata_stored(self):
         result = update_agent_presence("codex", status="online", metadata={"task": "review"})
         assert result["metadata"]["task"] == "review"
+
+    def test_presence_does_not_invent_permission_namespace(self):
+        result = update_agent_presence("plain-agent", status="online")
+        assert "namespace" not in result["metadata"]
 
     def test_presence_writes_audit_event(self):
         update_agent_presence("audit-agent", status="online")

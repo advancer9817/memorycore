@@ -57,24 +57,6 @@ _PROMOTE_IMPORTANCE_THRESHOLD = 0.75
 _PROMOTE_INJECTED_THRESHOLD = 3
 
 
-def consolidate(dry_run: bool = True, limit: int = 50) -> dict[str, Any]:
-    from local_memory_mcp.storage.crud import list_recent
-    rows = list_recent(limit)
-    seen: dict[str, list[dict[str, Any]]] = {}
-    for r in rows:
-        key = normalize_title_key(r.get("title", ""))
-        seen.setdefault(key, []).append(r)
-    duplicates = [v for v in seen.values() if len(v) > 1]
-    low_feedback = [r for r in rows if float(r.get("feedback_score", 0)) < -0.5]
-    return {
-        "dry_run": dry_run,
-        "applied": False,
-        "reason": "v0 consolidate is report-only; use memory_curator_report(dry_run=False) for low-risk lifecycle status changes",
-        "duplicate_title_groups": duplicates,
-        "low_feedback_candidates": low_feedback,
-    }
-
-
 def curator_report(
     dry_run: bool = True,
     limit: int = 500,

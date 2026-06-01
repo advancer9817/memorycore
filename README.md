@@ -51,7 +51,7 @@ bash start.sh
 `start.sh` 自动完成：
 
 1. 创建/复用 `.venv`（自动查找 python3.11/3.12/3.13）
-2. 安装完整依赖（`pip install -e .[all]`，包含 extraction、Qdrant vector 与 sentence-transformers fallback 支持）
+2. 安装默认运行依赖（`pip install -e .[all]`，包含 extraction 与 Qdrant vector；本地 sentence-transformers fallback 需显式安装 `.[embedding]` 或 `.[full]`）
 3. 初始化 SQLite 数据库（幂等）
 4. 导入 `memory-sync/memories.json`（若存在，使用 `newer` 冲突策略）
 5. 启动 HTTP MCP 服务（默认 `127.0.0.1:8318`）
@@ -136,7 +136,7 @@ scripts/sync-memory.sh status
 已验证：
 
 1. **SQLite + FTS5 结构化记忆层**：支持 type/scope/tags/status/importance/confidence/source_agent/effectiveness 等字段，FTS5 全文检索。
-2. **HTTP MCP server**：36 个工具，Hermes 可通过 `http://127.0.0.1:8318/mcp` 作为普通 HTTP MCP 客户端连接。
+2. **HTTP MCP server**：32 个工具，Hermes 可通过 `http://127.0.0.1:8318/mcp` 作为普通 HTTP MCP 客户端连接。
 3. **Context Pack**：`memory_context` 按任务生成 compact 上下文包，支持 token budget 控制，按记忆类型分组，集成 active contradicts/supersedes warning，并将检索记忆标记为 untrusted data；命中注入特征的记忆会从普通 context body 过滤到 warnings。
 4. **Curator**：重复标题、低反馈、stale、archive、矛盾候选、skill_candidate 推广候选检测；默认 dry-run。
 5. **Feedback / effectiveness**：`memory_feedback` 记录反馈事件并更新 feedback_score、injected_count、ineffective_count、effectiveness_score。
@@ -165,10 +165,8 @@ Removed / not current core：
 | `memory_context_stats` | 查询 context pack 质量趋势指标 |
 | `memory_get` | 读取单条记忆 |
 | `memory_list_recent` | 最近更新记录 |
-| `memory_update_status` | 更新记忆状态 |
 | `memory_feedback` | 记录记忆有用性反馈 |
 | `memory_timeline` | 决策/事件时间线 |
-| `memory_consolidate` | curator 去重/stale 检测（report-only） |
 | `memory_curator_report` | curator 候选报告，可选标记 stale/archive |
 | `memory_rollup_report` | 将累计 episodic 记忆滚动总结为长期记忆 |
 | `memory_ingest` | 从显式传入的对话消息抽取并去重写入 candidate |
@@ -185,8 +183,6 @@ Removed / not current core：
 | `memory_rebuild_vectors` | 从 SQLite 记录重建 Qdrant 向量索引 |
 | `memory_stats` | 返回按 type/status/agent 分组的记忆统计与聚合分数 |
 | `agent_send` | 向指定 agent 发送消息 |
-| `agent_permission_grant` | 创建或更新 agent 权限策略 |
-| `agent_permission_get` | 查询单个 agent 权限策略 |
 | `agent_handoff_create` | 创建结构化 agent handoff 请求 |
 | `agent_handoff_update` | 更新 handoff 状态并发送响应 |
 | `agent_capability_register` | 注册 agent 能力用于任务移交 |
@@ -348,10 +344,31 @@ python3.11 -m venv .venv
 .venv/bin/python -m pip install -e .[all]
 ```
 
+如需在 Ollama 不可用时优先使用本地 sentence-transformers fallback，而不是直接降级到 hashing：
+
+```bash
+.venv/bin/python -m pip install -e .[embedding]
+# 或一次性安装所有可选能力：
+.venv/bin/python -m pip install -e .[full]
+```
+
 运行测试：
 
 ```bash
 .venv/bin/python -m pytest -q
+```
+
+PyPI 发布后可直接安装默认运行能力：
+
+```bash
+python3.11 -m pip install "local-memory-mcp[all]"
+local-memory-mcp serve --host 127.0.0.1 --port 8318
+```
+
+如果需要本地 sentence-transformers fallback：
+
+```bash
+python3.11 -m pip install "local-memory-mcp[full]"
 ```
 
 ## 一键部署
@@ -377,7 +394,7 @@ scripts/deploy.sh --no-qdrant                   # 使用外部 Qdrant
 scripts/deploy.sh --skip-tests                  # 部署时跳过 pytest
 ```
 
-Docker Compose 快速启动会同时启动 lmmcp 和 Qdrant，并安装完整 Python extras：
+Docker Compose 快速启动会同时启动 lmmcp 和 Qdrant，并安装默认运行 extras：
 
 ```bash
 docker compose up --build
@@ -404,7 +421,7 @@ scripts/init_local_memory.sh
 
 当前语义层通过 `vector_store.py` 使用 Qdrant。配置位于 `config.yaml` 的 `qdrant` 和 `embedding` 段，也可由环境变量覆盖部分 embedding 设置。
 
-默认 embedding provider 是 Ollama `nomic-embed-text`。Ollama 不可用时，`embed_text` 会先尝试 sentence-transformers fallback；如果本地模型或依赖也不可用，再使用 deterministic hashing fallback，保证语义相关能力可降级而不阻断基础 SQLite/FTS5 能力。
+默认 embedding provider 是 Ollama `nomic-embed-text`。Ollama 不可用时，`embed_text` 会先尝试 sentence-transformers fallback；如果本地模型或依赖未安装，再使用 deterministic hashing fallback，保证语义相关能力可降级而不阻断基础 SQLite/FTS5 能力。默认 `.[all]` 不安装 `sentence-transformers` 大依赖；需要该本地 fallback 时显式安装 `.[embedding]` 或 `.[full]`。
 
 ## 设计边界
 

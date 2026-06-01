@@ -37,7 +37,18 @@ def test_deployment_doc_mentions_target_machine_verification():
     assert "Post-deploy verification" in text
 
 
-def test_start_script_installs_full_extras_by_default():
+def test_default_all_extra_stays_runtime_sized():
+    import tomllib
+
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    optional = pyproject["project"]["optional-dependencies"]
+
+    assert optional["all"] == ["local-memory-mcp[vector,extraction]"]
+    assert optional["full"] == ["local-memory-mcp[vector,extraction,embedding]"]
+    assert optional["embedding"] == ["sentence-transformers>=3.0.0,<6.0"]
+
+
+def test_start_script_installs_runtime_extras_by_default():
     text = (ROOT / "start.sh").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     deploy = (ROOT / "scripts" / "deploy.sh").read_text(encoding="utf-8")
@@ -45,6 +56,8 @@ def test_start_script_installs_full_extras_by_default():
     assert 'pip install -q -e ".[all]"' in text
     assert 'pip install -q -e ".[extraction]"' not in text
     assert "pip install -e .[all]" in readme
+    assert "pip install -e .[embedding]" in readme
+    assert "pip install -e .[full]" in readme
     assert 'pip install -e ".[all]"' in deploy
 
 
@@ -77,7 +90,7 @@ def test_start_script_rebuilds_drifted_venv():
     assert 'Rebuilding venv because existing scripts point outside this checkout' in text
 
 
-def test_docker_compose_enables_qdrant_and_full_extras():
+def test_docker_compose_enables_qdrant_and_runtime_extras():
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
 

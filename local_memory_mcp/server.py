@@ -40,17 +40,14 @@ from local_memory_mcp.storage import (
     agent_handoff_update as update_agent_handoff,
     build_context_pack,
     cleanup_expired_messages,
-    consolidate,
     curator_report,
     export_html,
     get_active_warnings,
     get_agent_inbox,
-    get_agent_permission,
     get_audit_log,
     get_context_quality_stats,
     get_memory_stats,
     get_record,
-    grant_agent_permission,
     list_agent_presence,
     list_recent,
     memory_backup as create_memory_backup,
@@ -197,13 +194,6 @@ def memory_list_recent(limit: int = 10) -> list[dict[str, Any]]:
 
 @mcp.tool()
 @_safe_tool
-def memory_update_status(id: str, status: str) -> dict[str, Any]:
-    """Mark a memory active/stale/archived/contradicted/promoted/candidate."""
-    return update_status(id, status)
-
-
-@mcp.tool()
-@_safe_tool
 def memory_feedback(
     id: str, score: float, note: str = "", source_agent: str = "agent"
 ) -> dict[str, Any]:
@@ -216,13 +206,6 @@ def memory_feedback(
 def memory_timeline(query: str = "", scope: str = "", limit: int = 20) -> list[dict[str, Any]]:
     """Return decision/timeline/feedback memories in chronological order."""
     return timeline(query, scope, limit)
-
-
-@mcp.tool()
-@_safe_tool
-def memory_consolidate(dry_run: bool = True, limit: int = 50) -> dict[str, Any]:
-    """Curator helper: detect duplicate/stale candidates. v0 is dry-run oriented."""
-    return consolidate(dry_run, limit)
 
 
 @mcp.tool()
@@ -609,29 +592,6 @@ def agent_capability_search(
 ) -> list[dict[str, Any]]:
     """Find agents by capability and optional namespace."""
     return search_agent_capabilities(capability, namespace, limit)
-
-
-@mcp.tool()
-@_safe_tool
-def agent_permission_grant(
-    agent_id: str,
-    namespace: str = "default",
-    can_read: bool = True,
-    can_write: bool = True,
-    can_broadcast: bool = True,
-    scopes: list[str] | str | None = None,
-    types: list[str] | str | None = None,
-    tags: list[str] | str | None = None,
-) -> dict[str, Any]:
-    """Create or update an agent permission policy."""
-    return grant_agent_permission(agent_id, namespace, can_read, can_write, can_broadcast, scopes, types, tags)
-
-
-@mcp.tool()
-@_safe_tool
-def agent_permission_get(agent_id: str) -> dict[str, Any] | None:
-    """Get one agent permission policy by agent id."""
-    return get_agent_permission(agent_id)
 
 
 @mcp.tool()

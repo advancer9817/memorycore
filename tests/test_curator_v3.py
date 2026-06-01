@@ -300,7 +300,7 @@ def test_rollup_processes_manual_source_episodic():
         memory_id="hermes-ep-manual",
     )
 
-    result = rollup_report(dry_run=True, force=True)
+    result = rollup_report(dry_run=True, force=True, _summarize_fn=lambda rows: [])
     assert result["triggered"] is True
     assert "hermes-ep-manual" in result["source_ids"]
 
@@ -314,6 +314,6 @@ def test_rollup_still_processes_extraction_source():
         memory_id="claude-ep-extraction",
     )
 
-    result = rollup_report(dry_run=True, force=True)
+    result = rollup_report(dry_run=True, force=True, _summarize_fn=lambda rows: [])
     assert result["triggered"] is True
     assert "claude-ep-extraction" in result["source_ids"]

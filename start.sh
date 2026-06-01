@@ -4,7 +4,7 @@
 # 适用场景：新设备 clone 仓库后第一次启动，或日常启动。
 # 执行步骤：
 #   1. 创建/复用 Python venv
-#   2. 安装/更新完整依赖（含 extraction + Qdrant vector）
+#   2. 安装/更新默认运行依赖（含 extraction + Qdrant vector）
 #   3. 初始化 SQLite DB（幂等）
 #   4. 导入 memory-sync/memories.json（冲突策略 newer，有则导入无则跳过）
 #   4.5 配置 Agent hooks / 软注入规则（幂等）

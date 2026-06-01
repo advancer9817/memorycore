@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import ast
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / "README.md"
 SERVER = ROOT / "local_memory_mcp" / "server.py"
+TOOLS_DOC = ROOT / "docs" / "tools.md"
 
 
 def _actual_mcp_tools() -> set[str]:
@@ -52,3 +55,19 @@ def test_readme_current_status_uses_actual_tool_count():
     actual_count = len(_actual_mcp_tools())
     assert f"{actual_count} 个工具" in text
     assert "16 个工具" not in text
+
+
+def test_tools_reference_is_generated_and_current():
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "generate_tools_doc.py"), "--check"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+    text = TOOLS_DOC.read_text(encoding="utf-8")
+    actual = _actual_mcp_tools()
+    documented = set(re.findall(r"^### `([^`]+)`", text, re.M))
+    assert documented == actual
+    assert f"All {len(actual)} tools" in text

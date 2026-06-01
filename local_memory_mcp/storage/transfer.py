@@ -18,7 +18,6 @@ _TRANSFER_TABLES = [
     "memory_links",
     "agent_messages",
     "agent_presence",
-    "agent_permissions",
 ]
 
 # Tables that represent durable, cross-device knowledge (used by --memories-only / sync)
@@ -34,7 +33,6 @@ _TABLE_PK = {
     "memory_links": "id",
     "agent_messages": "id",
     "agent_presence": "agent_id",
-    "agent_permissions": "agent_id",
 }
 
 _CONFLICT_POLICIES = {"skip", "replace", "newer"}
@@ -58,7 +56,7 @@ def memory_export(
         include_audit: Also export audit_events (large, device-local).
         memories_only: Only export memories/feedback_events/memory_links —
             the durable cross-device knowledge. Skips agent_messages,
-            presence, permissions (device-local runtime state).
+            and presence (device-local runtime state).
     """
     if memories_only:
         tables = list(_SYNC_TABLES)

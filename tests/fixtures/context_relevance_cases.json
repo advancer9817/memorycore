@@ -1,0 +1,50 @@
+[
+  {
+    "name": "chinese_prompt_relevance_feedback",
+    "task": "输入提示词后 检索到的记忆相关性不强这个问题也列入进去",
+    "records": [
+      {
+        "id": "eval-prompt-relevance-todo",
+        "type": "project_memory",
+        "title": "prompt 后记忆检索相关性持续评测",
+        "content": "用户反馈输入提示词后检索到的记忆相关性不强，需要沉淀真实弱相关提示词作为持续评测集。",
+        "importance": 0.5
+      },
+      {
+        "id": "eval-prompt-relevance-noise",
+        "type": "project_memory",
+        "title": "Docker Compose runtime note",
+        "content": "Qdrant 和 Ollama 可通过部署脚本启动，Docker 镜像需要持久化 volume。",
+        "importance": 1.0
+      }
+    ],
+    "expected_ids": ["eval-prompt-relevance-todo"],
+    "rejected_ids": ["eval-prompt-relevance-noise"],
+    "min_hit_rate": 0.5,
+    "max_filter_rate": 0.5
+  },
+  {
+    "name": "shared_proxy_latency_not_client_specific",
+    "task": "不只是 antigravity，codex 也要等几十秒才开始动",
+    "records": [
+      {
+        "id": "eval-shared-proxy-latency",
+        "type": "project_memory",
+        "title": "CPA/Codex/Antigravity first-token latency diagnosis",
+        "content": "多个客户端都要等几十秒才开始响应时，优先诊断共享代理或上游 first-token latency，而不是单独怀疑某个客户端。",
+        "importance": 0.8
+      },
+      {
+        "id": "eval-unrelated-gemini-hooks",
+        "type": "project_memory",
+        "title": "Gemini hook registration checklist",
+        "content": "Gemini BeforeAgent 和 SessionEnd hooks 需要写入 settings.json 并通过 fixture 验证。",
+        "importance": 1.0
+      }
+    ],
+    "expected_ids": ["eval-shared-proxy-latency"],
+    "rejected_ids": ["eval-unrelated-gemini-hooks"],
+    "min_hit_rate": 0.5,
+    "max_filter_rate": 0.5
+  }
+]

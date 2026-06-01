@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import local_memory_mcp as lm
+
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
 def test_context_pack_keeps_relevant_chinese_prompt_memory(monkeypatch):
@@ -175,3 +181,32 @@ def test_context_pack_vector_only_hits_respect_scope_and_project_path(monkeypatc
     assert global_allowed["id"] in pack["used_ids"]
     assert wrong_scope["id"] not in pack["used_ids"]
     assert wrong_project["id"] not in pack["used_ids"]
+
+
+def test_context_relevance_evaluation_fixture(monkeypatch):
+    """Pinned weak-relevance prompts from real feedback must keep expected IDs."""
+    monkeypatch.setattr(
+        "local_memory_mcp.storage.search._vector_search_ids",
+        lambda task, top_k=20, score_threshold=0.35: [],
+    )
+    cases = json.loads((FIXTURES / "context_relevance_cases.json").read_text(encoding="utf-8"))
+
+    for case in cases:
+        for record in case["records"]:
+            lm.add_memory_record(
+                record["type"],
+                record["title"],
+                record["content"],
+                memory_id=record["id"],
+                importance=record.get("importance", 0.5),
+            )
+
+        pack = lm.build_context_pack(case["task"], agent="relevance-eval")
+
+        for memory_id in case["expected_ids"]:
+            assert memory_id in pack["used_ids"], case["name"]
+        for memory_id in case["rejected_ids"]:
+            assert memory_id not in pack["used_ids"], case["name"]
+        assert pack["quality"]["hit_rate"] >= case["min_hit_rate"], case["name"]
+        assert pack["quality"]["filter_rate"] <= case["max_filter_rate"], case["name"]
+        assert "filtered_count" in pack["trace"], case["name"]

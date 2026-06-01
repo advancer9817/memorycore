@@ -1254,6 +1254,271 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
+## [迭代 61] 2026-06-01 — 前端测试恢复验证与 all extra 轻量化
+
+### 变更
+
+- `pyproject.toml`: 将 `.[all]` 收敛为默认运行依赖 `vector + extraction`，避免默认更新拉取 `sentence-transformers` 大依赖；新增 `.[full]` 作为包含 `embedding` 的显式重依赖 extra。
+- `README.md` / `docs/deployment.md`: 更新安装说明，明确 `.[all]` 不再安装 `sentence-transformers`，需要本地 sentence-transformers fallback 时使用 `.[embedding]` 或 `.[full]`。
+- `tests/test_deployment.py`: 增加 optional extras 结构回归测试，锁定 `all` 轻量、`full` 重依赖、`embedding` 显式安装路径。
+- `TODO.md`: 记录并完成前端 TestClient 卡死验证项与 `.[all]` 安装过重问题。
+
+### 修复
+
+- 修复 `.[all]` / `start.sh` / `deploy.sh` 默认安装链路会尝试安装 `sentence-transformers`，在网络或大包下载较慢时导致一键更新长时间无进展的问题。
+- 对 `tests/test_frontend.py` 单独运行卡在第一个 `TestClient` 用例的问题做运行态复验；当前在清理遗留进程并重启真实 `lmmcp.service` 后不再复现，前端测试已恢复稳定通过。
+
+### 验证
+
+- 依赖安装: `.venv/bin/python -m pip install -q -e '.[all]'` 成功完成，且 `importlib.util.find_spec('sentence_transformers') is not None` 返回 `False`。
+- Shell 语法: `bash -n start.sh scripts/deploy.sh` 通过。
+- Python 编译: `.venv/bin/python -m py_compile local_memory_mcp/vector_store.py` 通过。
+- 相关测试: `.venv/bin/python -m pytest tests/test_frontend.py tests/test_deployment.py tests/test_vector_store.py tests/test_config_validation.py -q`，64/64 pass。
+- 全量测试: `.venv/bin/python -m pytest -q`，393/393 pass。
+
+### 已知问题
+
+- `sentence-transformers` fallback 仍是可选重依赖；未显式安装 `.[embedding]` / `.[full]` 且 Ollama 不可用时，embedding 会继续降级到 deterministic hashing。
+- 前端 TestClient 卡死未找到代码级稳定复现路径；当前证据指向上轮更新过程中遗留进程/运行态切换导致的临时阻塞，已用单文件与全量测试覆盖验证。
+
+### 回滚
+
+`git checkout -- pyproject.toml README.md docs/deployment.md tests/test_deployment.py start.sh TODO.md ITERATION.md`
+
+---
+
+## [迭代 62] 2026-06-01 — prompt 记忆检索相关性持续评测集
+
+### 变更
+
+- `tests/fixtures/context_relevance_cases.json`: 新增真实弱相关 prompt fixture，覆盖“输入提示词后检索到的记忆相关性不强”和“多客户端 first-token latency 应指向共享代理/上游”的场景。
+- `tests/test_context_relevance.py`: 新增 fixture 驱动的持续评测测试，逐条校验 expected/rejected memory id、`hit_rate`、`filter_rate` 与 trace 字段。
+- `TODO.md`: 将 prompt 后记忆检索相关性持续评测集标记为完成。
+
+### 修复
+
+- 修复相关性优化只有临时回归断言、缺少可扩展评测样例文件的问题；后续新增真实弱相关 prompt 可直接追加到 fixture。
+
+### 验证
+
+- 测试: `.venv/bin/python -m pytest tests/test_context_relevance.py -q`，7/7 pass。
+
+### 已知问题
+
+- 当前评测集仍是小样本；后续真实弱相关 prompt 应继续追加到 fixture，而不是只调阈值。
+
+### 回滚
+
+`git checkout -- tests/test_context_relevance.py tests/fixtures/context_relevance_cases.json TODO.md ITERATION.md`
+
+---
+
+## [迭代 63] 2026-06-01 — rollup 扫描测试隔离外部 LLM
+
+### 变更
+
+- `tests/test_curator_v3.py`: manual source 与 extraction source 的 rollup 扫描测试传入 stub summarizer，只验证 eligible/source_ids 扫描语义，不再触发默认 LLM summarizer。
+- `TODO.md`: 将 rollup 测试隔离问题标记为完成。
+
+### 修复
+
+- 修复 `force=True` dry-run rollup 测试在本机存在真实 extraction 配置时可能调用外部 LLM 并超时的问题。
+
+### 验证
+
+- 测试: `.venv/bin/python -m pytest tests/test_curator_v3.py tests/test_rollup.py -q`，24/24 pass。
+
+### 已知问题
+
+- rollup 默认 summarizer 的真实 LLM 质量仍依赖运行时 extraction 配置；本轮只隔离测试，不改变生产行为。
+
+### 回滚
+
+`git checkout -- tests/test_curator_v3.py TODO.md ITERATION.md`
+
+---
+
+## [迭代 64] 2026-06-01 — 移除 agent 权限管理半成品
+
+### 变更
+
+- `local_memory_mcp/server.py`: 删除 MCP 工具 `agent_permission_grant` 与 `agent_permission_get`，工具数量从 36 收敛到 34。
+- `local_memory_mcp/storage/crud.py`: 移除写入记忆时的 agent permission 检查，所有本地 agent 默认可写，保持个人本地总线的简单模型。
+- `local_memory_mcp/storage/agents.py`: 移除 broadcast permission 检查和从 permission policy 补 namespace 的逻辑；广播改为发送给所有 online/idle agent（排除发送者）。
+- `local_memory_mcp/storage/db.py` / `local_memory_mcp/storage/transfer.py`: 不再创建或导出 `agent_permissions` 表。
+- `local_memory_mcp/frontend.py` / `README.md`: 删除 agent permission API 入口和工具文档条目，并更新 MCP 工具数量。
+- `tests/test_agent_permissions.py`: 删除权限管理测试；`tests/test_mailbox.py` / `tests/test_transfer.py` 补充权限移除后的广播、presence 和导出断言。
+- `TODO.md`: 将 agent/model 权限管理删除项标记为完成；Gemini 真实 CLI 验证项更新为当前缺少 `GEMINI_API_KEY` 的阻塞状态。
+
+### 修复
+
+- 修复 lmmcp 作为个人本地记忆总线仍维护半成品 RBAC，导致 agent 写入、广播、presence namespace 与同步导出行为复杂化的问题。
+
+### 验证
+
+- Python 编译: `.venv/bin/python -m py_compile local_memory_mcp/storage/crud.py local_memory_mcp/storage/agents.py local_memory_mcp/storage/__init__.py local_memory_mcp/storage/db.py local_memory_mcp/storage/transfer.py local_memory_mcp/server.py local_memory_mcp/frontend.py local_memory_mcp/__init__.py` 通过。
+- 相关测试: `.venv/bin/python -m pytest tests/test_mailbox.py tests/test_transfer.py tests/test_sync.py tests/test_frontend.py -q`，46/46 pass。
+- 全量测试: `.venv/bin/python -m pytest -q`，390/390 pass。
+- Gemini 现场检查: `gemini mcp list` 显示 `local_memory` connected；`gemini -p ... --output-format json` 因缺少 `GEMINI_API_KEY` 退出 code 41，真实 BeforeAgent/SessionEnd 验证继续保留在 TODO。
+
+### 已知问题
+
+- 旧运行库如果已存在 `agent_permissions` 表，本轮不会主动 drop；新初始化 schema 和导出/导入路径已不再创建或使用它。
+- Gemini 真实 CLI 端到端验证需要先配置 `GEMINI_API_KEY`。
+
+### 回滚
+
+`git checkout -- local_memory_mcp/server.py local_memory_mcp/storage/crud.py local_memory_mcp/storage/agents.py local_memory_mcp/storage/__init__.py local_memory_mcp/storage/db.py local_memory_mcp/storage/transfer.py local_memory_mcp/frontend.py local_memory_mcp/__init__.py local_memory_mcp/storage/permissions.py tests/test_agent_permissions.py tests/test_mailbox.py tests/test_transfer.py README.md TODO.md ITERATION.md`
+
+---
+
+## [迭代 65] 2026-06-01 — MCP 工具文档自动生成
+
+### 变更
+
+- `scripts/generate_tools_doc.py`: 新增 AST 文档生成脚本，从 `local_memory_mcp/server.py` 的 `@mcp.tool()` 函数签名、返回类型和 docstring 生成工具文档。
+- `docs/tools.md`: 重新生成 MCP 工具参考，当前登记 34 个工具，并标记为生成文件。
+- `tests/test_docs_consistency.py`: 增加 `scripts/generate_tools_doc.py --check` 一致性测试，确保 `docs/tools.md` 与实际工具注册同步。
+- `TODO.md`: 将自动生成 MCP 工具文档标记为完成。
+
+### 修复
+
+- 修复 `docs/tools.md` 长期手写、工具数量和实际注册列表漂移的问题。
+
+### 验证
+
+- Python 编译: `.venv/bin/python -m py_compile scripts/generate_tools_doc.py` 通过。
+- 文档检查: `.venv/bin/python scripts/generate_tools_doc.py --check` 通过。
+- 相关测试: `.venv/bin/python -m pytest tests/test_docs_consistency.py -q`，3/3 pass。
+- 全量测试: `.venv/bin/python -m pytest -q`，391/391 pass。
+
+### 已知问题
+
+- 生成文档只使用函数签名、返回类型和 docstring 摘要；参数语义说明仍依赖 docstring 后续继续完善。
+
+### 回滚
+
+`git checkout -- scripts/generate_tools_doc.py docs/tools.md tests/test_docs_consistency.py TODO.md ITERATION.md`
+
+---
+
+## [迭代 66] 2026-06-01 — MCP 工具面继续收敛
+
+### 变更
+
+- `local_memory_mcp/server.py`: 删除 MCP 工具 `memory_update_status` 与 `memory_consolidate`，工具数量从 34 收敛到 32。
+- `local_memory_mcp/storage/curator.py`: 删除旧的 `consolidate()` report-only helper，统一使用 `curator_report()` 提供重复标题、低反馈和生命周期候选报告。
+- `local_memory_mcp/frontend.py`: 删除 `/api/consolidate` 入口，前端/HTTP API 统一走 `/api/curator`。
+- `local_memory_mcp/storage/__init__.py` / `local_memory_mcp/__init__.py`: 移除 `consolidate` re-export。
+- `README.md` / `docs/tools.md`: 更新 MCP 工具数量和工具列表。
+- `tests/test_curator.py` / `tests/test_phase10.py`: 更新状态修改和 curator 报告测试，覆盖 `memory_update` 可改 status、`curator_report` 替代 consolidate。
+- `TODO.md`: 将 MCP 工具面收敛项标记为完成。
+
+### 修复
+
+- 修复 `memory_update_status` 与 `memory_update(status=...)`、`memory_consolidate` 与 `memory_curator_report` 之间的重复工具面，避免为低价值工具新增 admin profile 或额外权限复杂度。
+
+### 验证
+
+- Python 编译: `.venv/bin/python -m py_compile local_memory_mcp/server.py local_memory_mcp/frontend.py local_memory_mcp/storage/curator.py local_memory_mcp/storage/__init__.py local_memory_mcp/__init__.py` 通过。
+- 文档检查: `.venv/bin/python scripts/generate_tools_doc.py --check` 通过。
+- 相关测试: `.venv/bin/python -m pytest tests/test_curator.py tests/test_phase10.py tests/test_docs_consistency.py tests/test_frontend.py -q`，36/36 pass。
+- 全量测试: `.venv/bin/python -m pytest -q`，391/391 pass。
+
+### 已知问题
+
+- 这是 MCP 工具面的破坏性收敛；旧客户端如果仍调用 `memory_update_status` 或 `memory_consolidate`，需要改为 `memory_update(status=...)` 与 `memory_curator_report()`。
+
+### 回滚
+
+`git checkout -- local_memory_mcp/server.py local_memory_mcp/storage/curator.py local_memory_mcp/frontend.py local_memory_mcp/storage/__init__.py local_memory_mcp/__init__.py README.md docs/tools.md tests/test_curator.py tests/test_phase10.py TODO.md ITERATION.md`
+
+---
+
+## [迭代 67] 2026-06-01 — 发布准备验证与剩余外部阻塞记录
+
+### 变更
+
+- `README.md`: 补充 PyPI 发布后的安装命令，覆盖默认 `local-memory-mcp[all]` 与包含 sentence-transformers fallback 的 `local-memory-mcp[full]`。
+- `TODO.md`: 将“不新增 LLM 全自动记忆治理管线”决策项标记为完成；更新 PyPI 首发、Gemini 真实 CLI 验证、Docker Compose 端到端验证的当前阻塞条件。
+
+### 修复
+
+- 修复 TODO 中 Gemini 仍描述为“本机无 gemini 命令”的过时状态；当前 Gemini CLI 已安装且 `gemini mcp list` 能连上 `local_memory`，但真实 prompt 缺少 `GEMINI_API_KEY`。
+- 明确 Docker Compose 端到端验证的当前失败点是 Docker mirror 拉取 `python:3.11-slim` metadata 返回 unexpected EOF，而不是 compose 配置解析问题。
+
+### 验证
+
+- 发布构建: `.venv/bin/python -m build` 成功生成 `local_memory_mcp-0.25.0.tar.gz` 与 `local_memory_mcp-0.25.0-py3-none-any.whl`。
+- 发布校验: `.venv/bin/python -m twine check dist/*` 通过。
+- 安装验证: Python 3.11 临时 venv 安装 wheel 后，`importlib.metadata.version('local-memory-mcp')` 返回 `0.25.0`，`local_memory_mcp.main` 可调用。
+- PyPI 查询: `.venv/bin/python -m pip index versions local-memory-mcp` 返回 no matching distribution，说明当前尚未发布。
+- Gemini 检查: `gemini mcp list` 显示 `local_memory` connected；`gemini -p ... --output-format json` 因缺少 `GEMINI_API_KEY` 退出 code 41。
+- Docker Compose: `docker compose config` 通过；临时 compose 使用 18318/16333/16334 端口执行 `docker compose up --build -d` 时，拉取 `python:3.11-slim` 失败于 registry mirror unexpected EOF。
+- 文档测试: `.venv/bin/python -m pytest tests/test_docs_consistency.py tests/test_deployment.py -q`，20/20 pass。
+
+### 已知问题
+
+- PyPI 首发仍需提交当前改动、打/推 tag，并确认 PyPI Trusted Publishing 已配置。
+- Docker Compose 容器端到端验证等待 Docker registry/mirror 可用，或本机预先缓存 `python:3.11-slim`。
+- Gemini 真实 BeforeAgent/SessionEnd 验证等待 `GEMINI_API_KEY`。
+
+### 回滚
+
+`git checkout -- README.md TODO.md ITERATION.md`
+
+---
+
+## [迭代 68] 2026-06-01 — Docker Compose E2E 镜像拉取阻塞复验
+
+### 变更
+
+- `TODO.md`: 补充 Docker Compose 端到端验证的复验细节，记录已尝试的 Docker registry/mirror 与共同失败原因。
+
+### 验证
+
+- Docker 基础镜像拉取: `docker pull python:3.11-slim` 仍失败，Docker daemon 经 `docker.1ms.run` 获取 metadata 时返回 `unexpected EOF`。
+- Docker 备用镜像源: `docker pull docker.m.daocloud.io/library/python:3.11-slim`、`docker pull dockerproxy.com/library/python:3.11-slim`、`docker pull registry.dockermirror.com/library/python:3.11-slim` 均在 metadata HEAD 请求阶段返回 `unexpected EOF`。
+- 本地镜像缓存: `docker images` 中仍无 `python:3.11-slim`，只有 `qdrant/qdrant:latest` 等其它镜像可用。
+- 运行态: `lmmcp.service` active，`curl http://127.0.0.1:8318/health` 返回 ok。
+
+### 已知问题
+
+- Docker Compose 端到端验证继续等待可用 Docker registry/mirror 或本机预先缓存 `python:3.11-slim`。
+
+### 回滚
+
+`git checkout -- TODO.md ITERATION.md`
+
+---
+
+## [迭代 69] 2026-06-01 — TODO 外部阻塞复验与原始问题核验
+
+### 变更
+
+- `TODO.md`: 更新 Gemini 真实 CLI、PyPI 首发、Docker Compose E2E 三个未完成项的 2026-06-01 11:00 CST 复验证据。
+
+### 验证
+
+- 前端单测: `.venv/bin/python -m pytest tests/test_frontend.py -q`，8/8 pass，未复现首个 `TestClient` 用例卡死。
+- 默认 extras: `.venv/bin/python -m pip install -e '.[all]' --dry-run` 成功解析默认安装集合，未包含 `sentence-transformers`。
+- 可选 embedding 依赖: `.venv/bin/python -c ...` 检查 `sentence_transformers` 当前未安装，符合 `.[all]` 轻量化预期。
+- Gemini: `gemini mcp list` 显示 `local_memory` connected；`gemini -p 'Respond with only: ok' --output-format json` 仍因缺少 `GEMINI_API_KEY` 退出 code 41。
+- PyPI: `.venv/bin/python -m pip index versions local-memory-mcp` 仍返回 no matching distribution；`git ls-remote --tags origin 'v*'` 当前只看到 `v0.20.0`。
+- Docker: `docker image inspect python:3.11-slim` 显示本机无缓存；`docker pull python:3.11-slim` 仍失败于 `docker.1ms.run` metadata HEAD `unexpected EOF`。
+
+### 已知问题
+
+- Gemini 真实 BeforeAgent/SessionEnd 验证等待 `GEMINI_API_KEY`。
+- PyPI 首发仍需提交当前改动、打/推 `v0.25.0` tag，并确认 PyPI Trusted Publishing 已配置。
+- Docker Compose 容器端到端验证继续等待可用 Docker registry/mirror 或本机预先缓存 `python:3.11-slim`。
+
+### 回滚
+
+`git checkout -- TODO.md ITERATION.md`
+
+---
+
 ## 日志格式规范
 
 每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：

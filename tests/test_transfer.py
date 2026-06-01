@@ -22,7 +22,7 @@ def test_memory_export_contains_schema_and_core_tables():
     assert payload["schema_version"] == 1
     assert payload["counts"]["memories"] == 1
     assert payload["data"]["memories"][0]["id"] == record["id"]
-    assert "agent_permissions" in payload["data"]
+    assert "agent_permissions" not in payload["data"]
 
 
 def test_memory_import_dry_run_reports_conflicts_without_writing():

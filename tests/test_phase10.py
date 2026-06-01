@@ -203,7 +203,7 @@ def test_memory_update_importance_and_confidence():
     assert updated["confidence"] == pytest.approx(0.8)
 
 
-def test_memory_update_status():
+def test_memory_update_can_change_status():
     r = lm.add_memory_record("project_memory", "Update status", "content")
     updated = lm.update_memory_content(r["id"], new_status="stale")
     assert updated["status"] == "stale"

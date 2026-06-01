@@ -205,22 +205,6 @@ def init_db(conn: sqlite3.Connection) -> None:
           metadata_json TEXT NOT NULL DEFAULT '{}'
         );
 
-        CREATE TABLE IF NOT EXISTS agent_permissions (
-          id TEXT PRIMARY KEY,
-          agent_id TEXT NOT NULL UNIQUE,
-          namespace TEXT NOT NULL DEFAULT 'default',
-          can_read INTEGER NOT NULL DEFAULT 1,
-          can_write INTEGER NOT NULL DEFAULT 1,
-          can_broadcast INTEGER NOT NULL DEFAULT 1,
-          scopes_json TEXT NOT NULL DEFAULT '[]',
-          types_json TEXT NOT NULL DEFAULT '[]',
-          tags_json TEXT NOT NULL DEFAULT '[]',
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_agent_permissions_namespace ON agent_permissions(namespace);
-
         CREATE TABLE IF NOT EXISTS context_quality_events (
           id TEXT PRIMARY KEY,
           task TEXT NOT NULL,
