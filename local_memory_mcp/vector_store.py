@@ -3,8 +3,8 @@
 Single vector backend for both semantic search and dedup comparison.
 No sqlite-vec, no Mem0 Qdrant instance — one store, one source of truth.
 
-Embeddings via Ollama nomic-embed-text (httpx, no ollama SDK), with
-sentence-transformers and hashing fallbacks.
+Embeddings via Ollama /api/embed by default, with optional OpenAI-compatible
+embedding APIs, optional sentence-transformers, and hashing fallbacks.
 
 Public API
 ----------
@@ -35,10 +35,12 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class EmbedConfig:
-    provider: str = "ollama"          # "ollama" | "sentence-transformers" | "hashing"
+    provider: str = "ollama"          # "ollama" | "openai" | "sentence-transformers" | "hashing"
     model: str = "nomic-embed-text"
     ollama_url: str = "http://127.0.0.1:11434"
-    fallback_provider: str = "sentence-transformers"
+    api_url: str = ""
+    api_key: str = ""
+    fallback_provider: str = "hashing"
     sentence_transformers_model: str = "sentence-transformers/all-mpnet-base-v2"
     dim: int = 768
     timeout: int = 30
@@ -52,12 +54,19 @@ class EmbedConfig:
             if not host.startswith("http"):
                 host = f"http://{host}"
             self.ollama_url = host
+        if os.environ.get("LOCAL_MEMORY_EMBEDDING_API_URL"):
+            self.api_url = os.environ["LOCAL_MEMORY_EMBEDDING_API_URL"]
+        if os.environ.get("LOCAL_MEMORY_EMBEDDING_API_KEY"):
+            self.api_key = os.environ["LOCAL_MEMORY_EMBEDDING_API_KEY"]
 
 
 def embed_config_from_dict(cfg: dict[str, Any]) -> EmbedConfig:
     emb = cfg.get("embedding", {})
     dim = os.environ.get("LOCAL_MEMORY_EMBEDDING_DIM", emb.get("dim", 768))
-    timeout = os.environ.get("LOCAL_MEMORY_OLLAMA_TIMEOUT", emb.get("timeout", 30))
+    timeout = os.environ.get(
+        "LOCAL_MEMORY_EMBEDDING_TIMEOUT",
+        os.environ.get("LOCAL_MEMORY_OLLAMA_TIMEOUT", emb.get("timeout", 30)),
+    )
     return EmbedConfig(
         provider=os.environ.get("LOCAL_MEMORY_EMBEDDING_PROVIDER", emb.get("provider", "ollama")),
         model=os.environ.get("LOCAL_MEMORY_EMBEDDING_MODEL", emb.get("model", "nomic-embed-text")),
@@ -67,7 +76,15 @@ def embed_config_from_dict(cfg: dict[str, Any]) -> EmbedConfig:
         ),
         fallback_provider=os.environ.get(
             "LOCAL_MEMORY_EMBEDDING_FALLBACK_PROVIDER",
-            emb.get("fallback_provider", "sentence-transformers"),
+            emb.get("fallback_provider", "hashing"),
+        ),
+        api_url=os.environ.get(
+            "LOCAL_MEMORY_EMBEDDING_API_URL",
+            emb.get("api_url", ""),
+        ),
+        api_key=os.environ.get(
+            "LOCAL_MEMORY_EMBEDDING_API_KEY",
+            emb.get("api_key", ""),
         ),
         sentence_transformers_model=os.environ.get(
             "LOCAL_MEMORY_SENTENCE_TRANSFORMERS_MODEL",
@@ -86,7 +103,8 @@ def embed_text(text: str, config: EmbedConfig | None = None) -> list[float]:
     """Return a float vector for text.
 
     Default chain:
-    Ollama -> sentence-transformers -> deterministic hashing.
+    Ollama -> deterministic hashing. Configure provider=openai to use an
+    external OpenAI-compatible embedding API instead.
     """
     if config is None:
         config = EmbedConfig()
@@ -98,6 +116,12 @@ def embed_text(text: str, config: EmbedConfig | None = None) -> list[float]:
             return _embed_sentence_transformers(text, config)
         except Exception as exc:
             logger.warning("embed_text: sentence-transformers failed (%s), using hashing fallback", exc)
+            return _embed_hashing(text, config.dim)
+    if provider == "openai":
+        try:
+            return _embed_openai(text, config)
+        except Exception as exc:
+            logger.warning("embed_text: OpenAI-compatible embedding failed (%s), using hashing fallback", exc)
             return _embed_hashing(text, config.dim)
     if provider != "ollama":
         logger.warning("embed_text: unknown provider %r, using hashing fallback", config.provider)
@@ -113,6 +137,8 @@ def _normalize_provider(provider: str) -> str:
     value = str(provider or "").strip().lower().replace("_", "-")
     if value in {"sentence-transformer", "sentence-transformers", "st"}:
         return "sentence-transformers"
+    if value in {"api", "embedding-api", "openai", "openai-compatible", "openai-compatible-api"}:
+        return "openai"
     return value
 
 
@@ -123,6 +149,11 @@ def _embed_fallback(text: str, config: EmbedConfig) -> list[float]:
             return _embed_sentence_transformers(text, config)
         except Exception as exc:
             logger.warning("embed_text: sentence-transformers fallback failed (%s), using hashing fallback", exc)
+    elif fallback == "openai":
+        try:
+            return _embed_openai(text, config)
+        except Exception as exc:
+            logger.warning("embed_text: OpenAI-compatible embedding fallback failed (%s), using hashing fallback", exc)
     return _embed_hashing(text, config.dim)
 
 
@@ -146,6 +177,42 @@ def _embed_ollama(text: str, config: EmbedConfig) -> list[float]:
 
     # Ollama returns {"embeddings": [[...]]} or {"embedding": [...]}
     if "embeddings" in data:
+        vec = data["embeddings"][0]
+    else:
+        vec = data["embedding"]
+    return _fit_dim([float(x) for x in vec], config.dim)
+
+
+def _embed_openai(text: str, config: EmbedConfig) -> list[float]:
+    """Call an OpenAI-compatible embedding endpoint."""
+    if not config.api_url:
+        raise ValueError("embedding.api_url is not configured")
+    url = config.api_url.rstrip("/")
+    if not url.endswith("/embeddings"):
+        url += "/embeddings"
+    payload = {"model": config.model, "input": text}
+    headers = {"Content-Type": "application/json"}
+    if config.api_key:
+        headers["Authorization"] = f"Bearer {config.api_key}"
+    try:
+        import httpx
+        with httpx.Client(timeout=config.timeout) as client:
+            resp = client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+    except ImportError:
+        import urllib.request
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers=headers,
+        )
+        with urllib.request.urlopen(req, timeout=config.timeout) as r:
+            data = json.loads(r.read())
+
+    if "data" in data:
+        vec = data["data"][0]["embedding"]
+    elif "embeddings" in data:
         vec = data["embeddings"][0]
     else:
         vec = data["embedding"]
@@ -426,6 +493,7 @@ class VectorStore:
             "embed_provider": self.config.embed.provider,
             "embed_model": self.config.embed.model,
             "embed_fallback_provider": self.config.embed.fallback_provider,
+            "embedding_api_url": self.config.embed.api_url,
             "sentence_transformers_model": self.config.embed.sentence_transformers_model,
             "ollama_url": self.config.embed.ollama_url,
             "count": self.count(),

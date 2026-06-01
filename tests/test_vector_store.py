@@ -11,6 +11,7 @@ from local_memory_mcp.vector_store import (
     SearchResult,
     VectorStore,
     VectorStoreConfig,
+    _embed_openai,
     _embed_hashing,
     embed_config_from_dict,
     embed_text,
@@ -29,10 +30,12 @@ class TestEmbedConfig:
         cfg = EmbedConfig()
         assert cfg.provider == "ollama"
         assert cfg.model == "nomic-embed-text"
+        assert cfg.api_url == ""
         assert cfg.dim == 768
 
     def test_from_dict_empty(self):
         cfg = embed_config_from_dict({})
+        assert cfg.provider == "ollama"
         assert cfg.dim == 768
 
     def test_from_dict_custom(self):
@@ -46,6 +49,8 @@ class TestEmbedConfig:
         monkeypatch.setenv("LOCAL_MEMORY_EMBEDDING_PROVIDER", "hashing")
         monkeypatch.setenv("LOCAL_MEMORY_EMBEDDING_DIM", "128")
         monkeypatch.setenv("LOCAL_MEMORY_EMBEDDING_FALLBACK_PROVIDER", "hashing")
+        monkeypatch.setenv("LOCAL_MEMORY_EMBEDDING_API_URL", "http://127.0.0.1:8317/v1")
+        monkeypatch.setenv("LOCAL_MEMORY_EMBEDDING_API_KEY", "test-key")
         monkeypatch.setenv("LOCAL_MEMORY_SENTENCE_TRANSFORMERS_MODEL", "sentence-transformers/all-mpnet-base-v2")
 
         cfg = embed_config_from_dict({"embedding": {"provider": "ollama", "dim": 768}})
@@ -53,6 +58,8 @@ class TestEmbedConfig:
         assert cfg.provider == "hashing"
         assert cfg.dim == 128
         assert cfg.fallback_provider == "hashing"
+        assert cfg.api_url == "http://127.0.0.1:8317/v1"
+        assert cfg.api_key == "test-key"
         assert cfg.sentence_transformers_model == "sentence-transformers/all-mpnet-base-v2"
 
 
@@ -114,6 +121,55 @@ class TestEmbedText:
         vec = embed_text("hello", cfg)
         assert len(vec) == 64
         mock_st.assert_called_once()
+
+    @patch("local_memory_mcp.vector_store._embed_openai", return_value=[1.0] + [0.0] * 63)
+    @patch("local_memory_mcp.vector_store._embed_ollama", side_effect=Exception("connection refused"))
+    def test_ollama_failure_can_use_openai_compatible_api(self, mock_ollama, mock_openai):
+        cfg = EmbedConfig(
+            provider="ollama",
+            fallback_provider="openai",
+            model="text-embedding-3-small",
+            api_url="http://127.0.0.1:8317/v1",
+            dim=64,
+        )
+        vec = embed_text("hello", cfg)
+        assert len(vec) == 64
+        assert vec[0] == 1.0
+        mock_openai.assert_called_once()
+
+    def test_openai_compatible_api_response(self):
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"data": [{"embedding": [3.0, 4.0]}]}
+
+        class FakeClient:
+            def __init__(self, timeout):
+                self.timeout = timeout
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return None
+
+            def post(self, url, json, headers):
+                assert url == "http://127.0.0.1:8317/v1/embeddings"
+                assert json == {"model": "text-embedding-3-small", "input": "hello"}
+                assert headers["Authorization"] == "Bearer test-key"
+                return FakeResponse()
+
+        cfg = EmbedConfig(
+            provider="openai",
+            model="text-embedding-3-small",
+            api_url="http://127.0.0.1:8317/v1",
+            api_key="test-key",
+            dim=2,
+        )
+        with patch("httpx.Client", FakeClient):
+            assert _embed_openai("hello", cfg) == [0.6, 0.8]
 
 
 # ---------------------------------------------------------------------------

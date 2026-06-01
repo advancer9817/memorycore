@@ -1918,6 +1918,37 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
+## [迭代 84] 2026-06-01 — 移除本地 ML embedding 依赖链
+
+### 变更
+
+- `pyproject.toml`: `embedding` extra 改为空、`full` 收敛为 `vector + extraction`，不再通过项目依赖安装 `sentence-transformers`、PyTorch 或 CUDA/NVIDIA 包。
+- `local_memory_mcp/vector_store.py`: 默认继续使用本机 Ollama `/api/embed`，新增可选 OpenAI-compatible `/embeddings` provider；Ollama 失败时默认降级 hashing，不再默认尝试本地 `sentence-transformers`。
+- `local_memory_mcp/models.py` / `config.yaml`: 默认 embedding provider 保持 `ollama`，fallback 改为 `hashing`，并补充可选外接 embedding API 配置字段。
+- `tests/test_vector_store.py` / `tests/test_config.py` / `tests/test_config_validation.py` / `tests/test_deployment.py`: 更新默认 provider、OpenAI-compatible embedding API、空 `embedding` extra 与轻量 `full` extra 的回归测试。
+
+### 修复
+
+- 修复显式安装 `.[embedding]` / `.[full]` 时会经由 `sentence-transformers -> torch` 解析出 PyTorch/CUDA/NVIDIA 大包的问题；本机 embedding 仍由 Ollama `nomic-embed-text` 提供。
+
+### 验证
+
+- 依赖解析: `uv lock --dry-run` 只解析 48 个包，未出现 `torch`、`sentence-transformers`、`nvidia-*` 或 `cuda-*`。
+- 环境检查: `uv pip check --python .venv/bin/python` pass；已卸载本机 `.venv` 中残留的 `sentence-transformers`、`torch`、`transformers`、`scikit-learn`、`scipy` 等本地 ML 包。
+- Ollama embedding: `embed_text()` 使用 `provider=ollama` 调用 `http://127.0.0.1:11434/api/embed` 成功，返回 768 维归一化向量。
+- 焦点测试: `tests/test_vector_store.py tests/test_config.py tests/test_config_validation.py tests/test_deployment.py` 66/66 pass。
+- 全量测试: 399/399 pass，1 个既有 httpx deprecation warning。
+
+### 已知问题
+
+- README / deployment 文档仍有旧的 `sentence-transformers` fallback extra 描述，后续文档整理时需要同步为“手动外接 API 或自行安装可选包”。
+
+### 回滚
+
+`git checkout -- pyproject.toml config.yaml local_memory_mcp/vector_store.py local_memory_mcp/models.py tests/test_vector_store.py tests/test_config.py tests/test_config_validation.py tests/test_deployment.py ITERATION.md`
+
+---
+
 ## 日志格式规范
 
 每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：

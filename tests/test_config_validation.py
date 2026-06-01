@@ -21,6 +21,13 @@ def test_sentence_transformers_embedding_provider_is_valid():
     assert not any("embedding.provider" in w for w in warns)
 
 
+def test_openai_embedding_provider_is_valid():
+    cfg = {"embedding": {"provider": "openai", "api_url": "http://127.0.0.1:8317/v1", "dim": 768, "timeout": 30}}
+    warns = validate_config(cfg)
+    assert not any("embedding.provider" in w for w in warns)
+    assert not any("embedding.api_url" in w for w in warns)
+
+
 def test_invalid_embedding_fallback_provider():
     cfg = {"embedding": {"provider": "ollama", "fallback_provider": "ollama", "dim": 768, "timeout": 30}}
     warns = validate_config(cfg)
@@ -45,6 +52,13 @@ def test_valid_ollama_url():
                           "ollama_url": "http://127.0.0.1:11434"}}
     warns = validate_config(cfg)
     assert not any("ollama_url" in w for w in warns)
+
+
+def test_invalid_embedding_api_url():
+    cfg = {"embedding": {"provider": "openai", "dim": 768, "timeout": 30,
+                          "api_url": "localhost:8317/v1"}}
+    warns = validate_config(cfg)
+    assert any("api_url" in w for w in warns)
 
 
 def test_qdrant_no_url_no_path():

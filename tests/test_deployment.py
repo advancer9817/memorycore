@@ -44,8 +44,8 @@ def test_default_all_extra_stays_runtime_sized():
     optional = pyproject["project"]["optional-dependencies"]
 
     assert optional["all"] == ["local-memory-mcp[vector,extraction]"]
-    assert optional["full"] == ["local-memory-mcp[vector,extraction,embedding]"]
-    assert optional["embedding"] == ["sentence-transformers>=3.0.0,<6.0"]
+    assert optional["full"] == ["local-memory-mcp[vector,extraction]"]
+    assert optional["embedding"] == []
 
 
 def test_start_script_installs_runtime_extras_by_default():

@@ -44,5 +44,6 @@ def test_load_config_merges_defaults_when_file_missing(tmp_path, monkeypatch):
     assert config["backend"]["primary"] == "sqlite"
     assert config["backend"]["fallback"] == "sqlite"
     assert config["embedding"]["provider"] == "ollama"
+    assert config["embedding"]["api_url"] == ""
     assert config["embedding"]["dim"] == 768
     assert config["qdrant"]["url"] == "http://127.0.0.1:6333"

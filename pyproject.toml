@@ -17,9 +17,9 @@ dependencies = [
 [project.optional-dependencies]
 vector = ["qdrant-client>=1.18.0,<2.0"]
 extraction = ["httpx>=0.27.0"]
-embedding = ["sentence-transformers>=3.0.0,<6.0"]
+embedding = []
 all = ["local-memory-mcp[vector,extraction]"]
-full = ["local-memory-mcp[vector,extraction,embedding]"]
+full = ["local-memory-mcp[vector,extraction]"]
 dev = [
     "pytest>=9.0.0",
     "pytest-timeout>=2.4.0",
