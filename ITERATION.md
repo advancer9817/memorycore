@@ -1571,6 +1571,33 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
+## [迭代 72] 2026-06-01 — v0.25.0 发布触发与 PyPI Trusted Publisher 阻塞定位
+
+### 变更
+
+- `TODO.md`: 更新 PyPI 首发项，记录 `main` / `v0.25.0` 已推送、tag CI 已通过，以及当前 publish 失败的 PyPI OIDC claims。
+
+### 验证
+
+- 远端提交: `main` 已推送到 `9e75f4d fix: repair ci and publish workflows`。
+- 远端 tag: `v0.25.0` 已重新指向 `9e75f4d` 并推送。
+- GitHub Actions main CI: run `26732900203` success。
+- GitHub Actions tag CI: run `26732912402` success。
+- GitHub Actions Publish: run `26732912393` 在 `pypa/gh-action-pypi-publish` 阶段失败，PyPI 返回 `invalid-publisher`。
+- PyPI 查询: `.venv/bin/python -m pip index versions local-memory-mcp` 仍返回 no matching distribution，确认发布未产生包。
+
+### 已知问题
+
+- PyPI 首发等待 PyPI 账号侧配置 Trusted Publisher；当前 claims 为 repository `advancer9817-crypto/local-memory-mcp`、workflow `.github/workflows/publish.yml`、ref `refs/tags/v0.25.0`、environment `MISSING`。
+- Gemini 真实 BeforeAgent/SessionEnd 验证等待 `GEMINI_API_KEY`。
+- Docker Compose 容器端到端验证继续等待可用 Docker registry/mirror 或本机预先缓存 `python:3.11-slim`。
+
+### 回滚
+
+`git checkout -- TODO.md ITERATION.md`
+
+---
+
 ## 日志格式规范
 
 每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：

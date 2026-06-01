@@ -43,7 +43,7 @@
 
 ## 发布与部署
 
-- [ ] PyPI 首次发布（打 tag 触发 publish workflow，验证安装可用）：publish workflow 已存在；本地 `python -m build` 和 `twine check` 已通过，Python 3.11 临时 venv 安装 wheel 验证通过；2026-06-01 11:00 CST 复验 `pip index versions local-memory-mcp` 仍显示 PyPI 尚无该包，远端仅有 `v0.20.0` tag。实际发布还需提交当前改动、打/推 `v0.25.0` tag，并确认 PyPI Trusted Publishing 已配置。
+- [ ] PyPI 首次发布（打 tag 触发 publish workflow，验证安装可用）：本地 `python -m build`、`twine check`、Python 3.11 wheel 安装验证均已通过；当前改动已推到 `main`，`v0.25.0` tag 已推到 `9e75f4d`，main/tag CI 均已通过。Publish workflow 已越过 checkout/build，但 PyPI 返回 `invalid-publisher`，说明 PyPI 端还没有匹配的 Trusted Publisher；当前 OIDC claims 为 repository `advancer9817-crypto/local-memory-mcp`、workflow `.github/workflows/publish.yml`、ref `refs/tags/v0.25.0`、environment `MISSING`。配置 PyPI Trusted Publisher 后需 rerun publish，并验证 `pip install "local-memory-mcp[all]"`。
 - [x] 修复 GitHub Actions CI 依赖安装缺口：tag/main CI 只安装 `requirements.txt`，缺少项目依赖导致 `ModuleNotFoundError: No module named 'yaml'`；已改为安装 `.[dev,all]`，让 CI 与当前 package metadata 对齐。
 - [x] 修复 PyPI publish workflow checkout 权限缺口：publish job 只声明 `id-token: write` 会覆盖默认权限，tag workflow 中 `actions/checkout` 无法读取私有仓库并报 repository not found；已补 `contents: read`。
 - [x] Docker Compose 完善：`docker-compose.yml` 默认启动 lmmcp + Qdrant，Dockerfile 安装 `.[all]`，Compose 环境设置 Qdrant endpoint 与持久化 volume。
