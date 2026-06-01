@@ -84,7 +84,7 @@ async def _frontend_index_route(request):
     return await frontend_index(request)
 
 
-@mcp.custom_route("/api/{path:path}", methods=["GET", "POST", "PATCH", "DELETE"], include_in_schema=False)
+@mcp.custom_route("/api/{path:path}", methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"], include_in_schema=False)
 async def _frontend_api_route(request):
     return await frontend_api(request)
 

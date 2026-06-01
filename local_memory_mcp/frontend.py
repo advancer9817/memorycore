@@ -123,29 +123,34 @@ async def frontend_metrics(request: Request) -> Response:
 async def frontend_api(request: Request) -> Response:
     if not _CONFIG.enabled:
         return _json_error("not_found", "frontend disabled", 404)
+    if request.method.upper() == "OPTIONS":
+        return _with_cors(Response(status_code=204))
     auth_error = _check_auth(request)
     if auth_error is not None:
-        return auth_error
-    origin_error = _check_origin(request)
-    if origin_error is not None:
-        return origin_error
+        return _with_cors(auth_error)
     path = (request.path_params.get("path") or "").strip("/")
     parts = [part for part in path.split("/") if part]
+    if parts[:1] != ["v1"]:
+        origin_error = _check_origin(request)
+        if origin_error is not None:
+            return _with_cors(origin_error)
     query = parse_qs(request.url.query)
     try:
         data = await _dispatch_api(request, parts, query)
         if isinstance(data, Response):
-            return data
-        return _json_ok(data)
+            return _with_cors(data)
+        if parts[:1] == ["v1"]:
+            return _with_cors(JSONResponse(data))
+        return _with_cors(_json_ok(data))
     except json.JSONDecodeError:
-        return _json_error("bad_json", "request body must be valid JSON", 400)
+        return _with_cors(_json_error("bad_json", "request body must be valid JSON", 400))
     except ValueError as exc:
-        return _json_error("bad_request", str(exc), 400)
+        return _with_cors(_json_error("bad_request", str(exc), 400))
     except LookupError as exc:
-        return _json_error("not_found", str(exc), 404)
+        return _with_cors(_json_error("not_found", str(exc), 404))
     except Exception as exc:
         logger.exception("frontend api failed: /api/%s", path)
-        return _json_error("internal_error", f"{type(exc).__name__}: request failed", 500)
+        return _with_cors(_json_error("internal_error", f"{type(exc).__name__}: request failed", 500))
 
 
 async def _dispatch_api(request: Request, parts: list[str], query: dict[str, list[str]]) -> Any:
@@ -290,29 +295,57 @@ def _dispatch_openmemory_compat(
     body: dict[str, Any],
 ) -> Any:
     """Small REST compatibility surface for OpenMemory-style clients."""
-    if parts == ["memories"] and method == "GET":
-        return search_memory_records(
+    if (
+        (parts == ["memories"] and method == "GET")
+        or (parts == ["memories", "filter"] and method in {"GET", "POST"})
+    ):
+        page = int(body.get("page", _int_q(query, "page", 1)) or 1)
+        size = int(body.get("size", _int_q(query, "size", _int_q(query, "page_size", 10))) or 10)
+        search_query = body.get("search_query") if method == "POST" else None
+        search_query = search_query if search_query is not None else _str_q(query, "query", _str_q(query, "q", ""))
+        show_archived = bool(body.get("show_archived", False)) if method == "POST" else _bool_q(query, "show_archived", False)
+        status = "" if show_archived else _str_q(query, "status", "active")
+        rows = search_memory_records(
             query=_str_q(query, "query", _str_q(query, "q", "")),
             types=_list_q(query, "type") or _list_q(query, "types"),
             scope=_str_q(query, "scope", ""),
             project_path=_str_q(query, "project_path", ""),
             tags=_list_q(query, "tag") or _list_q(query, "tags"),
-            status=_str_q(query, "status", "active"),
-            limit=_int_q(query, "limit", 50),
+            status=status,
+            limit=max(size * page, _int_q(query, "limit", 50)),
         )
-    if parts == ["memories", "filter"] and method == "GET":
-        return search_memory_records(
-            query=_str_q(query, "query", _str_q(query, "q", "")),
-            types=_list_q(query, "type") or _list_q(query, "types"),
-            scope=_str_q(query, "scope", ""),
-            project_path=_str_q(query, "project_path", ""),
-            tags=_list_q(query, "tag") or _list_q(query, "tags"),
-            status=_str_q(query, "status", "active"),
-            limit=_int_q(query, "limit", 50),
-        )
+        if search_query:
+            rows = search_memory_records(
+                query=str(search_query),
+                status=status,
+                limit=max(size * page, 50),
+            )
+        app_ids = body.get("app_ids") or []
+        category_ids = body.get("category_ids") or []
+        if app_ids:
+            app_set = {str(item) for item in app_ids}
+            rows = [row for row in rows if str(row.get("source_agent") or "manual") in app_set]
+        if category_ids:
+            cat_set = {str(item) for item in category_ids}
+            rows = [row for row in rows if cat_set.intersection({str(tag) for tag in row.get("tags", [])})]
+        sort_column = str(body.get("sort_column") or "created_at")
+        sort_direction = str(body.get("sort_direction") or "desc").lower()
+        rows.sort(key=lambda row: str(row.get(sort_column) or row.get("created_at") or ""), reverse=sort_direction != "asc")
+        total = len(rows)
+        start = max(page - 1, 0) * size
+        page_rows = rows[start:start + size]
+        return {
+            "items": [_openmemory_memory_item(row) for row in page_rows],
+            "total": total,
+            "page": page,
+            "size": size,
+            "pages": max(1, (total + size - 1) // max(size, 1)),
+        }
     if parts == ["memories"] and method == "POST":
+        content = body.get("content") or body.get("text") or ""
+        title = body.get("title") or str(content).strip().splitlines()[0][:88] or "OpenMemory memory"
         return add_memory_record(
-            body.get("type", "project_memory"), body.get("title", ""), body.get("content", ""),
+            body.get("type", "project_memory"), title, content,
             scope=body.get("scope", "global"), tags=body.get("tags"), source=body.get("source", "openmemory-compat"),
             source_agent=body.get("source_agent", "openmemory-ui"), project_path=body.get("project_path", ""),
             confidence=body.get("confidence", 0.7), importance=body.get("importance", 0.5),
@@ -320,12 +353,50 @@ def _dispatch_openmemory_compat(
             related_ids=body.get("related_ids"), metadata=body.get("metadata"),
             atomize=body.get("atomize", "auto"),
         )
-    if len(parts) == 2 and parts[0] == "memories" and method == "PATCH":
-        return update_memory_content(parts[1], body.get("content"), body.get("title"), body.get("status"), body.get("confidence"), body.get("importance"))
+    if parts == ["memories"] and method == "DELETE":
+        ids = body.get("memory_ids") or []
+        archived = [update_status(str(memory_id), "archived") for memory_id in ids]
+        return {"archived": [item["id"] for item in archived], "count": len(archived)}
+    if len(parts) == 2 and parts[0] == "memories" and method == "GET":
+        record = get_record(parts[1])
+        if record is None:
+            raise LookupError(f"memory not found: {parts[1]}")
+        return _openmemory_simple_memory(record)
+    if len(parts) == 2 and parts[0] == "memories" and method in {"PATCH", "PUT"}:
+        content = body.get("content") or body.get("memory_content")
+        return _openmemory_memory_item(update_memory_content(parts[1], content, body.get("title"), body.get("status"), body.get("confidence"), body.get("importance")))
     if len(parts) == 2 and parts[0] == "memories" and method == "DELETE":
         return update_status(parts[1], body.get("status", "archived"))
+    if len(parts) == 3 and parts[0] == "memories" and parts[2] == "access-log" and method == "GET":
+        record = get_record(parts[1])
+        if record is None:
+            raise LookupError(f"memory not found: {parts[1]}")
+        return {"total": 1, "page": _int_q(query, "page", 1), "page_size": _int_q(query, "page_size", 10), "logs": [{
+            "id": record["id"],
+            "app_name": record.get("source_agent") or "manual",
+            "accessed_at": record.get("last_accessed_at") or record.get("updated_at"),
+        }]}
+    if len(parts) == 3 and parts[0] == "memories" and parts[2] == "related" and method == "GET":
+        links = query_links(parts[1], direction="both", limit=20)
+        ids = [link["target_id"] for link in links.get("outgoing", [])] + [link["source_id"] for link in links.get("incoming", [])]
+        items = []
+        for memory_id in ids:
+            record = get_record(memory_id)
+            if record:
+                items.append(_openmemory_memory_item(record))
+        return {"items": items, "total": len(items), "page": 1, "size": len(items) or 10, "pages": 1}
+    if parts == ["memories", "actions", "pause"] and method == "POST":
+        state = str(body.get("state") or "archived")
+        status = "active" if state == "active" else "archived"
+        ids = body.get("memory_ids") or []
+        updated = [update_status(str(memory_id), status) for memory_id in ids]
+        return {"updated": [item["id"] for item in updated], "state": state}
+    if parts == ["memories", "categories"] and method == "GET":
+        return _openmemory_categories()
     if parts == ["stats"] and method == "GET":
-        return get_memory_stats()
+        stats = get_memory_stats()
+        apps = _openmemory_apps(limit=1000)["apps"]
+        return {"total_memories": stats["total"], "total_apps": len(apps), "apps": apps}
     if parts == ["entities"] and method == "GET":
         return entity_search(
             _str_q(query, "query", _str_q(query, "q", "")) or "",
@@ -335,7 +406,92 @@ def _dispatch_openmemory_compat(
         )
     if parts == ["context-traces"] and method == "GET":
         return get_context_quality_stats(_int_q(query, "limit", 500))
+    if len(parts) == 1 and parts[0] == "apps" and method == "GET":
+        return _openmemory_apps(limit=_int_q(query, "page_size", 50), name=_str_q(query, "name", "") or "")
+    if len(parts) == 2 and parts[0] == "apps" and method == "GET":
+        return _openmemory_app_details(parts[1])
+    if len(parts) == 3 and parts[0] == "apps" and parts[2] == "memories" and method == "GET":
+        rows = search_memory_records(status="active", limit=_int_q(query, "page_size", 50))
+        rows = [row for row in rows if (row.get("source_agent") or "manual") == parts[1]]
+        return {"memories": [_openmemory_memory_item(row) for row in rows], "total": len(rows), "page": _int_q(query, "page", 1), "page_size": _int_q(query, "page_size", 50)}
+    if len(parts) == 3 and parts[0] == "apps" and parts[2] == "accessed" and method == "GET":
+        return {"memories": [], "total": 0, "page": _int_q(query, "page", 1), "page_size": _int_q(query, "page_size", 50)}
+    if len(parts) == 2 and parts[0] == "apps" and method == "PUT":
+        return _openmemory_app_details(parts[1])
+    if parts == ["config"] and method == "GET":
+        return {"openmemory": {"custom_instructions": ""}, "mem0": {"llm": {}, "embedder": {}}}
+    if parts == ["config"] and method in {"PUT", "POST"}:
+        return body
+    if len(parts) >= 2 and parts[0] == "config" and method in {"PUT", "POST"}:
+        return body
     raise LookupError(f"route not found: /api/v1/{'/'.join(parts)}")
+
+
+def _openmemory_memory_item(record: dict[str, Any]) -> dict[str, Any]:
+    tags = [str(tag) for tag in record.get("tags", [])]
+    state = "archived" if record.get("status") == "archived" else "active"
+    return {
+        "id": record["id"],
+        "content": record.get("content", ""),
+        "created_at": record.get("created_at"),
+        "updated_at": record.get("updated_at"),
+        "state": state,
+        "app_id": record.get("source_agent") or "manual",
+        "app_name": record.get("source_agent") or "manual",
+        "categories": tags,
+        "metadata_": record.get("metadata") or {},
+    }
+
+
+def _openmemory_simple_memory(record: dict[str, Any]) -> dict[str, Any]:
+    item = _openmemory_memory_item(record)
+    return {
+        "id": item["id"],
+        "text": item["content"],
+        "content": item["content"],
+        "created_at": item["created_at"],
+        "state": item["state"],
+        "categories": item["categories"],
+        "app_name": item["app_name"],
+        "metadata_": item["metadata_"],
+    }
+
+
+def _openmemory_categories() -> dict[str, Any]:
+    rows = search_memory_records(status="active", limit=1000)
+    names = sorted({str(tag) for row in rows for tag in row.get("tags", []) if str(tag)})
+    categories = [
+        {"id": name, "name": name, "description": f"{name} memories", "created_at": "", "updated_at": ""}
+        for name in names
+    ]
+    return {"categories": categories, "total": len(categories)}
+
+
+def _openmemory_apps(limit: int = 50, name: str = "") -> dict[str, Any]:
+    rows = search_memory_records(status="active", limit=1000)
+    counts: dict[str, int] = {}
+    for row in rows:
+        app = str(row.get("source_agent") or "manual")
+        if name and name.lower() not in app.lower():
+            continue
+        counts[app] = counts.get(app, 0) + 1
+    apps = [
+        {"id": app, "name": app, "total_memories_created": count, "total_memories_accessed": 0, "is_active": True}
+        for app, count in sorted(counts.items(), key=lambda item: item[0])[:limit]
+    ]
+    return {"apps": apps, "total": len(apps), "page": 1, "page_size": limit}
+
+
+def _openmemory_app_details(app_id: str) -> dict[str, Any]:
+    rows = search_memory_records(status="active", limit=1000)
+    total = sum(1 for row in rows if (row.get("source_agent") or "manual") == app_id)
+    return {
+        "is_active": True,
+        "total_memories_created": total,
+        "total_memories_accessed": 0,
+        "first_accessed": None,
+        "last_accessed": None,
+    }
 
 
 async def _json_body(request: Request) -> dict[str, Any]:
@@ -381,6 +537,13 @@ def _json_error(code: str, message: str, status: int, detail: Any = None) -> JSO
     if detail is not None:
         error["detail"] = detail
     return JSONResponse({"ok": False, "error": error}, status_code=status)
+
+
+def _with_cors(response: Response) -> Response:
+    response.headers.setdefault("Access-Control-Allow-Origin", "*")
+    response.headers.setdefault("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS")
+    response.headers.setdefault("Access-Control-Allow-Headers", "authorization,content-type")
+    return response
 
 
 def _str_q(query: dict[str, list[str]], key: str, default: str | None = "") -> str | None:

@@ -26,9 +26,9 @@
 - [x] 增加 semantic + lexical + entity boost 融合排序，减少弱相关注入。
 - [x] 增加 existing long memories backfill 工具，幂等拆分历史长记忆。
 - [x] 新增 `memory_atomize_report`、`memory_entity_search`、`memory_vector_audit` 工具。
-- [ ] fork OpenMemory UI 到本仓库 `ui/`，保留 Apache-2.0 license 和上游 attribution。
+- [x] fork OpenMemory UI 到本仓库 `ui/`，保留 Apache-2.0 license 和上游 attribution。
 - [x] 增加 OpenMemory UI 兼容 REST API 层，后端仍读写 lmmcp。
-- [ ] 用 Playwright 验证 UI：列表、搜索、详情、过滤、统计、归档/删除。
+- [x] 用 Playwright 验证 UI：列表、搜索、详情、过滤、统计、归档/删除。
 - [x] 增加召回评测集，覆盖长记忆局部事实、别名查询、跨项目隔离、弱相关过滤。
 
 ## 功能

@@ -23,7 +23,7 @@ def _client(token: str = "") -> TestClient:
     app = Starlette(routes=[
         Route("/", frontend_index, methods=["GET"]),
         Route("/health", frontend_health, methods=["GET"]),
-        Route("/api/{path:path}", frontend_api, methods=["GET", "POST", "PATCH", "DELETE"]),
+        Route("/api/{path:path}", frontend_api, methods=["GET", "POST", "PATCH", "PUT", "DELETE"]),
     ])
     return TestClient(app)
 
@@ -80,17 +80,25 @@ def test_frontend_v1_memory_compat_routes():
             "content": "lmmcp compat API content",
             "atomize": False,
         })
-        memory_id = created.json()["data"]["id"]
+        memory_id = created.json()["id"]
         listed = client.get("/api/v1/memories?query=lmmcp")
+        filtered = client.post("/api/v1/memories/filter", json={"search_query": "lmmcp", "page": 1, "size": 5})
+        detail = client.get(f"/api/v1/memories/{memory_id}")
+        updated = client.put(f"/api/v1/memories/{memory_id}", json={"memory_content": "updated lmmcp compat API content"})
         entities = client.get("/api/v1/entities?query=local_memory")
+        stats = client.get("/api/v1/stats")
         deleted = client.delete(f"/api/v1/memories/{memory_id}")
 
     assert created.status_code == 200
     assert listed.status_code == 200
-    assert any(row["id"] == memory_id for row in listed.json()["data"])
+    assert any(row["id"] == memory_id for row in listed.json()["items"])
+    assert filtered.json()["total"] >= 1
+    assert detail.json()["id"] == memory_id
+    assert updated.json()["id"] == memory_id
     assert entities.status_code == 200
-    assert any(hit["memory_id"] == memory_id for hit in entities.json()["data"])
-    assert deleted.json()["data"]["status"] == "archived"
+    assert any(hit["memory_id"] == memory_id for hit in entities.json())
+    assert stats.json()["total_memories"] >= 1
+    assert deleted.json()["status"] == "archived"
 
 
 def test_frontend_invalid_json_returns_400():

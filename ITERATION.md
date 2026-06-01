@@ -1985,6 +1985,39 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
+## [迭代 86] 2026-06-01 — OpenMemory UI fork 与端到端验证
+
+### 变更
+
+- `ui/`: fork OpenMemory UI 到本仓库，保留 Apache-2.0 license 与上游 attribution，并将前端 API 调整为访问 lmmcp `/api/v1/*` 兼容层。
+- `local_memory_mcp/frontend.py`: 补齐 OpenMemory UI 所需的 memories/filter、apps、stats、config、related、access-log、pause/archive 等兼容 REST 入口，并为 `/api/v1/*` 增加 CORS/OPTIONS 支持。
+- `local_memory_mcp/server.py`: 暴露 OpenMemory UI 兼容 API 所需的 HTTP 方法。
+- `tests/test_frontend.py` / `ui/tests/openmemory-smoke.spec.ts`: 增加后端兼容 API 与 UI 列表、搜索、详情、过滤、统计、归档 smoke 覆盖。
+- `README.md` / `TODO.md`: 补充 `ui/` 使用命令、license/NOTICE 说明，并关闭 OpenMemory UI fork 与 Playwright 验证 TODO。
+
+### 修复
+
+- 修复 OpenMemory UI 直接访问本机 lmmcp 时的跨源预检、裸 JSON 响应格式、PUT/PATCH 更新和批量归档兼容问题。
+
+### 验证
+
+- 语法检查: `python3 -m py_compile local_memory_mcp/frontend.py local_memory_mcp/server.py` pass。
+- 后端测试: `uv run pytest -q` 407/407 pass，1 个既有 httpx deprecation warning。
+- UI 构建: `cd ui && pnpm build` pass。
+- UI 端到端: `cd ui && LMMCP_API_URL=http://127.0.0.1:8318 pnpm exec playwright test` 1/1 pass。
+- 依赖检查: `uv lock --dry-run` pass，`rg -n 'torch|sentence-transformers|nvidia-|cuda' uv.lock pyproject.toml` 无命中。
+- 服务验证: `systemctl --user restart lmmcp.service` 后服务 active，`curl -fsS http://127.0.0.1:8318/health` 返回 `status=ok`。
+
+### 已知问题
+
+- 无。
+
+### 回滚
+
+`git revert HEAD`
+
+---
+
 ## 日志格式规范
 
 每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：

@@ -361,6 +361,16 @@ python3.11 -m venv .venv
 .venv/bin/python -m pytest -q
 ```
 
+OpenMemory UI fork 位于 `ui/`，通过后端 `/api/v1/*` 兼容 REST 层读写 lmmcp，不运行 Mem0 后端 SDK。该目录保留上游 Apache-2.0 license 与 attribution，详见 `ui/LICENSE` 和 `ui/NOTICE.md`。
+
+```bash
+cd ui
+pnpm install
+LMMCP_API_URL=http://127.0.0.1:8318 pnpm dev
+pnpm build
+LMMCP_API_URL=http://127.0.0.1:8318 pnpm test:e2e
+```
+
 PyPI 发布后可直接安装默认运行能力：
 
 ```bash
