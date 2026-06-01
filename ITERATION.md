@@ -1707,6 +1707,34 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
+## [迭代 77] 2026-06-01 — CI 并发 SQLite 写入锁库修复
+
+### 变更
+
+- `local_memory_mcp/storage/db.py`: SQLite connection timeout 从默认值提高到 30 秒，`PRAGMA busy_timeout` 提高到 30000ms。
+- `local_memory_mcp/storage/db.py`: `managed_conn()` 增加进程内 `threading.RLock()`，串行化本进程内 SQLite 事务，保留 commit retry 作为跨进程/外部锁兜底。
+- `TODO.md`: 记录并完成 GitHub Actions CI 并发写入偶发锁库失败。
+
+### 修复
+
+- 修复 GitHub Actions main/tag CI 中 `test_concurrent_writes_no_corruption` 偶发 `sqlite3.OperationalError: database is locked`，导致发布链路被 CI 阻断的问题。
+
+### 验证
+
+- 远端失败证据: GitHub Actions runs `26733413919` 与 `26733419297` 均在 `tests/test_concurrent_and_migration.py::test_concurrent_writes_no_corruption` 报 `database is locked`。
+
+### 已知问题
+
+- 需推送修复后复验 main/tag CI。
+- PyPI 首发等待 PyPI 账号侧配置 Trusted Publisher。
+- Docker Compose 容器端到端验证继续等待可用 Docker registry/mirror 或本机预先缓存 `python:3.11-slim`。
+
+### 回滚
+
+`git checkout -- local_memory_mcp/storage/db.py TODO.md ITERATION.md`
+
+---
+
 ## 日志格式规范
 
 每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：

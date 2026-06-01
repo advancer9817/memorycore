@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 _thread_local = threading.local()
 _LOCK_RETRY_ATTEMPTS = 10
 _LOCK_RETRY_DELAY = 0.1
+_write_lock = threading.RLock()
 
 
 def _get_thread_conn(path) -> sqlite3.Connection:
@@ -29,12 +30,12 @@ def _get_thread_conn(path) -> sqlite3.Connection:
         _thread_local.conns = {}
         cache = _thread_local.conns
     if key not in cache:
-        conn = sqlite3.connect(path, check_same_thread=False)
+        conn = sqlite3.connect(path, timeout=30, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA wal_autocheckpoint=500")
         conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA busy_timeout=30000")
         if key not in _INITIALIZED_DB_PATHS:
             init_db(conn)
             _INITIALIZED_DB_PATHS.add(key)
@@ -49,13 +50,14 @@ def connect() -> sqlite3.Connection:
 
 @contextmanager
 def managed_conn():
-    conn = connect()
-    try:
-        yield conn
-        _commit_with_retry(conn)
-    except Exception:
-        conn.rollback()
-        raise
+    with _write_lock:
+        conn = connect()
+        try:
+            yield conn
+            _commit_with_retry(conn)
+        except Exception:
+            conn.rollback()
+            raise
 
 
 def _commit_with_retry(conn: sqlite3.Connection) -> None:
