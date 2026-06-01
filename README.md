@@ -276,7 +276,7 @@ Claude Code `~/.claude.json`（user scope，全局可用）：
 
 ## Agent Session Hook 部署
 
-Claude Code / Codex 会在 `SessionStart` 阶段更新 agent presence 并注册默认 capability，在 `UserPromptSubmit` 阶段自动调用 `memory_context`；Gemini 通过 `BeforeAgent` hook 注入 `memory_context`，并通过 `AfterAgent` + `SessionEnd` hooks 传入 `transcript_path` 写回；Hermes 通过 `pre_llm_call` shell hook 在模型调用前注入 `memory_context`；opencode 通过 plugin 在 `experimental.chat.system.transform` 阶段调用 `memory_context`。这些读前上下文会注入回答前上下文；Claude Code / Codex / Gemini / Hermes / opencode 会话结束时自动将对话摘要写回 lmmcp，由统一脚本处理：
+Claude Code 会在 `SessionStart` 阶段更新 agent presence 并注册默认 capability，并在 `UserPromptSubmit` 阶段自动调用 `memory_context`；Codex 只保留 `SessionStart` presence/capability 与 `Stop` 写回 hook，读前记忆按 `AGENTS.md` 规则由模型显式调用 `memory_context`，避免把弱相关 hook 输出直接显示在对话里。Gemini 通过 `BeforeAgent` hook 注入 `memory_context`，并通过 `AfterAgent` + `SessionEnd` hooks 传入 `transcript_path` 写回；Hermes 通过 `pre_llm_call` shell hook 在模型调用前注入 `memory_context`；opencode 通过 plugin 在 `experimental.chat.system.transform` 阶段调用 `memory_context`。这些读前上下文会注入回答前上下文；Claude Code / Codex / Gemini / Hermes / opencode 会话结束时自动将对话摘要写回 lmmcp，由统一脚本处理：
 
 ```bash
 # 部署 Claude/Codex/Hermes session hooks
@@ -306,7 +306,7 @@ python3 scripts/connect_agents.py --register-hooks
 | `--agent opencode` | opencode | hook stdin `session_id` 或最新 `~/.local/share/opencode/opencode.db` session |
 | `--agent gemini` | Gemini | `AfterAgent` / `SessionEnd` hook stdin `transcript_path` 或 `GEMINI_SESSION_FILE` JSON/JSONL |
 
-`session-start.sh` 使用短 timeout 调用 `agent_presence_update` 和 `agent_capability_register`，服务不可用时静默跳过；`lmmcp-context.sh` 使用短 timeout 调用 `memory_context`，并按调用方输出 Claude/Codex/Gemini 的 `additionalContext` 或 Hermes 的 `{"context": ...}`，服务不可用时静默跳过，不阻塞用户输入；`lmmcp-ingest.py` 后台调用 `memory_ingest`，失败不阻塞 agent 退出。
+`session-start.sh` 使用短 timeout 调用 `agent_presence_update` 和 `agent_capability_register`，服务不可用时静默跳过；`lmmcp-context.sh` 使用短 timeout 调用 `memory_context`，并按调用方输出 Claude/Gemini 的 `additionalContext` 或 Hermes 的 `{"context": ...}`，服务不可用时静默跳过，不阻塞用户输入；Codex 不注册读前 context hook；`lmmcp-ingest.py` 后台调用 `memory_ingest`，失败不阻塞 agent 退出。
 
 ## 服务脚本
 

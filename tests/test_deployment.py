@@ -124,17 +124,21 @@ def test_hook_setup_registers_prompt_context_injection():
     setup = (ROOT / "scripts" / "setup-hooks.sh").read_text(encoding="utf-8")
     connect_agents = (ROOT / "scripts" / "connect_agents.py").read_text(encoding="utf-8")
     context_hook = (ROOT / "scripts" / "hooks" / "lmmcp-context.sh").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     assert 'add_hook(hooks, "UserPromptSubmit", f"LMMCP_AGENT_ID=claude bash {lmmcp_context}", 5)' in setup
-    assert 'add_hook(codex_hook_root, "UserPromptSubmit", f"LMMCP_AGENT_ID=codex bash {lmmcp_context}", 5)' in setup
+    assert 'remove_hook_entries(codex_hook_root, "UserPromptSubmit", codex_lmmcp_context_fragments)' in setup
+    assert 'add_hook(codex_hook_root, "UserPromptSubmit", f"LMMCP_AGENT_ID=codex bash {lmmcp_context}", 5)' not in setup
     assert "context_command = f\"LMMCP_AGENT_ID=claude bash {HOOK_LMMCP_CONTEXT}\"" in connect_agents
-    assert "context_command = f\"LMMCP_AGENT_ID=codex bash {HOOK_LMMCP_CONTEXT}\"" in connect_agents
+    assert 'changed = _remove_hook_entries(root, "UserPromptSubmit", CODEX_LMMCP_CONTEXT_FRAGMENTS) or changed' in connect_agents
+    assert "context_command = f\"LMMCP_AGENT_ID=codex bash {HOOK_LMMCP_CONTEXT}\"" not in connect_agents
     assert '"project_path": sys.argv[3]' in context_hook
     assert 'or extra.get("user_message")' in context_hook
     assert 'if event == "pre_llm_call":' in context_hook
     assert 'payload = {"context": context}' in context_hook
     assert 'hook_event_name = "BeforeAgent" if event == "BeforeAgent" else "UserPromptSubmit"' in context_hook
     assert 'if isinstance(used_ids, list) and not used_ids:' in context_hook
+    assert "Codex 不注册读前 context hook" in readme
 
 
 def test_session_start_hook_registers_presence_and_capabilities():

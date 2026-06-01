@@ -20,7 +20,8 @@
 - [x] 修复 hooks 初始化脚本未同步 Hermes SQLite session 存储变化：`scripts/setup-hooks.sh` 现在安装带 `--background` 的 Hermes on_session_end hook，`scripts/hooks/lmmcp-ingest.py` 只从 `~/.hermes/state.db` 读取 transcript，并在后台模式保留 stdin payload。
 - [x] Embedding sentence-transformers 降级（Ollama 不可用时自动切换）：`embed_text()` 现在按 Ollama -> sentence-transformers -> hashing 顺序降级，支持环境变量覆盖 fallback provider/model。
 - [x] 修复 rollup 测试隔离问题：`test_rollup_processes_manual_source_episodic` 和 extraction source 对应用例已传入 stub summarizer，避免 dry-run/force 扫描测试依赖真实 extraction LLM。
-- [x] 默认启用 Claude/Codex 对话前自动检索注入：`setup-hooks.sh` 和 `connect_agents.py --register-hooks` 已默认给 Claude/Codex 注册 `UserPromptSubmit -> lmmcp-context.sh`，并保留显式 `memory_context` 作为自动注入缺失时的兜底。
+- [x] 默认启用 Claude 对话前自动检索注入：`setup-hooks.sh` 和 `connect_agents.py --register-hooks` 已默认给 Claude 注册 `UserPromptSubmit -> lmmcp-context.sh`，并保留显式 `memory_context` 作为自动注入缺失时的兜底。
+- [x] 停用 Codex 对话前自动检索注入：Codex 不再注册 `UserPromptSubmit -> lmmcp-context.sh`，本机 `~/.codex/hooks.json` 已移除该读前 hook；Codex 读记忆改为按 `AGENTS.md` 规则显式调用 MCP `memory_context`，只保留 `SessionStart` presence/capability 与 `Stop` 写回 hook，避免可见 hook 输出和弱相关记忆污染对话。
 - [x] 补齐 opencode 对话前自动检索注入：新增 `scripts/hooks/opencode-lmmcp-plugin.js`，通过 opencode `experimental.chat.system.transform` 在 LLM 调用前读取最新用户消息并调用 `memory_context` 注入 system context；`connect_agents.py --register-hooks` 会把该 plugin 写入 opencode `plugin` 配置。
 - [x] 补齐 Hermes 对话前自动检索注入：`setup-hooks.sh` 与 `connect_agents.py --register-hooks` 会注册 Hermes `pre_llm_call -> lmmcp-context.sh`，脚本返回 Hermes `{"context": ...}` 格式并通过短 timeout 调用 `memory_context`。
 - [x] 补齐 Gemini 对话前自动检索注入支持矩阵：`setup-hooks.sh` 与 `connect_agents.py --register-hooks` 会注册 Gemini `BeforeAgent -> lmmcp-context.sh`，脚本返回 `additionalContext` 并通过短 timeout 调用 `memory_context`。

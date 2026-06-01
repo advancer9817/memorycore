@@ -1860,6 +1860,37 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
+## [迭代 82] 2026-06-01 — 停用 Codex 可见读前记忆注入
+
+### 变更
+
+- `scripts/setup-hooks.sh`: Codex hook 注册不再添加 `UserPromptSubmit -> lmmcp-context.sh`，只清理旧读前 hook，并保留 `SessionStart` presence/capability 与 `Stop` 写回 hook；生成的 `AGENTS.md` 规则改为显式调用 `memory_context`。
+- `scripts/connect_agents.py`: `register_hooks_codex()` 改为只注册 Codex presence/writeback hooks，读记忆保持显式 MCP 调用。
+- `README.md`: 更新 agent hook 部署说明，明确 Codex 不注册读前 context hook。
+- `tests/test_deployment.py`: 增加回归断言，防止安装脚本重新给 Codex 注册 `UserPromptSubmit` 读前 hook。
+- `TODO.md`: 记录 Codex 对话前自动检索注入已停用。
+- `/home/advancer/.codex/hooks.json` / `/home/advancer/.codex/config.toml` / `/home/advancer/AGENTS.md`: 本机 Codex 配置已移除 `UserPromptSubmit` 读前 hook 与对应 trust state，并改为 AGENTS 显式读记忆规则。
+
+### 修复
+
+- 修复 Codex `UserPromptSubmit` hook 把 `memory_context` 结果作为可见 hook context 注入对话，导致 UI 噪声明显、且弱相关记忆会污染用户当前问题的问题。
+
+### 验证
+
+- 焦点测试: `tests/test_deployment.py` 18/18 pass。
+- 本机配置: `~/.codex/hooks.json` 只剩 `SessionStart` 与 `Stop`，不再包含 `UserPromptSubmit` / `lmmcp-context.sh`。
+- 静态检查: 仓库脚本中不存在给 Codex 添加 `LMMCP_AGENT_ID=codex ... lmmcp-context.sh` 的注册逻辑，仅保留旧 hook 清理逻辑。
+
+### 已知问题
+
+- Claude/Gemini/Hermes/opencode 仍保留各自读前自动注入路径；本轮只停用 Codex 的可见 `UserPromptSubmit` 注入。
+
+### 回滚
+
+`git checkout -- README.md TODO.md scripts/connect_agents.py scripts/setup-hooks.sh tests/test_deployment.py ITERATION.md`
+
+---
+
 ## 日志格式规范
 
 每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：

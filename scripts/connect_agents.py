@@ -508,7 +508,7 @@ def trust_codex_hooks(config_path: Path, hooks_path: Path, backup_dir: Path, dry
 
 
 def register_hooks_codex(path: Path, backup_dir: Path, dry_run: bool) -> bool:
-    """Register Codex context injection and writeback hooks."""
+    """Register Codex presence and writeback hooks; memory reads stay explicit."""
     old_config = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
     new_config = enable_codex_hooks_feature(old_config)
     hooks_path = path.parent / "hooks.json"
@@ -523,11 +523,6 @@ def register_hooks_codex(path: Path, backup_dir: Path, dry_run: bool) -> bool:
     start_entries = root.setdefault("SessionStart", [])
     if not any(start_command in json.dumps(entry, ensure_ascii=False) for entry in start_entries):
         start_entries.append({"hooks": [{"type": "command", "command": start_command, "timeout": 5}]})
-        changed = True
-    context_command = f"LMMCP_AGENT_ID=codex bash {HOOK_LMMCP_CONTEXT}"
-    context_entries = root.setdefault("UserPromptSubmit", [])
-    if not any(context_command in json.dumps(entry, ensure_ascii=False) for entry in context_entries):
-        context_entries.append({"hooks": [{"type": "command", "command": context_command, "timeout": 5}]})
         changed = True
     end_command = f"python3 {HOOK_LMMCP_INGEST} --agent codex --background"
     entries = root.setdefault("Stop", [])
