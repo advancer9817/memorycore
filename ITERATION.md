@@ -2198,3 +2198,20 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 - `test_deployment.py`：断言字符串同步更新
 - `LMMCP_DB` 测试用变量改为标准 `LOCAL_MEMORY_DB`
 - pyproject.toml CLI 别名 `lmmcp` → `mcore`
+
+---
+
+## [迭代 91] 2026-06-02 — Next.js 前端集成到 :8318 单端口
+
+### 变更
+
+**架构**
+- `next.config.mjs`：改为 `output: "standalone"`，去掉 rewrites（前端直接用绝对 API URL）
+- 后端 `frontend.py`：新增 `_proxy_to_ui()` 函数，当配置 `ui_port` 时用 httpx 将所有非 API 路由 proxy 到 Next.js standalone server
+- 后端 `server.py`：新增 `/{path:path}` 通配 custom_route，所有 UI 路径（`/_next/*`、`/memory/*`、`/apps/*` 等）都 proxy 到 Next.js；新增 `--ui-port` 参数和 `MCORE_UI_PORT` 环境变量
+- `start.sh`：新增步骤 5 `_start_ui()`，自动执行 `pnpm build` → 复制 static 资产 → 启动 Next.js standalone（内部 3001）→ 传 `--ui-port 3001` 给后端
+
+**结果**
+- 用户只访问 `http://127.0.0.1:8318/`，后端 proxy 到 Next.js，单端口搞定
+- `pnpm dev` 开发模式仍然可用（不带 `--ui-port` 时后端 serve 老 HTML）
+- Node.js/pnpm 不可用时优雅降级，继续 serve 老 HTML 控制台

@@ -6,13 +6,13 @@ import logging
 import subprocess
 import time
 import yaml
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from ipaddress import ip_address
 from typing import Any
 from urllib.parse import parse_qs
 
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from memorycore.models import MEMORY_TYPES, STATUSES, VALID_RELATION_TYPES, load_config, config_path
 from memorycore.storage import (
@@ -64,6 +64,7 @@ class FrontendConfig:
     allow_insecure_remote: bool = False
     max_body_bytes: int = 2_000_000
     enabled: bool = True
+    ui_port: int = 0  # Next.js standalone port; 0 = serve legacy HTML
 
 
 _CONFIG = FrontendConfig()
@@ -75,11 +76,16 @@ def configure_frontend(
     auth_token: str = "",
     allow_insecure_remote: bool = False,
     enabled: bool = True,
+    ui_port: int = 0,
 ) -> None:
     if enabled:
         validate_frontend_bind(host, auth_token, allow_insecure_remote)
     global _CONFIG
-    _CONFIG = FrontendConfig(host=host, port=int(port), auth_token=auth_token or "", allow_insecure_remote=allow_insecure_remote, enabled=enabled)
+    _CONFIG = FrontendConfig(
+        host=host, port=int(port), auth_token=auth_token or "",
+        allow_insecure_remote=allow_insecure_remote, enabled=enabled,
+        ui_port=int(ui_port),
+    )
 
 
 def validate_frontend_bind(host: str, auth_token: str = "", allow_insecure_remote: bool = False) -> None:
@@ -102,7 +108,52 @@ def _is_loopback_host(host: str) -> bool:
 async def frontend_index(request: Request) -> Response:
     if not _CONFIG.enabled:
         return Response("frontend disabled", status_code=404)
+    if _CONFIG.ui_port:
+        return await _proxy_to_ui(request)
     return HTMLResponse(_FRONTEND_HTML)
+
+
+async def _proxy_to_ui(request: Request) -> Response:
+    """Proxy request to the Next.js standalone server."""
+    try:
+        import httpx
+    except ImportError:
+        return Response("httpx not installed; run: pip install httpx", status_code=503)
+
+    ui_base = f"http://127.0.0.1:{_CONFIG.ui_port}"
+    target_url = ui_base + str(request.url.path)
+    if request.url.query:
+        target_url += "?" + request.url.query
+
+    headers = {
+        k: v for k, v in request.headers.items()
+        if k.lower() not in {"host", "connection", "transfer-encoding"}
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            body = await request.body()
+            resp = await client.request(
+                method=request.method,
+                url=target_url,
+                headers=headers,
+                content=body,
+            )
+            return Response(
+                content=resp.content,
+                status_code=resp.status_code,
+                headers=dict(resp.headers),
+            )
+    except httpx.ConnectError:
+        return Response(
+            f"MemoryCore UI not running on port {_CONFIG.ui_port}. "
+            "Start it with: cd ui && pnpm start",
+            status_code=503,
+            media_type="text/plain",
+        )
+    except Exception as exc:
+        logger.exception("UI proxy error")
+        return Response(f"UI proxy error: {exc}", status_code=502, media_type="text/plain")
 
 
 async def frontend_health(request: Request) -> Response:

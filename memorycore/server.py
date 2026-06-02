@@ -98,6 +98,11 @@ async def _frontend_health_route(request):
 async def _frontend_metrics_route(request):
     return await frontend_metrics(request)
 
+
+@mcp.custom_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"], include_in_schema=False)
+async def _frontend_proxy_route(request):
+    return await frontend_index(request)
+
 SQLITE_VEC_AVAILABLE = False  # removed; vector search now via vector_store.py (Qdrant)
 
 
@@ -890,6 +895,7 @@ def main(argv: list[str] | None = None) -> int:
     p_serve.add_argument("--auth-token", default=os.environ.get("LOCAL_MEMORY_FRONTEND_TOKEN", ""), help="Bearer token required for /api/*")
     p_serve.add_argument("--allow-insecure-remote", action="store_true", help="Allow non-loopback frontend bind without auth token")
     p_serve.add_argument("--mcp-only", action="store_true", help="Disable frontend / and /api routes while keeping /mcp")
+    p_serve.add_argument("--ui-port", type=int, default=int(os.environ.get("MCORE_UI_PORT", "0")), help="Port of the Next.js UI server to proxy (0 = serve legacy HTML)")
     args = parser.parse_args(argv)
     if args.cmd == "init":
         from memorycore.storage import managed_conn
@@ -1026,6 +1032,7 @@ def main(argv: list[str] | None = None) -> int:
             auth_token=args.auth_token,
             allow_insecure_remote=args.allow_insecure_remote,
             enabled=not args.mcp_only,
+            ui_port=getattr(args, "ui_port", 0),
         )
         obs_port = getattr(args, "obs_port", 0)
         if obs_port:

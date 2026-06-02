@@ -343,12 +343,30 @@ python3.11 -m venv .venv
 
 内置前端位于 `ui/`，通过后端 `/api/v1/*` REST 层读写 memorycore，不依赖 Mem0 后端 SDK。
 
+`bash start.sh` 会自动构建 Next.js standalone 并启动，`:8318/` 直接代理到 Next.js，无需单独跑 dev server。
+
+手动构建和启动（生产模式，单端口）：
+
 ```bash
 cd ui
 pnpm install
-MCORE_API_URL=http://127.0.0.1:8318 pnpm dev
-pnpm build
-MCORE_API_URL=http://127.0.0.1:8318 pnpm test:e2e
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8318 pnpm build
+# 复制静态资产
+cp -r public .next/standalone/public
+cp -r .next/static .next/standalone/.next/static
+# 启动 Next.js standalone（内部端口 3001）
+PORT=3001 HOSTNAME=127.0.0.1 node .next/standalone/server.js &
+# 启动后端并 proxy 到 UI（用户访问 :8318/）
+memorycore serve --host 127.0.0.1 --port 8318 --ui-port 3001
+```
+
+开发模式（热重载）：
+
+```bash
+cd ui
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8318 pnpm dev   # UI 在 :3000
+# 后端单独启动，不带 --ui-port
+memorycore serve --host 127.0.0.1 --port 8318
 ```
 
 该目录保留上游 Apache-2.0 license 与 attribution，详见 `ui/LICENSE` 和 `ui/NOTICE.md`。

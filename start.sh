@@ -45,6 +45,9 @@ done
 LOG="$SCRIPT_DIR/mcore.log"
 SYNC_FILE="$SCRIPT_DIR/memory-sync/memories.json"
 PID_FILE="${MCORE_PID_FILE:-/tmp/mcore.pid}"
+UI_DIR="$SCRIPT_DIR/ui"
+UI_PORT="${MCORE_UI_PORT:-3001}"
+UI_PID_FILE="/tmp/mcore-ui.pid"
 
 _log()  { echo "[start.sh] $*"; }
 _warn() { echo "[start.sh] WARNING: $*" >&2; }
@@ -118,19 +121,60 @@ fi
 _log "Configuring agent hooks and memory rules ..."
 bash "$SCRIPT_DIR/scripts/setup-hooks.sh" || _warn "Hook setup failed (non-fatal)"
 
-# ── 5. 启动服务 ───────────────────────────────────────────────────────────────
+# ── 5. 启动 Next.js UI ────────────────────────────────────────────────────────
+_start_ui() {
+  if ! command -v pnpm &>/dev/null && ! command -v node &>/dev/null; then
+    _warn "node/pnpm not found — skipping UI build (legacy HTML will be served at /)"
+    echo ""
+    return
+  fi
+  if [[ ! -d "$UI_DIR/node_modules" ]]; then
+    _log "Installing UI dependencies ..."
+    (cd "$UI_DIR" && pnpm install --frozen-lockfile 2>&1) || { _warn "pnpm install failed — skipping UI"; echo ""; return; }
+  fi
+  _log "Building Next.js UI ..."
+  (cd "$UI_DIR" && NEXT_PUBLIC_API_URL="http://$HOST:$PORT" pnpm build 2>&1) || {
+    _warn "pnpm build failed — skipping UI (legacy HTML will be served)"
+    echo ""
+    return
+  }
+  cp -r "$UI_DIR/public" "$UI_DIR/.next/standalone/public" 2>/dev/null || true
+  cp -r "$UI_DIR/.next/static" "$UI_DIR/.next/standalone/.next/static" 2>/dev/null || true
+  _log "Starting Next.js UI on port $UI_PORT ..."
+  PORT="$UI_PORT" HOSTNAME=127.0.0.1 \
+    nohup node "$UI_DIR/.next/standalone/server.js" >>"$SCRIPT_DIR/mcore-ui.log" 2>&1 &
+  echo $! >"$UI_PID_FILE"
+  sleep 1
+  if kill -0 "$(cat "$UI_PID_FILE")" 2>/dev/null; then
+    _log "UI started (pid $(cat "$UI_PID_FILE"))"
+    echo "$UI_PORT"
+  else
+    _warn "UI failed to start — check mcore-ui.log"
+    echo ""
+  fi
+}
+
+UI_ACTUAL_PORT="$(_start_ui)"
+
+# ── 6. 启动 MCP 服务 ──────────────────────────────────────────────────────────
 _log "Starting MCP service on http://$HOST:$PORT ..."
 _log "  MCP endpoint : http://$HOST:$PORT/mcp"
 _log "  Dashboard    : http://$HOST:$PORT/"
 _log "  Health       : http://$HOST:$PORT/health"
+
+SERVE_ARGS="--host $HOST --port $PORT"
+if [[ -n "$UI_ACTUAL_PORT" ]]; then
+  SERVE_ARGS="$SERVE_ARGS --ui-port $UI_ACTUAL_PORT"
+fi
 
 if [[ "$DAEMON" -eq 1 ]]; then
   if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
     _warn "Already running (pid $(cat "$PID_FILE")). Use 'scripts/mcore stop' first."
     exit 1
   fi
-  nohup "$PY" -m memorycore serve --host "$HOST" --port "$PORT" >> "$LOG" 2>&1 &
-  echo $! > "$PID_FILE"
+  # shellcheck disable=SC2086
+  nohup "$PY" -m memorycore serve $SERVE_ARGS >>"$LOG" 2>&1 &
+  echo $! >"$PID_FILE"
   sleep 1
   if kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
     _log "Started in background (pid $(cat "$PID_FILE")). Log: $LOG"
@@ -140,5 +184,6 @@ if [[ "$DAEMON" -eq 1 ]]; then
     exit 1
   fi
 else
-  exec "$PY" -m memorycore serve --host "$HOST" --port "$PORT"
+  # shellcheck disable=SC2086
+  exec "$PY" -m memorycore serve $SERVE_ARGS
 fi
