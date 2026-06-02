@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-command installer for local-memory-mcp.
+# One-command installer for memorycore.
 #
 # Installs missing host deps, Python deps, writes config, initializes SQLite,
 # installs user systemd services for Qdrant + mcore + curator, and verifies health.
@@ -9,7 +9,7 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/deploy.sh [options]
 
-One-command local-memory-mcp deployment.
+One-command memorycore deployment.
 
 Options:
   --root PATH              Install/runtime root. Default: current checkout.
@@ -435,7 +435,7 @@ fi
 
 cat <<EOF
 
-[done] local-memory-mcp deployed
+[done] memorycore deployed
   root:      $ROOT
   endpoint:  http://$HOST:$PORT/mcp
   db:        $DB

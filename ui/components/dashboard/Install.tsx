@@ -383,8 +383,8 @@ export const Install = () => {
                   </div>
                 )}
                 {llmRunState.findings && llmRunState.findings.length > 0 && (
-                  <div className="mt-3 space-y-1">
-                    {llmRunState.findings.slice(0, 4).map((f, i) => (
+                  <div className="mt-3 max-h-64 overflow-y-auto space-y-1 pr-1">
+                    {llmRunState.findings.map((f, i) => (
                       <div key={i} className="rounded bg-zinc-800 px-2 py-1 text-xs">
                         <span className="text-violet-300">{f.action}</span>
                         <span className="text-zinc-400"> · {f.title || "—"}</span>

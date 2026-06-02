@@ -10,7 +10,7 @@
 #
 # 用法：
 #   bash scripts/install_services.sh
-#   bash scripts/install_services.sh --host 0.0.0.0 --port 8318 --ui-port 3001
+#   bash scripts/install_services.sh --host 0.0.0.0 --port 8318 --ui-port 18318
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,7 +19,7 @@ SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 # ── 参数 ──────────────────────────────────────────────────────────────────────
 HOST="${MCORE_HOST:-127.0.0.1}"
 PORT="${MCORE_PORT:-8318}"
-UI_PORT="${MCORE_UI_PORT:-3001}"
+UI_PORT="${MCORE_UI_PORT:-18318}"
 PYTHON_BIN="$ROOT/.venv/bin/python"
 CONFIG="$ROOT/config.yaml"
 DB="$ROOT/memory.sqlite3"

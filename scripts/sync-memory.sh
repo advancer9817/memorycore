@@ -8,7 +8,7 @@
 #   scripts/sync-memory.sh status        # 查看待同步状态
 #
 # 环境变量:
-#   MCORE_DIR         本项目根目录 (默认 $HOME/project/local-memory-mcp)
+#   MCORE_DIR         本项目根目录 (默认 $HOME/project/memorycore)
 #   MCORE_PYTHON      Python 解释器 (默认 $MCORE_DIR/.venv/bin/python)
 #   LOCAL_MEMORY_DB   SQLite 数据库路径 (默认由 mcore 自动确定)
 #   SYNC_FILE         导出文件名 (默认 memory-sync/memories.json)

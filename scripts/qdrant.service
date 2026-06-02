@@ -1,5 +1,5 @@
 [Unit]
-Description=Qdrant Vector Database for local-memory-mcp
+Description=Qdrant Vector Database for memorycore
 After=network-online.target docker.service
 Wants=network-online.target
 

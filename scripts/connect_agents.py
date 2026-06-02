@@ -9,8 +9,6 @@ Configures:
 - Codex CLI (WSL + Windows user config when available)
 - Gemini CLI (WSL + Windows user config when available)
 - opencode (WSL + Windows user config when available)
-
-The script is intentionally idempotent and removes stale openmemory entries.
 """
 from __future__ import annotations
 
@@ -32,10 +30,9 @@ except Exception:  # pragma: no cover
     yaml = None
 
 DEFAULT_ENDPOINT = "http://127.0.0.1:8318/mcp"
-SERVER_NAME = "local_memory"
-OPENMEMORY_KEYS = {"openmemory", "open_memory"}
+SERVER_NAME = "memorycore"
 HOME = Path.home()
-BACKUP_ROOT = HOME / ".agent-memory" / "local-memory-mcp" / "backups" / "connect-agents"
+BACKUP_ROOT = HOME / ".agent-memory" / "memorycore" / "backups" / "connect-agents"
 HOOKS_DIR = Path(__file__).resolve().parent / "hooks"
 
 
@@ -99,9 +96,6 @@ def configure_hermes_config(path: Path, endpoint: str, backup_dir: Path, dry_run
     data = yaml.safe_load(old) if old.strip() else {}
     data = data or {}
     servers = data.setdefault("mcp_servers", {})
-    for key in list(servers.keys()):
-        if key.lower() in OPENMEMORY_KEYS:
-            servers.pop(key, None)
     servers[SERVER_NAME] = {
         "enabled": True,
         "type": "http",
@@ -131,25 +125,13 @@ def hermes_paths() -> list[Path]:
 def configure_claude(path: Path, endpoint: str, backup_dir: Path, dry_run: bool) -> bool:
     data = read_json(path)
     servers = data.setdefault("mcpServers", {})
-    for key in list(servers.keys()):
-        if key.lower() in OPENMEMORY_KEYS:
-            servers.pop(key, None)
     servers[SERVER_NAME] = {"type": "http", "url": endpoint}
-    # Remove old Windows project entry that can resurrect confusion in Claude UI.
-    projects = data.get("projects")
-    if isinstance(projects, dict):
-        for key in list(projects.keys()):
-            if "openmemory" in key.lower():
-                projects.pop(key, None)
     return write_json(path, data, backup_dir, dry_run)
 
 
 def configure_gemini(path: Path, endpoint: str, backup_dir: Path, dry_run: bool) -> bool:
     data = read_json(path)
     servers = data.setdefault("mcpServers", {})
-    for key in list(servers.keys()):
-        if key.lower() in OPENMEMORY_KEYS:
-            servers.pop(key, None)
     servers[SERVER_NAME] = {"httpUrl": endpoint, "timeout": 60000}
     return write_json(path, data, backup_dir, dry_run)
 
@@ -163,9 +145,7 @@ def remove_toml_table(text: str, table: str) -> str:
 def configure_codex(path: Path, endpoint: str, backup_dir: Path, dry_run: bool) -> bool:
     old = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
     text = old
-    text = remove_toml_table(text, "mcp_servers.openmemory")
-    text = remove_toml_table(text, "mcp_servers.open_memory")
-    text = remove_toml_table(text, "mcp_servers.local_memory")
+    text = remove_toml_table(text, "mcp_servers.memorycore")
     if "[mcp_servers]" not in text:
         if text and not text.endswith("\n"):
             text += "\n"
@@ -187,9 +167,6 @@ def configure_opencode(path: Path, endpoint: str, backup_dir: Path, dry_run: boo
     data = read_json(path)
     data.setdefault("$schema", "https://opencode.ai/config.json")
     servers = data.setdefault("mcp", {})
-    for key in list(servers.keys()):
-        if key.lower() in OPENMEMORY_KEYS:
-            servers.pop(key, None)
     servers[SERVER_NAME] = {"type": "remote", "url": endpoint}
     return write_json(path, data, backup_dir, dry_run)
 

@@ -1,37 +1,32 @@
 backend:
-  primary: sqlite
   fallback: sqlite
-
-qdrant:
-  url: http://127.0.0.1:6333
-  collection: agent_memory
-  timeout: 30
-
-embedding:
-  provider: auto
-  model: nomic-embed-text
-  fallback_provider: hashing
-  api_url: ""
-  api_key: ""
-  sentence_transformers_model: sentence-transformers/all-mpnet-base-v2
-  dim: 768
-  ollama_url: http://127.0.0.1:11434
-  timeout: 30
-
+  primary: sqlite
 context_pack:
   default_token_budget: 2000
   include_stale_warnings: true
   max_records_per_group: 6
-
-temporal:
-  enabled: false
-  contradiction_detection: heuristic
-  auto_supersede_user_corrections: true
-
+embedding:
+  api_key: ''
+  api_url: ''
+  dim: 768
+  fallback_provider: hashing
+  model: nomic-embed-text
+  ollama_url: http://127.0.0.1:11434
+  provider: auto
+  sentence_transformers_model: sentence-transformers/all-mpnet-base-v2
+  timeout: 30
 extraction:
-  api_key: ""
-  base_url: "http://127.0.0.1:8317/v1"
-  model: "gpt-5.5"
-  temperature: 0.1
+  api_key: sk
+  base_url: http://127.0.0.1:8317/v1
   max_tokens: 2000
+  model: gpt-5.5
+  temperature: 0.1
   timeout: 180
+qdrant:
+  collection: agent_memory
+  timeout: 30
+  url: http://127.0.0.1:6333
+temporal:
+  auto_supersede_user_corrections: true
+  contradiction_detection: heuristic
+  enabled: false

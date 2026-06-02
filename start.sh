@@ -46,7 +46,7 @@ LOG="$SCRIPT_DIR/mcore.log"
 SYNC_FILE="$SCRIPT_DIR/memory-sync/memories.json"
 PID_FILE="${MCORE_PID_FILE:-/tmp/mcore.pid}"
 UI_DIR="$SCRIPT_DIR/ui"
-UI_PORT="${MCORE_UI_PORT:-3001}"
+UI_PORT="${MCORE_UI_PORT:-18318}"
 UI_PID_FILE="/tmp/mcore-ui.pid"
 
 _log()  { echo "[start.sh] $*"; }

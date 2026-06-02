@@ -1,6 +1,6 @@
 [Unit]
-Description=local-memory-mcp curator hourly run
-Requires=lmmcp-curator.service
+Description=memorycore curator hourly run
+Requires=mcore-curator.service
 
 [Timer]
 OnCalendar=hourly

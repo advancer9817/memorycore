@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MCP_DIR="${LMMCP_DIR:-$HOME/project/local-memory-mcp}"
-PYTHON="${LMMCP_PYTHON:-$MCP_DIR/.venv/bin/python}"
-HOST="${LMMCP_HOST:-127.0.0.1}"
-PORT="${LMMCP_PORT:-8318}"
+MCP_DIR="${MCORE_DIR:-$HOME/project/memorycore}"
+PYTHON="${MCORE_PYTHON:-$MCP_DIR/.venv/bin/python}"
+HOST="${MCORE_HOST:-127.0.0.1}"
+PORT="${MCORE_PORT:-8318}"
 DB="${LOCAL_MEMORY_DB:-$MCP_DIR/memory.sqlite3}"
-PID_FILE="${LMMCP_PID_FILE:-/tmp/mcore.pid}"
-LOG_FILE="${LMMCP_LOG_FILE:-$MCP_DIR/lmmcp.log}"
+PID_FILE="${MCORE_PID_FILE:-/tmp/mcore.pid}"
+LOG_FILE="${MCORE_LOG_FILE:-$MCP_DIR/mcore.log}"
 SYNC_FILE="${SYNC_FILE:-memory-sync/memories.json}"
 SYNC_REMOTE="${SYNC_REMOTE:-origin}"
 # Set to 0 to disable automatic memory sync on start/stop
-AUTO_SYNC="${LMMCP_AUTO_SYNC:-1}"
+AUTO_SYNC="${MCORE_AUTO_SYNC:-1}"
 
 service_cmd_matches() {
   local pid="$1"
@@ -60,38 +60,38 @@ running_pid() {
 _sync_pull() {
   if [[ "$AUTO_SYNC" != "1" ]]; then return 0; fi
   local sync_path="$MCP_DIR/$SYNC_FILE"
-  echo "[lmmcp] auto-sync: pulling from git remote ..." >&2
+  echo "[mcore] auto-sync: pulling from git remote ..." >&2
   cd "$MCP_DIR"
   if ! git pull "$SYNC_REMOTE" --ff-only --quiet 2>/dev/null; then
-    echo "[lmmcp] auto-sync: git pull skipped (not a git repo or diverged)" >&2
+    echo "[mcore] auto-sync: git pull skipped (not a git repo or diverged)" >&2
     return 0
   fi
   if [[ ! -f "$sync_path" ]]; then
-    echo "[lmmcp] auto-sync: no sync file at $sync_path, skipping import" >&2
+    echo "[mcore] auto-sync: no sync file at $sync_path, skipping import" >&2
     return 0
   fi
-  echo "[lmmcp] auto-sync: importing memories (conflict_policy=newer) ..." >&2
+  echo "[mcore] auto-sync: importing memories (conflict_policy=newer) ..." >&2
   "$PYTHON" -m memorycore import "$sync_path" \
-    --conflict-policy newer --apply 2>&1 | grep -v "^$" | sed 's/^/[lmmcp] import: /' >&2 || true
+    --conflict-policy newer --apply 2>&1 | grep -v "^$" | sed 's/^/[mcore] import: /' >&2 || true
 }
 
 _sync_push() {
   if [[ "$AUTO_SYNC" != "1" ]]; then return 0; fi
   local sync_path="$MCP_DIR/$SYNC_FILE"
-  echo "[lmmcp] auto-sync: exporting memories ..." >&2
+  echo "[mcore] auto-sync: exporting memories ..." >&2
   mkdir -p "$(dirname "$sync_path")"
   "$PYTHON" -m memorycore export "$sync_path" --memories-only 2>/dev/null || {
-    echo "[lmmcp] auto-sync: export failed, skipping push" >&2
+    echo "[mcore] auto-sync: export failed, skipping push" >&2
     return 0
   }
   cd "$MCP_DIR"
   if ! git rev-parse --git-dir &>/dev/null; then
-    echo "[lmmcp] auto-sync: not a git repo, skipping push" >&2
+    echo "[mcore] auto-sync: not a git repo, skipping push" >&2
     return 0
   fi
   git add "$SYNC_FILE" 2>/dev/null || true
   if git diff --cached --quiet; then
-    echo "[lmmcp] auto-sync: no changes in sync file, skipping commit" >&2
+    echo "[mcore] auto-sync: no changes in sync file, skipping commit" >&2
     return 0
   fi
   local ts device
@@ -104,9 +104,9 @@ d = json.load(open('$sync_path'))
 print(d['counts'].get('memories', 0))
 " 2>/dev/null || echo '?')"
   git commit -m "chore(memory-sync): $device @ $ts — ${count} memories" --quiet
-  echo "[lmmcp] auto-sync: pushing to $SYNC_REMOTE ..." >&2
+  echo "[mcore] auto-sync: pushing to $SYNC_REMOTE ..." >&2
   git push "$SYNC_REMOTE" --quiet 2>/dev/null || \
-    echo "[lmmcp] auto-sync: git push failed (remote may be unreachable)" >&2
+    echo "[mcore] auto-sync: git push failed (remote may be unreachable)" >&2
 }
 
 start() {
@@ -187,5 +187,5 @@ case "${1:-}" in
     _sync_push || true
     _sync_pull || true
     ;;
-  *) echo "Usage: lmmcp {start|stop|restart|status|logs [N]|sync}" >&2; exit 2 ;;
+  *) echo "Usage: mcore {start|stop|restart|status|logs [N]|sync}" >&2; exit 2 ;;
 esac
