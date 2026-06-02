@@ -15,6 +15,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from memorycore.models import MEMORY_TYPES, STATUSES, VALID_RELATION_TYPES, load_config, config_path
+from memorycore.storage.db import _managed_query
 from memorycore.storage import (
     add_feedback,
     add_link,
@@ -285,6 +286,20 @@ async def _dispatch_api(request: Request, parts: list[str], query: dict[str, lis
             stale_after_days=int(body.get("stale_after_days", 60)), archive_after_days=int(body.get("archive_after_days", 120)),
             allow_actions=body.get("allow_actions"), deny_actions=body.get("deny_actions"),
         )
+    if parts == ["curator", "llm"] and method == "POST":
+        from memorycore.storage.curator_llm import llm_curator_report, apply_llm_curator
+        from memorycore.models import load_config
+        cfg = load_config()
+        dry_run = body.get("dry_run", True)
+        report = llm_curator_report(
+            config=cfg,
+            limit=int(body.get("limit", 200)),
+            sim_threshold=float(body.get("sim_threshold", 0.72)),
+        )
+        if not dry_run:
+            applied = apply_llm_curator(report, dry_run=False)
+            report["applied"] = applied
+        return report
     if parts == ["links"] and method == "POST":
         return add_link(body.get("source_id", ""), body.get("target_id", ""), body.get("relation_type", "related_to"), body.get("weight", 1.0), body.get("note", ""), body.get("source_agent", "frontend"))
     if len(parts) == 2 and parts[0] == "links" and method == "GET":
@@ -587,6 +602,14 @@ def _memory_categories() -> dict[str, Any]:
     return {"categories": categories, "total": len(categories)}
 
 
+_KNOWN_AGENTS = {
+    "claude", "claude-code",
+    "codex",
+    "hermes", "hermes-cli",
+    "gemini",
+    "opencode",
+}
+
 def _apps_list(
     limit: int = 50,
     name: str = "",
@@ -594,10 +617,15 @@ def _apps_list(
     sort_by: str = "name",
     sort_direction: str = "asc",
 ) -> dict[str, Any]:
+    from datetime import datetime, timezone, timedelta
+
     rows = search_memory_records(status="active", limit=1000)
     apps_by_id: dict[str, dict[str, Any]] = {}
     for row in rows:
         app = str(row.get("source_agent") or "manual")
+        # Only show known agent clients, not models or internal processes
+        if app not in _KNOWN_AGENTS:
+            continue
         if name and name.lower() not in app.lower():
             continue
         current = apps_by_id.setdefault(app, {
@@ -605,8 +633,8 @@ def _apps_list(
             "name": app,
             "total_memories_created": 0,
             "total_memories_accessed": 0,
-            "is_active": True,
-            "status": "unknown",
+            "is_active": False,
+            "status": "offline",
             "last_activity_at": "",
             "last_seen_at": "",
         })
@@ -616,14 +644,31 @@ def _apps_list(
             current["last_activity_at"] = updated_at
 
     presence_by_id = {item["agent_id"]: item for item in list_agent_presence(limit=500)}
+    now = datetime.now(timezone.utc)
     for app, item in apps_by_id.items():
         presence = presence_by_id.get(app)
-        if presence:
-            item["status"] = presence.get("status") or "unknown"
+        if presence and presence.get("status"):
+            item["status"] = presence["status"]
             item["last_seen_at"] = presence.get("last_seen_at") or ""
             item["is_active"] = item["status"] in {"online", "idle", "busy"}
             if str(item["last_seen_at"]) > str(item.get("last_activity_at") or ""):
                 item["last_activity_at"] = item["last_seen_at"]
+        else:
+            # Derive status from last memory activity when no live presence record
+            last_ts = item.get("last_activity_at") or ""
+            if last_ts:
+                try:
+                    ts = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    age = now - ts
+                    if age < timedelta(hours=24):
+                        item["status"] = "idle"
+                        item["is_active"] = True
+                    else:
+                        item["status"] = "offline"
+                except Exception:
+                    item["status"] = "offline"
 
     if is_active in {"true", "false"}:
         expected = is_active == "true"
@@ -694,6 +739,32 @@ def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
         "ExecMainStartTimestamp",
         "ExecMainExitTimestamp",
     ])
+    # Fall back to audit log when systemd timer has no history
+    last_run_at = (
+        service.get("ExecMainExitTimestamp")
+        or timer.get("LastTriggerUSec")
+        or ""
+    )
+    if not last_run_at:
+        try:
+            row = _managed_query(
+                "SELECT created_at FROM audit_events WHERE event_type='curator_apply'"
+                " ORDER BY created_at DESC LIMIT 1",
+                (),
+            )
+            if row:
+                last_run_at = row[0].get("created_at", "")
+        except Exception:
+            pass
+
+    # Compute next run when timer is inactive (hourly schedule)
+    next_run_at = timer.get("NextElapseUSecRealtime") or ""
+    if not next_run_at:
+        from datetime import datetime, timezone, timedelta
+        now_dt = datetime.now(timezone.utc)
+        next_hour = (now_dt + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+        next_run_at = next_hour.isoformat()
+
     return {
         "stats": stats,
         "curator": {
@@ -702,7 +773,7 @@ def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
             "summary": report.get("summary", {}),
             "planned_actions": report.get("action_plan", [])[:10],
         },
-        "timer": timer,
+        "timer": {**timer, "LastTriggerUSec": last_run_at, "NextElapseUSecRealtime": next_run_at},
         "service": service,
     }
 

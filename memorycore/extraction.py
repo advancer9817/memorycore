@@ -126,6 +126,7 @@ class ExtractionConfig:
             self.api_key = (
                 os.environ.get("MEM0_LLM_API_KEY")
                 or os.environ.get("DEEPSEEK_API_KEY")
+                or os.environ.get("ANTHROPIC_AUTH_TOKEN")
                 or ""
             )
 

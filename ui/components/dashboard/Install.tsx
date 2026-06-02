@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Activity, Archive, Database, Play, RefreshCw, Sparkles } from "lucide-react";
+import { Activity, Archive, Brain, Database, Play, Sparkles } from "lucide-react";
 import { getApiBaseUrl } from "@/lib/api-url";
 
 type CuratorStatus = {
@@ -99,9 +99,68 @@ export const Install = () => {
     }
   };
 
-  useEffect(() => {
-    fetchStatus().catch(() => setLoading(false));
-  }, []);
+  const [llmRunState, setLlmRunState] = useState<{
+    state: "idle" | "running" | "succeeded" | "failed";
+    elapsedMs?: number;
+    summary?: Record<string, number>;
+    error?: string;
+    findings?: Array<{ action: string; reason: string; title?: string }>;
+  }>({ state: "idle" });
+  const [llmRunning, setLlmRunning] = useState(false);
+
+  const runLlmCurator = async () => {
+    const started = new Date();
+    setLlmRunning(true);
+    setLlmRunState({ state: "running" });
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/curator/llm`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dry_run: false, limit: 200 }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload?.error?.message || `LLM Curator failed with ${response.status}`);
+      }
+      const data = payload.data || payload;
+      const finished = new Date();
+      const findings = [
+        ...(data.semantic_duplicates || []).map((d: any) => ({
+          action: "archive duplicate",
+          title: d.drop_title,
+          reason: d.reason,
+        })),
+        ...(data.contradictions || []).map((c: any) => ({
+          action: "mark contradicted",
+          title: c.older_title,
+          reason: c.reason,
+        })),
+        ...(data.importance_reassessments || [])
+          .filter((r: any) => r.action !== "keep")
+          .map((r: any) => ({
+            action: r.action,
+            title: r.title,
+            reason: r.reason,
+          })),
+      ];
+      setLlmRunState({
+        state: "succeeded",
+        elapsedMs: finished.getTime() - started.getTime(),
+        summary: data.summary || {},
+        findings,
+      });
+      await fetchStatus();
+    } catch (error: any) {
+      const finished = new Date();
+      setLlmRunState({
+        state: "failed",
+        elapsedMs: finished.getTime() - started.getTime(),
+        error: error?.message || "LLM Curator failed",
+      });
+    } finally {
+      setLlmRunning(false);
+    }
+  };
 
   const summary = status?.curator.summary || {};
   const byStatus = status?.stats.by_status || {};
@@ -111,17 +170,8 @@ export const Install = () => {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-semibold">Memory Operations</h2>
-        <Button
-          variant="outline"
-          className="border-zinc-700 bg-zinc-900 hover:bg-zinc-800"
-          onClick={() => fetchStatus()}
-          disabled={loading}
-        >
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
+      <div className="mb-6">
+        <h2 className="text-base font-medium text-zinc-400">Memory Operations</h2>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -220,10 +270,18 @@ export const Install = () => {
             <Button
               className="w-full bg-primary hover:bg-primary/90"
               onClick={applyCurator}
-              disabled={applying}
+              disabled={applying || llmRunning}
             >
               <Play className="h-4 w-4 mr-2" />
               {applying ? "Running curator..." : "Run Curator Now"}
+            </Button>
+            <Button
+              className="w-full bg-violet-700 hover:bg-violet-600 text-white"
+              onClick={runLlmCurator}
+              disabled={applying || llmRunning}
+            >
+              <Brain className="h-4 w-4 mr-2" />
+              {llmRunning ? "LLM analysing..." : "Run LLM Curator"}
             </Button>
             <div className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm">
               <div className="flex items-center justify-between">
@@ -285,6 +343,59 @@ export const Install = () => {
               )}
               {runState.error && <div className="mt-2 text-red-300">{runState.error}</div>}
             </div>
+            {/* LLM Curator results */}
+            {llmRunState.state !== "idle" && (
+              <div className="rounded-md border border-violet-800 bg-zinc-950 px-3 py-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-400">LLM analysis</span>
+                  <Badge
+                    variant="outline"
+                    className={
+                      llmRunState.state === "succeeded"
+                        ? "border-violet-600 bg-violet-500/10 text-violet-300"
+                        : llmRunState.state === "failed"
+                          ? "border-red-700 bg-red-500/10 text-red-300"
+                          : "border-sky-700 bg-sky-500/10 text-sky-300"
+                    }
+                  >
+                    {llmRunState.state}
+                  </Badge>
+                </div>
+                {llmRunState.elapsedMs !== undefined && (
+                  <div className="mt-1 text-zinc-500 text-xs">
+                    {(llmRunState.elapsedMs / 1000).toFixed(1)}s
+                  </div>
+                )}
+                {llmRunState.summary && (
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    <div className="rounded bg-zinc-800 px-2 py-1">
+                      <div className="text-zinc-500">Duplicates</div>
+                      <div className="text-zinc-100 font-medium">{llmRunState.summary.semantic_duplicates ?? 0}</div>
+                    </div>
+                    <div className="rounded bg-zinc-800 px-2 py-1">
+                      <div className="text-zinc-500">Contradictions</div>
+                      <div className="text-zinc-100 font-medium">{llmRunState.summary.contradictions ?? 0}</div>
+                    </div>
+                    <div className="rounded bg-zinc-800 px-2 py-1">
+                      <div className="text-zinc-500">Reassessed</div>
+                      <div className="text-zinc-100 font-medium">{llmRunState.summary.importance_reassessments ?? 0}</div>
+                    </div>
+                  </div>
+                )}
+                {llmRunState.findings && llmRunState.findings.length > 0 && (
+                  <div className="mt-3 space-y-1">
+                    {llmRunState.findings.slice(0, 4).map((f, i) => (
+                      <div key={i} className="rounded bg-zinc-800 px-2 py-1 text-xs">
+                        <span className="text-violet-300">{f.action}</span>
+                        <span className="text-zinc-400"> · {f.title || "—"}</span>
+                        {f.reason && <div className="text-zinc-500 mt-0.5">{f.reason}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {llmRunState.error && <div className="mt-2 text-red-300">{llmRunState.error}</div>}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

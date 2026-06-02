@@ -2279,3 +2279,53 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 **UI 端口**
 - 默认 UI 端口从 `3001` 改为 `18318`（`start.sh`、`scripts/install_services.sh`）
+
+## [迭代 93] 2026-06-03 — LLM-enhanced Curator + 多项 UI 与后端修复
+
+### 变更
+
+**新增：`memorycore/storage/curator_llm.py` — LLM 语义 Curator**
+- 三项语义分析能力，作为现有规则引擎的增强层（不修改原 `curator.py`）：
+  1. **语义去重**：向量搜索（Qdrant）找相似度 ≥ 0.72 的记忆对，批量交 LLM 判断是否真正重复，保留重要性更高的，archive 另一条
+  2. **矛盾检测**：相似度 ≥ 0.60 的记忆对交 LLM 判断是否语义矛盾，标记旧记忆为 `contradicted`
+  3. **重要性重评估**：对从未被访问 / 负反馈 / 高重要性的记忆批量让 LLM 重打分，可 promote / downgrade / archive
+- 全部 LLM 调用按 `_BATCH_SIZE=10` 分批，结果结构化返回，调用方决定是否应用（dry-run 安全）
+
+**新增：`POST /api/curator/llm`**
+- 接受 `{dry_run, limit, sim_threshold}`，`dry_run=false` 时直接写库并记录 audit log
+
+**前端：Curator Dry Run 卡片**
+- 新增 "Run LLM Curator" 按钮（紫色，区分规则 curator）
+- 新增 LLM analysis 结果卡：显示 Duplicates / Contradictions / Reassessed 三维度统计及 findings 列表
+
+**修复：Curator Schedule — Last run / Next run 显示 n/a**
+- `_curator_status_payload`：systemd timer inactive 时 `LastTriggerUSec` 为空，改为从 `audit_events` 表（`event_type='curator_apply'`）补取最近一次运行时间
+- `NextElapseUSecRealtime` 为空时，按 hourly 调度推算下一整点时间回填，不再显示 `n/a`
+
+**修复：Apps 页 agent 列表与 status**
+- `_apps_list` 加 `_KNOWN_AGENTS` 白名单（claude、claude-code、codex、hermes、hermes-cli、gemini、opencode），过滤掉模型名（gpt-5.5）和内部进程（memory-rollup、default-router）
+- status 从死值 `unknown` 改为按最近记忆活动时间推算：24h 内 → `idle`，更早 → `offline`
+
+**修复：Memory Operations UI**
+- 删除页面级 Refresh 按钮
+- "Memory Operations" 标题降权：`text-xl font-semibold` → `text-base font-medium text-zinc-400`
+
+---
+
+### 痛点记录
+
+**痛点 1：LLM Curator 全量返回 0，无任何错误提示**
+- 根因 A：`_fetch_active_memories(limit)` 只取最近 N 条，构成 `by_id` 缓存；Qdrant 搜索返回的相似记忆 id 来自全库，大量不在缓存里，被 `other_id not in by_id` 过滤掉，导致候选对为空
+- 修复：搜索结果中不在缓存的 id 收集后批量调 `_fetch_memories_by_ids` 从 DB 补查
+- 根因 B：`curator_llm.py` 的 `_call_llm` 复用 `extraction._call_llm`，后者在异常时 `raise_for_status()` 抛出，但上层 `try/except` 只打 `logger.warning` 不向上传，导致整个分析返回空结果且无 error 字段
+
+**痛点 2：LLM 调用 401 Unauthorized，静默失败**
+- `config.yaml` 的 `extraction.api_key: "nk"` 是错误的占位符；代理 `:8317` 实际需要 `ANTHROPIC_AUTH_TOKEN`（值为 `sk`）
+- `ExtractionConfig.__post_init__` 只读 `MEM0_LLM_API_KEY` / `DEEPSEEK_API_KEY`，未兜底 `ANTHROPIC_AUTH_TOKEN`
+- 修复：`__post_init__` 加 `ANTHROPIC_AUTH_TOKEN` fallback；`config.yaml` 的硬编码 key 清空为 `""`
+- **教训**：LLM 调用失败应在 `errors` 字段显式返回错误信息而不是静默返回空结果；`config.yaml` 中不应硬编码 token
+
+**痛点 3：Curator 纯规则引擎，瞬间结束易被误判为失败**
+- 原设计全部基于 SQL 阈值（importance / feedback_score / updated_at），无语义理解
+- `Planned Actions: 0` 是正常结果（记忆质量尚可），但 UI 没有任何解释，用户易误以为失败
+- 本次新增 LLM curator 作为语义补充层；UI 可后续加 "为什么没有 action" 的说明文本
