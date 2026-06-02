@@ -5,6 +5,7 @@ import json
 import logging
 import subprocess
 import time
+import yaml
 from dataclasses import dataclass
 from ipaddress import ip_address
 from typing import Any
@@ -13,8 +14,8 @@ from urllib.parse import parse_qs
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 
-from local_memory_mcp.models import MEMORY_TYPES, STATUSES, VALID_RELATION_TYPES, load_config
-from local_memory_mcp.storage import (
+from memorycore.models import MEMORY_TYPES, STATUSES, VALID_RELATION_TYPES, load_config, config_path
+from memorycore.storage import (
     add_feedback,
     add_link,
     add_memory_record,
@@ -164,7 +165,7 @@ async def _dispatch_api(request: Request, parts: list[str], query: dict[str, lis
         return {"memory_types": sorted(MEMORY_TYPES), "statuses": sorted(STATUSES), "relation_types": sorted(VALID_RELATION_TYPES)}
 
     if parts[:1] == ["v1"]:
-        return _dispatch_openmemory_compat(method, parts[1:], query, body)
+        return _dispatch_v1_compat(method, parts[1:], query, body)
 
     if parts == ["memories"] and method == "GET":
         return search_memory_records(
@@ -264,10 +265,10 @@ async def _dispatch_api(request: Request, parts: list[str], query: dict[str, lis
     if parts == ["backup"] and method == "POST":
         return memory_backup(body.get("path"))
     if parts == ["vector", "status"] and method == "GET":
-        from local_memory_mcp.vector_store import get_vector_store
+        from memorycore.vector_store import get_vector_store
         return get_vector_store(load_config()).status()
     if parts == ["vector", "search"] and method == "GET":
-        from local_memory_mcp.vector_store import get_vector_store
+        from memorycore.vector_store import get_vector_store
         results = get_vector_store(load_config()).search(
             _str_q(query, "query", _str_q(query, "q", "")),
             top_k=_int_q(query, "top_k", 10),
@@ -291,13 +292,13 @@ async def _dispatch_api(request: Request, parts: list[str], query: dict[str, lis
     raise LookupError(f"route not found: /api/{'/'.join(parts)}")
 
 
-def _dispatch_openmemory_compat(
+def _dispatch_v1_compat(
     method: str,
     parts: list[str],
     query: dict[str, list[str]],
     body: dict[str, Any],
 ) -> Any:
-    """Small REST compatibility surface for OpenMemory-style clients."""
+    """MemoryCore v1 REST compatibility API for external clients."""
     if (
         (parts == ["memories"] and method == "GET")
         or (parts == ["memories", "filter"] and method in {"GET", "POST"})
@@ -338,7 +339,7 @@ def _dispatch_openmemory_compat(
         start = max(page - 1, 0) * size
         page_rows = rows[start:start + size]
         return {
-            "items": [_openmemory_memory_item(row) for row in page_rows],
+            "items": [_memory_item(row) for row in page_rows],
             "total": total,
             "page": page,
             "size": size,
@@ -346,11 +347,11 @@ def _dispatch_openmemory_compat(
         }
     if parts == ["memories"] and method == "POST":
         content = body.get("content") or body.get("text") or ""
-        title = body.get("title") or str(content).strip().splitlines()[0][:88] or "OpenMemory memory"
+        title = body.get("title") or str(content).strip().splitlines()[0][:88] or "MemoryCore memory"
         return add_memory_record(
             body.get("type", "project_memory"), title, content,
-            scope=body.get("scope", "global"), tags=body.get("tags"), source=body.get("source", "openmemory-compat"),
-            source_agent=body.get("source_agent", "openmemory-ui"), project_path=body.get("project_path", ""),
+            scope=body.get("scope", "global"), tags=body.get("tags"), source=body.get("source", "v1-compat"),
+            source_agent=body.get("source_agent", "memorycore-ui"), project_path=body.get("project_path", ""),
             confidence=body.get("confidence", 0.7), importance=body.get("importance", 0.5),
             status=body.get("status", "active"), decay_policy=body.get("decay_policy", "review"),
             related_ids=body.get("related_ids"), metadata=body.get("metadata"),
@@ -361,15 +362,15 @@ def _dispatch_openmemory_compat(
         archived = [update_status(str(memory_id), "archived") for memory_id in ids]
         return {"archived": [item["id"] for item in archived], "count": len(archived)}
     if parts == ["memories", "categories"] and method == "GET":
-        return _openmemory_categories()
+        return _memory_categories()
     if len(parts) == 2 and parts[0] == "memories" and method == "GET":
         record = get_record(parts[1])
         if record is None:
             raise LookupError(f"memory not found: {parts[1]}")
-        return _openmemory_simple_memory(record)
+        return _simple_memory(record)
     if len(parts) == 2 and parts[0] == "memories" and method in {"PATCH", "PUT"}:
         content = body.get("content") or body.get("memory_content")
-        return _openmemory_memory_item(update_memory_content(parts[1], content, body.get("title"), body.get("status"), body.get("confidence"), body.get("importance")))
+        return _memory_item(update_memory_content(parts[1], content, body.get("title"), body.get("status"), body.get("confidence"), body.get("importance")))
     if len(parts) == 2 and parts[0] == "memories" and method == "DELETE":
         return update_status(parts[1], body.get("status", "archived"))
     if len(parts) == 3 and parts[0] == "memories" and parts[2] == "access-log" and method == "GET":
@@ -388,7 +389,7 @@ def _dispatch_openmemory_compat(
         for memory_id in ids:
             record = get_record(memory_id)
             if record:
-                items.append(_openmemory_memory_item(record))
+                items.append(_memory_item(record))
         return {"items": items, "total": len(items), "page": 1, "size": len(items) or 10, "pages": 1}
     if parts == ["memories", "actions", "pause"] and method == "POST":
         state = str(body.get("state") or "archived")
@@ -398,7 +399,7 @@ def _dispatch_openmemory_compat(
         return {"updated": [item["id"] for item in updated], "state": state}
     if parts == ["stats"] and method == "GET":
         stats = get_memory_stats()
-        apps = _openmemory_apps(limit=1000)["apps"]
+        apps = _apps_list(limit=1000)["apps"]
         return {"total_memories": stats["total"], "total_apps": len(apps), "apps": apps}
     if parts == ["entities"] and method == "GET":
         return entity_search(
@@ -410,7 +411,7 @@ def _dispatch_openmemory_compat(
     if parts == ["context-traces"] and method == "GET":
         return get_context_quality_stats(_int_q(query, "limit", 500))
     if len(parts) == 1 and parts[0] == "apps" and method == "GET":
-        return _openmemory_apps(
+        return _apps_list(
             limit=_int_q(query, "page_size", 50),
             name=_str_q(query, "name", "") or "",
             is_active=_str_q(query, "is_active", ""),
@@ -418,27 +419,80 @@ def _dispatch_openmemory_compat(
             sort_direction=_str_q(query, "sort_direction", "asc") or "asc",
         )
     if len(parts) == 2 and parts[0] == "apps" and method == "GET":
-        return _openmemory_app_details(parts[1])
+        return _app_details(parts[1])
     if len(parts) == 3 and parts[0] == "apps" and parts[2] == "memories" and method == "GET":
         page = _int_q(query, "page", 1)
         page_size = _int_q(query, "page_size", 50)
         rows = search_memory_records(status="active", limit=max(page * page_size, 1000))
         rows = [row for row in rows if (row.get("source_agent") or "manual") == parts[1]]
-        return {"memories": [_openmemory_memory_item(row) for row in rows], "total": len(rows), "page": page, "page_size": page_size}
+        return {"memories": [_memory_item(row) for row in rows], "total": len(rows), "page": page, "page_size": page_size}
     if len(parts) == 3 and parts[0] == "apps" and parts[2] == "accessed" and method == "GET":
         return {"memories": [], "total": 0, "page": _int_q(query, "page", 1), "page_size": _int_q(query, "page_size", 50)}
     if len(parts) == 2 and parts[0] == "apps" and method == "PUT":
-        return _openmemory_app_details(parts[1])
+        return _app_details(parts[1])
     if parts == ["config"] and method == "GET":
-        return {"openmemory": {"custom_instructions": ""}, "mem0": {"llm": {}, "embedder": {}}}
+        return _read_memorycore_config()
     if parts == ["config"] and method in {"PUT", "POST"}:
-        return body
+        return _write_memorycore_config(body)
     if len(parts) >= 2 and parts[0] == "config" and method in {"PUT", "POST"}:
         return body
     raise LookupError(f"route not found: /api/v1/{'/'.join(parts)}")
 
 
-def _openmemory_memory_item(record: dict[str, Any]) -> dict[str, Any]:
+def _read_memorycore_config() -> dict[str, Any]:
+    cfg = load_config()
+    extraction = cfg.get("extraction", {})
+    embedding = cfg.get("embedding", {})
+    return {
+        "settings": {
+            "custom_instructions": None,
+        },
+        "llm": {
+            "extraction": {
+                "base_url": extraction.get("base_url", ""),
+                "api_key": extraction.get("api_key", ""),
+                "model": extraction.get("model", ""),
+                "temperature": extraction.get("temperature", 0.1),
+                "max_tokens": extraction.get("max_tokens", 2000),
+                "timeout": extraction.get("timeout", 180),
+            },
+            "embedding": {
+                "provider": embedding.get("provider", "auto"),
+                "model": embedding.get("model", "nomic-embed-text"),
+                "ollama_url": embedding.get("ollama_url", "http://127.0.0.1:11434"),
+                "api_url": embedding.get("api_url", ""),
+                "api_key": embedding.get("api_key", ""),
+                "dim": embedding.get("dim", 768),
+                "timeout": embedding.get("timeout", 30),
+            },
+        },
+    }
+
+
+def _write_memorycore_config(body: dict[str, Any]) -> dict[str, Any]:
+    path = config_path()
+    existing: dict[str, Any] = {}
+    if path.exists():
+        existing = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+    llm_body = body.get("llm", {})
+    extraction_patch = llm_body.get("extraction", {})
+    embedding_patch = llm_body.get("embedding", {})
+
+    if extraction_patch:
+        existing.setdefault("extraction", {}).update({
+            k: v for k, v in extraction_patch.items() if v is not None and v != ""
+        })
+    if embedding_patch:
+        existing.setdefault("embedding", {}).update({
+            k: v for k, v in embedding_patch.items() if v is not None and v != ""
+        })
+
+    path.write_text(yaml.safe_dump(existing, allow_unicode=True, default_flow_style=False), encoding="utf-8")
+    return _read_memorycore_config()
+
+
+def _memory_item(record: dict[str, Any]) -> dict[str, Any]:
     tags = [str(tag) for tag in record.get("tags", [])]
     state = "archived" if record.get("status") == "archived" else "active"
     return {
@@ -454,8 +508,8 @@ def _openmemory_memory_item(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _openmemory_simple_memory(record: dict[str, Any]) -> dict[str, Any]:
-    item = _openmemory_memory_item(record)
+def _simple_memory(record: dict[str, Any]) -> dict[str, Any]:
+    item = _memory_item(record)
     return {
         "id": item["id"],
         "text": item["content"],
@@ -468,7 +522,7 @@ def _openmemory_simple_memory(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _openmemory_categories() -> dict[str, Any]:
+def _memory_categories() -> dict[str, Any]:
     rows = search_memory_records(status="active", limit=1000)
     names = sorted({str(tag) for row in rows for tag in row.get("tags", []) if str(tag)})
     categories = [
@@ -478,7 +532,7 @@ def _openmemory_categories() -> dict[str, Any]:
     return {"categories": categories, "total": len(categories)}
 
 
-def _openmemory_apps(
+def _apps_list(
     limit: int = 50,
     name: str = "",
     is_active: str | None = "",
@@ -535,7 +589,7 @@ def _openmemory_apps(
     return {"apps": apps, "total": len(apps), "page": 1, "page_size": limit}
 
 
-def _openmemory_app_details(app_id: str) -> dict[str, Any]:
+def _app_details(app_id: str) -> dict[str, Any]:
     rows = search_memory_records(status="active", limit=1000)
     total = sum(1 for row in rows if (row.get("source_agent") or "manual") == app_id)
     return {

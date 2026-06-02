@@ -5,11 +5,11 @@ import re
 import uuid
 from typing import Any
 
-from local_memory_mcp.models import as_json, now, row_to_dict
-from local_memory_mcp.storage.db import managed_conn
+from memorycore.models import as_json, now, row_to_dict
+from memorycore.storage.db import managed_conn
 
 _ALIAS_GROUPS = [
-    ("lmmcp", ["lmmcp", "local_memory", "local-memory-mcp", "local_memory_mcp", "local memory", "local memory mcp"]),
+    ("lmmcp", ["lmmcp", "local_memory", "local-memory-mcp", "memorycore", "local memory", "local memory mcp"]),
     ("qdrant", ["qdrant", "vector store", "vector_store"]),
     ("sqlite", ["sqlite", "sqlite3", "memory.sqlite3", "fts5"]),
     ("ollama", ["ollama", "nomic-embed-text", "nomic embed text"]),

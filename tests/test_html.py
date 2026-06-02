@@ -1,4 +1,4 @@
-import local_memory_mcp as lm
+import memorycore as lm
 
 
 def test_export_html_writes_dashboard_with_records_and_escaped_json(tmp_path):

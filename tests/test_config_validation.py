@@ -1,6 +1,6 @@
 """Tests for config schema validation."""
 import pytest
-from local_memory_mcp.models import validate_config, DEFAULT_CONFIG, load_config
+from memorycore.models import validate_config, DEFAULT_CONFIG, load_config
 
 
 def test_default_config_is_valid():

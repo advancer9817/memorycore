@@ -5,9 +5,9 @@ import uuid
 from datetime import timedelta
 from typing import Any
 
-from local_memory_mcp.models import as_json, from_json, local_now, now
-from local_memory_mcp.storage.db import managed_conn
-from local_memory_mcp.storage.audit import log_audit_event
+from memorycore.models import as_json, from_json, local_now, now
+from memorycore.storage.db import managed_conn
+from memorycore.storage.audit import log_audit_event
 
 _MESSAGE_PRIORITIES = {"low", "normal", "high", "urgent"}
 _PRESENCE_STATUSES = {"online", "idle", "busy", "offline"}

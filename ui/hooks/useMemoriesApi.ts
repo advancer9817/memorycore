@@ -166,7 +166,7 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
         user_id: user_id,
         text: text,
         infer: false,
-        app: "openmemory",
+        app: "memorycore",
       }
       await axios.post<ApiMemoryItem>(`${getApiBaseUrl()}/api/v1/memories/`, memoryData);
     } catch (err: any) {

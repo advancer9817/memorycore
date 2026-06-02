@@ -15,7 +15,7 @@ AUTO_SYNC="${LMMCP_AUTO_SYNC:-1}"
 
 service_cmd_matches() {
   local pid="$1"
-  ps -p "$pid" -o args= 2>/dev/null | grep -q "local_memory_mcp.*serve.*--port $PORT"
+  ps -p "$pid" -o args= 2>/dev/null | grep -q "memorycore.*serve.*--port $PORT"
 }
 
 port_pid() {
@@ -71,7 +71,7 @@ _sync_pull() {
     return 0
   fi
   echo "[lmmcp] auto-sync: importing memories (conflict_policy=newer) ..." >&2
-  "$PYTHON" -m local_memory_mcp import "$sync_path" \
+  "$PYTHON" -m memorycore import "$sync_path" \
     --conflict-policy newer --apply 2>&1 | grep -v "^$" | sed 's/^/[lmmcp] import: /' >&2 || true
 }
 
@@ -80,7 +80,7 @@ _sync_push() {
   local sync_path="$MCP_DIR/$SYNC_FILE"
   echo "[lmmcp] auto-sync: exporting memories ..." >&2
   mkdir -p "$(dirname "$sync_path")"
-  "$PYTHON" -m local_memory_mcp export "$sync_path" --memories-only 2>/dev/null || {
+  "$PYTHON" -m memorycore export "$sync_path" --memories-only 2>/dev/null || {
     echo "[lmmcp] auto-sync: export failed, skipping push" >&2
     return 0
   }
@@ -125,7 +125,7 @@ start() {
   # Pull + import before starting so this session starts with latest memories
   _sync_pull || true
   cd "$MCP_DIR"
-  nohup env LOCAL_MEMORY_DB="$DB" PYTHONPATH="$MCP_DIR" "$PYTHON" -m local_memory_mcp serve --host "$HOST" --port "$PORT" >> "$LOG_FILE" 2>&1 &
+  nohup env LOCAL_MEMORY_DB="$DB" PYTHONPATH="$MCP_DIR" "$PYTHON" -m memorycore serve --host "$HOST" --port "$PORT" >> "$LOG_FILE" 2>&1 &
   echo $! > "$PID_FILE"
   sleep 1
   local post_pid

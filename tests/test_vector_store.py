@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from local_memory_mcp.vector_store import (
+from memorycore.vector_store import (
     EmbedConfig,
     SearchResult,
     VectorStore,
@@ -99,14 +99,14 @@ class TestEmbedText:
         vec = embed_text("hello", cfg)
         assert len(vec) == 64
 
-    @patch("local_memory_mcp.vector_store._embed_ollama", side_effect=Exception("connection refused"))
+    @patch("memorycore.vector_store._embed_ollama", side_effect=Exception("connection refused"))
     def test_ollama_failure_can_fall_back_to_hashing(self, mock_ollama):
         cfg = EmbedConfig(provider="ollama", fallback_provider="hashing", dim=64)
         vec = embed_text("hello", cfg)
         assert len(vec) == 64  # hashing fallback
 
-    @patch("local_memory_mcp.vector_store._embed_openai", return_value=[1.0] + [0.0] * 63)
-    @patch("local_memory_mcp.vector_store._embed_ollama")
+    @patch("memorycore.vector_store._embed_openai", return_value=[1.0] + [0.0] * 63)
+    @patch("memorycore.vector_store._embed_ollama")
     def test_auto_prefers_configured_openai_compatible_api(self, mock_ollama, mock_openai):
         cfg = EmbedConfig(
             provider="auto",
@@ -119,8 +119,8 @@ class TestEmbedText:
         mock_openai.assert_called_once()
         mock_ollama.assert_not_called()
 
-    @patch("local_memory_mcp.vector_store._embed_sentence_transformers", return_value=[1.0] + [0.0] * 63)
-    @patch("local_memory_mcp.vector_store._embed_ollama", side_effect=Exception("connection refused"))
+    @patch("memorycore.vector_store._embed_sentence_transformers", return_value=[1.0] + [0.0] * 63)
+    @patch("memorycore.vector_store._embed_ollama", side_effect=Exception("connection refused"))
     def test_ollama_failure_prefers_sentence_transformers(self, mock_ollama, mock_st):
         cfg = EmbedConfig(provider="ollama", fallback_provider="sentence-transformers", dim=64)
         vec = embed_text("hello", cfg)
@@ -128,16 +128,16 @@ class TestEmbedText:
         assert vec[0] == 1.0
         mock_st.assert_called_once()
 
-    @patch("local_memory_mcp.vector_store._embed_sentence_transformers", side_effect=ImportError("missing"))
-    @patch("local_memory_mcp.vector_store._embed_ollama", side_effect=Exception("connection refused"))
+    @patch("memorycore.vector_store._embed_sentence_transformers", side_effect=ImportError("missing"))
+    @patch("memorycore.vector_store._embed_ollama", side_effect=Exception("connection refused"))
     def test_sentence_transformers_failure_falls_back_to_hashing(self, mock_ollama, mock_st):
         cfg = EmbedConfig(provider="ollama", fallback_provider="sentence-transformers", dim=64)
         vec = embed_text("hello", cfg)
         assert len(vec) == 64
         mock_st.assert_called_once()
 
-    @patch("local_memory_mcp.vector_store._embed_openai", return_value=[1.0] + [0.0] * 63)
-    @patch("local_memory_mcp.vector_store._embed_ollama", side_effect=Exception("connection refused"))
+    @patch("memorycore.vector_store._embed_openai", return_value=[1.0] + [0.0] * 63)
+    @patch("memorycore.vector_store._embed_ollama", side_effect=Exception("connection refused"))
     def test_ollama_failure_can_use_openai_compatible_api(self, mock_ollama, mock_openai):
         cfg = EmbedConfig(
             provider="ollama",

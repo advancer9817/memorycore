@@ -24,27 +24,27 @@ export interface EmbedderProvider {
   config: EmbedderConfig;
 }
 
-export interface Mem0Config {
+export interface LLMBackendConfig {
   llm?: LLMProvider;
   embedder?: EmbedderProvider;
 }
 
-export interface OpenMemoryConfig {
+export interface MemoryCoreConfig {
   custom_instructions?: string | null;
 }
 
 export interface ConfigState {
-  openmemory: OpenMemoryConfig;
-  mem0: Mem0Config;
+  settings: MemoryCoreConfig;
+  llm: LLMBackendConfig;
   status: 'idle' | 'loading' | 'succeeded' | 'failed';
   error: string | null;
 }
 
 const initialState: ConfigState = {
-  openmemory: {
+  settings: {
     custom_instructions: null,
   },
-  mem0: {
+  llm: {
     llm: {
       provider: 'openai',
       config: {
@@ -74,11 +74,13 @@ const configSlice = createSlice({
       state.status = 'loading';
       state.error = null;
     },
-    setConfigSuccess: (state, action: PayloadAction<{ openmemory?: OpenMemoryConfig; mem0: Mem0Config }>) => {
-      if (action.payload.openmemory) {
-        state.openmemory = action.payload.openmemory;
+    setConfigSuccess: (state, action: PayloadAction<{ settings?: MemoryCoreConfig; llm?: LLMBackendConfig }>) => {
+      if (action.payload.settings) {
+        state.settings = action.payload.settings;
       }
-      state.mem0 = action.payload.mem0;
+      if (action.payload.llm) {
+        state.llm = action.payload.llm;
+      }
       state.status = 'succeeded';
       state.error = null;
     },
@@ -86,17 +88,17 @@ const configSlice = createSlice({
       state.status = 'failed';
       state.error = action.payload;
     },
-    updateOpenMemory: (state, action: PayloadAction<OpenMemoryConfig>) => {
-      state.openmemory = action.payload;
+    updateMemoryCoreConfig: (state, action: PayloadAction<MemoryCoreConfig>) => {
+      state.settings = action.payload;
     },
-    updateLLM: (state, action: PayloadAction<LLMProvider>) => {
-      state.mem0.llm = action.payload;
+    updateLLMProvider: (state, action: PayloadAction<LLMProvider>) => {
+      state.llm.llm = action.payload;
     },
-    updateEmbedder: (state, action: PayloadAction<EmbedderProvider>) => {
-      state.mem0.embedder = action.payload;
+    updateEmbedderProvider: (state, action: PayloadAction<EmbedderProvider>) => {
+      state.llm.embedder = action.payload;
     },
-    updateMem0Config: (state, action: PayloadAction<Mem0Config>) => {
-      state.mem0 = action.payload;
+    updateLLMBackendConfig: (state, action: PayloadAction<LLMBackendConfig>) => {
+      state.llm = action.payload;
     },
   },
 });
@@ -105,10 +107,10 @@ export const {
   setConfigLoading,
   setConfigSuccess,
   setConfigError,
-  updateOpenMemory,
-  updateLLM,
-  updateEmbedder,
-  updateMem0Config,
+  updateMemoryCoreConfig,
+  updateLLMProvider,
+  updateEmbedderProvider,
+  updateLLMBackendConfig,
 } = configSlice.actions;
 
-export default configSlice.reducer; 
+export default configSlice.reducer;

@@ -46,7 +46,7 @@ _check_env() {
 _do_push() {
     _log "Exporting memories (--memories-only) ..."
     mkdir -p "$(dirname "$SYNC_PATH")"
-    "$PY" -m local_memory_mcp export "$SYNC_PATH" --memories-only 2>&1
+    "$PY" -m memorycore export "$SYNC_PATH" --memories-only 2>&1
 
     cd "$LMMCP_DIR"
     if git diff --quiet "$SYNC_FILE" 2>/dev/null && git ls-files --error-unmatch "$SYNC_FILE" &>/dev/null; then
@@ -77,12 +77,12 @@ _do_pull() {
     fi
 
     _log "Dry-run import (conflict_policy=newer) ..."
-    "$PY" -m local_memory_mcp import "$SYNC_PATH" --conflict-policy newer 2>&1
+    "$PY" -m memorycore import "$SYNC_PATH" --conflict-policy newer 2>&1
 
     echo ""
     read -r -p "[sync-memory] Apply import? (y/N) " answer
     if [[ "${answer,,}" == "y" ]]; then
-        "$PY" -m local_memory_mcp import "$SYNC_PATH" --conflict-policy newer --apply 2>&1
+        "$PY" -m memorycore import "$SYNC_PATH" --conflict-policy newer --apply 2>&1
         _log "Import applied."
     else
         _log "Import skipped (dry-run only)."
@@ -100,7 +100,7 @@ _do_status() {
     "$PY" -c "
 import json, sys
 sys.path.insert(0, '$LMMCP_DIR')
-from local_memory_mcp.storage.crud import get_memory_stats
+from memorycore.storage.crud import get_memory_stats
 s = get_memory_stats()
 print(f'  total={s[\"total\"]}  by_status={s[\"by_status\"]}')
 " 2>/dev/null || true

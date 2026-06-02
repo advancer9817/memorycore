@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from local_memory_mcp.privacy import redact_secrets, redact_record_fields
+from memorycore.privacy import redact_secrets, redact_record_fields
 
 
 class TestRedactSecrets:
@@ -106,9 +106,9 @@ class TestAddMemoryRedaction:
         import os
         monkeypatch.setenv("LMMCP_DB", str(tmp_path / "test.sqlite3"))
         # Reset initialized DB cache so tmp DB is used
-        from local_memory_mcp import models
+        from memorycore import models
         monkeypatch.setattr(models, "_INITIALIZED_DB_PATHS", set())
-        from local_memory_mcp.storage import add_memory_record, get_record
+        from memorycore.storage import add_memory_record, get_record
         record = add_memory_record(
             memory_type="project_memory",
             title="Service credentials",

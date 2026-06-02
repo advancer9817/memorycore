@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import local_memory_mcp as lm
+import memorycore as lm
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -11,7 +11,7 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 def test_context_pack_keeps_relevant_chinese_prompt_memory(monkeypatch):
     monkeypatch.setattr(
-        "local_memory_mcp.storage.search._vector_search_ids",
+        "memorycore.storage.search._vector_search_ids",
         lambda task, top_k=20, score_threshold=0.35: [],
     )
     related = lm.add_memory_record(
@@ -37,7 +37,7 @@ def test_context_pack_keeps_relevant_chinese_prompt_memory(monkeypatch):
 
 def test_context_pack_filters_weak_chinese_keyword_overlap(monkeypatch):
     monkeypatch.setattr(
-        "local_memory_mcp.storage.search._vector_search_ids",
+        "memorycore.storage.search._vector_search_ids",
         lambda task, top_k=20, score_threshold=0.35: [],
     )
     related = lm.add_memory_record(
@@ -92,7 +92,7 @@ def test_context_pack_filters_low_relevance_vector_only_hits(monkeypatch):
     )
 
     monkeypatch.setattr(
-        "local_memory_mcp.storage.search._vector_search_ids",
+        "memorycore.storage.search._vector_search_ids",
         lambda task, top_k=20, score_threshold=0.35: [(record["id"], 0.36)],
     )
 
@@ -112,7 +112,7 @@ def test_context_pack_filters_medium_score_vector_only_without_lexical_match(mon
     )
 
     monkeypatch.setattr(
-        "local_memory_mcp.storage.search._vector_search_ids",
+        "memorycore.storage.search._vector_search_ids",
         lambda task, top_k=20, score_threshold=0.35: [(record["id"], 0.66)],
     )
 
@@ -161,7 +161,7 @@ def test_context_pack_vector_only_hits_respect_scope_and_project_path(monkeypatc
     )
 
     monkeypatch.setattr(
-        "local_memory_mcp.storage.search._vector_search_ids",
+        "memorycore.storage.search._vector_search_ids",
         lambda task, top_k=20, score_threshold=0.35: [
             (wrong_scope["id"], 0.95),
             (wrong_project["id"], 0.95),
@@ -186,7 +186,7 @@ def test_context_pack_vector_only_hits_respect_scope_and_project_path(monkeypatc
 def test_context_relevance_evaluation_fixture(monkeypatch):
     """Pinned weak-relevance prompts from real feedback must keep expected IDs."""
     monkeypatch.setattr(
-        "local_memory_mcp.storage.search._vector_search_ids",
+        "memorycore.storage.search._vector_search_ids",
         lambda task, top_k=20, score_threshold=0.35: [],
     )
     cases = json.loads((FIXTURES / "context_relevance_cases.json").read_text(encoding="utf-8"))

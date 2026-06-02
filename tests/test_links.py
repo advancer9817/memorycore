@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-import local_memory_mcp as lm
+import memorycore as lm
 
 
 # ─── helpers ──────────────────────────────────────────────────────────────────

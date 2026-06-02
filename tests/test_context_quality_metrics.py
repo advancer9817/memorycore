@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import local_memory_mcp as lm
-from local_memory_mcp.storage import get_context_quality_stats
+import memorycore as lm
+from memorycore.storage import get_context_quality_stats
 
 
 def test_context_pack_records_quality_event_and_rates():

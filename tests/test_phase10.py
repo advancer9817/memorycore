@@ -1,6 +1,6 @@
 """Tests for Phase 10: effectiveness tracking, injection recording, memory_warnings, memory_update."""
 import pytest
-import local_memory_mcp as lm
+import memorycore as lm
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +133,7 @@ def test_init_db_migrates_existing_memories_table_without_effectiveness_columns(
 
 def test_memory_warnings_returns_empty_for_no_links():
     r = lm.add_memory_record("project_memory", "Warn no links", "content")
-    from local_memory_mcp.storage import get_active_warnings
+    from memorycore.storage import get_active_warnings
     result = get_active_warnings([r["id"]])
     assert result == []
 
@@ -143,7 +143,7 @@ def test_memory_warnings_detects_contradicts_link():
     b = lm.add_memory_record("project_memory", "Warn B", "content B")
     lm.add_link(a["id"], b["id"], relation_type="contradicts", weight=0.8)
 
-    from local_memory_mcp.storage import get_active_warnings
+    from memorycore.storage import get_active_warnings
     warnings = get_active_warnings([a["id"], b["id"]])
     assert len(warnings) == 1
     w = warnings[0]
@@ -158,7 +158,7 @@ def test_memory_warnings_detects_supersedes_link():
     new = lm.add_memory_record("project_memory", "Warn new", "new content")
     lm.add_link(new["id"], old["id"], relation_type="supersedes", weight=0.5)
 
-    from local_memory_mcp.storage import get_active_warnings
+    from memorycore.storage import get_active_warnings
     warnings = get_active_warnings([old["id"], new["id"]])
     assert len(warnings) == 1
     assert warnings[0]["relation_type"] == "supersedes"
@@ -170,7 +170,7 @@ def test_memory_warnings_respects_min_weight():
     b = lm.add_memory_record("project_memory", "Warn low weight B", "content")
     lm.add_link(a["id"], b["id"], relation_type="contradicts", weight=0.2)
 
-    from local_memory_mcp.storage import get_active_warnings
+    from memorycore.storage import get_active_warnings
     # Default min_weight=0.4 should exclude weight=0.2
     warnings = get_active_warnings([a["id"], b["id"]], min_weight=0.4)
     assert warnings == []

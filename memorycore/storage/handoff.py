@@ -4,10 +4,10 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from local_memory_mcp.models import as_json, from_json, normalize_list, now
-from local_memory_mcp.storage.agents import send_agent_message
-from local_memory_mcp.storage.audit import log_audit_event
-from local_memory_mcp.storage.db import managed_conn
+from memorycore.models import as_json, from_json, normalize_list, now
+from memorycore.storage.agents import send_agent_message
+from memorycore.storage.audit import log_audit_event
+from memorycore.storage.db import managed_conn
 
 _HANDOFF_STATUSES = {"ack", "done", "failed"}
 

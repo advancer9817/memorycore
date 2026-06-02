@@ -1,6 +1,6 @@
 from pathlib import Path
 
-import local_memory_mcp as lm
+import memorycore as lm
 
 ROOT = Path(__file__).resolve().parents[1]
 

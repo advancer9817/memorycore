@@ -1,6 +1,6 @@
 import pytest
 
-import local_memory_mcp as lm
+import memorycore as lm
 
 
 def test_add_get_list_normalizes_fields():

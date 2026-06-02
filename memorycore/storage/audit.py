@@ -4,8 +4,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from local_memory_mcp.models import as_json, now
-from local_memory_mcp.storage.db import _managed_query, managed_conn
+from memorycore.models import as_json, now
+from memorycore.storage.db import _managed_query, managed_conn
 
 
 def log_audit_event(

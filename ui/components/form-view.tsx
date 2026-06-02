@@ -29,117 +29,51 @@ export function FormView({ settings, onChange }: FormViewProps) {
   const API_URL = process.env.NEXT_PUBLIC_API_URL || ""
   const userId = useSelector((state: RootState) => state.profile.userId)
 
-  const handleOpenMemoryChange = (key: string, value: any) => {
+  const handleMemoryCoreChange = (key: string, value: any) => {
     onChange({
       ...settings,
-      openmemory: {
-        ...settings.openmemory,
+      settings: {
+        ...settings.settings,
         [key]: value,
       },
     })
   }
 
-  const handleLlmProviderChange = (value: string) => {
+  const handleExtractionChange = (key: string, value: any) => {
     onChange({
       ...settings,
-      mem0: {
-        ...settings.mem0,
-        llm: {
-          ...settings.mem0.llm,
-          provider: value,
+      llm: {
+        ...settings.llm,
+        extraction: {
+          ...settings.llm?.extraction,
+          [key]: value,
         },
       },
     })
   }
 
-  const handleLlmConfigChange = (key: string, value: any) => {
+  const handleEmbeddingChange = (key: string, value: any) => {
     onChange({
       ...settings,
-      mem0: {
-        ...settings.mem0,
-        llm: {
-          ...settings.mem0.llm,
-          config: {
-            ...settings.mem0.llm.config,
-            [key]: value,
-          },
+      llm: {
+        ...settings.llm,
+        embedding: {
+          ...settings.llm?.embedding,
+          [key]: value,
         },
       },
     })
   }
 
-  const handleEmbedderProviderChange = (value: string) => {
-    onChange({
-      ...settings,
-      mem0: {
-        ...settings.mem0,
-        embedder: {
-          ...settings.mem0.embedder,
-          provider: value,
-        },
-      },
-    })
-  }
-
-  const handleEmbedderConfigChange = (key: string, value: any) => {
-    onChange({
-      ...settings,
-      mem0: {
-        ...settings.mem0,
-        embedder: {
-          ...settings.mem0.embedder,
-          config: {
-            ...settings.mem0.embedder.config,
-            [key]: value,
-          },
-        },
-      },
-    })
-  }
-
-  const needsLlmApiKey = settings.mem0?.llm?.provider?.toLowerCase() !== "ollama"
-  const needsEmbedderApiKey = settings.mem0?.embedder?.provider?.toLowerCase() !== "ollama"
-  const isLlmOllama = settings.mem0?.llm?.provider?.toLowerCase() === "ollama"
-  const isEmbedderOllama = settings.mem0?.embedder?.provider?.toLowerCase() === "ollama"
-
-  const LLM_PROVIDERS = {
-    "OpenAI": "openai",
-    "Anthropic": "anthropic", 
-    "Azure OpenAI": "azure_openai",
-    "Ollama": "ollama",
-    "Together": "together",
-    "Groq": "groq",
-    "Litellm": "litellm",
-    "Mistral AI": "mistralai",
-    "Google AI": "google_ai",
-    "AWS Bedrock": "aws_bedrock",
-    "Gemini": "gemini",
-    "DeepSeek": "deepseek",
-    "xAI": "xai",
-    "LM Studio": "lmstudio",
-    "LangChain": "langchain",
-  }
-
-  const EMBEDDER_PROVIDERS = {
-    "OpenAI": "openai",
-    "Azure OpenAI": "azure_openai", 
-    "Ollama": "ollama",
-    "Hugging Face": "huggingface",
-    "Vertex AI": "vertexai",
-    "Gemini": "gemini",
-    "LM Studio": "lmstudio",
-    "Together": "together",
-    "LangChain": "langchain",
-    "AWS Bedrock": "aws_bedrock",
-  }
+  const isEmbeddingOllama = settings.llm?.embedding?.provider?.toLowerCase() === "ollama"
 
   return (
     <div className="space-y-8">
-      {/* OpenMemory Settings */}
+      {/* MemoryCore Settings */}
       <Card>
         <CardHeader>
-          <CardTitle>OpenMemory Settings</CardTitle>
-          <CardDescription>Configure your OpenMemory instance settings</CardDescription>
+          <CardTitle>MemoryCore Settings</CardTitle>
+          <CardDescription>Configure your MemoryCore instance settings</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="space-y-2">
@@ -147,8 +81,8 @@ export function FormView({ settings, onChange }: FormViewProps) {
             <Textarea
               id="custom-instructions"
               placeholder="Enter custom instructions for memory management..."
-              value={settings.openmemory?.custom_instructions || ""}
-              onChange={(e) => handleOpenMemoryChange("custom_instructions", e.target.value)}
+              value={settings.settings?.custom_instructions || ""}
+              onChange={(e) => handleMemoryCoreChange("custom_instructions", e.target.value)}
               className="min-h-[100px]"
             />
             <p className="text-xs text-muted-foreground mt-1">
@@ -158,113 +92,94 @@ export function FormView({ settings, onChange }: FormViewProps) {
         </CardContent>
       </Card>
 
-      {/* LLM Settings */}
+      {/* Extraction LLM Settings */}
       <Card>
         <CardHeader>
-          <CardTitle>LLM Settings</CardTitle>
-          <CardDescription>Configure your Large Language Model provider and settings</CardDescription>
+          <CardTitle>Extraction LLM</CardTitle>
+          <CardDescription>LLM used for memory fact extraction (config.yaml: extraction.*)</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="llm-provider">LLM Provider</Label>
-            <Select 
-              value={settings.mem0?.llm?.provider || ""}
-              onValueChange={handleLlmProviderChange}
-            >
-              <SelectTrigger id="llm-provider">
-                <SelectValue placeholder="Select a provider" />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.entries(LLM_PROVIDERS).map(([provider, value]) => (
-                  <SelectItem key={value} value={value}>
-                    {provider}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="llm-model">Model</Label>
+            <Label htmlFor="extraction-base-url">Base URL</Label>
             <Input
-              id="llm-model"
-              placeholder="Enter model name"
-              value={settings.mem0?.llm?.config?.model || ""}
-              onChange={(e) => handleLlmConfigChange("model", e.target.value)}
+              id="extraction-base-url"
+              placeholder="http://127.0.0.1:8317/v1"
+              value={settings.llm?.extraction?.base_url || ""}
+              onChange={(e) => handleExtractionChange("base_url", e.target.value)}
             />
           </div>
 
-          {isLlmOllama && (
-            <div className="space-y-2">
-              <Label htmlFor="llm-ollama-url">Ollama Base URL</Label>
-              <Input
-                id="llm-ollama-url"
-                placeholder="http://host.docker.internal:11434"
-                value={settings.mem0?.llm?.config?.ollama_base_url || ""}
-                onChange={(e) => handleLlmConfigChange("ollama_base_url", e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                Leave empty to use default: http://host.docker.internal:11434
-              </p>
-            </div>
-          )}
+          <div className="space-y-2">
+            <Label htmlFor="extraction-model">Model</Label>
+            <Input
+              id="extraction-model"
+              placeholder="gpt-4o-mini"
+              value={settings.llm?.extraction?.model || ""}
+              onChange={(e) => handleExtractionChange("model", e.target.value)}
+            />
+          </div>
 
-          {needsLlmApiKey && (
-            <div className="space-y-2">
-              <Label htmlFor="llm-api-key">API Key</Label>
-              <div className="relative">
-                <Input
-                  id="llm-api-key"
-                  type={showLlmApiKey ? "text" : "password"}
-                  placeholder="env:API_KEY"
-                  value={settings.mem0?.llm?.config?.api_key || ""}
-                  onChange={(e) => handleLlmConfigChange("api_key", e.target.value)}
-                />
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  type="button" 
-                  className="absolute right-2 top-1/2 transform -translate-y-1/2 h-7 w-7"
-                  onClick={() => setShowLlmApiKey(!showLlmApiKey)}
-                >
-                  {showLlmApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Use "env:API_KEY" to load from environment variable, or enter directly
-              </p>
+          <div className="space-y-2">
+            <Label htmlFor="extraction-api-key">API Key</Label>
+            <div className="relative">
+              <Input
+                id="extraction-api-key"
+                type={showLlmApiKey ? "text" : "password"}
+                placeholder="env:OPENAI_API_KEY"
+                value={settings.llm?.extraction?.api_key || ""}
+                onChange={(e) => handleExtractionChange("api_key", e.target.value)}
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                type="button"
+                className="absolute right-2 top-1/2 transform -translate-y-1/2 h-7 w-7"
+                onClick={() => setShowLlmApiKey(!showLlmApiKey)}
+              >
+                {showLlmApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </Button>
             </div>
-          )}
+            <p className="text-xs text-muted-foreground">Use "env:VAR_NAME" to load from environment variable</p>
+          </div>
 
           <div className="flex items-center space-x-2 pt-2">
-            <Switch id="llm-advanced-settings" checked={showLlmAdvanced} onCheckedChange={setShowLlmAdvanced} />
-            <Label htmlFor="llm-advanced-settings">Show advanced settings</Label>
+            <Switch id="extraction-advanced" checked={showLlmAdvanced} onCheckedChange={setShowLlmAdvanced} />
+            <Label htmlFor="extraction-advanced">Show advanced settings</Label>
           </div>
 
           {showLlmAdvanced && (
-            <div className="space-y-6 pt-2">
+            <div className="space-y-4 pt-2">
               <div className="space-y-2">
-                <div className="flex justify-between">
-                  <Label htmlFor="temperature">Temperature: {settings.mem0?.llm?.config?.temperature}</Label>
-                </div>
+                <Label htmlFor="extraction-temperature">
+                  Temperature: {settings.llm?.extraction?.temperature ?? 0.1}
+                </Label>
                 <Slider
-                  id="temperature"
+                  id="extraction-temperature"
                   min={0}
                   max={1}
-                  step={0.1}
-                  value={[settings.mem0?.llm?.config?.temperature || 0.7]}
-                  onValueChange={(value) => handleLlmConfigChange("temperature", value[0])}
+                  step={0.05}
+                  value={[settings.llm?.extraction?.temperature ?? 0.1]}
+                  onValueChange={(value) => handleExtractionChange("temperature", value[0])}
                 />
               </div>
-
               <div className="space-y-2">
-                <Label htmlFor="max-tokens">Max Tokens</Label>
+                <Label htmlFor="extraction-max-tokens">Max Tokens</Label>
                 <Input
-                  id="max-tokens"
+                  id="extraction-max-tokens"
                   type="number"
                   placeholder="2000"
-                  value={settings.mem0?.llm?.config?.max_tokens || ""}
-                  onChange={(e) => handleLlmConfigChange("max_tokens", Number.parseInt(e.target.value) || "")}
+                  value={settings.llm?.extraction?.max_tokens || ""}
+                  onChange={(e) => handleExtractionChange("max_tokens", Number.parseInt(e.target.value) || "")}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="extraction-timeout">Timeout (s)</Label>
+                <Input
+                  id="extraction-timeout"
+                  type="number"
+                  placeholder="180"
+                  value={settings.llm?.extraction?.timeout || ""}
+                  onChange={(e) => handleExtractionChange("timeout", Number.parseInt(e.target.value) || "")}
                 />
               </div>
             </div>
@@ -272,82 +187,87 @@ export function FormView({ settings, onChange }: FormViewProps) {
         </CardContent>
       </Card>
 
-      {/* Embedder Settings */}
+      {/* Embedding Settings */}
       <Card>
         <CardHeader>
-          <CardTitle>Embedder Settings</CardTitle>
-          <CardDescription>Configure your Embedding Model provider and settings</CardDescription>
+          <CardTitle>Embedding Model</CardTitle>
+          <CardDescription>Vector embedding provider and model (config.yaml: embedding.*)</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="embedder-provider">Embedder Provider</Label>
-            <Select 
-              value={settings.mem0?.embedder?.provider || ""} 
-              onValueChange={handleEmbedderProviderChange}
+            <Label htmlFor="embedding-provider">Provider</Label>
+            <Select
+              value={settings.llm?.embedding?.provider || "auto"}
+              onValueChange={(v) => handleEmbeddingChange("provider", v)}
             >
-              <SelectTrigger id="embedder-provider">
+              <SelectTrigger id="embedding-provider">
                 <SelectValue placeholder="Select a provider" />
               </SelectTrigger>
               <SelectContent>
-                {Object.entries(EMBEDDER_PROVIDERS).map(([provider, value]) => (
-                  <SelectItem key={value} value={value}>
-                    {provider}
-                  </SelectItem>
+                {["auto", "ollama", "openai", "api", "sentence-transformers", "hashing"].map((p) => (
+                  <SelectItem key={p} value={p}>{p}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="embedder-model">Model</Label>
+            <Label htmlFor="embedding-model">Model</Label>
             <Input
-              id="embedder-model"
-              placeholder="Enter model name"
-              value={settings.mem0?.embedder?.config?.model || ""}
-              onChange={(e) => handleEmbedderConfigChange("model", e.target.value)}
+              id="embedding-model"
+              placeholder="nomic-embed-text"
+              value={settings.llm?.embedding?.model || ""}
+              onChange={(e) => handleEmbeddingChange("model", e.target.value)}
             />
           </div>
 
-          {isEmbedderOllama && (
+          {isEmbeddingOllama && (
             <div className="space-y-2">
-              <Label htmlFor="embedder-ollama-url">Ollama Base URL</Label>
+              <Label htmlFor="embedding-ollama-url">Ollama URL</Label>
               <Input
-                id="embedder-ollama-url"
-                placeholder="http://host.docker.internal:11434"
-                value={settings.mem0?.embedder?.config?.ollama_base_url || ""}
-                onChange={(e) => handleEmbedderConfigChange("ollama_base_url", e.target.value)}
+                id="embedding-ollama-url"
+                placeholder="http://127.0.0.1:11434"
+                value={settings.llm?.embedding?.ollama_url || ""}
+                onChange={(e) => handleEmbeddingChange("ollama_url", e.target.value)}
               />
-              <p className="text-xs text-muted-foreground mt-1">
-                Leave empty to use default: http://host.docker.internal:11434
-              </p>
             </div>
           )}
 
-          {needsEmbedderApiKey && (
-            <div className="space-y-2">
-              <Label htmlFor="embedder-api-key">API Key</Label>
-              <div className="relative">
-                <Input
-                  id="embedder-api-key"
-                  type={showEmbedderApiKey ? "text" : "password"}
-                  placeholder="env:API_KEY"
-                  value={settings.mem0?.embedder?.config?.api_key || ""}
-                  onChange={(e) => handleEmbedderConfigChange("api_key", e.target.value)}
-                />
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  type="button" 
-                  className="absolute right-2 top-1/2 transform -translate-y-1/2 h-7 w-7"
-                  onClick={() => setShowEmbedderApiKey(!showEmbedderApiKey)}
-                >
-                  {showEmbedderApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
+          {["openai", "api"].includes(settings.llm?.embedding?.provider || "") && (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="embedding-api-key">API Key</Label>
+                <div className="relative">
+                  <Input
+                    id="embedding-api-key"
+                    type={showEmbedderApiKey ? "text" : "password"}
+                    placeholder="env:OPENAI_API_KEY"
+                    value={settings.llm?.embedding?.api_key || ""}
+                    onChange={(e) => handleEmbeddingChange("api_key", e.target.value)}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    type="button"
+                    className="absolute right-2 top-1/2 transform -translate-y-1/2 h-7 w-7"
+                    onClick={() => setShowEmbedderApiKey(!showEmbedderApiKey)}
+                  >
+                    {showEmbedderApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Use "env:API_KEY" to load from environment variable, or enter directly
-              </p>
-            </div>
+              {settings.llm?.embedding?.provider === "api" && (
+                <div className="space-y-2">
+                  <Label htmlFor="embedding-api-url">API URL</Label>
+                  <Input
+                    id="embedding-api-url"
+                    placeholder="http://127.0.0.1:11434/v1/embeddings"
+                    value={settings.llm?.embedding?.api_url || ""}
+                    onChange={(e) => handleEmbeddingChange("api_url", e.target.value)}
+                  />
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>
@@ -398,7 +318,7 @@ export function FormView({ settings, onChange }: FormViewProps) {
           {/* Import Section */}
           <div className="p-4 border border-zinc-800 rounded-lg space-y-2">
             <div className="text-sm font-medium">Import</div>
-            <p className="text-xs text-muted-foreground">Upload a ZIP exported by OpenMemory. Default settings will be used.</p>
+            <p className="text-xs text-muted-foreground">Upload a ZIP archive to import memories. Default settings will be used.</p>
             <div className="flex items-center gap-3 flex-wrap">
               <input
                 ref={fileInputRef}

@@ -21,7 +21,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from local_memory_mcp.frontend import (
+from memorycore.frontend import (
     configure_frontend,
     frontend_api,
     frontend_health,
@@ -29,8 +29,8 @@ from local_memory_mcp.frontend import (
     frontend_metrics,
 )
 
-from local_memory_mcp.models import DEFAULT_ROOT, load_config, validate_config
-from local_memory_mcp.storage import (
+from memorycore.models import DEFAULT_ROOT, load_config, validate_config
+from memorycore.storage import (
     add_memory_record,
     add_feedback,
     add_link,
@@ -305,7 +305,7 @@ def memory_ingest(
         {"added": int, "updated": int, "skipped": int, "errors": int, "elapsed_s": float}
     """
     import concurrent.futures
-    from local_memory_mcp.dedup import ingest
+    from memorycore.dedup import ingest
 
     def _run():
         return ingest(
@@ -362,7 +362,7 @@ def memory_vector_search(
     Returns:
         List of {"id", "score", "text", "payload"} dicts, sorted by score desc.
     """
-    from local_memory_mcp.vector_store import get_vector_store
+    from memorycore.vector_store import get_vector_store
 
     try:
         vs = get_vector_store(load_config())
@@ -379,7 +379,7 @@ def memory_vector_search(
 @_safe_tool
 def memory_vector_status() -> dict[str, Any]:
     """Return Qdrant vector store status (availability, collection, count)."""
-    from local_memory_mcp.vector_store import get_vector_store
+    from memorycore.vector_store import get_vector_store
 
     try:
         vs = get_vector_store(load_config())
@@ -753,7 +753,7 @@ def _start_auto_curator(interval_hours: float = 6.0) -> None:
         time.sleep(120)
         while True:
             try:
-                from local_memory_mcp.storage.handoff import cleanup_expired_handoffs
+                from memorycore.storage.handoff import cleanup_expired_handoffs
                 handoff_cleanup = cleanup_expired_handoffs()
                 rollup = rollup_report(dry_run=False)
                 rollup_summary = rollup.get("summary", {})
@@ -781,7 +781,7 @@ def _start_auto_curator(interval_hours: float = 6.0) -> None:
 
 def _start_observability_server(host: str, obs_port: int) -> None:
     """Start a lightweight HTTP server exposing /health and /metrics."""
-    from local_memory_mcp.storage import get_memory_stats
+    from memorycore.storage import get_memory_stats
 
     class _Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):  # silence access logs
@@ -892,11 +892,11 @@ def main(argv: list[str] | None = None) -> int:
     p_serve.add_argument("--mcp-only", action="store_true", help="Disable frontend / and /api routes while keeping /mcp")
     args = parser.parse_args(argv)
     if args.cmd == "init":
-        from local_memory_mcp.storage import managed_conn
+        from memorycore.storage import managed_conn
 
         with managed_conn():
             pass
-        from local_memory_mcp.models import db_path
+        from memorycore.models import db_path
 
         print(db_path())
     elif args.cmd == "add":
@@ -954,7 +954,7 @@ def main(argv: list[str] | None = None) -> int:
         payload = report["summary"] if args.summary_only else report
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     elif args.cmd == "semantic-status":
-        from local_memory_mcp.vector_store import get_vector_store
+        from memorycore.vector_store import get_vector_store
 
         try:
             payload = get_vector_store(load_config()).status()
@@ -962,7 +962,7 @@ def main(argv: list[str] | None = None) -> int:
             payload = {"available": False, "degraded": True, "reason": f"{type(exc).__name__}: {exc}"}
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     elif args.cmd == "semantic-search":
-        from local_memory_mcp.vector_store import get_vector_store
+        from memorycore.vector_store import get_vector_store
 
         try:
             filters = {"status": args.status} if args.status else None
@@ -1016,7 +1016,7 @@ def main(argv: list[str] | None = None) -> int:
         # Pre-initialize vector store singleton with config so build_context_pack
         # picks up the correct Ollama URL / Qdrant path on first call.
         try:
-            from local_memory_mcp.vector_store import get_vector_store
+            from memorycore.vector_store import get_vector_store
             get_vector_store(cfg)
         except Exception as _vs_err:
             logger.warning("vector store init skipped: %s", _vs_err)

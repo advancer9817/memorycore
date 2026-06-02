@@ -5,9 +5,9 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from local_memory_mcp.models import DEFAULT_ROOT, load_config, now
-from local_memory_mcp.storage.audit import log_audit_event
-from local_memory_mcp.storage.db import connect, db_path, managed_conn
+from memorycore.models import DEFAULT_ROOT, load_config, now
+from memorycore.storage.audit import log_audit_event
+from memorycore.storage.db import connect, db_path, managed_conn
 
 SCHEMA_VERSION = 1
 
@@ -194,7 +194,7 @@ def memory_backup(path: str | None = None) -> dict[str, Any]:
 
 
 def memory_rebuild_vectors(dry_run: bool = True, limit: int = 5000) -> dict[str, Any]:
-    from local_memory_mcp.storage.crud import _sync_to_vector
+    from memorycore.storage.crud import _sync_to_vector
 
     cap = max(1, min(int(limit), 5000))
     with managed_conn() as conn:
@@ -226,7 +226,7 @@ def memory_vector_audit(dry_run: bool = True, limit: int = 100) -> dict[str, Any
     ids = [str(row["id"]) for row in rows]
 
     try:
-        from local_memory_mcp.vector_store import get_vector_store
+        from memorycore.vector_store import get_vector_store
 
         vs = get_vector_store(load_config())
         status = vs.status()
@@ -263,7 +263,7 @@ def memory_vector_audit(dry_run: bool = True, limit: int = 100) -> dict[str, Any
         missing = [memory_id for memory_id in ids if memory_id not in present_ids]
         rebuilt = 0
         if not dry_run and missing:
-            from local_memory_mcp.storage.crud import _sync_to_vector
+            from memorycore.storage.crud import _sync_to_vector
 
             by_id = {str(row["id"]): row for row in rows}
             for memory_id in missing:

@@ -6,7 +6,7 @@ Wants=network-online.target __QDRANT_SERVICE__
 [Service]
 Type=simple
 WorkingDirectory=__ROOT__
-ExecStart=__PYTHON__ -m local_memory_mcp serve --host __LMMCP_HOST__ --port __LMMCP_PORT__
+ExecStart=__PYTHON__ -m memorycore serve --host __LMMCP_HOST__ --port __LMMCP_PORT__
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

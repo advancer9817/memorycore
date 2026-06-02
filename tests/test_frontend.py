@@ -8,8 +8,8 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-import local_memory_mcp as lm
-from local_memory_mcp.frontend import (
+import memorycore as lm
+from memorycore.frontend import (
     configure_frontend,
     frontend_api,
     frontend_health,
@@ -171,10 +171,10 @@ def test_frontend_vector_search_passes_score_threshold_as_keyword(monkeypatch):
                 )
             ]
 
-    fake_module = types.ModuleType("local_memory_mcp.vector_store")
+    fake_module = types.ModuleType("memorycore.vector_store")
     fake_store = FakeVectorStore()
     fake_module.get_vector_store = lambda cfg: fake_store
-    monkeypatch.setitem(sys.modules, "local_memory_mcp.vector_store", fake_module)
+    monkeypatch.setitem(sys.modules, "memorycore.vector_store", fake_module)
 
     with _client() as client:
         response = client.get("/api/vector/search?query=semantic&top_k=3&score_threshold=0.72")

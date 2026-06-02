@@ -2,9 +2,9 @@ import { expect, test } from "@playwright/test";
 
 const apiURL = process.env.LMMCP_API_URL || "http://127.0.0.1:8318";
 
-test.describe("OpenMemory UI compatibility", () => {
+test.describe("MemoryCore UI smoke", () => {
   test("lists, searches, opens, filters, shows stats, and archives a memory", async ({ page, request }) => {
-    const marker = `LMMCP-OPENMEMORY-UI-${Date.now()}`;
+    const marker = `MEMORYCORE-UI-${Date.now()}`;
     const imageErrors: string[] = [];
     page.on("console", (message) => {
       if (
@@ -16,9 +16,9 @@ test.describe("OpenMemory UI compatibility", () => {
     });
     const created = await request.post(`${apiURL}/api/v1/memories`, {
       data: {
-        text: `${marker} Playwright smoke memory for OpenMemory UI.`,
-        tags: ["playwright", "openmemory-ui"],
-        source_agent: "openmemory-smoke-unknown",
+        text: `${marker} Playwright smoke memory for MemoryCore UI.`,
+        tags: ["playwright", "memorycore-ui"],
+        source_agent: "memorycore-smoke-test",
         atomize: false,
       },
     });
@@ -42,7 +42,7 @@ test.describe("OpenMemory UI compatibility", () => {
     await page.getByLabel("API URL").fill(apiURL);
     await page.getByRole("button", { name: /save configuration/i }).click();
     await expect
-      .poll(() => page.evaluate(() => window.localStorage.getItem("lmmcp.openmemory.apiUrl")))
+      .poll(() => page.evaluate(() => window.localStorage.getItem("memorycore.apiUrl")))
       .toBe(apiURL);
 
     await page.goto(`/memories?search=${encodeURIComponent(marker)}`);
@@ -56,7 +56,7 @@ test.describe("OpenMemory UI compatibility", () => {
 
     await page.goto(`/memory/${memory.id}`);
     await expect(page.getByText(marker)).toBeVisible();
-    await page.goto("/apps/openmemory-smoke-unknown");
+    await page.goto(`/apps/memorycore-smoke-test`);
     await expect(page.getByText(marker)).toBeVisible();
     expect(imageErrors).toEqual([]);
 

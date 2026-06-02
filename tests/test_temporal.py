@@ -4,10 +4,10 @@ from __future__ import annotations
 import pytest
 from datetime import datetime, timedelta, timezone
 
-import local_memory_mcp as lm
-from local_memory_mcp.storage import add_memory_record, search_memory_records
-from local_memory_mcp.storage.curator import curator_report, _DECAY_STEP, _DECAY_MIN_CONFIDENCE
-from local_memory_mcp.storage.db import managed_conn
+import memorycore as lm
+from memorycore.storage import add_memory_record, search_memory_records
+from memorycore.storage.curator import curator_report, _DECAY_STEP, _DECAY_MIN_CONFIDENCE
+from memorycore.storage.db import managed_conn
 
 
 @pytest.fixture(autouse=True)

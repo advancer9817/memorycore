@@ -30,10 +30,10 @@ export default function SettingsPage() {
   const { toast } = useToast()
   const configState = useSelector((state: RootState) => state.config)
   const [settings, setSettings] = useState({
-    openmemory: configState.openmemory || {
+    settings: configState.settings || {
       custom_instructions: null
     },
-    mem0: configState.mem0
+    llm: configState.llm
   })
   const [viewMode, setViewMode] = useState<"form" | "json">("form")
   const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL)
@@ -61,17 +61,17 @@ export default function SettingsPage() {
   useEffect(() => {
     setSettings(prev => ({
       ...prev,
-      openmemory: configState.openmemory || { custom_instructions: null },
-      mem0: configState.mem0
+      settings: configState.settings || { custom_instructions: null },
+      llm: configState.llm
     }))
-  }, [configState.openmemory, configState.mem0])
+  }, [configState.settings, configState.llm])
 
   const handleSave = async () => {
     try {
       setApiUrl(setApiBaseUrl(apiUrl))
-      await saveConfig({ 
-        openmemory: settings.openmemory,
-        mem0: settings.mem0 
+      await saveConfig({
+        settings: settings.settings,
+        llm: settings.llm
       })
       toast({
         title: "Settings saved",
@@ -110,7 +110,7 @@ export default function SettingsPage() {
         <div className="flex justify-between items-center mb-8">
           <div className="animate-fade-slide-down">
             <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-            <p className="text-muted-foreground mt-1">Manage your OpenMemory and Mem0 configuration</p>
+            <p className="text-muted-foreground mt-1">Manage your MemoryCore configuration</p>
           </div>
           <div className="flex space-x-2">
             <AlertDialog>
@@ -147,7 +147,7 @@ export default function SettingsPage() {
         <Card className="mb-8 animate-fade-slide-down delay-1">
           <CardHeader>
             <CardTitle>API Connection</CardTitle>
-            <CardDescription>Configure the lmmcp backend used by this OpenMemory UI</CardDescription>
+            <CardDescription>Configure the MemoryCore backend API endpoint</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">

@@ -47,7 +47,7 @@ ensure_lmmcp_running() {
     return 1
   fi
   cd "$LMMCP_ROOT"
-  nohup "$LMMCP_ROOT/.venv/bin/python" -m local_memory_mcp serve --host "$LMMCP_HOST" --port "$LMMCP_PORT" \
+  nohup "$LMMCP_ROOT/.venv/bin/python" -m memorycore serve --host "$LMMCP_HOST" --port "$LMMCP_PORT" \
     >>"$LMMCP_LOG_FILE" 2>&1 &
   local new_pid=$!
   echo "$new_pid" > "$LMMCP_PID_FILE"

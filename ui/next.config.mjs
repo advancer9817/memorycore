@@ -4,8 +4,8 @@ const nextConfig = {
     const apiUrl = process.env.LMMCP_API_URL || "http://127.0.0.1:8318";
     return [
       {
-        source: "/api/v1/:path*",
-        destination: `${apiUrl}/api/v1/:path*`,
+        source: "/api/:path*",
+        destination: `${apiUrl}/api/:path*`,
       },
     ];
   },

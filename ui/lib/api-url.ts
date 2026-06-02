@@ -1,4 +1,4 @@
-const API_URL_STORAGE_KEY = "lmmcp.openmemory.apiUrl";
+const API_URL_STORAGE_KEY = "memorycore.apiUrl";
 
 export const DEFAULT_API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8318").replace(/\/+$/, "");
 

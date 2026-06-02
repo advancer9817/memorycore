@@ -1,22 +1,22 @@
 """local-memory-mcp — Structured agent memory with SQLite/FTS5 + Qdrant.
 
 Re-exports all public symbols for backward compatibility with existing
-code that does ``import local_memory_mcp as lm``.
+code that does ``import memorycore as lm``.
 """
 from __future__ import annotations
 
 # Keep pyright quiet about re-exports
 from typing import Any
 
-from local_memory_mcp.injection_guard import (
+from memorycore.injection_guard import (
     BOUNDARY_NOTICE,
     check_memory_for_injection,
     warning_for_filtered_memory,
 )
-from local_memory_mcp.privacy import redact_record_fields, redact_secrets
+from memorycore.privacy import redact_record_fields, redact_secrets
 
 # ── Models (constants + helpers) ──────────────────────────────────────────────
-from local_memory_mcp.models import (
+from memorycore.models import (
     DEFAULT_ROOT,
     _INITIALIZED_DB_PATHS,
     config_path,
@@ -28,7 +28,7 @@ from local_memory_mcp.models import (
 SQLITE_VEC_AVAILABLE: bool = False  # removed; vector search now via vector_store.py
 
 # ── Storage (SQLite operations) ────────────────────────────────────────────────
-from local_memory_mcp.storage import (
+from memorycore.storage import (
     add_feedback,
     add_link,
     add_memory_record,
@@ -69,7 +69,7 @@ from local_memory_mcp.storage import (
 )
 
 # ── Server (MCP tools + CLI) ──────────────────────────────────────────────────
-from local_memory_mcp.server import main, memory_link_add, memory_link_query
+from memorycore.server import main, memory_link_add, memory_link_query
 
 __all__ = [
     "BOUNDARY_NOTICE",

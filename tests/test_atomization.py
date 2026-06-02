@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import local_memory_mcp as lm
-from local_memory_mcp.storage.db import managed_conn
+import memorycore as lm
+from memorycore.storage.db import managed_conn
 
 
 def _mock_vector_store():
@@ -21,7 +21,7 @@ def test_memory_add_atomizes_parent_into_linked_child_facts():
         "- Qdrant endpoint is http://127.0.0.1:6333 and collection is agent_memory.",
     ])
 
-    with patch("local_memory_mcp.storage.crud._get_vector_store", return_value=_mock_vector_store()):
+    with patch("memorycore.storage.crud._get_vector_store", return_value=_mock_vector_store()):
         parent = lm.add_memory_record(
             "project_memory",
             "Long lmmcp operating facts",
@@ -83,7 +83,7 @@ def test_atomize_report_is_idempotent():
         atomize=False,
     )
 
-    with patch("local_memory_mcp.storage.crud._get_vector_store", return_value=_mock_vector_store()):
+    with patch("memorycore.storage.crud._get_vector_store", return_value=_mock_vector_store()):
         first = lm.atomize_report(record_id=parent["id"], dry_run=False, min_chars=1)
         second = lm.atomize_report(record_id=parent["id"], dry_run=False, min_chars=1)
 

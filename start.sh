@@ -99,13 +99,13 @@ _log "Installing/updating dependencies ..."
 
 # ── 3. 初始化 DB（幂等）──────────────────────────────────────────────────────
 _log "Initializing database ..."
-"$PY" -m local_memory_mcp init
+"$PY" -m memorycore init
 
 # ── 4. 导入记忆 ───────────────────────────────────────────────────────────────
 if [[ "$SKIP_IMPORT" -eq 0 ]]; then
   if [[ -f "$SYNC_FILE" ]]; then
     _log "Importing memories from $SYNC_FILE (conflict_policy=newer) ..."
-    "$PY" -m local_memory_mcp import "$SYNC_FILE" --conflict-policy newer --apply
+    "$PY" -m memorycore import "$SYNC_FILE" --conflict-policy newer --apply
   else
     _log "No sync file found at $SYNC_FILE — skipping import (first run on this device?)"
     _log "To sync from another device: git pull && bash start.sh"
@@ -129,7 +129,7 @@ if [[ "$DAEMON" -eq 1 ]]; then
     _warn "Already running (pid $(cat "$PID_FILE")). Use 'scripts/lmmcp stop' first."
     exit 1
   fi
-  nohup "$PY" -m local_memory_mcp serve --host "$HOST" --port "$PORT" >> "$LOG" 2>&1 &
+  nohup "$PY" -m memorycore serve --host "$HOST" --port "$PORT" >> "$LOG" 2>&1 &
   echo $! > "$PID_FILE"
   sleep 1
   if kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
@@ -140,5 +140,5 @@ if [[ "$DAEMON" -eq 1 ]]; then
     exit 1
   fi
 else
-  exec "$PY" -m local_memory_mcp serve --host "$HOST" --port "$PORT"
+  exec "$PY" -m memorycore serve --host "$HOST" --port "$PORT"
 fi

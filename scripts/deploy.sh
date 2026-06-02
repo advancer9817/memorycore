@@ -360,8 +360,8 @@ fi
 
 mkdir -p "$ROOT/logs" "$(dirname "$DB")"
 msg init "Initializing SQLite and dashboard"
-LOCAL_MEMORY_CONFIG="$CONFIG" LOCAL_MEMORY_DB="$DB" PYTHONPATH="$ROOT" "$PY" -m local_memory_mcp init >/dev/null
-LOCAL_MEMORY_CONFIG="$CONFIG" LOCAL_MEMORY_DB="$DB" PYTHONPATH="$ROOT" "$PY" -m local_memory_mcp html "$ROOT/dashboard.html" >/dev/null
+LOCAL_MEMORY_CONFIG="$CONFIG" LOCAL_MEMORY_DB="$DB" PYTHONPATH="$ROOT" "$PY" -m memorycore init >/dev/null
+LOCAL_MEMORY_CONFIG="$CONFIG" LOCAL_MEMORY_DB="$DB" PYTHONPATH="$ROOT" "$PY" -m memorycore html "$ROOT/dashboard.html" >/dev/null
 
 if [ "$INSTALL_SYSTEMD" -eq 1 ]; then
   have systemctl || die "systemctl not found; rerun with --no-systemd"
@@ -422,11 +422,11 @@ if [ "$INSTALL_SYSTEMD" -eq 1 ]; then
   for i in $(seq 1 30); do ss -ltn 2>/dev/null | grep -q ":$PORT " && break; sleep 1; [ "$i" -eq 30 ] && die "lmmcp port $PORT did not open"; done
 fi
 LOCAL_MEMORY_CONFIG="$CONFIG" LOCAL_MEMORY_DB="$DB" PYTHONPATH="$ROOT" "$PY" - <<'PY'
-from local_memory_mcp.vector_store import get_vector_store
-from local_memory_mcp.models import load_config
+from memorycore.vector_store import get_vector_store
+from memorycore.models import load_config
 print(get_vector_store(load_config()).status())
 PY
-LOCAL_MEMORY_CONFIG="$CONFIG" LOCAL_MEMORY_DB="$DB" PYTHONPATH="$ROOT" "$PY" -m local_memory_mcp curator --summary-only >/dev/null
+LOCAL_MEMORY_CONFIG="$CONFIG" LOCAL_MEMORY_DB="$DB" PYTHONPATH="$ROOT" "$PY" -m memorycore curator --summary-only >/dev/null
 
 if [ "$SKIP_TESTS" -eq 0 ]; then
   msg tests "Running pytest"

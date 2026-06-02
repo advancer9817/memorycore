@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-import local_memory_mcp as lm
+import memorycore as lm
 
 
 def _memory_id(prefix: str) -> str:

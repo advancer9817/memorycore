@@ -5,10 +5,10 @@ import html
 import json
 from pathlib import Path
 
-from local_memory_mcp.storage.db import db_path, managed_conn
-from local_memory_mcp.storage.crud import list_recent
-from local_memory_mcp.storage.curator import curator_report
-from local_memory_mcp.storage.search import get_context_quality_stats
+from memorycore.storage.db import db_path, managed_conn
+from memorycore.storage.crud import list_recent
+from memorycore.storage.curator import curator_report
+from memorycore.storage.search import get_context_quality_stats
 
 
 def dashboard_payload(limit: int = 1000) -> dict[str, object]:

@@ -4,8 +4,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from local_memory_mcp.models import VALID_RELATION_TYPES, now
-from local_memory_mcp.storage.db import managed_conn
+from memorycore.models import VALID_RELATION_TYPES, now
+from memorycore.storage.db import managed_conn
 
 
 def add_link(

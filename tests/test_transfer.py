@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from local_memory_mcp.storage import (
+from memorycore.storage import (
     add_memory_record,
     get_audit_log,
     log_audit_event,

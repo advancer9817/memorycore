@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import time
 
-import local_memory_mcp as lm
-from local_memory_mcp.storage import (
+import memorycore as lm
+from memorycore.storage import (
     get_agent_inbox,
     get_audit_log,
     list_agent_presence,

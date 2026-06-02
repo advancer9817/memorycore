@@ -6,14 +6,14 @@ import re
 import uuid
 from typing import Any
 
-from local_memory_mcp.injection_guard import (
+from memorycore.injection_guard import (
     BOUNDARY_NOTICE,
     check_memory_for_injection,
     warning_for_filtered_memory,
 )
-from local_memory_mcp.models import as_json, fts_phrase, normalize_list, now, row_to_dict
-from local_memory_mcp.storage.db import _managed_query, managed_conn
-from local_memory_mcp.storage.entities import entity_search
+from memorycore.models import as_json, fts_phrase, normalize_list, now, row_to_dict
+from memorycore.storage.db import _managed_query, managed_conn
+from memorycore.storage.entities import entity_search
 
 logger = logging.getLogger(__name__)
 
@@ -377,10 +377,10 @@ def _vector_search_ids(
 ) -> list[tuple[str, float]]:
     """Return [(id, score)] from Qdrant semantic search. Empty list if unavailable."""
     try:
-        from local_memory_mcp.vector_store import get_vector_store, _store
+        from memorycore.vector_store import get_vector_store, _store
         # If singleton not yet initialized with config, load config now
         if _store is None:
-            from local_memory_mcp.models import load_config
+            from memorycore.models import load_config
             vs = get_vector_store(load_config())
         else:
             vs = get_vector_store()

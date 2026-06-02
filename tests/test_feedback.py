@@ -1,6 +1,6 @@
 import pytest
 
-import local_memory_mcp as lm
+import memorycore as lm
 
 
 def set_created_at(memory_id, value):

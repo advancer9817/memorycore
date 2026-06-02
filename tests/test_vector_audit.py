@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import local_memory_mcp as lm
+import memorycore as lm
 
 
 def test_vector_audit_reports_unavailable_store_gracefully():
@@ -18,7 +18,7 @@ def test_vector_audit_reports_unavailable_store_gracefully():
     fake_store = MagicMock()
     fake_store.status.return_value = {"available": False, "count": 0}
 
-    with patch("local_memory_mcp.vector_store.get_vector_store", return_value=fake_store):
+    with patch("memorycore.vector_store.get_vector_store", return_value=fake_store):
         report = lm.memory_vector_audit(dry_run=True, limit=10)
 
     assert report["available"] is False
@@ -52,7 +52,7 @@ def test_vector_audit_detects_missing_vectors():
         _client=fake_client,
     )
 
-    with patch("local_memory_mcp.vector_store.get_vector_store", return_value=fake_store):
+    with patch("memorycore.vector_store.get_vector_store", return_value=fake_store):
         report = lm.memory_vector_audit(dry_run=True, limit=10)
 
     assert report["available"] is True

@@ -23,9 +23,9 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
-from local_memory_mcp.models import local_now, normalize_list, normalize_title_key, now
-from local_memory_mcp.storage.db import _managed_query, managed_conn
-from local_memory_mcp.storage.audit import log_audit_event
+from memorycore.models import local_now, normalize_list, normalize_title_key, now
+from memorycore.storage.db import _managed_query, managed_conn
+from memorycore.storage.audit import log_audit_event
 
 # Decay: records that were used and then forgotten
 _DECAY_STEP = 0.05
@@ -320,7 +320,7 @@ def curator_report(
     actions: list[dict[str, Any]] = []
 
     if not dry_run:
-        from local_memory_mcp.storage.crud import update_status_batch
+        from memorycore.storage.crud import update_status_batch
         decay_applied = 0
         with managed_conn() as conn:
             if auto_decay_candidates:
@@ -348,7 +348,7 @@ def curator_report(
             update_status_batch(conn, batch_updates)
 
         if decay_applied:
-            from local_memory_mcp.storage.db import connect as _connect
+            from memorycore.storage.db import connect as _connect
             _connect().execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
         for planned in action_plan:

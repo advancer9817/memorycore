@@ -1,6 +1,6 @@
 from pathlib import Path
 
-import local_memory_mcp as lm
+import memorycore as lm
 
 
 def test_default_config_path_is_project_config():

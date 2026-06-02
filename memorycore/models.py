@@ -1,6 +1,6 @@
 """Models, constants, and helpers for local-memory-mcp.
 
-Extracted from the original local_memory_mcp.py monolith into a dedicated
+Extracted from the original memorycore.py monolith into a dedicated
 module with no MCP or I/O dependencies so both storage.py and external
 modules (extraction.py, dedup.py) can import them without circular issues.
 """

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-import local_memory_mcp as lm
+import memorycore as lm
 
 
 def _set_field(memory_id: str, **kwargs) -> None:
@@ -293,7 +293,7 @@ def test_precious_type_staled_only_with_very_negative_feedback():
 
 def test_rollup_processes_manual_source_episodic():
     """episodic_memory with source='manual' is included in rollup scan."""
-    from local_memory_mcp.storage.rollup import rollup_report
+    from memorycore.storage.rollup import rollup_report
     lm.add_memory_record(
         "episodic_memory", "Hermes manual episodic", "user said X",
         status="candidate", source="manual", source_agent="hermes",
@@ -307,7 +307,7 @@ def test_rollup_processes_manual_source_episodic():
 
 def test_rollup_still_processes_extraction_source():
     """episodic_memory with source='extraction' is still included in rollup scan."""
-    from local_memory_mcp.storage.rollup import rollup_report
+    from memorycore.storage.rollup import rollup_report
     lm.add_memory_record(
         "episodic_memory", "Extraction episodic", "extracted from session",
         status="candidate", source="extraction", source_agent="claude",

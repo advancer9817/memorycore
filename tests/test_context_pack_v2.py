@@ -5,7 +5,7 @@ TDD: written before the implementation is updated. These tests should fail
 """
 from __future__ import annotations
 
-import local_memory_mcp as lm
+import memorycore as lm
 
 
 # ---------------------------------------------------------------------------

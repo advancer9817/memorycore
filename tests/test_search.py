@@ -1,4 +1,4 @@
-import local_memory_mcp as lm
+import memorycore as lm
 
 
 def add_sample_records():

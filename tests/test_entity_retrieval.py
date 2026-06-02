@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import local_memory_mcp as lm
-from local_memory_mcp.storage.db import managed_conn
+import memorycore as lm
+from memorycore.storage.db import managed_conn
 
 
 def _mock_vector_store():
@@ -31,7 +31,7 @@ def test_entity_search_matches_lmmcp_aliases():
 
 def test_context_uses_entity_hits_and_prefers_atomic_child_over_parent(monkeypatch):
     monkeypatch.setattr(
-        "local_memory_mcp.storage.search._vector_search_ids",
+        "memorycore.storage.search._vector_search_ids",
         lambda task, top_k=20, score_threshold=0.35: [],
     )
     content = "\n".join([
@@ -39,7 +39,7 @@ def test_context_uses_entity_hits_and_prefers_atomic_child_over_parent(monkeypat
         "- memory.sqlite3 is the SQLite DB under /home/advancer/project/local-memory-mcp.",
         "- MCP endpoint is http://127.0.0.1:8318/mcp for clients.",
     ])
-    with patch("local_memory_mcp.storage.crud._get_vector_store", return_value=_mock_vector_store()):
+    with patch("memorycore.storage.crud._get_vector_store", return_value=_mock_vector_store()):
         parent = lm.add_memory_record(
             "project_memory",
             "Parent lmmcp memory.sqlite3 summary",

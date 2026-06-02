@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 
-import local_memory_mcp as lm
+import memorycore as lm
 
 
 def _set_updated_at(memory_id: str, value: str) -> None:

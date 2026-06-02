@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from local_memory_mcp.storage import (
+from memorycore.storage import (
     add_memory_record,
     managed_conn,
     memory_export,
@@ -197,7 +197,7 @@ def test_import_invalid_conflict_policy_returns_error():
 def test_cli_export_creates_file(tmp_path):
     add_memory_record("project_memory", "CLI Export", "content")
     out = tmp_path / "out.json"
-    from local_memory_mcp.server import main
+    from memorycore.server import main
     rc = main(["export", str(out), "--memories-only"])
     assert rc == 0
     assert out.exists()
@@ -209,7 +209,7 @@ def test_cli_export_creates_file(tmp_path):
 def test_cli_import_dry_run(tmp_path):
     r = add_memory_record("project_memory", "Import Target", "original")
     out = tmp_path / "export.json"
-    from local_memory_mcp.server import main
+    from memorycore.server import main
     main(["export", str(out), "--memories-only"])
     # import dry-run (no --apply)
     rc = main(["import", str(out), "--conflict-policy", "newer"])
@@ -221,6 +221,6 @@ def test_cli_import_dry_run(tmp_path):
 
 
 def test_cli_import_missing_file_returns_error(tmp_path):
-    from local_memory_mcp.server import main
+    from memorycore.server import main
     rc = main(["import", str(tmp_path / "nonexistent.json")])
     assert rc == 1

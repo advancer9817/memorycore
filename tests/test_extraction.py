@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from local_memory_mcp.extraction import (
+from memorycore.extraction import (
     ExtractionConfig,
     ExtractedFact,
     _parse_response,
@@ -146,7 +146,7 @@ class TestExtractFacts:
                 if v is not None:
                     os.environ[k] = v
 
-    @patch("local_memory_mcp.extraction._call_llm")
+    @patch("memorycore.extraction._call_llm")
     def test_basic_extraction(self, mock_call):
         mock_call.return_value = json.dumps({"memory": [
             {"id": "0", "text": "User works on WSL2 Ubuntu"},
@@ -164,14 +164,14 @@ class TestExtractFacts:
         assert facts[0].text == "User works on WSL2 Ubuntu"
         assert elapsed >= 0
 
-    @patch("local_memory_mcp.extraction._call_llm")
+    @patch("memorycore.extraction._call_llm")
     def test_empty_conversation(self, mock_call):
         mock_call.return_value = '{"memory": []}'
         cfg = self._make_config()
         facts, _ = extract_facts([{"role": "user", "content": "Hi"}], config=cfg)
         assert facts == []
 
-    @patch("local_memory_mcp.extraction._call_llm")
+    @patch("memorycore.extraction._call_llm")
     def test_with_existing_memories(self, mock_call):
         mock_call.return_value = json.dumps({"memory": [
             {"id": "0", "text": "User switched from Python to Rust",
@@ -187,7 +187,7 @@ class TestExtractFacts:
         assert len(facts) == 1
         assert facts[0].linked_memory_ids == ["existing-uuid-1"]
 
-    @patch("local_memory_mcp.extraction._call_llm", side_effect=Exception("network error"))
+    @patch("memorycore.extraction._call_llm", side_effect=Exception("network error"))
     def test_llm_error_returns_empty(self, mock_call):
         cfg = self._make_config()
         facts, elapsed = extract_facts(
@@ -196,7 +196,7 @@ class TestExtractFacts:
         assert facts == []
         assert elapsed >= 0
 
-    @patch("local_memory_mcp.extraction._call_llm")
+    @patch("memorycore.extraction._call_llm")
     def test_chinese_input(self, mock_call):
         mock_call.return_value = json.dumps({"memory": [
             {"id": "0", "text": "用户使用 Neovim 编写代码，配置了 lazy.nvim 插件管理器"}

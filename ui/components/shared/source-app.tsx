@@ -16,10 +16,10 @@ export const constants = {
     icon: <Icon source="/images/claude.webp" />,
     iconImage: "/images/claude.webp",
   },
-  openmemory: {
-    name: "OpenMemory",
-    icon: <Icon source="/images/open-memory.svg" />,
-    iconImage: "/images/open-memory.svg",
+  memorycore: {
+    name: "MemoryCore",
+    icon: <Icon source="/logo.svg" />,
+    iconImage: "/logo.svg",
   },
   cursor: {
     name: "Cursor",

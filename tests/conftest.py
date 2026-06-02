@@ -1,6 +1,6 @@
 import pytest
 
-import local_memory_mcp as lm
+import memorycore as lm
 
 
 @pytest.fixture(autouse=True)

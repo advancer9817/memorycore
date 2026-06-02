@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="$ROOT/.venv/bin/python"
-SERVER="$ROOT/local_memory_mcp"
+SERVER="$ROOT/memorycore"
 OUT_DIR="$ROOT/reports"
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 mkdir -p "$OUT_DIR"

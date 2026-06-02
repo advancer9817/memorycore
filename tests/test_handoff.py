@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from local_memory_mcp.storage import (
+from memorycore.storage import (
     agent_capability_register,
     agent_capability_search,
     agent_handoff_create,

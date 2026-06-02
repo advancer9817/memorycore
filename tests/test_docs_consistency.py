@@ -10,7 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / "README.md"
-SERVER = ROOT / "local_memory_mcp" / "server.py"
+SERVER = ROOT / "memorycore" / "server.py"
 TOOLS_DOC = ROOT / "docs" / "tools.md"
 
 

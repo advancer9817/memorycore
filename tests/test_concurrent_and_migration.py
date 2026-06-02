@@ -9,7 +9,7 @@ import pytest
 
 def test_concurrent_writes_no_corruption(isolated_memory_db):
     """Multiple threads writing simultaneously must not corrupt the DB."""
-    from local_memory_mcp.storage import add_memory_record, search_memory_records
+    from memorycore.storage import add_memory_record, search_memory_records
 
     errors: list[Exception] = []
     results: list[dict[str, Any]] = []
@@ -43,7 +43,7 @@ def test_concurrent_writes_no_corruption(isolated_memory_db):
 
 def test_concurrent_reads_during_writes(isolated_memory_db):
     """Reads should succeed while writes are in progress."""
-    from local_memory_mcp.storage import add_memory_record, list_recent
+    from memorycore.storage import add_memory_record, list_recent
 
     add_memory_record("feedback", "Seed", "seed content")
 
@@ -76,7 +76,7 @@ def test_concurrent_reads_during_writes(isolated_memory_db):
 
 def test_schema_version_created_on_init(isolated_memory_db):
     """schema_version table must have exactly one row with version=1 after init."""
-    from local_memory_mcp.storage.db import managed_conn
+    from memorycore.storage.db import managed_conn
 
     with managed_conn() as conn:
         rows = conn.execute("SELECT version, applied_at FROM schema_version").fetchall()
@@ -88,7 +88,7 @@ def test_schema_version_created_on_init(isolated_memory_db):
 
 def test_schema_version_idempotent(isolated_memory_db):
     """Calling init_db twice must not create duplicate schema_version rows."""
-    from local_memory_mcp.storage.db import init_db, managed_conn
+    from memorycore.storage.db import init_db, managed_conn
 
     with managed_conn() as conn:
         init_db(conn)
@@ -101,7 +101,7 @@ def test_schema_version_idempotent(isolated_memory_db):
 
 def test_ensure_column_is_idempotent(isolated_memory_db):
     """_ensure_column must not raise if column already exists."""
-    from local_memory_mcp.storage.db import _ensure_column, managed_conn
+    from memorycore.storage.db import _ensure_column, managed_conn
 
     with managed_conn() as conn:
         _ensure_column(conn, "memories", "injected_count", "INTEGER NOT NULL DEFAULT 0")

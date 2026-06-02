@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from local_memory_mcp.models import local_now
+from memorycore.models import local_now
 
 logger = logging.getLogger(__name__)
 

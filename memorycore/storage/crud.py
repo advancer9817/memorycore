@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from local_memory_mcp.models import (
+from memorycore.models import (
     as_json,
     finite_float,
     load_config,
@@ -16,11 +16,11 @@ from local_memory_mcp.models import (
     validate_status,
     validate_type,
 )
-from local_memory_mcp.privacy import redact_record_fields
-from local_memory_mcp.storage.db import _managed_query, managed_conn
-from local_memory_mcp.storage.audit import log_audit_event
-from local_memory_mcp.storage.atomization import atomize_record, should_atomize
-from local_memory_mcp.storage.entities import sync_memory_entities
+from memorycore.privacy import redact_record_fields
+from memorycore.storage.db import _managed_query, managed_conn
+from memorycore.storage.audit import log_audit_event
+from memorycore.storage.atomization import atomize_record, should_atomize
+from memorycore.storage.entities import sync_memory_entities
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ def _validate_iso(value: str | None, field: str) -> None:
         raise ValueError(f"{field} must include timezone info (e.g. '+00:00'), got: {value!r}")
 
 try:
-    from local_memory_mcp.vector_store import get_vector_store as _get_vector_store
+    from memorycore.vector_store import get_vector_store as _get_vector_store
 except Exception:
     _get_vector_store = None  # type: ignore[assignment]
 
@@ -320,7 +320,7 @@ def get_record(memory_id: str) -> dict[str, Any] | None:
 
 
 def timeline(query: str = "", scope: str = "", limit: int = 20) -> list[dict[str, Any]]:
-    from local_memory_mcp.storage.search import search_memory_records
+    from memorycore.storage.search import search_memory_records
     rows = search_memory_records(
         query, types=["timeline_event", "decision", "feedback"],
         scope=scope, status="active", limit=limit,

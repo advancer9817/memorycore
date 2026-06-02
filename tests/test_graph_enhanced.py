@@ -7,8 +7,8 @@ TDD: these tests should fail (RED) before models.py / storage.py are updated.
 """
 from __future__ import annotations
 
-import local_memory_mcp as lm
-from local_memory_mcp.models import VALID_RELATION_TYPES
+import memorycore as lm
+from memorycore.models import VALID_RELATION_TYPES
 
 
 # ---------------------------------------------------------------------------

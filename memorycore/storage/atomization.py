@@ -6,9 +6,9 @@ import json
 import re
 from typing import Any, Callable
 
-from local_memory_mcp.models import as_json, now, row_to_dict
-from local_memory_mcp.storage.db import managed_conn
-from local_memory_mcp.storage.links import add_link
+from memorycore.models import as_json, now, row_to_dict
+from memorycore.storage.db import managed_conn
+from memorycore.storage.links import add_link
 
 ATOMIZER_VERSION = "mem0-inspired-v1"
 
@@ -163,7 +163,7 @@ def atomize_record(
     if dry_run or not new_facts:
         return result
     if add_memory_fn is None:
-        from local_memory_mcp.storage.crud import add_memory_record as add_memory_fn
+        from memorycore.storage.crud import add_memory_record as add_memory_fn
 
     child_ids: list[str] = []
     for fact in new_facts:
@@ -205,7 +205,7 @@ def atomize_record(
         row = conn.execute("SELECT * FROM memories WHERE id=?", (record_id,)).fetchone()
     if row is not None:
         try:
-            from local_memory_mcp.storage.entities import sync_memory_entities
+            from memorycore.storage.entities import sync_memory_entities
 
             sync_memory_entities(row_to_dict(row))
         except Exception:

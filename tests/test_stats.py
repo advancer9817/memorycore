@@ -1,7 +1,7 @@
 """Tests for memory_stats / get_memory_stats."""
 import pytest
-from local_memory_mcp.storage import add_memory_record, add_feedback, add_link, get_memory_stats
-from local_memory_mcp.server import memory_stats as mcp_memory_stats
+from memorycore.storage import add_memory_record, add_feedback, add_link, get_memory_stats
+from memorycore.server import memory_stats as mcp_memory_stats
 
 
 @pytest.fixture(autouse=True)

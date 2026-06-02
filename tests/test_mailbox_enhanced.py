@@ -5,8 +5,8 @@ import time
 
 import pytest
 
-import local_memory_mcp as lm
-from local_memory_mcp.storage import (
+import memorycore as lm
+from memorycore.storage import (
     cleanup_expired_messages,
     get_agent_inbox,
     managed_conn,
@@ -215,12 +215,12 @@ class TestBroadcastMessage:
 
 class TestAgentSendMCPTool:
     def test_agent_send_accepts_ttl_seconds(self):
-        from local_memory_mcp.server import agent_send
+        from memorycore.server import agent_send
         result = agent_send("a", "b", "mcp-ttl", ttl_seconds=60)
         assert result.get("expires_at") is not None
 
     def test_agent_send_ttl_none_by_default(self):
-        from local_memory_mcp.server import agent_send
+        from memorycore.server import agent_send
         result = agent_send("a", "b", "mcp-no-ttl")
         assert result.get("expires_at") is None
 
@@ -232,12 +232,12 @@ class TestAgentSendMCPTool:
 
 class TestAgentMessagesCleanupMCPTool:
     def test_agent_messages_cleanup_exists_and_callable(self):
-        from local_memory_mcp.server import agent_messages_cleanup
+        from memorycore.server import agent_messages_cleanup
         result = agent_messages_cleanup()
         assert "deleted" in result
 
     def test_agent_messages_cleanup_deletes_expired(self):
-        from local_memory_mcp.server import agent_messages_cleanup
+        from memorycore.server import agent_messages_cleanup
         send_agent_message("a", "b", "mcp-clean", ttl_seconds=-1)
         result = agent_messages_cleanup()
         assert result["deleted"] >= 1

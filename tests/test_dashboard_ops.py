@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 
-import local_memory_mcp as lm
-from local_memory_mcp.storage import send_agent_message, update_agent_presence
+import memorycore as lm
+from memorycore.storage import send_agent_message, update_agent_presence
 
 
 def _dashboard_payload(text: str) -> dict:

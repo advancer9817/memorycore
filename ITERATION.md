@@ -2101,3 +2101,44 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 > - 测试结果必须写实际数字（如 362/362 pass），不允许占位符。
 > - 已知问题如已在上个迭代修复，从列表中移除并改记入"修复"段。
 > - 不要在迭代条目中包含 git diff stat、file change list、remote URL 等 repo sync 元数据。
+
+---
+
+## [迭代 88] 2026-06-02 — 品牌重命名：local-memory-mcp → MemoryCore
+
+### 变更
+
+**前端品牌替换（OpenMemory/Mem0 → MemoryCore）**
+- `ui/app/layout.tsx`：页面 title/description 改为 MemoryCore
+- `ui/components/Navbar.tsx`：logo 文字 OpenMemory → MemoryCore
+- `ui/app/memories/components/CreateMemoryDialog.tsx`：对话框描述更新
+- `ui/app/settings/page.tsx`：副标题、卡片描述更新
+- `ui/components/form-view.tsx`：Settings 卡片标题/描述更新；LLM/Embedder 表单对齐后端真实字段（`extraction.*` + `embedding.*`）
+- `ui/components/shared/source-app.tsx`：app 图标常量键 `openmemory → memorycore`
+- `ui/package.json`：包名 `lmmcp-openmemory-ui → memorycore-ui`
+- `ui/lib/api-url.ts`：localStorage key `lmmcp.openmemory.apiUrl → memorycore.apiUrl`
+- `ui/next.config.mjs`：rewrite 从 `/api/v1/*` 扩展为 `/api/*`，覆盖 curator/context 等原生端点
+- `ui/playwright.config.ts`：UI 端口 env var `OPENMEMORY_UI_PORT → MEMORYCORE_UI_PORT`
+
+**TypeScript 类型重命名**
+- `store/configSlice.ts`：`OpenMemoryConfig → MemoryCoreConfig`，`Mem0Config → LLMBackendConfig`，state 字段 `openmemory → settings`，`mem0 → llm`；reducer `updateOpenMemory → updateMemoryCoreConfig`，`updateMem0Config → updateLLMBackendConfig`
+- `hooks/useConfig.ts`：同步导入和函数签名
+
+**后端函数名清理（frontend.py）**
+- `_dispatch_openmemory_compat → _dispatch_v1_compat`
+- `_openmemory_memory_item → _memory_item`
+- `_openmemory_simple_memory → _simple_memory`
+- `_openmemory_categories → _memory_categories`
+- `_openmemory_apps → _apps_list`
+- `_openmemory_app_details → _app_details`
+
+**后端 config API 接入真实配置**
+- `frontend.py`：`GET /api/v1/config` 改为读取真实 `config.yaml`（extraction + embedding 两段）
+- `frontend.py`：`PUT /api/v1/config` 改为写入 `config.yaml`，持久化 extraction/embedding 配置
+
+**Python 包目录重命名**
+- `local_memory_mcp/` 目录 → `memorycore/`
+- 所有内部 `from local_memory_mcp` import → `from memorycore`
+- 所有测试 patch 路径、脚本 `-m local_memory_mcp` 调用同步更新
+- `pyproject.toml`：包名 `local-memory-mcp → memorycore`，CLI 入口保留 `lmmcp` 别名
+- `scripts/lmmcp`、`scripts/lmmcp.service`、`start.sh`、`run_curator.sh` 等全部更新

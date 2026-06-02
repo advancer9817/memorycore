@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-import local_memory_mcp as lm
+import memorycore as lm
 
 
 def _old(memory_id: str, hours: int = 48) -> None:

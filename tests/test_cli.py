@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 import sys
 import types
 
-import local_memory_mcp as lm
+import memorycore as lm
 
 
 def read_json(capsys):
@@ -62,9 +62,9 @@ def test_semantic_cli_uses_qdrant_vector_store(monkeypatch, capsys):
             })
             return [FakeHit()]
 
-    fake_vs_mod = types.ModuleType("local_memory_mcp.vector_store")
+    fake_vs_mod = types.ModuleType("memorycore.vector_store")
     fake_vs_mod.get_vector_store = lambda cfg=None: FakeVectorStore()
-    monkeypatch.setitem(sys.modules, "local_memory_mcp.vector_store", fake_vs_mod)
+    monkeypatch.setitem(sys.modules, "memorycore.vector_store", fake_vs_mod)
 
     assert lm.main(["semantic-status"]) == 0
     status = read_json(capsys)
@@ -92,7 +92,7 @@ def test_semantic_cli_uses_qdrant_vector_store(monkeypatch, capsys):
 
 
 def test_semantic_index_rebuilds_vectors_only_with_force(monkeypatch, capsys):
-    import local_memory_mcp.server as srv
+    import memorycore.server as srv
 
     calls = []
 

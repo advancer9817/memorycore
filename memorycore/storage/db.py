@@ -8,7 +8,7 @@ import time
 from contextlib import contextmanager
 from typing import Any
 
-from local_memory_mcp.models import (
+from memorycore.models import (
     _INITIALIZED_DB_PATHS,
     db_path,
     now,
