@@ -2142,3 +2142,19 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 - 所有测试 patch 路径、脚本 `-m local_memory_mcp` 调用同步更新
 - `pyproject.toml`：包名 `local-memory-mcp → memorycore`，CLI 入口保留 `lmmcp` 别名
 - `scripts/lmmcp`、`scripts/lmmcp.service`、`start.sh`、`run_curator.sh` 等全部更新
+
+---
+
+## [迭代 89] 2026-06-02 — README 更新
+
+### 变更
+
+- 标题从 `local-memory-mcp` 改为 `MemoryCore`
+- 仓库 clone URL、路径表格（`local_memory_mcp/` → `memorycore/`）全部更新
+- CLI 命令从 `-m local_memory_mcp` 改为 `-m memorycore`，新增 `lmmcp` 别名说明
+- PyPI 安装命令从 `local-memory-mcp[all]` 改为 `memorycore[all]`
+- 控制台描述从"OpenMemory UI fork"改为"MemoryCore 控制台（Next.js 前端）"，移除 Mem0 相关说明
+- 服务脚本环境变量 `LMMCP_DIR` 默认值从 `local-memory-mcp` 改为 `memorycore`
+- 已完成功能列表新增"MemoryCore 控制台（品牌重命名 + 配置界面接入真实 config.yaml）"
+- 部署路径示例从 `/opt/local-memory-mcp` 改为 `/opt/memorycore`
+- 整体精简：移除重复段落，合并客户端接入配置为独立小节
