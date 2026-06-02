@@ -214,7 +214,7 @@ env = settings.setdefault("env", {})
 env.setdefault("MCORE_PORT", "8318")
 env.setdefault("MCORE_AGENT_ID", "claude")
 servers = settings.setdefault("mcpServers", {})
-servers.setdefault("local_memory", {"type": "http", "url": endpoint})
+servers.setdefault("memorycore", {"type": "http", "url": endpoint})
 write_json(claude_settings, settings)
 
 claude_rules = """
@@ -279,7 +279,7 @@ trust_codex_hooks(codex_config, codex_hooks)
 
 gemini_data = load_json(gemini_settings)
 gemini_servers = gemini_data.setdefault("mcpServers", {})
-gemini_servers["local_memory"] = {"httpUrl": endpoint, "timeout": 60000}
+gemini_servers["memorycore"] = {"httpUrl": endpoint, "timeout": 60000}
 gemini_hooks = gemini_data.setdefault("hooks", {})
 remove_hook_entries(gemini_hooks, "SessionStart", mcore_session_start_fragments)
 remove_hook_entries(gemini_hooks, "BeforeAgent", codex_mcore_context_fragments)
