@@ -2158,3 +2158,43 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 - 已完成功能列表新增"MemoryCore 控制台（品牌重命名 + 配置界面接入真实 config.yaml）"
 - 部署路径示例从 `/opt/local-memory-mcp` 改为 `/opt/memorycore`
 - 整体精简：移除重复段落，合并客户端接入配置为独立小节
+
+---
+
+## [迭代 90] 2026-06-02 — lmmcp → mcore 全量重命名
+
+### 变更
+
+**文件重命名**
+- `scripts/lmmcp` → `scripts/mcore`
+- `scripts/lmmcp.service` → `scripts/mcore.service`
+- `scripts/lmmcp-curator.service` → `scripts/mcore-curator.service`
+- `scripts/lmmcp-daemon.sh` → `scripts/mcore-daemon.sh`
+- `scripts/hooks/lmmcp-context.sh` → `scripts/hooks/mcore-context.sh`
+- `scripts/hooks/lmmcp-ingest.py` → `scripts/hooks/mcore-ingest.py`
+- `scripts/hooks/opencode-lmmcp-plugin.js` → `scripts/hooks/opencode-mcore-plugin.js`
+
+**环境变量重命名**（`LMMCP_*` → `MCORE_*`）
+- `LMMCP_AGENT_ID` → `MCORE_AGENT_ID`
+- `LMMCP_PORT` → `MCORE_PORT`
+- `LMMCP_HOST` → `MCORE_HOST`
+- `LMMCP_DIR` → `MCORE_DIR`
+- `LMMCP_AUTO_SYNC` → `MCORE_AUTO_SYNC`
+- `LMMCP_URL` → `MCORE_URL`
+- `LMMCP_ROOT` → `MCORE_ROOT`
+- 以及所有其他 `LMMCP_*` 变量
+
+**代码/脚本内部变量名**
+- `ensure_lmmcp_running` → `ensure_mcore_running`
+- `_lmmcp_url` → `_mcore_url`
+- `HOOK_LMMCP_CONTEXT` → `HOOK_MCORE_CONTEXT`
+- `CODEX_LMMCP_CONTEXT_FRAGMENTS` → `CODEX_MCORE_CONTEXT_FRAGMENTS`
+- `LMMCP_SESSION_START_FRAGMENTS` → `MCORE_SESSION_START_FRAGMENTS`
+- `lmmcp-memory-rules` → `mcore-memory-rules` 注释块标记
+
+**其他**
+- `docker-compose.yml`：服务名 `lmmcp` → `mcore`，volume `lmmcp_data` → `mcore_data`
+- `settings.json`：hooks 路径和 env var 同步更新
+- `test_deployment.py`：断言字符串同步更新
+- `LMMCP_DB` 测试用变量改为标准 `LOCAL_MEMORY_DB`
+- pyproject.toml CLI 别名 `lmmcp` → `mcore`

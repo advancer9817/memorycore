@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install lmmcp-curator systemd user timer (or cron fallback).
+# Install mcore-curator systemd user timer (or cron fallback).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -8,16 +8,16 @@ SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 # --- systemd path ---
 install_systemd() {
     mkdir -p "$SYSTEMD_USER_DIR"
-    cp "$ROOT/scripts/lmmcp-curator.service" "$SYSTEMD_USER_DIR/lmmcp-curator.service"
-    cp "$ROOT/scripts/lmmcp-curator.timer"   "$SYSTEMD_USER_DIR/lmmcp-curator.timer"
+    cp "$ROOT/scripts/mcore-curator.service" "$SYSTEMD_USER_DIR/mcore-curator.service"
+    cp "$ROOT/scripts/mcore-curator.timer"   "$SYSTEMD_USER_DIR/mcore-curator.timer"
 
     # Patch WorkingDirectory and ExecStart with actual HOME path
-    sed -i "s|%h|$HOME|g" "$SYSTEMD_USER_DIR/lmmcp-curator.service"
+    sed -i "s|%h|$HOME|g" "$SYSTEMD_USER_DIR/mcore-curator.service"
 
     systemctl --user daemon-reload
-    systemctl --user enable --now lmmcp-curator.timer
+    systemctl --user enable --now mcore-curator.timer
     echo "systemd timer installed."
-    systemctl --user list-timers lmmcp-curator.timer --no-pager
+    systemctl --user list-timers mcore-curator.timer --no-pager
 }
 
 # --- cron fallback ---

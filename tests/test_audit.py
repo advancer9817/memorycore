@@ -6,8 +6,8 @@ import pytest
 
 @pytest.fixture()
 def isolated_db(tmp_path, monkeypatch):
-    """Patch LMMCP_DB and reset the DB-init cache so each test gets a fresh DB."""
-    monkeypatch.setenv("LMMCP_DB", str(tmp_path / "audit_test.sqlite3"))
+    """Patch LOCAL_MEMORY_DB and reset the DB-init cache so each test gets a fresh DB."""
+    monkeypatch.setenv("LOCAL_MEMORY_DB", str(tmp_path / "audit_test.sqlite3"))
     from memorycore import models
     monkeypatch.setattr(models, "_INITIALIZED_DB_PATHS", set())
     return tmp_path

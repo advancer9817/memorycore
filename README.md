@@ -34,7 +34,7 @@ MEM_ROOT="${LOCAL_MEMORY_ROOT:-$(pwd)}"
 | SQLite DB | `$MEM_ROOT/memory.sqlite3` |
 | Dashboard | `$MEM_ROOT/dashboard.html` |
 | MCP probe | `$MEM_ROOT/probe_mcp.py` |
-| 可选服务脚本 | `$MEM_ROOT/scripts/lmmcp` |
+| 可选服务脚本 | `$MEM_ROOT/scripts/mcore` |
 
 代码默认使用项目目录内的 `memory.sqlite3`，可用 `LOCAL_MEMORY_DB` 覆盖数据库路径，`LOCAL_MEMORY_CONFIG` 覆盖配置文件路径。
 
@@ -79,14 +79,14 @@ http://127.0.0.1:8318/health  健康检查
 
 ### 自动模式（推荐）
 
-`scripts/lmmcp` 服务脚本在 **启动前自动拉取**、**停止后自动推送**：
+`scripts/mcore` 服务脚本在 **启动前自动拉取**、**停止后自动推送**：
 
 ```bash
-scripts/lmmcp start   # git pull → import → 启动服务
-scripts/lmmcp stop    # 停止服务 → export → git commit → git push
+scripts/mcore start   # git pull → import → 启动服务
+scripts/mcore stop    # 停止服务 → export → git commit → git push
 ```
 
-设置 `LMMCP_AUTO_SYNC=0` 可禁用自动同步（git 操作失败时也不会影响服务启停）。
+设置 `MCORE_AUTO_SYNC=0` 可禁用自动同步（git 操作失败时也不会影响服务启停）。
 
 ### 手动同步
 
@@ -126,7 +126,7 @@ scripts/sync-memory.sh status
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `LMMCP_AUTO_SYNC` | `1` | 设为 `0` 禁用 lmmcp 自动同步 |
+| `MCORE_AUTO_SYNC` | `1` | 设为 `0` 禁用 mcore 自动同步 |
 | `SYNC_FILE` | `memory-sync/memories.json` | 同步文件路径（相对仓库根） |
 | `SYNC_REMOTE` | `origin` | git remote 名称 |
 | `SYNC_DEVICE` | `hostname -s` | commit message 中的设备标识 |
@@ -141,7 +141,7 @@ scripts/sync-memory.sh status
 6. **Memory links / warnings**：支持 `related_to`、`supersedes`、`contradicts`、`supports`、`part_of`；`memory_warnings` 可根据 active links 产生冲突/替代提示。
 7. **Qdrant 语义检索**：`memory_vector_search` / `memory_vector_status` / `memory_vector_audit` 通过 `vector_store.py` 使用 Qdrant + 可配置 embedding API；`auto` provider 优先使用配置的 OpenAI-compatible API，未配置时尝试 Ollama API，最后使用 hashing fallback。
 8. **MemoryCore 控制台**：内置 Next.js 前端，展示记忆列表、agent 状态、curator 面板、配置管理（extraction LLM + embedding 模型直接写入 `config.yaml`）。
-9. **多客户端接入**：Hermes / Codex / Claude Code / Gemini / opencode 都作为普通 MCP 客户端接入；lmmcp 核心不依赖任一客户端配置仓库或私有 transcript。
+9. **多客户端接入**：Hermes / Codex / Claude Code / Gemini / opencode 都作为普通 MCP 客户端接入；mcore 核心不依赖任一客户端配置仓库或私有 transcript。
 
 Optional / degraded：
 
@@ -284,10 +284,10 @@ bash scripts/setup-hooks.sh
 python3 scripts/connect_agents.py --register-hooks
 ```
 
-**读前注入脚本**：`scripts/hooks/lmmcp-context.sh`  
-**opencode 读前注入插件**：`scripts/hooks/opencode-lmmcp-plugin.js`  
+**读前注入脚本**：`scripts/hooks/mcore-context.sh`  
+**opencode 读前注入插件**：`scripts/hooks/opencode-mcore-plugin.js`  
 **启动注册脚本**：`scripts/hooks/session-start.sh`  
-**结束写回脚本**：`scripts/hooks/lmmcp-ingest.py`
+**结束写回脚本**：`scripts/hooks/mcore-ingest.py`
 
 | 参数 | 适用 | 读取来源 |
 |---|---|---|
@@ -299,26 +299,26 @@ python3 scripts/connect_agents.py --register-hooks
 
 ## 服务脚本
 
-仓库提供可选脚本 `scripts/lmmcp`：
+仓库提供可选脚本 `scripts/mcore`：
 
 ```bash
-scripts/lmmcp start
-scripts/lmmcp status
-scripts/lmmcp logs 80
-scripts/lmmcp stop
+scripts/mcore start
+scripts/mcore status
+scripts/mcore logs 80
+scripts/mcore stop
 ```
 
 默认值可通过环境变量覆盖：
 
 | 变量 | 默认值 |
 |---|---|
-| `LMMCP_DIR` | `$HOME/project/memorycore` |
-| `LMMCP_PYTHON` | `$LMMCP_DIR/.venv/bin/python` |
-| `LMMCP_HOST` | `127.0.0.1` |
-| `LMMCP_PORT` | `8318` |
-| `LOCAL_MEMORY_DB` | `$LMMCP_DIR/memory.sqlite3` |
-| `LMMCP_PID_FILE` | `/tmp/lmmcp.pid` |
-| `LMMCP_LOG_FILE` | `$LMMCP_DIR/lmmcp.log` |
+| `MCORE_DIR` | `$HOME/project/memorycore` |
+| `MCORE_PYTHON` | `$MCORE_DIR/.venv/bin/python` |
+| `MCORE_HOST` | `127.0.0.1` |
+| `MCORE_PORT` | `8318` |
+| `LOCAL_MEMORY_DB` | `$MCORE_DIR/memory.sqlite3` |
+| `MCORE_PID_FILE` | `/tmp/mcore.pid` |
+| `MCORE_LOG_FILE` | `$MCORE_DIR/mcore.log` |
 
 ## 安装与测试
 
@@ -346,9 +346,9 @@ python3.11 -m venv .venv
 ```bash
 cd ui
 pnpm install
-LMMCP_API_URL=http://127.0.0.1:8318 pnpm dev
+MCORE_API_URL=http://127.0.0.1:8318 pnpm dev
 pnpm build
-LMMCP_API_URL=http://127.0.0.1:8318 pnpm test:e2e
+MCORE_API_URL=http://127.0.0.1:8318 pnpm test:e2e
 ```
 
 该目录保留上游 Apache-2.0 license 与 attribution，详见 `ui/LICENSE` 和 `ui/NOTICE.md`。

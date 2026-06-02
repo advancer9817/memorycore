@@ -7,11 +7,11 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-HOOK_PATH = ROOT / "scripts" / "hooks" / "lmmcp-ingest.py"
+HOOK_PATH = ROOT / "scripts" / "hooks" / "mcore-ingest.py"
 
 
 def _load_hook():
-    spec = importlib.util.spec_from_file_location("lmmcp_ingest_hook", HOOK_PATH)
+    spec = importlib.util.spec_from_file_location("mcore_ingest_hook", HOOK_PATH)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -145,7 +145,7 @@ def test_gemini_json_transcript_and_hook_payload_path(tmp_path, monkeypatch):
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("LMMCP_INGEST_HOOK_PAYLOAD", json.dumps({"transcript_path": str(transcript)}))
+    monkeypatch.setenv("MCORE_INGEST_HOOK_PAYLOAD", json.dumps({"transcript_path": str(transcript)}))
 
     assert hook._messages_for_agent("gemini") == [
         {"role": "user", "content": "Gemini 用户提示"},

@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   async rewrites() {
-    const apiUrl = process.env.LMMCP_API_URL || "http://127.0.0.1:8318";
+    const apiUrl = process.env.MCORE_API_URL || "http://127.0.0.1:8318";
     return [
       {
         source: "/api/:path*",

@@ -12,21 +12,21 @@
 #
 # 用法：
 #   bash start.sh                   # 前台运行
-#   bash start.sh --daemon          # 后台运行（PID 写入 /tmp/lmmcp.pid）
+#   bash start.sh --daemon          # 后台运行（PID 写入 /tmp/mcore.pid）
 #   bash start.sh --no-import       # 跳过记忆导入
 #   bash start.sh --host 0.0.0.0 --port 8318
-#   LMMCP_AUTO_SYNC=0 bash start.sh # 同上效果（兼容 lmmcp 脚本变量）
+#   MCORE_AUTO_SYNC=0 bash start.sh # 同上效果（兼容旧 lmmcp 脚本变量）
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # ── 参数 ──────────────────────────────────────────────────────────────────────
-HOST="${LMMCP_HOST:-127.0.0.1}"
-PORT="${LMMCP_PORT:-8318}"
+HOST="${MCORE_HOST:-127.0.0.1}"
+PORT="${MCORE_PORT:-8318}"
 DAEMON=0
 SKIP_IMPORT=0
-PYTHON_BIN="${LMMCP_PYTHON:-}"
+PYTHON_BIN="${MCORE_PYTHON:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -42,9 +42,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-LOG="$SCRIPT_DIR/lmmcp.log"
+LOG="$SCRIPT_DIR/mcore.log"
 SYNC_FILE="$SCRIPT_DIR/memory-sync/memories.json"
-PID_FILE="${LMMCP_PID_FILE:-/tmp/lmmcp.pid}"
+PID_FILE="${MCORE_PID_FILE:-/tmp/mcore.pid}"
 
 _log()  { echo "[start.sh] $*"; }
 _warn() { echo "[start.sh] WARNING: $*" >&2; }
@@ -126,7 +126,7 @@ _log "  Health       : http://$HOST:$PORT/health"
 
 if [[ "$DAEMON" -eq 1 ]]; then
   if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
-    _warn "Already running (pid $(cat "$PID_FILE")). Use 'scripts/lmmcp stop' first."
+    _warn "Already running (pid $(cat "$PID_FILE")). Use 'scripts/mcore stop' first."
     exit 1
   fi
   nohup "$PY" -m memorycore serve --host "$HOST" --port "$PORT" >> "$LOG" 2>&1 &
@@ -134,7 +134,7 @@ if [[ "$DAEMON" -eq 1 ]]; then
   sleep 1
   if kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
     _log "Started in background (pid $(cat "$PID_FILE")). Log: $LOG"
-    _log "Stop with: scripts/lmmcp stop"
+    _log "Stop with: scripts/mcore stop"
   else
     echo "[start.sh] ERROR: service failed to start — check $LOG" >&2
     exit 1

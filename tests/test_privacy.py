@@ -104,7 +104,7 @@ class TestAddMemoryRedaction:
 
     def test_secret_not_stored_in_db(self, tmp_path, monkeypatch):
         import os
-        monkeypatch.setenv("LMMCP_DB", str(tmp_path / "test.sqlite3"))
+        monkeypatch.setenv("LOCAL_MEMORY_DB", str(tmp_path / "test.sqlite3"))
         # Reset initialized DB cache so tmp DB is used
         from memorycore import models
         monkeypatch.setattr(models, "_INITIALIZED_DB_PATHS", set())

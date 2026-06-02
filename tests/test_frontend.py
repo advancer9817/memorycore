@@ -82,7 +82,7 @@ def test_frontend_v1_memory_compat_routes():
         })
         memory_id = created.json()["id"]
         listed = client.get("/api/v1/memories?query=lmmcp")
-        filtered = client.post("/api/v1/memories/filter", json={"search_query": "lmmcp", "page": 1, "size": 5})
+        filtered = client.post("/api/v1/memories/filter", json={"search_query": "mcore", "page": 1, "size": 5})
         detail = client.get(f"/api/v1/memories/{memory_id}")
         updated = client.put(f"/api/v1/memories/{memory_id}", json={"memory_content": "updated lmmcp compat API content"})
         categories = client.get("/api/v1/memories/categories?user_id=test")

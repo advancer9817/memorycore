@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-LMMCP_PORT="${LMMCP_PORT:-8318}"
-LMMCP_HOST="${LMMCP_HOST:-127.0.0.1}"
-LMMCP_URL="http://${LMMCP_HOST}:${LMMCP_PORT}/mcp"
-AGENT="${LMMCP_AGENT_ID:-claude}"
+MCORE_PORT="${MCORE_PORT:-8318}"
+MCORE_HOST="${MCORE_HOST:-127.0.0.1}"
+MCORE_URL="http://${MCORE_HOST}:${MCORE_PORT}/mcp"
+AGENT="${MCORE_AGENT_ID:-claude}"
 
 STDIN_JSON="$(cat)"
 
@@ -56,16 +56,16 @@ except Exception:
 print(str(data.get("hook_event_name") or data.get("hookEventName") or ""))
 ' 2>/dev/null || true)"
 
-touch /tmp/lmmcp-session-mark 2>/dev/null || true
+touch /tmp/mcore-session-mark 2>/dev/null || true
 
 [ -z "$PROMPT" ] && exit 0
 
 if command -v ss >/dev/null 2>&1; then
-  ss -tln 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${LMMCP_PORT}$" || exit 0
+  ss -tln 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${MCORE_PORT}$" || exit 0
 fi
 
-INIT_PAYLOAD='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"lmmcp-context-hook","version":"1.0"}}}'
-INIT_RESPONSE="$(curl -sS -i --max-time 1.0 -X POST "$LMMCP_URL" \
+INIT_PAYLOAD='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"mcore-context-hook","version":"1.0"}}}'
+INIT_RESPONSE="$(curl -sS -i --max-time 1.0 -X POST "$MCORE_URL" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d "$INIT_PAYLOAD" 2>/dev/null || true)"
@@ -92,7 +92,7 @@ print(json.dumps(payload, ensure_ascii=False))
 
 [ -z "$PAYLOAD" ] && exit 0
 
-RESPONSE="$(curl -sS --max-time 1.8 -X POST "$LMMCP_URL" \
+RESPONSE="$(curl -sS --max-time 1.8 -X POST "$MCORE_URL" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "Mcp-Session-Id: $SESSION_ID" \

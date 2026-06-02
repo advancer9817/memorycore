@@ -1,5 +1,5 @@
 services:
-  lmmcp:
+  mcore:
     build:
       context: .
       args:
@@ -7,7 +7,7 @@ services:
     ports:
       - "8318:8318"
     volumes:
-      - lmmcp_data:/data
+      - mcore_data:/data
     environment:
       LOCAL_MEMORY_DB: /data/memory.sqlite3
       LOCAL_MEMORY_CONFIG: /data/config.yaml
@@ -35,5 +35,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  lmmcp_data:
+  mcore_data:
   qdrant_data:

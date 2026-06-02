@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# session-start.sh — Hook: ensure lmmcp is running and register the agent.
+# session-start.sh — Hook: ensure mcore is running and register the agent.
 # Called by Agent hooks at SessionStart / before_session.
 # Exits 0 always; failure must not break agent startup.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../lmmcp-daemon.sh" 2>/dev/null || true
+source "$SCRIPT_DIR/../mcore-daemon.sh" 2>/dev/null || true
 
-LMMCP_PORT="${LMMCP_PORT:-8318}"
-LMMCP_HOST="${LMMCP_HOST:-127.0.0.1}"
-LMMCP_URL="http://${LMMCP_HOST}:${LMMCP_PORT}/mcp"
-AGENT="${LMMCP_AGENT_ID:-agent}"
-NAMESPACE="${LMMCP_AGENT_NAMESPACE:-default}"
-INIT_TIMEOUT="${LMMCP_SESSION_START_INIT_TIMEOUT:-1.5}"
-CALL_TIMEOUT="${LMMCP_SESSION_START_CALL_TIMEOUT:-1.5}"
+MCORE_PORT="${MCORE_PORT:-8318}"
+MCORE_HOST="${MCORE_HOST:-127.0.0.1}"
+MCORE_URL="http://${MCORE_HOST}:${MCORE_PORT}/mcp"
+AGENT="${MCORE_AGENT_ID:-agent}"
+NAMESPACE="${MCORE_AGENT_NAMESPACE:-default}"
+INIT_TIMEOUT="${MCORE_SESSION_START_INIT_TIMEOUT:-1.5}"
+CALL_TIMEOUT="${MCORE_SESSION_START_CALL_TIMEOUT:-1.5}"
 
-ensure_lmmcp_running 2>/dev/null || true
+ensure_mcore_running 2>/dev/null || true
 
-touch /tmp/lmmcp-session-mark 2>/dev/null || true
+touch /tmp/mcore-session-mark 2>/dev/null || true
 
 command -v curl >/dev/null 2>&1 || exit 0
 command -v python3 >/dev/null 2>&1 || exit 0
@@ -39,10 +39,10 @@ case "${AGENT,,}" in
     DEFAULT_CAPABILITIES="memory,collaboration"
     ;;
 esac
-CAPABILITIES="${LMMCP_AGENT_CAPABILITIES:-$DEFAULT_CAPABILITIES}"
+CAPABILITIES="${MCORE_AGENT_CAPABILITIES:-$DEFAULT_CAPABILITIES}"
 
-INIT_PAYLOAD='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"lmmcp-session-start-hook","version":"1.0"}}}'
-INIT_RESPONSE="$(curl -sS -i --max-time "$INIT_TIMEOUT" -X POST "$LMMCP_URL" \
+INIT_PAYLOAD='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"mcore-session-start-hook","version":"1.0"}}}'
+INIT_RESPONSE="$(curl -sS -i --max-time "$INIT_TIMEOUT" -X POST "$MCORE_URL" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d "$INIT_PAYLOAD" 2>/dev/null || true)"
@@ -93,7 +93,7 @@ call_tool() {
   local payload
   payload="$(tool_payload "$request_id" "$tool_name" "$arguments")"
   [ -z "$payload" ] && return 0
-  curl -sS --max-time "$CALL_TIMEOUT" -X POST "$LMMCP_URL" \
+  curl -sS --max-time "$CALL_TIMEOUT" -X POST "$MCORE_URL" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -H "Mcp-Session-Id: $SESSION_ID" \

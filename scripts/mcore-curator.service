@@ -1,7 +1,7 @@
 [Unit]
 Description=local-memory-mcp curator run
-After=network-online.target __LMMCP_SERVICE__
-Wants=network-online.target __LMMCP_SERVICE__
+After=network-online.target __MCORE_SERVICE__
+Wants=network-online.target __MCORE_SERVICE__
 
 [Service]
 Type=oneshot

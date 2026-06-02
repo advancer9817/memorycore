@@ -13,7 +13,7 @@ def _mock_vector_store():
     return store
 
 
-def test_entity_search_matches_lmmcp_aliases():
+def test_entity_search_matches_mcore_aliases():
     record = lm.add_memory_record(
         "environment_fact",
         "local-memory-mcp service facts",
@@ -25,7 +25,7 @@ def test_entity_search_matches_lmmcp_aliases():
     hits = lm.entity_search("local_memory", limit=5)
 
     assert [hit["memory_id"] for hit in hits] == [record["id"]]
-    assert hits[0]["normalized_entity"] == "lmmcp"
+    assert hits[0]["normalized_entity"] == "mcore"
     assert hits[0]["boost"] > 0
 
 

@@ -625,13 +625,13 @@ def _systemctl_user_show(unit: str, properties: list[str]) -> dict[str, str]:
 def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
     stats = get_memory_stats()
     report = curator_report(dry_run=True, limit=limit)
-    timer = _systemctl_user_show("lmmcp-curator.timer", [
+    timer = _systemctl_user_show("mcore-curator.timer", [
         "ActiveState",
         "SubState",
         "NextElapseUSecRealtime",
         "LastTriggerUSec",
     ])
-    service = _systemctl_user_show("lmmcp-curator.service", [
+    service = _systemctl_user_show("mcore-curator.service", [
         "ActiveState",
         "SubState",
         "Result",
@@ -780,7 +780,7 @@ function recordHtml(rows){ return rows.slice(0,80).map(r=>`<article class="recor
 async function createMemory(){ await api('/api/memories',{method:'POST',body:JSON.stringify({title:$('mTitle').value,content:$('mContent').value,type:$('mType').value,source_agent:'frontend'})}); await refresh(); }
 async function searchMemories(){ const rows=await api('/api/memories?query='+encodeURIComponent($('q').value)); $('recordList').innerHTML=recordHtml(rows); }
 async function applyCurator(){ await api('/api/curator/apply',{method:'POST',body:JSON.stringify({})}); await refresh(); }
-async function downloadExport(){ const data=await api('/api/export'); const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='lmmcp-export.json'; a.click(); }
+async function downloadExport(){ const data=await api('/api/export'); const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='mcore-export.json'; a.click(); }
 async function backup(){ alert(JSON.stringify(await api('/api/backup',{method:'POST',body:'{}'}),null,2)); }
 async function vectorDryRun(){ alert(JSON.stringify(await api('/api/vector/rebuild',{method:'POST',body:JSON.stringify({dry_run:true})}),null,2)); }
 mountNav(); refresh();

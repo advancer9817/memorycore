@@ -23,7 +23,7 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     env: {
-      LMMCP_API_URL: process.env.LMMCP_API_URL || "http://127.0.0.1:8318",
+      MCORE_API_URL: process.env.MCORE_API_URL || "http://127.0.0.1:8318",
       NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8318",
     },
   },

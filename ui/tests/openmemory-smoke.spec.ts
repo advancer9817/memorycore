@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-const apiURL = process.env.LMMCP_API_URL || "http://127.0.0.1:8318";
+const apiURL = process.env.MCORE_API_URL || "http://127.0.0.1:8318";
 
 test.describe("MemoryCore UI smoke", () => {
   test("lists, searches, opens, filters, shows stats, and archives a memory", async ({ page, request }) => {

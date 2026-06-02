@@ -10,8 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-MARK = Path("/tmp/lmmcp-session-mark")
-LOG = Path(os.environ.get("LMMCP_INGEST_LOG", "/tmp/lmmcp-ingest.log"))
+MARK = Path("/tmp/mcore-session-mark")
+LOG = Path(os.environ.get("MCORE_INGEST_LOG", "/tmp/mcore-ingest.log"))
 
 
 def _log(message: str) -> None:
@@ -28,7 +28,7 @@ def _spawn_background(agent: str, force: bool) -> None:
     if force:
         cmd.append("--force")
     env = os.environ.copy()
-    env["LMMCP_INGEST_BACKGROUND_CHILD"] = "1"
+    env["MCORE_INGEST_BACKGROUND_CHILD"] = "1"
     # Hermes on_session_end passes hook metadata on stdin.  A detached child
     # cannot read the parent's stdin after we redirect it to DEVNULL, so carry
     # the small JSON payload through the environment for background mode.
@@ -37,8 +37,8 @@ def _spawn_background(agent: str, force: bool) -> None:
     except Exception:
         payload = ""
     if payload:
-        env["LMMCP_INGEST_HOOK_PAYLOAD"] = payload[:20000]
-        env["LMMCP_HERMES_HOOK_PAYLOAD"] = payload[:20000]
+        env["MCORE_INGEST_HOOK_PAYLOAD"] = payload[:20000]
+        env["MCORE_HERMES_HOOK_PAYLOAD"] = payload[:20000]
     try:
         proc = subprocess.Popen(
             cmd,
@@ -54,9 +54,9 @@ def _spawn_background(agent: str, force: bool) -> None:
         _log(f"background_spawn_failed agent={agent} error={type(exc).__name__}")
 
 
-def _lmmcp_url() -> str:
-    host = os.environ.get("LMMCP_HOST", "127.0.0.1")
-    port = os.environ.get("LMMCP_PORT", "8318")
+def _mcore_url() -> str:
+    host = os.environ.get("MCORE_HOST", "127.0.0.1")
+    port = os.environ.get("MCORE_PORT", "8318")
     return f"http://{host}:{port}/mcp"
 
 
@@ -69,7 +69,7 @@ def _curl_post(payload: dict, session_id: str = "", timeout: float = 10.0) -> tu
         str(timeout),
         "-X",
         "POST",
-        _lmmcp_url(),
+        _mcore_url(),
         "-H",
         "Content-Type: application/json",
         "-H",
@@ -155,7 +155,7 @@ def _parse_json_text(value: object) -> dict:
 
 
 def _hook_payload() -> dict:
-    raw = os.environ.get("LMMCP_INGEST_HOOK_PAYLOAD") or os.environ.get("LMMCP_HERMES_HOOK_PAYLOAD")
+    raw = os.environ.get("MCORE_INGEST_HOOK_PAYLOAD") or os.environ.get("MCORE_HERMES_HOOK_PAYLOAD")
     if not raw:
         try:
             raw = sys.stdin.read()
@@ -482,7 +482,7 @@ def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:
         _log(f"skip_empty_messages agent={agent_id}")
         return
     try:
-        ingest_timeout = float(os.environ.get("LMMCP_INGEST_TIMEOUT", "120"))
+        ingest_timeout = float(os.environ.get("MCORE_INGEST_TIMEOUT", "120"))
         _log(f"ingest_start agent={agent_id} messages={len(messages)}")
         headers, _ = _curl_post(
             {
@@ -492,7 +492,7 @@ def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:
                 "params": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {},
-                    "clientInfo": {"name": "lmmcp-ingest-hook", "version": "1.0"},
+                    "clientInfo": {"name": "mcore-ingest-hook", "version": "1.0"},
                 },
             },
             timeout=5,
@@ -555,13 +555,13 @@ def _messages_for_agent(agent: str) -> list[dict[str, str]]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Ingest recent agent transcript messages into lmmcp")
-    parser.add_argument("--agent", default=os.environ.get("LMMCP_AGENT_ID", "claude"))
+    parser = argparse.ArgumentParser(description="Ingest recent agent transcript messages into mcore")
+    parser.add_argument("--agent", default=os.environ.get("MCORE_AGENT_ID", "claude"))
     parser.add_argument("--background", action="store_true", help="Spawn ingest in the background and exit immediately")
     parser.add_argument("--force", action="store_true", help="Compatibility flag; Stop ingest always sends the transcript")
     args = parser.parse_args()
     agent = args.agent.strip().lower()
-    if args.background and os.environ.get("LMMCP_INGEST_BACKGROUND_CHILD") != "1":
+    if args.background and os.environ.get("MCORE_INGEST_BACKGROUND_CHILD") != "1":
         _spawn_background(agent, args.force)
         return
     messages = _messages_for_agent(agent)

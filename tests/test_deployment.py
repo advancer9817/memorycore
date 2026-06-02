@@ -123,15 +123,15 @@ def test_publish_workflow_uses_pypi_token_secret():
 def test_hook_setup_registers_prompt_context_injection():
     setup = (ROOT / "scripts" / "setup-hooks.sh").read_text(encoding="utf-8")
     connect_agents = (ROOT / "scripts" / "connect_agents.py").read_text(encoding="utf-8")
-    context_hook = (ROOT / "scripts" / "hooks" / "lmmcp-context.sh").read_text(encoding="utf-8")
+    context_hook = (ROOT / "scripts" / "hooks" / "mcore-context.sh").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert 'add_hook(hooks, "UserPromptSubmit", f"LMMCP_AGENT_ID=claude bash {lmmcp_context}", 5)' in setup
-    assert 'remove_hook_entries(codex_hook_root, "UserPromptSubmit", codex_lmmcp_context_fragments)' in setup
-    assert 'add_hook(codex_hook_root, "UserPromptSubmit", f"LMMCP_AGENT_ID=codex bash {lmmcp_context}", 5)' not in setup
-    assert "context_command = f\"LMMCP_AGENT_ID=claude bash {HOOK_LMMCP_CONTEXT}\"" in connect_agents
-    assert 'changed = _remove_hook_entries(root, "UserPromptSubmit", CODEX_LMMCP_CONTEXT_FRAGMENTS) or changed' in connect_agents
-    assert "context_command = f\"LMMCP_AGENT_ID=codex bash {HOOK_LMMCP_CONTEXT}\"" not in connect_agents
+    assert 'add_hook(hooks, "UserPromptSubmit", f"MCORE_AGENT_ID=claude bash {mcore_context}", 5)' in setup
+    assert 'remove_hook_entries(codex_hook_root, "UserPromptSubmit", codex_mcore_context_fragments)' in setup
+    assert 'add_hook(codex_hook_root, "UserPromptSubmit", f"MCORE_AGENT_ID=codex bash {mcore_context}", 5)' not in setup
+    assert "context_command = f\"MCORE_AGENT_ID=claude bash {HOOK_MCORE_CONTEXT}\"" in connect_agents
+    assert 'changed = _remove_hook_entries(root, "UserPromptSubmit", CODEX_MCORE_CONTEXT_FRAGMENTS) or changed' in connect_agents
+    assert "context_command = f\"MCORE_AGENT_ID=codex bash {HOOK_MCORE_CONTEXT}\"" not in connect_agents
     assert '"project_path": sys.argv[3]' in context_hook
     assert 'or extra.get("user_message")' in context_hook
     assert 'if event == "pre_llm_call":' in context_hook
@@ -144,7 +144,7 @@ def test_hook_setup_registers_prompt_context_injection():
 def test_session_start_hook_registers_presence_and_capabilities():
     hook = (ROOT / "scripts" / "hooks" / "session-start.sh").read_text(encoding="utf-8")
 
-    assert "ensure_lmmcp_running 2>/dev/null || true" in hook
+    assert "ensure_mcore_running 2>/dev/null || true" in hook
     assert "agent_presence_update" in hook
     assert "agent_capability_register" in hook
     assert "Mcp-Session-Id" in hook
@@ -159,29 +159,29 @@ def test_hook_setup_registers_session_start_presence_hook():
     setup = (ROOT / "scripts" / "setup-hooks.sh").read_text(encoding="utf-8")
     connect_agents = (ROOT / "scripts" / "connect_agents.py").read_text(encoding="utf-8")
 
-    assert 'add_hook(hooks, "SessionStart", f"LMMCP_AGENT_ID=claude bash {lmmcp_session_start}", 5)' in setup
-    assert 'add_hook(codex_hook_root, "SessionStart", f"LMMCP_AGENT_ID=codex bash {lmmcp_session_start}", 5)' in setup
-    assert "start_command = f\"LMMCP_AGENT_ID=claude bash {HOOK_SESSION_START}\"" in connect_agents
-    assert "start_command = f\"LMMCP_AGENT_ID=codex bash {HOOK_SESSION_START}\"" in connect_agents
-    assert "hooks[\"session_start\"] = f\"LMMCP_AGENT_ID=opencode bash {HOOK_SESSION_START}\"" in connect_agents
+    assert 'add_hook(hooks, "SessionStart", f"MCORE_AGENT_ID=claude bash {mcore_session_start}", 5)' in setup
+    assert 'add_hook(codex_hook_root, "SessionStart", f"MCORE_AGENT_ID=codex bash {mcore_session_start}", 5)' in setup
+    assert "start_command = f\"MCORE_AGENT_ID=claude bash {HOOK_SESSION_START}\"" in connect_agents
+    assert "start_command = f\"MCORE_AGENT_ID=codex bash {HOOK_SESSION_START}\"" in connect_agents
+    assert "hooks[\"session_start\"] = f\"MCORE_AGENT_ID=opencode bash {HOOK_SESSION_START}\"" in connect_agents
 
 
 def test_gemini_hooks_register_context_and_write_after_ingest():
     setup = (ROOT / "scripts" / "setup-hooks.sh").read_text(encoding="utf-8")
     connect_agents = (ROOT / "scripts" / "connect_agents.py").read_text(encoding="utf-8")
-    ingest_hook = (ROOT / "scripts" / "hooks" / "lmmcp-ingest.py").read_text(encoding="utf-8")
+    ingest_hook = (ROOT / "scripts" / "hooks" / "mcore-ingest.py").read_text(encoding="utf-8")
 
     assert 'GEMINI_SETTINGS="${GEMINI_SETTINGS:-$HOME/.gemini/settings.json}"' in setup
     assert 'gemini_servers["local_memory"] = {"httpUrl": endpoint, "timeout": 60000}' in setup
-    assert 'add_hook(gemini_hooks, "BeforeAgent", f"LMMCP_AGENT_ID=gemini bash {lmmcp_context}", 5000)' in setup
-    assert 'add_hook(gemini_hooks, "AfterAgent", f"python3 {lmmcp_ingest} --agent gemini --background", 30000)' in setup
-    assert 'add_hook(gemini_hooks, "SessionEnd", f"python3 {lmmcp_ingest} --agent gemini --background", 30000)' in setup
+    assert 'add_hook(gemini_hooks, "BeforeAgent", f"MCORE_AGENT_ID=gemini bash {mcore_context}", 5000)' in setup
+    assert 'add_hook(gemini_hooks, "AfterAgent", f"python3 {mcore_ingest} --agent gemini --background", 30000)' in setup
+    assert 'add_hook(gemini_hooks, "SessionEnd", f"python3 {mcore_ingest} --agent gemini --background", 30000)' in setup
 
     assert "def register_hooks_gemini" in connect_agents
-    assert '"BeforeAgent", CODEX_LMMCP_CONTEXT_FRAGMENTS' in connect_agents
-    assert '"AfterAgent", LMMCP_INGEST_FRAGMENTS' in connect_agents
-    assert 'context_command = f"LMMCP_AGENT_ID=gemini bash {HOOK_LMMCP_CONTEXT}"' in connect_agents
-    assert 'end_command = f"python3 {HOOK_LMMCP_INGEST} --agent gemini --background"' in connect_agents
+    assert '"BeforeAgent", CODEX_MCORE_CONTEXT_FRAGMENTS' in connect_agents
+    assert '"AfterAgent", MCORE_INGEST_FRAGMENTS' in connect_agents
+    assert 'context_command = f"MCORE_AGENT_ID=gemini bash {HOOK_MCORE_CONTEXT}"' in connect_agents
+    assert 'end_command = f"python3 {HOOK_MCORE_INGEST} --agent gemini --background"' in connect_agents
     assert 'register_hooks_gemini(detected["gemini"], backup_dir, dry_run)' in connect_agents
 
     assert "def _payload_transcript_path" in ingest_hook
@@ -191,9 +191,9 @@ def test_gemini_hooks_register_context_and_write_after_ingest():
 
 def test_opencode_session_end_uses_background_ingest():
     connect_agents = (ROOT / "scripts" / "connect_agents.py").read_text(encoding="utf-8")
-    ingest_hook = (ROOT / "scripts" / "hooks" / "lmmcp-ingest.py").read_text(encoding="utf-8")
+    ingest_hook = (ROOT / "scripts" / "hooks" / "mcore-ingest.py").read_text(encoding="utf-8")
 
-    assert 'end_command = f"python3 {HOOK_LMMCP_INGEST} --agent opencode --background"' in connect_agents
+    assert 'end_command = f"python3 {HOOK_MCORE_INGEST} --agent opencode --background"' in connect_agents
     assert "def _extract_opencode_from_db" in ingest_hook
     assert "OPENCODE_DB" in ingest_hook
     assert "GEMINI_SESSION_FILE" in ingest_hook
@@ -203,15 +203,15 @@ def test_hermes_hooks_register_pre_llm_context_injection():
     setup = (ROOT / "scripts" / "setup-hooks.sh").read_text(encoding="utf-8")
     connect_agents = (ROOT / "scripts" / "connect_agents.py").read_text(encoding="utf-8")
 
-    assert 'HERMES_CONTEXT_DEST="$HERMES_HOOK_DIR/lmmcp-context.sh"' in setup
+    assert 'HERMES_CONTEXT_DEST="$HERMES_HOOK_DIR/mcore-context.sh"' in setup
     assert 'cp "$HERMES_CONTEXT_SRC" "$HERMES_CONTEXT_DEST"' in setup
-    assert 'context_command = f"LMMCP_AGENT_ID=hermes bash {hermes_context_dest}"' in setup
+    assert 'context_command = f"MCORE_AGENT_ID=hermes bash {hermes_context_dest}"' in setup
     assert 'hooks_cfg["pre_llm_call"] = [{"command": context_command, "timeout": 5}]' in setup
     assert '"event": "pre_llm_call"' in setup
     assert '--agent hermes --background' in setup
 
-    assert "hermes_context_hook = hermes_hook_dir / \"lmmcp-context.sh\"" in connect_agents
-    assert 'context_command = f"LMMCP_AGENT_ID=hermes bash {hermes_context_hook}"' in connect_agents
+    assert "hermes_context_hook = hermes_hook_dir / \"mcore-context.sh\"" in connect_agents
+    assert 'context_command = f"MCORE_AGENT_ID=hermes bash {hermes_context_hook}"' in connect_agents
     assert '"pre_llm_call",' in connect_agents
     assert '"on_session_end", ingest_command' in connect_agents
     assert '--agent hermes --background' in connect_agents
@@ -219,9 +219,9 @@ def test_hermes_hooks_register_pre_llm_context_injection():
 
 def test_opencode_plugin_registers_pre_llm_context_injection():
     connect_agents = (ROOT / "scripts" / "connect_agents.py").read_text(encoding="utf-8")
-    plugin = (ROOT / "scripts" / "hooks" / "opencode-lmmcp-plugin.js").read_text(encoding="utf-8")
+    plugin = (ROOT / "scripts" / "hooks" / "opencode-mcore-plugin.js").read_text(encoding="utf-8")
 
-    assert 'HOOK_OPENCODE_PLUGIN = str(HOOKS_DIR / "opencode-lmmcp-plugin.js")' in connect_agents
+    assert 'HOOK_OPENCODE_PLUGIN = str(HOOKS_DIR / "opencode-mcore-plugin.js")' in connect_agents
     assert 'plugin_entry = [HOOK_OPENCODE_PLUGIN, {"agent": "opencode", "url": endpoint}]' in connect_agents
     assert 'register_hooks_opencode(detected["opencode"], endpoint, backup_dir, dry_run)' in connect_agents
     assert '"experimental.chat.system.transform"' in plugin

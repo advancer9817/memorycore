@@ -60,7 +60,7 @@ class TestEntropyDetection:
 
 @pytest.fixture()
 def isolated_db(tmp_path, monkeypatch):
-    monkeypatch.setenv("LMMCP_DB", str(tmp_path / "iter19_test.sqlite3"))
+    monkeypatch.setenv("LOCAL_MEMORY_DB", str(tmp_path / "iter19_test.sqlite3"))
     from memorycore import models
     monkeypatch.setattr(models, "_INITIALIZED_DB_PATHS", set())
     return tmp_path

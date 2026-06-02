@@ -2,7 +2,7 @@
 # One-command installer for local-memory-mcp.
 #
 # Installs missing host deps, Python deps, writes config, initializes SQLite,
-# installs user systemd services for Qdrant + lmmcp + curator, and verifies health.
+# installs user systemd services for Qdrant + mcore + curator, and verifies health.
 set -euo pipefail
 
 usage() {
@@ -13,8 +13,8 @@ One-command local-memory-mcp deployment.
 
 Options:
   --root PATH              Install/runtime root. Default: current checkout.
-  --host HOST              lmmcp bind host. Default: 127.0.0.1
-  --port PORT              lmmcp HTTP port. Default: 8318
+  --host HOST              mcore bind host. Default: 127.0.0.1
+  --port PORT              mcore HTTP port. Default: 8318
   --db PATH                SQLite DB path. Default: ROOT/memory.sqlite3
   --config PATH            Config path. Default: ROOT/config.yaml
   --force-config           Rewrite config.yaml even if it exists.
@@ -42,12 +42,12 @@ Options:
   --dry-run                Print resolved plan and exit before writes.
   -h, --help               Show this help.
 
-Environment overrides are also supported: LOCAL_MEMORY_ROOT, LMMCP_HOST,
-LMMCP_PORT, LOCAL_MEMORY_DB, LOCAL_MEMORY_CONFIG, QDRANT_URL,
+Environment overrides are also supported: LOCAL_MEMORY_ROOT, MCORE_HOST,
+MCORE_PORT, LOCAL_MEMORY_DB, LOCAL_MEMORY_CONFIG, QDRANT_URL,
 QDRANT_COLLECTION, LOCAL_MEMORY_EMBEDDING_PROVIDER, LOCAL_MEMORY_EMBEDDING_MODEL,
 LOCAL_MEMORY_EMBEDDING_FALLBACK_PROVIDER, LOCAL_MEMORY_SENTENCE_TRANSFORMERS_MODEL,
-LOCAL_MEMORY_EMBEDDING_DIM, LOCAL_MEMORY_OLLAMA_URL, LMMCP_BOOTSTRAP_DEPS,
-LMMCP_WITH_OLLAMA, LMMCP_ASSUME_YES, LMMCP_PULL_IMAGES, LMMCP_PULL_MODELS.
+LOCAL_MEMORY_EMBEDDING_DIM, LOCAL_MEMORY_OLLAMA_URL, MCORE_BOOTSTRAP_DEPS,
+MCORE_WITH_OLLAMA, MCORE_ASSUME_YES, MCORE_PULL_IMAGES, MCORE_PULL_MODELS.
 USAGE
 }
 
@@ -148,7 +148,7 @@ ensure_ollama_ready() {
       }
     fi
     if ! curl -fsS "${LOCAL_MEMORY_OLLAMA_URL:-http://127.0.0.1:11434}/api/tags" >/dev/null 2>&1; then
-      nohup ollama serve >/tmp/lmmcp-ollama.log 2>&1 &
+      nohup ollama serve >/tmp/mcore-ollama.log 2>&1 &
       sleep 2
     fi
   fi
@@ -175,8 +175,8 @@ PY
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ROOT="${LOCAL_MEMORY_ROOT:-$SOURCE_DIR}"
-HOST="${LMMCP_HOST:-127.0.0.1}"
-PORT="${LMMCP_PORT:-8318}"
+HOST="${MCORE_HOST:-127.0.0.1}"
+PORT="${MCORE_PORT:-8318}"
 DB="${LOCAL_MEMORY_DB:-}"
 CONFIG="${LOCAL_MEMORY_CONFIG:-}"
 FORCE_CONFIG=0
@@ -198,17 +198,17 @@ WITH_OLLAMA=1
 PULL_IMAGES=1
 PULL_MODELS=1
 ASSUME_YES=1
-if [ -n "${LMMCP_BOOTSTRAP_DEPS:-}" ]; then
-  if as_bool "$LMMCP_BOOTSTRAP_DEPS"; then BOOTSTRAP_DEPS=1; else BOOTSTRAP_DEPS=0; fi
+if [ -n "${MCORE_BOOTSTRAP_DEPS:-}" ]; then
+  if as_bool "$MCORE_BOOTSTRAP_DEPS"; then BOOTSTRAP_DEPS=1; else BOOTSTRAP_DEPS=0; fi
 fi
-if [ -n "${LMMCP_WITH_OLLAMA:-}" ]; then
-  if as_bool "$LMMCP_WITH_OLLAMA"; then WITH_OLLAMA=1; else WITH_OLLAMA=0; fi
+if [ -n "${MCORE_WITH_OLLAMA:-}" ]; then
+  if as_bool "$MCORE_WITH_OLLAMA"; then WITH_OLLAMA=1; else WITH_OLLAMA=0; fi
 fi
-if [ -n "${LMMCP_ASSUME_YES:-}" ]; then
-  if as_bool "$LMMCP_ASSUME_YES"; then ASSUME_YES=1; else ASSUME_YES=0; fi
+if [ -n "${MCORE_ASSUME_YES:-}" ]; then
+  if as_bool "$MCORE_ASSUME_YES"; then ASSUME_YES=1; else ASSUME_YES=0; fi
 fi
-if ! as_bool "${LMMCP_PULL_IMAGES:-1}"; then PULL_IMAGES=0; fi
-if ! as_bool "${LMMCP_PULL_MODELS:-1}"; then PULL_MODELS=0; fi
+if ! as_bool "${MCORE_PULL_IMAGES:-1}"; then PULL_IMAGES=0; fi
+if ! as_bool "${MCORE_PULL_MODELS:-1}"; then PULL_MODELS=0; fi
 DRY_RUN=0
 
 while [ "$#" -gt 0 ]; do
@@ -317,7 +317,7 @@ fi
 if [ "$WITH_OLLAMA" -eq 1 ]; then
   ensure_ollama_ready
 elif [[ "${LOCAL_MEMORY_EMBEDDING_PROVIDER:-auto}" =~ ^(auto|ollama)$ ]] && ! curl -fsS "${LOCAL_MEMORY_OLLAMA_URL:-http://127.0.0.1:11434}/api/tags" >/dev/null 2>&1; then
-  warn "Ollama is not reachable; vector embedding will use fallback providers. Remove --no-ollama or set LMMCP_WITH_OLLAMA=1 to install/start/pull the model."
+  warn "Ollama is not reachable; vector embedding will use fallback providers. Remove --no-ollama or set MCORE_WITH_OLLAMA=1 to install/start/pull the model."
 fi
 
 if [ ! -f "$CONFIG" ] || [ "$FORCE_CONFIG" -eq 1 ]; then
@@ -386,32 +386,32 @@ if [ "$INSTALL_SYSTEMD" -eq 1 ]; then
     QDRANT_SERVICE=""
   fi
 
-  msg systemd "Installing lmmcp.service and lmmcp-curator.timer"
-  cp "$ROOT/scripts/lmmcp.service" "$SYSTEMD_USER_DIR/lmmcp.service"
-  replace_token "$SYSTEMD_USER_DIR/lmmcp.service" __ROOT__ "$ROOT"
-  replace_token "$SYSTEMD_USER_DIR/lmmcp.service" __PYTHON__ "$PY"
-  replace_token "$SYSTEMD_USER_DIR/lmmcp.service" __LMMCP_HOST__ "$HOST"
-  replace_token "$SYSTEMD_USER_DIR/lmmcp.service" __LMMCP_PORT__ "$PORT"
-  replace_token "$SYSTEMD_USER_DIR/lmmcp.service" __CONFIG__ "$CONFIG"
-  replace_token "$SYSTEMD_USER_DIR/lmmcp.service" __DB__ "$DB"
-  replace_token "$SYSTEMD_USER_DIR/lmmcp.service" __QDRANT_SERVICE__ "${QDRANT_SERVICE:-network-online.target}"
+  msg systemd "Installing mcore.service and mcore-curator.timer"
+  cp "$ROOT/scripts/mcore.service" "$SYSTEMD_USER_DIR/mcore.service"
+  replace_token "$SYSTEMD_USER_DIR/mcore.service" __ROOT__ "$ROOT"
+  replace_token "$SYSTEMD_USER_DIR/mcore.service" __PYTHON__ "$PY"
+  replace_token "$SYSTEMD_USER_DIR/mcore.service" __MCORE_HOST__ "$HOST"
+  replace_token "$SYSTEMD_USER_DIR/mcore.service" __MCORE_PORT__ "$PORT"
+  replace_token "$SYSTEMD_USER_DIR/mcore.service" __CONFIG__ "$CONFIG"
+  replace_token "$SYSTEMD_USER_DIR/mcore.service" __DB__ "$DB"
+  replace_token "$SYSTEMD_USER_DIR/mcore.service" __QDRANT_SERVICE__ "${QDRANT_SERVICE:-network-online.target}"
 
-  cp "$ROOT/scripts/lmmcp-curator.service" "$SYSTEMD_USER_DIR/lmmcp-curator.service"
-  cp "$ROOT/scripts/lmmcp-curator.timer" "$SYSTEMD_USER_DIR/lmmcp-curator.timer"
-  replace_token "$SYSTEMD_USER_DIR/lmmcp-curator.service" __ROOT__ "$ROOT"
-  replace_token "$SYSTEMD_USER_DIR/lmmcp-curator.service" __ENV_FILE__ "$ROOT/.env"
-  replace_token "$SYSTEMD_USER_DIR/lmmcp-curator.service" __CONFIG__ "$CONFIG"
-  replace_token "$SYSTEMD_USER_DIR/lmmcp-curator.service" __DB__ "$DB"
-  replace_token "$SYSTEMD_USER_DIR/lmmcp-curator.service" __CURATOR_APPLY__ "$CURATOR_APPLY"
-  replace_token "$SYSTEMD_USER_DIR/lmmcp-curator.service" __CURATOR_LIMIT__ "$CURATOR_LIMIT"
-  replace_token "$SYSTEMD_USER_DIR/lmmcp-curator.service" __STALE_AFTER_DAYS__ "$STALE_AFTER_DAYS"
-  replace_token "$SYSTEMD_USER_DIR/lmmcp-curator.service" __ARCHIVE_AFTER_DAYS__ "$ARCHIVE_AFTER_DAYS"
-  replace_token "$SYSTEMD_USER_DIR/lmmcp-curator.service" __LMMCP_SERVICE__ "lmmcp.service"
+  cp "$ROOT/scripts/mcore-curator.service" "$SYSTEMD_USER_DIR/mcore-curator.service"
+  cp "$ROOT/scripts/mcore-curator.timer" "$SYSTEMD_USER_DIR/mcore-curator.timer"
+  replace_token "$SYSTEMD_USER_DIR/mcore-curator.service" __ROOT__ "$ROOT"
+  replace_token "$SYSTEMD_USER_DIR/mcore-curator.service" __ENV_FILE__ "$ROOT/.env"
+  replace_token "$SYSTEMD_USER_DIR/mcore-curator.service" __CONFIG__ "$CONFIG"
+  replace_token "$SYSTEMD_USER_DIR/mcore-curator.service" __DB__ "$DB"
+  replace_token "$SYSTEMD_USER_DIR/mcore-curator.service" __CURATOR_APPLY__ "$CURATOR_APPLY"
+  replace_token "$SYSTEMD_USER_DIR/mcore-curator.service" __CURATOR_LIMIT__ "$CURATOR_LIMIT"
+  replace_token "$SYSTEMD_USER_DIR/mcore-curator.service" __STALE_AFTER_DAYS__ "$STALE_AFTER_DAYS"
+  replace_token "$SYSTEMD_USER_DIR/mcore-curator.service" __ARCHIVE_AFTER_DAYS__ "$ARCHIVE_AFTER_DAYS"
+  replace_token "$SYSTEMD_USER_DIR/mcore-curator.service" __MCORE_SERVICE__ "mcore.service"
 
   systemctl --user daemon-reload
   if [ "$INSTALL_QDRANT" -eq 1 ]; then systemctl --user enable --now "$QDRANT_SERVICE"; fi
-  systemctl --user enable --now lmmcp.service lmmcp-curator.timer
-  systemctl --user restart lmmcp.service
+  systemctl --user enable --now mcore.service mcore-curator.timer
+  systemctl --user restart mcore.service
 fi
 
 msg verify "Health checks"
@@ -419,7 +419,7 @@ if [ "$INSTALL_SYSTEMD" -eq 1 ]; then
   if [ "$INSTALL_QDRANT" -eq 1 ]; then
     for i in $(seq 1 45); do curl -fsS "$QDRANT_URL/collections" >/dev/null 2>&1 && break; sleep 1; [ "$i" -eq 45 ] && die "Qdrant did not become healthy at $QDRANT_URL"; done
   fi
-  for i in $(seq 1 30); do ss -ltn 2>/dev/null | grep -q ":$PORT " && break; sleep 1; [ "$i" -eq 30 ] && die "lmmcp port $PORT did not open"; done
+  for i in $(seq 1 30); do ss -ltn 2>/dev/null | grep -q ":$PORT " && break; sleep 1; [ "$i" -eq 30 ] && die "mcore port $PORT did not open"; done
 fi
 LOCAL_MEMORY_CONFIG="$CONFIG" LOCAL_MEMORY_DB="$DB" PYTHONPATH="$ROOT" "$PY" - <<'PY'
 from memorycore.vector_store import get_vector_store
@@ -443,7 +443,7 @@ cat <<EOF
   qdrant:    $QDRANT_URL
 
 Useful commands:
-  systemctl --user status qdrant.service lmmcp.service lmmcp-curator.timer
-  journalctl --user -u lmmcp.service -f
+  systemctl --user status qdrant.service mcore.service mcore-curator.timer
+  journalctl --user -u mcore.service -f
   tail -80 $ROOT/logs/curator.log
 EOF

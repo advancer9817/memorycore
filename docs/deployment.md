@@ -29,10 +29,10 @@ The default deployment:
 7. Ensures Ollama is installed/running and pulls the embedding model; use `--no-ollama` to rely on fallback embeddings.
 8. Installs user systemd services:
    - `qdrant.service`
-   - `lmmcp.service`
-   - `lmmcp-curator.timer` / `lmmcp-curator.service`
+   - `mcore.service`
+   - `mcore-curator.timer` / `mcore-curator.service`
 9. Pulls the Qdrant Docker image unless `--no-pull-images` is used.
-10. Starts Qdrant and lmmcp.
+10. Starts Qdrant and mcore.
 11. Runs curator summary and health checks.
 12. Runs pytest unless `--skip-tests` is used.
 
@@ -97,14 +97,14 @@ scripts/init_local_memory.sh
 
 ## Docker Compose
 
-For container-only deployment, `docker-compose.yml` starts both lmmcp and
+For container-only deployment, `docker-compose.yml` starts both mcore and
 Qdrant with persistent volumes:
 
 ```bash
 docker compose up --build
 ```
 
-The lmmcp image installs `.[all]` by default so Qdrant and extraction
+The mcore image installs `.[all]` by default so Qdrant and extraction
 dependencies are present without pulling the large sentence-transformers stack. Compose defaults
 `LOCAL_MEMORY_EMBEDDING_PROVIDER=hashing` because the Ollama daemon is usually
 outside the container; override the environment if you provide an Ollama
@@ -155,15 +155,15 @@ CLI options have priority over environment defaults.
 | Option / env | Default | Purpose |
 |---|---|---|
 | `--root` / `LOCAL_MEMORY_ROOT` | current checkout | Install/runtime root |
-| `--host` / `LMMCP_HOST` | `127.0.0.1` | lmmcp bind host |
-| `--port` / `LMMCP_PORT` | `8318` | lmmcp HTTP port |
+| `--host` / `MCORE_HOST` | `127.0.0.1` | mcore bind host |
+| `--port` / `MCORE_PORT` | `8318` | mcore HTTP port |
 | `--db` / `LOCAL_MEMORY_DB` | `$ROOT/memory.sqlite3` | SQLite DB path |
 | `--config` / `LOCAL_MEMORY_CONFIG` | `$ROOT/config.yaml` | Config file path |
-| `--bootstrap-deps` / `--no-bootstrap-deps` / `LMMCP_BOOTSTRAP_DEPS=0/1` | on | Install missing host packages with apt/dnf/yum/brew when possible |
-| `--with-ollama` / `--no-ollama` / `LMMCP_WITH_OLLAMA=0/1` | on | Ensure Ollama is present/reachable and pull the embedding model |
-| `--no-pull-images` / `LMMCP_PULL_IMAGES=0` | pull enabled | Skip Docker image pre-pull |
-| `--no-pull-models` / `LMMCP_PULL_MODELS=0` | pull enabled | Skip Ollama model pull |
-| `--assume-yes` / `--no-assume-yes` / `LMMCP_ASSUME_YES=0/1` | on | Pass non-interactive yes flags to supported package managers |
+| `--bootstrap-deps` / `--no-bootstrap-deps` / `MCORE_BOOTSTRAP_DEPS=0/1` | on | Install missing host packages with apt/dnf/yum/brew when possible |
+| `--with-ollama` / `--no-ollama` / `MCORE_WITH_OLLAMA=0/1` | on | Ensure Ollama is present/reachable and pull the embedding model |
+| `--no-pull-images` / `MCORE_PULL_IMAGES=0` | pull enabled | Skip Docker image pre-pull |
+| `--no-pull-models` / `MCORE_PULL_MODELS=0` | pull enabled | Skip Ollama model pull |
+| `--assume-yes` / `--no-assume-yes` / `MCORE_ASSUME_YES=0/1` | on | Pass non-interactive yes flags to supported package managers |
 | `--qdrant-image` / `QDRANT_IMAGE` | `qdrant/qdrant` | Docker image |
 | `--qdrant-http-port` / `QDRANT_HTTP_PORT` | `6333` | Qdrant HTTP host port |
 | `--qdrant-grpc-port` / `QDRANT_GRPC_PORT` | `6334` | Qdrant gRPC host port |
@@ -183,16 +183,16 @@ CLI options have priority over environment defaults.
 `deploy.sh` writes user units to `~/.config/systemd/user/`.
 
 - `qdrant.service`: runs Docker `qdrant/qdrant` with persistent storage.
-- `lmmcp.service`: starts the HTTP MCP server and has `Wants/After=qdrant.service`.
-- `lmmcp-curator.timer`: runs hourly.
-- `lmmcp-curator.service`: runs `run_curator.sh` from the deployed root with
+- `mcore.service`: starts the HTTP MCP server and has `Wants/After=qdrant.service`.
+- `mcore-curator.timer`: runs hourly.
+- `mcore-curator.service`: runs `run_curator.sh` from the deployed root with
   `LOCAL_MEMORY_CURATOR_APPLY=1` by default.
 
 Useful commands:
 
 ```bash
-systemctl --user status qdrant.service lmmcp.service lmmcp-curator.timer
-journalctl --user -u lmmcp.service -f
+systemctl --user status qdrant.service mcore.service mcore-curator.timer
+journalctl --user -u mcore.service -f
 tail -80 /path/to/local-memory-mcp/logs/curator.log
 ```
 
@@ -237,7 +237,7 @@ Claude Code user config:
 
 ```bash
 curl -fsS http://127.0.0.1:6333/collections
-systemctl --user is-active qdrant.service lmmcp.service lmmcp-curator.timer
+systemctl --user is-active qdrant.service mcore.service mcore-curator.timer
 PY=/path/to/local-memory-mcp/.venv/bin/python
 $PY -m pytest tests -q
 ```
@@ -253,6 +253,6 @@ Qdrant starts is `available: true`.
 | Docker unavailable | Qdrant service cannot be installed | Default deploy tries to install Docker where supported; otherwise install Docker manually, or run with `--no-qdrant` and provide `QDRANT_URL` |
 | Docker image missing/offline | Qdrant startup fails | Default deploy pre-pulls `qdrant/qdrant`; pre-seed the image for offline installs or use `--no-pull-images` only when already cached |
 | User systemd unavailable | services cannot be installed | Run with `--no-systemd`, or install as a platform-specific service manually |
-| Port conflict | Qdrant/lmmcp health checks fail | Override `--port`, `--qdrant-http-port`, or `--qdrant-grpc-port` |
+| Port conflict | Qdrant/mcore health checks fail | Override `--port`, `--qdrant-http-port`, or `--qdrant-grpc-port` |
 | Copying live SQLite files | database locks or stale data | Use the generated DB or export/import intentionally; do not overwrite a live DB |
 | Ollama unavailable | embedding quality degrades | Default deploy tries to install/start Ollama and pull the model; use `--no-ollama` only when relying on fallback embeddings intentionally |

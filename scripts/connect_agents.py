@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-click lmmcp MCP registration for local agents.
+"""One-click mcore MCP registration for local agents.
 
 Default endpoint: http://127.0.0.1:8318/mcp
 
@@ -199,14 +199,14 @@ def configure_opencode(path: Path, endpoint: str, backup_dir: Path, dry_run: boo
 # ---------------------------------------------------------------------------
 
 HOOK_SESSION_START = str(HOOKS_DIR / "session-start.sh")
-HOOK_LMMCP_CONTEXT = str(HOOKS_DIR / "lmmcp-context.sh")
-HOOK_LMMCP_INGEST = str(HOOKS_DIR / "lmmcp-ingest.py")
-HOOK_OPENCODE_PLUGIN = str(HOOKS_DIR / "opencode-lmmcp-plugin.js")
-OLD_HOOK_FRAGMENTS = ("session-end.sh", "codex-session-end.sh", "lmmcp-session-end.py")
-CODEX_LMMCP_CONTEXT_FRAGMENTS = ("lmmcp-context.sh",)
-LMMCP_INGEST_FRAGMENTS = ("lmmcp-ingest.py",)
-LMMCP_SESSION_START_FRAGMENTS = ("session-start.sh",)
-OPENCODE_LMMCP_PLUGIN_FRAGMENTS = ("opencode-lmmcp-plugin.js",)
+HOOK_MCORE_CONTEXT = str(HOOKS_DIR / "mcore-context.sh")
+HOOK_MCORE_INGEST = str(HOOKS_DIR / "mcore-ingest.py")
+HOOK_OPENCODE_PLUGIN = str(HOOKS_DIR / "opencode-mcore-plugin.js")
+OLD_HOOK_FRAGMENTS = ("session-end.sh", "codex-session-end.sh", "mcore-session-end.py")
+CODEX_MCORE_CONTEXT_FRAGMENTS = ("mcore-context.sh",)
+MCORE_INGEST_FRAGMENTS = ("mcore-ingest.py",)
+MCORE_SESSION_START_FRAGMENTS = ("session-start.sh",)
+OPENCODE_MCORE_PLUGIN_FRAGMENTS = ("opencode-mcore-plugin.js",)
 
 
 def detect_agents() -> dict[str, Path]:
@@ -285,7 +285,7 @@ def _update_hermes_allowlist(
                 any(fragment in str(item.get("command", "")) for fragment in OLD_HOOK_FRAGMENTS)
                 or any(
                     fragment in str(item.get("command", ""))
-                    for fragment in (*LMMCP_INGEST_FRAGMENTS, *CODEX_LMMCP_CONTEXT_FRAGMENTS)
+                    for fragment in (*MCORE_INGEST_FRAGMENTS, *CODEX_MCORE_CONTEXT_FRAGMENTS)
                 )
             )
         )
@@ -314,22 +314,22 @@ def register_hooks_claude(path: Path, backup_dir: Path, dry_run: bool) -> bool:
     """Register Claude Code context injection and writeback hooks."""
     data = read_json(path)
     hooks = data.setdefault("hooks", {})
-    start_command = f"LMMCP_AGENT_ID=claude bash {HOOK_SESSION_START}"
+    start_command = f"MCORE_AGENT_ID=claude bash {HOOK_SESSION_START}"
     start_hook = {
         "hooks": [{"type": "command", "command": start_command, "timeout": 5}]
     }
-    context_command = f"LMMCP_AGENT_ID=claude bash {HOOK_LMMCP_CONTEXT}"
+    context_command = f"MCORE_AGENT_ID=claude bash {HOOK_MCORE_CONTEXT}"
     context_hook = {
         "hooks": [{"type": "command", "command": context_command, "timeout": 5}]
     }
-    end_command = f"python3 {HOOK_LMMCP_INGEST} --agent claude --background"
+    end_command = f"python3 {HOOK_MCORE_INGEST} --agent claude --background"
     end_hook = {
         "hooks": [{"type": "command", "command": end_command, "timeout": 30}]
     }
-    changed = _remove_hook_entries(hooks, "SessionStart", LMMCP_SESSION_START_FRAGMENTS)
+    changed = _remove_hook_entries(hooks, "SessionStart", MCORE_SESSION_START_FRAGMENTS)
     changed = _remove_old_hook_entries(hooks, "Stop") or changed
-    changed = _remove_hook_entries(hooks, "Stop", LMMCP_INGEST_FRAGMENTS) or changed
-    changed = _remove_hook_entries(hooks, "UserPromptSubmit", CODEX_LMMCP_CONTEXT_FRAGMENTS) or changed
+    changed = _remove_hook_entries(hooks, "Stop", MCORE_INGEST_FRAGMENTS) or changed
+    changed = _remove_hook_entries(hooks, "UserPromptSubmit", CODEX_MCORE_CONTEXT_FRAGMENTS) or changed
     existing_start = hooks.get("SessionStart", [])
     if not any(start_command in str(h) for h in existing_start):
         hooks["SessionStart"] = existing_start + [start_hook]
@@ -344,8 +344,8 @@ def register_hooks_claude(path: Path, backup_dir: Path, dry_run: bool) -> bool:
         changed = True
     env = data.setdefault("env", {})
     before_env = dict(env)
-    env.setdefault("LMMCP_PORT", "8318")
-    env.setdefault("LMMCP_AGENT_ID", "claude")
+    env.setdefault("MCORE_PORT", "8318")
+    env.setdefault("MCORE_AGENT_ID", "claude")
     if env != before_env:
         changed = True
     if not changed:
@@ -363,23 +363,23 @@ def register_hooks_hermes(path: Path, backup_dir: Path, dry_run: bool) -> bool:
     data = data or {}
     hooks = data.setdefault("hooks", {})
     hermes_hook_dir = HOME / ".hermes" / "agent-hooks"
-    hermes_ingest_hook = hermes_hook_dir / "lmmcp-ingest.py"
-    hermes_context_hook = hermes_hook_dir / "lmmcp-context.sh"
+    hermes_ingest_hook = hermes_hook_dir / "mcore-ingest.py"
+    hermes_context_hook = hermes_hook_dir / "mcore-context.sh"
     ingest_command = f"python3 {hermes_ingest_hook} --agent hermes --background"
-    context_command = f"LMMCP_AGENT_ID=hermes bash {hermes_context_hook}"
+    context_command = f"MCORE_AGENT_ID=hermes bash {hermes_context_hook}"
     changed = _upsert_hermes_hook_entry(
         hooks,
         "on_session_end",
         ingest_command,
         10,
-        (*OLD_HOOK_FRAGMENTS, *LMMCP_INGEST_FRAGMENTS),
+        (*OLD_HOOK_FRAGMENTS, *MCORE_INGEST_FRAGMENTS),
     )
     changed = _upsert_hermes_hook_entry(
         hooks,
         "pre_llm_call",
         context_command,
         5,
-        CODEX_LMMCP_CONTEXT_FRAGMENTS,
+        CODEX_MCORE_CONTEXT_FRAGMENTS,
     ) or changed
     changed = _update_hermes_allowlist(
         [("on_session_end", ingest_command), ("pre_llm_call", context_command)],
@@ -388,8 +388,8 @@ def register_hooks_hermes(path: Path, backup_dir: Path, dry_run: bool) -> bool:
     ) or changed
     if not dry_run:
         hermes_hook_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(HOOK_LMMCP_INGEST, hermes_ingest_hook)
-        shutil.copy2(HOOK_LMMCP_CONTEXT, hermes_context_hook)
+        shutil.copy2(HOOK_MCORE_INGEST, hermes_ingest_hook)
+        shutil.copy2(HOOK_MCORE_CONTEXT, hermes_context_hook)
         hermes_ingest_hook.chmod(0o755)
         hermes_context_hook.chmod(0o755)
     if not changed:
@@ -464,7 +464,7 @@ def _codex_list_hook_hashes(cwd: Path, hooks_path: Path) -> dict[str, str]:
         return lines
 
     try:
-        send({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"clientInfo": {"name": "lmmcp-connect-agents", "version": "1"}}})
+        send({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"clientInfo": {"name": "mcore-connect-agents", "version": "1"}}})
         drain(0.5)
         send({"jsonrpc": "2.0", "id": 1, "method": "hooks/list", "params": {"cwds": [str(cwd)]}})
         target_prefix = f"{hooks_path}:"
@@ -515,16 +515,16 @@ def register_hooks_codex(path: Path, backup_dir: Path, dry_run: bool) -> bool:
     hooks_data = read_json(hooks_path)
     root = hooks_data.setdefault("hooks", {})
     changed = old_config != new_config
-    changed = _remove_hook_entries(root, "SessionStart", LMMCP_SESSION_START_FRAGMENTS) or changed
-    changed = _remove_hook_entries(root, "UserPromptSubmit", CODEX_LMMCP_CONTEXT_FRAGMENTS) or changed
+    changed = _remove_hook_entries(root, "SessionStart", MCORE_SESSION_START_FRAGMENTS) or changed
+    changed = _remove_hook_entries(root, "UserPromptSubmit", CODEX_MCORE_CONTEXT_FRAGMENTS) or changed
     changed = _remove_old_hook_entries(root, "Stop") or changed
-    changed = _remove_hook_entries(root, "Stop", LMMCP_INGEST_FRAGMENTS) or changed
-    start_command = f"LMMCP_AGENT_ID=codex bash {HOOK_SESSION_START}"
+    changed = _remove_hook_entries(root, "Stop", MCORE_INGEST_FRAGMENTS) or changed
+    start_command = f"MCORE_AGENT_ID=codex bash {HOOK_SESSION_START}"
     start_entries = root.setdefault("SessionStart", [])
     if not any(start_command in json.dumps(entry, ensure_ascii=False) for entry in start_entries):
         start_entries.append({"hooks": [{"type": "command", "command": start_command, "timeout": 5}]})
         changed = True
-    end_command = f"python3 {HOOK_LMMCP_INGEST} --agent codex --background"
+    end_command = f"python3 {HOOK_MCORE_INGEST} --agent codex --background"
     entries = root.setdefault("Stop", [])
     if not any(end_command in json.dumps(entry, ensure_ascii=False) for entry in entries):
         entries.append({"hooks": [{"type": "command", "command": end_command, "timeout": 30}]})
@@ -546,10 +546,10 @@ def register_hooks_opencode(path: Path, endpoint: str, backup_dir: Path, dry_run
     data = read_json(path)
     hooks = data.setdefault("hooks", {})
     changed = False
-    if hooks.get("session_start") != f"LMMCP_AGENT_ID=opencode bash {HOOK_SESSION_START}":
-        hooks["session_start"] = f"LMMCP_AGENT_ID=opencode bash {HOOK_SESSION_START}"
+    if hooks.get("session_start") != f"MCORE_AGENT_ID=opencode bash {HOOK_SESSION_START}":
+        hooks["session_start"] = f"MCORE_AGENT_ID=opencode bash {HOOK_SESSION_START}"
         changed = True
-    end_command = f"python3 {HOOK_LMMCP_INGEST} --agent opencode --background"
+    end_command = f"python3 {HOOK_MCORE_INGEST} --agent opencode --background"
     if hooks.get("session_end") != end_command:
         hooks["session_end"] = end_command
         changed = True
@@ -560,7 +560,7 @@ def register_hooks_opencode(path: Path, endpoint: str, backup_dir: Path, dry_run
         changed = True
     filtered_plugins = [
         entry for entry in plugins
-        if not any(fragment in json.dumps(entry, ensure_ascii=False) for fragment in OPENCODE_LMMCP_PLUGIN_FRAGMENTS)
+        if not any(fragment in json.dumps(entry, ensure_ascii=False) for fragment in OPENCODE_MCORE_PLUGIN_FRAGMENTS)
     ]
     plugin_entry = [HOOK_OPENCODE_PLUGIN, {"agent": "opencode", "url": endpoint}]
     filtered_plugins.append(plugin_entry)
@@ -577,24 +577,24 @@ def register_hooks_gemini(path: Path, backup_dir: Path, dry_run: bool) -> bool:
     data = read_json(path)
     hooks = data.setdefault("hooks", {})
     changed = False
-    changed = _remove_hook_entries(hooks, "SessionStart", LMMCP_SESSION_START_FRAGMENTS) or changed
-    changed = _remove_hook_entries(hooks, "BeforeAgent", CODEX_LMMCP_CONTEXT_FRAGMENTS) or changed
-    changed = _remove_hook_entries(hooks, "AfterAgent", LMMCP_INGEST_FRAGMENTS) or changed
-    changed = _remove_hook_entries(hooks, "SessionEnd", LMMCP_INGEST_FRAGMENTS) or changed
+    changed = _remove_hook_entries(hooks, "SessionStart", MCORE_SESSION_START_FRAGMENTS) or changed
+    changed = _remove_hook_entries(hooks, "BeforeAgent", CODEX_MCORE_CONTEXT_FRAGMENTS) or changed
+    changed = _remove_hook_entries(hooks, "AfterAgent", MCORE_INGEST_FRAGMENTS) or changed
+    changed = _remove_hook_entries(hooks, "SessionEnd", MCORE_INGEST_FRAGMENTS) or changed
 
-    start_command = f"LMMCP_AGENT_ID=gemini bash {HOOK_SESSION_START}"
+    start_command = f"MCORE_AGENT_ID=gemini bash {HOOK_SESSION_START}"
     start_entries = hooks.setdefault("SessionStart", [])
     if not any(start_command in json.dumps(entry, ensure_ascii=False) for entry in start_entries):
         start_entries.append({"hooks": [{"type": "command", "command": start_command, "timeout": 5000}]})
         changed = True
 
-    context_command = f"LMMCP_AGENT_ID=gemini bash {HOOK_LMMCP_CONTEXT}"
+    context_command = f"MCORE_AGENT_ID=gemini bash {HOOK_MCORE_CONTEXT}"
     context_entries = hooks.setdefault("BeforeAgent", [])
     if not any(context_command in json.dumps(entry, ensure_ascii=False) for entry in context_entries):
         context_entries.append({"hooks": [{"type": "command", "command": context_command, "timeout": 5000}]})
         changed = True
 
-    end_command = f"python3 {HOOK_LMMCP_INGEST} --agent gemini --background"
+    end_command = f"python3 {HOOK_MCORE_INGEST} --agent gemini --background"
     after_entries = hooks.setdefault("AfterAgent", [])
     if not any(end_command in json.dumps(entry, ensure_ascii=False) for entry in after_entries):
         after_entries.append({"hooks": [{"type": "command", "command": end_command, "timeout": 30000}]})
@@ -649,7 +649,7 @@ def windows_user_dirs() -> list[Path]:
 
 
 def endpoint_probe(endpoint: str) -> tuple[bool, str]:
-    payload = '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"lmmcp-connect-agents","version":"1"}}}'
+    payload = '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"mcore-connect-agents","version":"1"}}}'
     try:
         proc = subprocess.run(
             [
@@ -695,8 +695,8 @@ def run_list_command(label: str, cmd: list[str]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Connect lmmcp to Hermes/Claude/Codex/Gemini/opencode")
-    parser.add_argument("--endpoint", default=os.environ.get("LMMCP_ENDPOINT", DEFAULT_ENDPOINT), help=f"MCP endpoint (default: {DEFAULT_ENDPOINT})")
+    parser = argparse.ArgumentParser(description="Connect mcore to Hermes/Claude/Codex/Gemini/opencode")
+    parser.add_argument("--endpoint", default=os.environ.get("MCORE_ENDPOINT", DEFAULT_ENDPOINT), help=f"MCP endpoint (default: {DEFAULT_ENDPOINT})")
     parser.add_argument("--agents", default="all", help="Comma-separated: hermes,claude,codex,gemini,opencode,all")
     parser.add_argument("--dry-run", action="store_true", help="Show what would change without writing")
     parser.add_argument("--no-probe", action="store_true", help="Skip endpoint health probe")
@@ -718,7 +718,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             log(f"! Endpoint probe failed for {args.endpoint}")
             log(f"  {detail}")
-            log("  Continuing config write; start service with: lmmcp start")
+            log("  Continuing config write; start service with: mcore start")
 
     if "hermes" in agents:
         for path in hermes_paths():

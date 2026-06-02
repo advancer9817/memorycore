@@ -8,9 +8,9 @@
 #   scripts/sync-memory.sh status        # 查看待同步状态
 #
 # 环境变量:
-#   LMMCP_DIR         本项目根目录 (默认 $HOME/project/local-memory-mcp)
-#   LMMCP_PYTHON      Python 解释器 (默认 $LMMCP_DIR/.venv/bin/python)
-#   LOCAL_MEMORY_DB   SQLite 数据库路径 (默认由 lmmcp 自动确定)
+#   MCORE_DIR         本项目根目录 (默认 $HOME/project/local-memory-mcp)
+#   MCORE_PYTHON      Python 解释器 (默认 $MCORE_DIR/.venv/bin/python)
+#   LOCAL_MEMORY_DB   SQLite 数据库路径 (默认由 mcore 自动确定)
 #   SYNC_FILE         导出文件名 (默认 memory-sync/memories.json)
 #   SYNC_REMOTE       git remote (默认 origin)
 #   SYNC_BRANCH       git branch (默认当前分支)
@@ -24,23 +24,23 @@
 
 set -euo pipefail
 
-LMMCP_DIR="${LMMCP_DIR:-$HOME/project/local-memory-mcp}"
-LMMCP_PYTHON="${LMMCP_PYTHON:-$LMMCP_DIR/.venv/bin/python}"
+MCORE_DIR="${MCORE_DIR:-$HOME/project/local-memory-mcp}"
+MCORE_PYTHON="${MCORE_PYTHON:-$MCORE_DIR/.venv/bin/python}"
 SYNC_FILE="${SYNC_FILE:-memory-sync/memories.json}"
 SYNC_REMOTE="${SYNC_REMOTE:-origin}"
-SYNC_BRANCH="${SYNC_BRANCH:-$(git -C "$LMMCP_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)}"
+SYNC_BRANCH="${SYNC_BRANCH:-$(git -C "$MCORE_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)}"
 SYNC_DEVICE="${SYNC_DEVICE:-$(hostname -s 2>/dev/null || echo unknown)}"
 
-PY="$LMMCP_PYTHON"
+PY="$MCORE_PYTHON"
 CMD="$1"
-SYNC_PATH="$LMMCP_DIR/$SYNC_FILE"
+SYNC_PATH="$MCORE_DIR/$SYNC_FILE"
 
 _log() { echo "[sync-memory] $*" >&2; }
 _die() { echo "[sync-memory] ERROR: $*" >&2; exit 1; }
 
 _check_env() {
-    [[ -x "$PY" ]] || _die "Python not found at $PY. Set LMMCP_PYTHON or run: cd $LMMCP_DIR && python3.11 -m venv .venv && .venv/bin/pip install -e ."
-    [[ -d "$LMMCP_DIR/.git" ]] || _die "$LMMCP_DIR is not a git repository"
+    [[ -x "$PY" ]] || _die "Python not found at $PY. Set MCORE_PYTHON or run: cd $MCORE_DIR && python3.11 -m venv .venv && .venv/bin/pip install -e ."
+    [[ -d "$MCORE_DIR/.git" ]] || _die "$MCORE_DIR is not a git repository"
 }
 
 _do_push() {
@@ -48,7 +48,7 @@ _do_push() {
     mkdir -p "$(dirname "$SYNC_PATH")"
     "$PY" -m memorycore export "$SYNC_PATH" --memories-only 2>&1
 
-    cd "$LMMCP_DIR"
+    cd "$MCORE_DIR"
     if git diff --quiet "$SYNC_FILE" 2>/dev/null && git ls-files --error-unmatch "$SYNC_FILE" &>/dev/null; then
         _log "No changes in $SYNC_FILE, skipping commit."
         return 0
@@ -64,7 +64,7 @@ _do_push() {
 }
 
 _do_pull() {
-    cd "$LMMCP_DIR"
+    cd "$MCORE_DIR"
     _log "Pulling from $SYNC_REMOTE/$SYNC_BRANCH ..."
     git pull "$SYNC_REMOTE" "$SYNC_BRANCH" --ff-only || {
         _log "WARNING: fast-forward failed. Run 'git pull --rebase' manually if needed."
@@ -90,7 +90,7 @@ _do_pull() {
 }
 
 _do_status() {
-    cd "$LMMCP_DIR"
+    cd "$MCORE_DIR"
     _log "Git status for sync file:"
     git status "$SYNC_FILE" 2>/dev/null || true
     _log "Remote ahead/behind:"
@@ -99,7 +99,7 @@ _do_status() {
     _log "Local memory stats:"
     "$PY" -c "
 import json, sys
-sys.path.insert(0, '$LMMCP_DIR')
+sys.path.insert(0, '$MCORE_DIR')
 from memorycore.storage.crud import get_memory_stats
 s = get_memory_stats()
 print(f'  total={s[\"total\"]}  by_status={s[\"by_status\"]}')

@@ -1,12 +1,12 @@
 [Unit]
-Description=local-memory-mcp MCP Server (HTTP :__LMMCP_PORT__)
+Description=local-memory-mcp MCP Server (HTTP :__MCORE_PORT__)
 After=network-online.target __QDRANT_SERVICE__
 Wants=network-online.target __QDRANT_SERVICE__
 
 [Service]
 Type=simple
 WorkingDirectory=__ROOT__
-ExecStart=__PYTHON__ -m memorycore serve --host __LMMCP_HOST__ --port __LMMCP_PORT__
+ExecStart=__PYTHON__ -m memorycore serve --host __MCORE_HOST__ --port __MCORE_PORT__
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
