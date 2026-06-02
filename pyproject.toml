@@ -27,7 +27,7 @@ dev = [
 
 [project.scripts]
 memorycore = "memorycore.server:main"
-lmmcp = "memorycore.server:main"
+mcore = "memorycore.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["memorycore"]

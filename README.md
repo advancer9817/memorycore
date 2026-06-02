@@ -358,8 +358,8 @@ LMMCP_API_URL=http://127.0.0.1:8318 pnpm test:e2e
 ```bash
 pip install "memorycore[all]"
 memorycore serve --host 127.0.0.1 --port 8318
-# 或使用别名
-lmmcp serve --host 127.0.0.1 --port 8318
+# 或使用短别名
+mcore serve --host 127.0.0.1 --port 8318
 ```
 
 ## 一键部署
