@@ -2233,3 +2233,49 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 - `scripts/hooks/git-pre-push`：push 前自动导出 `memory-sync/memories.json` 并提交（随 push 携带）。
 - `scripts/hooks/git-post-merge`：pull/merge 后检测 memories.json 是否变更，有则自动 `import --conflict-policy newer --apply`。
 - `scripts/setup-hooks.sh`：末尾加入 git hooks 安装逻辑，`bash scripts/setup-hooks.sh` 一次完成全部配置。
+
+## [迭代 92] 2026-06-03 — 仓库迁移、脚本全量清理、UI 优化
+
+### 背景
+仓库从 `local-memory-mcp` 正式改名为 `memorycore`，在新设备完成克隆并首次启动后，对残留旧命名做彻底清理，同时修复 Apps 页 agent 列表和 status 问题，优化 Memory Operations UI。
+
+### 变更
+
+**仓库迁移**
+- 克隆新仓库到 `/home/advancer/project/memorycore`，`uv sync` 初始化依赖，`start.sh --daemon` 完成首次启动（自动 pnpm build + 记忆导入）。
+
+**scripts/mcore — 环境变量彻底替换**
+- 默认路径：`$HOME/project/local-memory-mcp` → `$HOME/project/memorycore`
+- 变量名：`LMMCP_DIR` → `MCORE_DIR`、`LMMCP_PYTHON` → `MCORE_PYTHON`、`LMMCP_HOST` → `MCORE_HOST`、`LMMCP_PORT` → `MCORE_PORT`、`LMMCP_PID_FILE` → `MCORE_PID_FILE`、`LMMCP_LOG_FILE` → `MCORE_LOG_FILE`（日志文件名同步改为 `mcore.log`）、`LMMCP_AUTO_SYNC` → `MCORE_AUTO_SYNC`
+- 日志前缀：`[lmmcp]` → `[mcore]`，Usage 提示 `lmmcp` → `mcore`
+
+**scripts/connect_agents.py — MCP 连接名 + 旧迁移代码清理**
+- `SERVER_NAME`: `local_memory` → `memorycore`（影响所有 agent 配置文件中的 MCP 条目名）
+- TOML 硬编码清理：`mcp_servers.local_memory` → `mcp_servers.memorycore`
+- 删除 `OPENMEMORY_KEYS`、所有 `openmemory`/`open_memory` stale 清理循环及相关 docstring（迁移已完成，不再需要兼容旧条目）
+
+**scripts/sync-memory.sh / deploy.sh / install_services.sh / lmmcp-curator.timer / qdrant.service**
+- 注释、描述中残留的 `local-memory-mcp` / `lmmcp` 字样全部更新为 `memorycore` / `mcore`
+
+**scripts/hooks/opencode-mcore-plugin.js**
+- `DEFAULT_LMMCP_URL` → `DEFAULT_MCORE_URL`，函数名 `lmmcpUrl` → `mcoreUrl`
+- 导出名 `LmmcpMemoryPlugin` → `McoreMemoryPlugin`，env var `LMMCP_*` → `MCORE_*`，clientInfo name 同步
+
+**scripts/connect_agents.py — 其他**
+- `BACKUP_ROOT` 路径从 `local-memory-mcp` 改为 `memorycore`
+
+**~/.claude/settings.json — Agent 配置同步**
+- 环境变量：`LMMCP_AGENT_ID` → `MCORE_AGENT_ID`，`LMMCP_PORT` → `MCORE_PORT`
+- Stop hook 路径：`local-memory-mcp/scripts/hooks/lmmcp-ingest.py` → `memorycore/scripts/hooks/mcore-ingest.py`
+- MCP 连接名：`local_memory` → `memorycore`
+
+**memorycore/frontend.py — Apps 页 agent 列表修复**
+- 新增 `_KNOWN_AGENTS` 白名单（`claude`、`claude-code`、`codex`、`hermes`、`hermes-cli`、`gemini`、`opencode`），`_apps_list` 只聚合白名单内的 source_agent，过滤掉模型名（`gpt-5.5`）、内部进程（`memory-rollup`、`default-router`）等非 agent 来源
+- Status 推算逻辑：无 presence 记录时不再硬编码 `unknown`，改为按最近记忆活动时间推算——24h 内显示 `idle`，更早显示 `offline`
+
+**UI — Memory Operations 页**
+- 删除页面级 Refresh 按钮（`Install.tsx`）
+- "Memory Operations" 标题降权：`text-xl font-semibold` → `text-base font-medium text-zinc-400`，视觉上融入页面背景
+
+**UI 端口**
+- 默认 UI 端口从 `3001` 改为 `18318`（`start.sh`、`scripts/install_services.sh`）
