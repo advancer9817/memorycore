@@ -2215,3 +2215,21 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 - 用户只访问 `http://127.0.0.1:8318/`，后端 proxy 到 Next.js，单端口搞定
 - `pnpm dev` 开发模式仍然可用（不带 `--ui-port` 时后端 serve 老 HTML）
 - Node.js/pnpm 不可用时优雅降级，继续 serve 老 HTML 控制台
+
+## 2026-06-02 — 服务迁移 + UI 代理修复 + git 记忆同步
+
+### 变更内容
+
+**修复：UI 代理 content-encoding 错误**
+- `memorycore/frontend.py` `_proxy_to_ui()`：httpx 自动解压响应体，但原始 `content-encoding: gzip` 头被原样转发，浏览器收到解压内容却被告知是 gzip，导致 `ERR_CONTENT_DECODING_FAILED`，页面一片空白。修复：转发响应头时过滤掉 `content-encoding`、`content-length`、`transfer-encoding`。
+
+**迁移：systemd 服务全套重命名 lmmcp → mcore**
+- 新增 `scripts/install_services.sh`：一键安装 `mcore.service` + `mcore-curator.service` + `mcore-curator.timer`，自动迁移旧 lmmcp 单元。
+- `scripts/mcore.service`：加入 `--ui-port __UI_PORT__` 占位符。
+- `scripts/mcore-curator.service` / `scripts/mcore-curator.timer`：描述更新为 MemoryCore。
+- `scripts/sync-memory.sh`：默认 `MCORE_DIR` 从 `local-memory-mcp` 更新为 `memorycore`。
+
+**新增：git hooks 自动记忆同步**
+- `scripts/hooks/git-pre-push`：push 前自动导出 `memory-sync/memories.json` 并提交（随 push 携带）。
+- `scripts/hooks/git-post-merge`：pull/merge 后检测 memories.json 是否变更，有则自动 `import --conflict-policy newer --apply`。
+- `scripts/setup-hooks.sh`：末尾加入 git hooks 安装逻辑，`bash scripts/setup-hooks.sh` 一次完成全部配置。

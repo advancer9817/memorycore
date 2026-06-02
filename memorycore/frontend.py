@@ -139,10 +139,14 @@ async def _proxy_to_ui(request: Request) -> Response:
                 headers=headers,
                 content=body,
             )
+            fwd_headers = {
+                k: v for k, v in resp.headers.items()
+                if k.lower() not in {"content-encoding", "content-length", "transfer-encoding"}
+            }
             return Response(
                 content=resp.content,
                 status_code=resp.status_code,
-                headers=dict(resp.headers),
+                headers=fwd_headers,
             )
     except httpx.ConnectError:
         return Response(

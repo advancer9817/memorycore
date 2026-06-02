@@ -24,7 +24,7 @@
 
 set -euo pipefail
 
-MCORE_DIR="${MCORE_DIR:-$HOME/project/local-memory-mcp}"
+MCORE_DIR="${MCORE_DIR:-$HOME/project/memorycore}"
 MCORE_PYTHON="${MCORE_PYTHON:-$MCORE_DIR/.venv/bin/python}"
 SYNC_FILE="${SYNC_FILE:-memory-sync/memories.json}"
 SYNC_REMOTE="${SYNC_REMOTE:-origin}"

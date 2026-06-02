@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# git post-merge hook — git pull/merge 后自动导入拉取的新记忆。
+#
+# 触发时机：git merge 完成后（包括 git pull 内部触发的 merge）
+# 行为：
+#   1. 检查 memory-sync/memories.json 是否被本次 merge 更新
+#   2. 若有更新，调用 memorycore import --conflict-policy newer --apply
+#   3. 非阻塞：导入失败只打 warning，不影响工作区
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+MCORE_DIR="${MCORE_DIR:-$HOME/project/memorycore}"
+PYTHON="${MCORE_PYTHON:-$MCORE_DIR/.venv/bin/python}"
+SYNC_FILE="memory-sync/memories.json"
+SYNC_PATH="$MCORE_DIR/$SYNC_FILE"
+
+# 只对 memorycore 仓库本身生效
+[[ "$REPO_ROOT" == "$MCORE_DIR" ]] || exit 0
+[[ -x "$PYTHON" ]] || { echo "[post-merge] WARNING: python not found at $PYTHON, skipping memory import" >&2; exit 0; }
+[[ -f "$SYNC_PATH" ]] || { echo "[post-merge] No memory sync file found, skipping import." >&2; exit 0; }
+
+# 检查 memories.json 是否在本次 merge 中被修改（$1=1 表示 squash merge）
+CHANGED=$(git diff-tree -r --name-only --no-commit-id ORIG_HEAD HEAD 2>/dev/null | grep -c "^${SYNC_FILE}$" || echo 0)
+if [[ "$CHANGED" -eq 0 ]]; then
+    echo "[post-merge] Memory sync file unchanged, skipping import." >&2
+    exit 0
+fi
+
+echo "[post-merge] Importing pulled memories (conflict_policy=newer) ..." >&2
+if "$PYTHON" -m memorycore import "$SYNC_PATH" --conflict-policy newer --apply >/dev/null 2>&1; then
+    echo "[post-merge] Memory import applied." >&2
+else
+    echo "[post-merge] WARNING: memory import failed. Run manually: python -m memorycore import $SYNC_FILE --conflict-policy newer --apply" >&2
+fi
+
+exit 0

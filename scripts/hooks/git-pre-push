@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# git pre-push hook — 推送前导出本地记忆到 memory-sync/memories.json 并随本次推送一起提交。
+#
+# 触发时机：git push 之前（含 push 的所有分支）
+# 行为：
+#   1. 调用 memorycore export --memories-only 生成 memory-sync/memories.json
+#   2. 如有变更，自动 git add + git commit（附在本次 push 里）
+#   3. 非阻塞：导出失败只打 warning，不中断 push
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+MCORE_DIR="${MCORE_DIR:-$HOME/project/memorycore}"
+PYTHON="${MCORE_PYTHON:-$MCORE_DIR/.venv/bin/python}"
+SYNC_FILE="memory-sync/memories.json"
+SYNC_PATH="$MCORE_DIR/$SYNC_FILE"
+
+# 只对 memorycore 仓库本身生效
+[[ "$REPO_ROOT" == "$MCORE_DIR" ]] || exit 0
+[[ -x "$PYTHON" ]] || { echo "[pre-push] WARNING: python not found at $PYTHON, skipping memory export" >&2; exit 0; }
+
+echo "[pre-push] Exporting memories before push ..." >&2
+mkdir -p "$(dirname "$SYNC_PATH")"
+if "$PYTHON" -m memorycore export "$SYNC_PATH" --memories-only >/dev/null 2>&1; then
+    cd "$MCORE_DIR"
+    # 检查是否有变更（新文件或内容变化）
+    if ! git diff --quiet "$SYNC_FILE" 2>/dev/null || ! git ls-files --error-unmatch "$SYNC_FILE" &>/dev/null; then
+        git add "$SYNC_FILE"
+        DEVICE="$(hostname -s 2>/dev/null || echo unknown)"
+        TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        COUNT="$(python3 -c "import json; d=json.load(open('$SYNC_FILE')); print(d.get('counts',{}).get('memories','?'))" 2>/dev/null || echo '?')"
+        git commit -m "chore(memory-sync): $DEVICE @ $TIMESTAMP — ${COUNT} memories" --no-verify
+        echo "[pre-push] Memory export committed (${COUNT} memories)." >&2
+    else
+        echo "[pre-push] Memory unchanged, skipping commit." >&2
+    fi
+else
+    echo "[pre-push] WARNING: memory export failed, push continues without sync." >&2
+fi
+
+exit 0

@@ -1,5 +1,5 @@
 [Unit]
-Description=local-memory-mcp curator run
+Description=MemoryCore curator run
 After=network-online.target __MCORE_SERVICE__
 Wants=network-online.target __MCORE_SERVICE__
 

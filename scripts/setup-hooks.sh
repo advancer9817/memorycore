@@ -366,4 +366,15 @@ if not any(item.get("command") == context_command and item.get("event") == "pre_
 write_json(hermes_allowlist, allow)
 PY
 
+# ── 安装 git hooks（pre-push / post-merge）────────────────────────────────────
+GIT_HOOKS_DIR="$REPO_ROOT/.git/hooks"
+if [[ -d "$GIT_HOOKS_DIR" ]]; then
+    cp "$HOOKS_DIR/git-pre-push"   "$GIT_HOOKS_DIR/pre-push"
+    cp "$HOOKS_DIR/git-post-merge" "$GIT_HOOKS_DIR/post-merge"
+    chmod +x "$GIT_HOOKS_DIR/pre-push" "$GIT_HOOKS_DIR/post-merge"
+    echo "git hooks installed: pre-push (memory export) + post-merge (memory import)"
+else
+    echo "WARNING: .git/hooks not found, skipping git hook installation" >&2
+fi
+
 echo "mcore hooks configured"
