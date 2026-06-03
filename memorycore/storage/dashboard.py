@@ -5,7 +5,7 @@ import html
 import json
 from pathlib import Path
 
-from memorycore.storage.db import db_path, managed_conn
+from memorycore.storage.db import db_path, read_conn
 from memorycore.storage.crud import list_recent
 from memorycore.storage.curator import curator_report
 from memorycore.storage.search import get_context_quality_stats
@@ -30,7 +30,7 @@ def dashboard_payload(limit: int = 1000) -> dict[str, object]:
         r for r in rows
         if r.get("type") in {"timeline_event", "decision", "feedback"}
     ][:80]
-    with managed_conn() as conn:
+    with read_conn() as conn:
         links = [dict(r) for r in conn.execute("SELECT * FROM memory_links ORDER BY created_at DESC LIMIT 200").fetchall()]
         mailbox = [dict(r) for r in conn.execute("SELECT * FROM agent_messages ORDER BY created_at DESC, rowid DESC LIMIT 100").fetchall()]
         presence = [dict(r) for r in conn.execute("SELECT * FROM agent_presence ORDER BY last_seen_at DESC LIMIT 100").fetchall()]

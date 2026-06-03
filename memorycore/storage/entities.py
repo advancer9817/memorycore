@@ -6,7 +6,7 @@ import uuid
 from typing import Any
 
 from memorycore.models import as_json, now, row_to_dict
-from memorycore.storage.db import managed_conn
+from memorycore.storage.db import managed_conn, read_conn
 
 _ALIAS_GROUPS = [
     ("mcore", ["mcore", "local_memory", "local-memory-mcp", "memorycore", "local memory", "local memory mcp"]),
@@ -176,7 +176,7 @@ def entity_search(
         clauses.append("(m.project_path = ? OR m.project_path = '')")
         params.append(project_path)
     params.append(cap)
-    with managed_conn() as conn:
+    with read_conn() as conn:
         rows = conn.execute(
             f"""
             SELECT

@@ -43,8 +43,8 @@ def test_default_all_extra_stays_runtime_sized():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     optional = pyproject["project"]["optional-dependencies"]
 
-    assert optional["all"] == ["local-memory-mcp[vector,extraction]"]
-    assert optional["full"] == ["local-memory-mcp[vector,extraction]"]
+    assert optional["all"] == ["memorycore[vector,extraction]"]
+    assert optional["full"] == ["memorycore[vector,extraction]"]
     assert optional["embedding"] == []
 
 

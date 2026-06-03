@@ -230,17 +230,35 @@ def extract_facts(
     logger.info("extraction: extracted %d facts in %.2fs", len(facts), elapsed)
     return facts, elapsed
 
-
 # ---------------------------------------------------------------------------
 # LLM call (httpx, no SDK dependency)
 # ---------------------------------------------------------------------------
+
+# Module-level connection pool — avoids TCP handshake overhead on repeated calls.
+_httpx_client: "httpx.Client | None" = None
+_httpx_client_key: tuple = ()
+
+
+def _get_httpx_client(config: "ExtractionConfig") -> "httpx.Client":
+    global _httpx_client, _httpx_client_key
+    import httpx
+    key = (config.base_url, config.timeout)
+    if _httpx_client is None or _httpx_client_key != key:
+        if _httpx_client is not None:
+            try:
+                _httpx_client.close()
+            except Exception:
+                pass
+        _httpx_client = httpx.Client(timeout=config.timeout, limits=httpx.Limits(max_keepalive_connections=4, max_connections=8))
+        _httpx_client_key = key
+    return _httpx_client
+
 
 def _call_llm(system_prompt: str, user_prompt: str, config: ExtractionConfig) -> str:
     """POST to OpenAI-compatible chat completions endpoint."""
     try:
         import httpx
     except ImportError:
-        # httpx may not be installed; fall back to urllib
         return _call_llm_urllib(system_prompt, user_prompt, config)
 
     url = config.base_url.rstrip("/") + "/chat/completions"
@@ -258,10 +276,10 @@ def _call_llm(system_prompt: str, user_prompt: str, config: ExtractionConfig) ->
         "Authorization": f"Bearer {config.api_key}",
         "Content-Type": "application/json",
     }
-    with httpx.Client(timeout=config.timeout) as client:
-        resp = client.post(url, json=payload, headers=headers)
-        resp.raise_for_status()
-        data = resp.json()
+    client = _get_httpx_client(config)
+    resp = client.post(url, json=payload, headers=headers)
+    resp.raise_for_status()
+    data = resp.json()
     return data["choices"][0]["message"]["content"]
 
 
