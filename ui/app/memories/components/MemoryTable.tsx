@@ -149,7 +149,7 @@ export function MemoryTable() {
                 Created On
               </div>
             </TableHead>
-            <TableHead className="text-right border-zinc-700">
+            <TableHead className="text-right border-zinc-700 flex justify-center">
               <div className="flex items-center justify-end">
                 <MoreHorizontal className="h-4 w-4 mr-2" />
               </div>
@@ -229,7 +229,7 @@ export function MemoryTable() {
               <TableCell className="w-[140px] text-center">
                 {formatDate(memory.created_at)}
               </TableCell>
-              <TableCell className="text-right">
+              <TableCell className="text-right flex justify-center">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="icon" className="h-8 w-8">
