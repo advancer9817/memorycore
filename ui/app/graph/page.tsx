@@ -8,10 +8,7 @@ import { useRouter } from "next/navigation";
 import { getApiBaseUrl } from "@/lib/api-url";
 
 // Load ForceGraph2D only on client — it requires window/canvas
-const ForceGraph2D = dynamic(
-  () => import("react-force-graph").then((m) => ({ default: m.ForceGraph2D })),
-  { ssr: false }
-);
+const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), { ssr: false });
 
 interface GraphNode {
   id: string;
