@@ -91,11 +91,11 @@ export function MemoryFilters() {
   return (
     <div className="flex flex-col md:flex-row gap-4 mb-4">
       <div className="relative flex-1">
-        <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
         <Input
           ref={inputRef}
           placeholder="Search memories..."
-          className="pl-8 bg-background border-border max-w-[500px]"
+          className="pl-8 bg-zinc-950 border-zinc-800 max-w-[500px]"
           onChange={(e) => handleSearch(e.target.value)}
         />
       </div>

@@ -19,7 +19,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="h-screen font-sans antialiased flex flex-col bg-background">
+      <body className="h-screen font-sans antialiased flex flex-col bg-zinc-950">
         <Providers>
           <ThemeProvider
             attribute="class"

@@ -51,8 +51,8 @@ const AppDetailCard = ({
 
   return (
     <div>
-      <div className="bg-card border w-[320px] border-border rounded-xl mb-6">
-        <div className="flex items-center gap-2 mb-4 bg-muted rounded-t-xl p-3">
+      <div className="bg-zinc-900 border w-[320px] border-zinc-800 rounded-xl mb-6">
+        <div className="flex items-center gap-2 mb-4 bg-zinc-800 rounded-t-xl p-3">
           <div className="w-5 h-5 flex items-center justify-center">
             {appConfig.iconImage ? (
               <div>
@@ -67,7 +67,7 @@ const AppDetailCard = ({
               </div>
             ) : (
               <div className="w-5 h-5 flex items-center justify-center bg-zinc-700 rounded-full">
-                <BiEdit className="w-4 h-4 text-muted-foreground" />
+                <BiEdit className="w-4 h-4 text-zinc-400" />
               </div>
             )}
           </div>
@@ -76,7 +76,7 @@ const AppDetailCard = ({
 
         <div className="space-y-4 p-3">
           <div>
-            <p className="text-xs text-muted-foreground">Access Status</p>
+            <p className="text-xs text-zinc-400">Access Status</p>
             <p
               className={`font-medium ${
                 selectedApp.details.is_active
@@ -91,21 +91,21 @@ const AppDetailCard = ({
           </div>
 
           <div>
-            <p className="text-xs text-muted-foreground">Total Memories Created</p>
+            <p className="text-xs text-zinc-400">Total Memories Created</p>
             <p className="font-medium">
               {selectedApp.details.total_memories_created} Memories
             </p>
           </div>
 
           <div>
-            <p className="text-xs text-muted-foreground">Total Memories Accessed</p>
+            <p className="text-xs text-zinc-400">Total Memories Accessed</p>
             <p className="font-medium">
               {selectedApp.details.total_memories_accessed} Memories
             </p>
           </div>
 
           <div>
-            <p className="text-xs text-muted-foreground">First Accessed</p>
+            <p className="text-xs text-zinc-400">First Accessed</p>
             <p className="font-medium">
               {selectedApp.details.first_accessed
                 ? new Date(
@@ -122,7 +122,7 @@ const AppDetailCard = ({
           </div>
 
           <div>
-            <p className="text-xs text-muted-foreground">Last Accessed</p>
+            <p className="text-xs text-zinc-400">Last Accessed</p>
             <p className="font-medium">
               {selectedApp.details.last_accessed
                 ? new Date(
@@ -138,12 +138,12 @@ const AppDetailCard = ({
             </p>
           </div>
 
-          <hr className="border-border" />
+          <hr className="border-zinc-800" />
 
           <div className="flex gap-2 justify-end">
             <Button
               onClick={handlePauseAccess}
-              className="flex bg-transparent w-[170px] bg-muted border-border hover:bg-muted text-foreground"
+              className="flex bg-transparent w-[170px] bg-zinc-800 border-zinc-800 hover:bg-zinc-800 text-white"
               size="sm"
               disabled={isLoading}
             >

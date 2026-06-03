@@ -182,7 +182,7 @@ export const Install = () => {
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-zinc-400 flex items-center justify-between">
-              Total Memories <Database className="h-4 w-4 text-muted-foreground" />
+              Total Memories <Database className="h-4 w-4 text-zinc-500" />
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -192,7 +192,7 @@ export const Install = () => {
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-zinc-400 flex items-center justify-between">
-              Active <Activity className="h-4 w-4 text-muted-foreground" />
+              Active <Activity className="h-4 w-4 text-zinc-500" />
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -202,7 +202,7 @@ export const Install = () => {
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-zinc-400 flex items-center justify-between">
-              Candidates <Sparkles className="h-4 w-4 text-muted-foreground" />
+              Candidates <Sparkles className="h-4 w-4 text-zinc-500" />
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -212,7 +212,7 @@ export const Install = () => {
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-zinc-400 flex items-center justify-between">
-              Archived <Archive className="h-4 w-4 text-muted-foreground" />
+              Archived <Archive className="h-4 w-4 text-zinc-500" />
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -243,7 +243,7 @@ export const Install = () => {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-zinc-400">Last result</span>
-              <span className="text-foreground">{lastResult}</span>
+              <span className="text-zinc-100">{lastResult}</span>
             </div>
           </CardContent>
         </Card>
@@ -255,24 +255,24 @@ export const Install = () => {
           <CardContent className="py-4 space-y-3">
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div className="rounded-md bg-zinc-800 px-3 py-2">
-                <div className="text-muted-foreground">Scanned</div>
+                <div className="text-zinc-500">Scanned</div>
                 <div className="text-lg font-semibold">{status?.curator.scanned ?? "-"}</div>
               </div>
               <div className="rounded-md bg-zinc-800 px-3 py-2">
-                <div className="text-muted-foreground">Planned Actions</div>
+                <div className="text-zinc-500">Planned Actions</div>
                 <div className="text-lg font-semibold">{summary.planned_actions ?? 0}</div>
               </div>
               <div className="rounded-md bg-zinc-800 px-3 py-2">
-                <div className="text-muted-foreground">Skill Promotions</div>
+                <div className="text-zinc-500">Skill Promotions</div>
                 <div className="text-lg font-semibold">{summary.skill_promotions ?? 0}</div>
               </div>
               <div className="rounded-md bg-zinc-800 px-3 py-2">
-                <div className="text-muted-foreground">Duplicates</div>
+                <div className="text-zinc-500">Duplicates</div>
                 <div className="text-lg font-semibold">{summary.duplicates ?? 0}</div>
               </div>
             </div>
             <Button
-              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
+              className="w-full bg-primary hover:bg-primary/90"
               onClick={applyCurator}
               disabled={applying || llmRunning}
             >
@@ -280,7 +280,7 @@ export const Install = () => {
               {applying ? "Running curator..." : "Run Curator Now"}
             </Button>
             <Button
-              className="w-full bg-amber-600 hover:bg-amber-500 text-foreground"
+              className="w-full bg-violet-700 hover:bg-violet-600 text-white"
               onClick={runLlmCurator}
               disabled={applying || llmRunning}
             >
@@ -289,7 +289,7 @@ export const Install = () => {
             </Button>
             <div className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm">
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Manual run</span>
+                <span className="text-zinc-400">Manual run</span>
                 <Badge
                   variant="outline"
                   className={
@@ -299,21 +299,21 @@ export const Install = () => {
                         ? "border-red-700 bg-red-500/10 text-red-300"
                         : runState.state === "running"
                           ? "border-sky-700 bg-sky-500/10 text-sky-300"
-                          : "border-border bg-muted text-muted-foreground"
+                          : "border-zinc-700 bg-zinc-800 text-zinc-300"
                   }
                 >
                   {runState.state}
                 </Badge>
               </div>
               {runState.startedAt && (
-                <div className="mt-2 grid grid-cols-2 gap-2 text-muted-foreground">
+                <div className="mt-2 grid grid-cols-2 gap-2 text-zinc-400">
                   <div>
-                    <div className="text-muted-foreground">Started</div>
-                    <div className="text-zinc-100">{formatTime(runState.startedAt)}</div>
+                    <div className="text-zinc-500">Started</div>
+                    <div className="text-zinc-200">{formatTime(runState.startedAt)}</div>
                   </div>
                   <div>
-                    <div className="text-muted-foreground">Elapsed</div>
-                    <div className="text-foreground">
+                    <div className="text-zinc-500">Elapsed</div>
+                    <div className="text-zinc-200">
                       {runState.elapsedMs !== undefined ? `${(runState.elapsedMs / 1000).toFixed(1)}s` : "running"}
                     </div>
                   </div>
@@ -322,15 +322,15 @@ export const Install = () => {
               {runState.summary && (
                 <div className="mt-3 grid grid-cols-3 gap-2">
                   <div className="rounded bg-zinc-800 px-2 py-1">
-                    <div className="text-muted-foreground">Actions</div>
+                    <div className="text-zinc-500">Actions</div>
                     <div className="text-zinc-100 font-medium">{runState.summary.actions ?? 0}</div>
                   </div>
                   <div className="rounded bg-zinc-800 px-2 py-1">
-                    <div className="text-muted-foreground">Promote</div>
+                    <div className="text-zinc-500">Promote</div>
                     <div className="text-zinc-100 font-medium">{runState.summary.skill_promotions ?? 0}</div>
                   </div>
                   <div className="rounded bg-zinc-800 px-2 py-1">
-                    <div className="text-muted-foreground">Archive</div>
+                    <div className="text-zinc-500">Archive</div>
                     <div className="text-zinc-100 font-medium">{runState.summary.archive ?? 0}</div>
                   </div>
                 </div>
@@ -340,7 +340,7 @@ export const Install = () => {
                   {runState.actions.slice(0, 3).map((action) => (
                     <div key={`${action.id}-${action.action}`} className="rounded bg-zinc-800 px-2 py-1">
                       <span className="text-primary">{action.action}</span>
-                      <span className="text-muted-foreground"> · {action.title || action.id}</span>
+                      <span className="text-zinc-400"> · {action.title || action.id}</span>
                     </div>
                   ))}
                 </div>
@@ -349,9 +349,9 @@ export const Install = () => {
             </div>
             {/* LLM Curator results */}
             {llmRunState.state !== "idle" && (
-              <div className="rounded-xl border border-violet-800 bg-zinc-950 px-3 py-3 text-sm">
+              <div className="rounded-md border border-violet-800 bg-zinc-950 px-3 py-3 text-sm">
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">LLM analysis</span>
+                  <span className="text-zinc-400">LLM analysis</span>
                   <Badge
                     variant="outline"
                     className={
@@ -366,22 +366,22 @@ export const Install = () => {
                   </Badge>
                 </div>
                 {llmRunState.elapsedMs !== undefined && (
-                  <div className="mt-1 text-muted-foreground text-xs">
+                  <div className="mt-1 text-zinc-500 text-xs">
                     {(llmRunState.elapsedMs / 1000).toFixed(1)}s
                   </div>
                 )}
                 {llmRunState.summary && (
                   <div className="mt-2 grid grid-cols-3 gap-2">
                     <div className="rounded bg-zinc-800 px-2 py-1">
-                      <div className="text-muted-foreground">Duplicates</div>
+                      <div className="text-zinc-500">Duplicates</div>
                       <div className="text-zinc-100 font-medium">{llmRunState.summary.semantic_duplicates ?? 0}</div>
                     </div>
                     <div className="rounded bg-zinc-800 px-2 py-1">
-                      <div className="text-muted-foreground">Contradictions</div>
+                      <div className="text-zinc-500">Contradictions</div>
                       <div className="text-zinc-100 font-medium">{llmRunState.summary.contradictions ?? 0}</div>
                     </div>
                     <div className="rounded bg-zinc-800 px-2 py-1">
-                      <div className="text-muted-foreground">Reassessed</div>
+                      <div className="text-zinc-500">Reassessed</div>
                       <div className="text-zinc-100 font-medium">{llmRunState.summary.importance_reassessments ?? 0}</div>
                     </div>
                   </div>
@@ -390,9 +390,9 @@ export const Install = () => {
                   <div className="mt-3 max-h-64 overflow-y-auto space-y-1 pr-1">
                     {llmRunState.findings.map((f, i) => (
                       <div key={i} className="rounded bg-zinc-800 px-2 py-1 text-xs">
-                        <span className="text-primary">{f.action}</span>
-                        <span className="text-muted-foreground"> · {f.title || "—"}</span>
-                        {f.reason && <div className="text-muted-foreground mt-0.5">{f.reason}</div>}
+                        <span className="text-violet-300">{f.action}</span>
+                        <span className="text-zinc-400"> · {f.title || "—"}</span>
+                        {f.reason && <div className="text-zinc-500 mt-0.5">{f.reason}</div>}
                       </div>
                     ))}
                   </div>

@@ -43,7 +43,7 @@ export function CreateMemoryDialog() {
         <Button
           variant="outline"
           size="sm"
-          className="bg-primary hover:bg-primary/90 text-foreground"
+          className="bg-primary hover:bg-primary/90 text-white"
         >
           <GoPlus />
           Create Memory
@@ -63,7 +63,7 @@ export function CreateMemoryDialog() {
               ref={textRef}
               id="memory"
               placeholder="e.g., Lives in San Francisco"
-              className="bg-background border-border min-h-[150px]"
+              className="bg-zinc-950 border-zinc-800 min-h-[150px]"
             />
           </div>
         </div>

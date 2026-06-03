@@ -218,14 +218,14 @@ export default function FilterComponent() {
             )}
           </Button>
         </DialogTrigger>
-        <DialogContent className="sm:max-w-[425px] bg-zinc-900 border-zinc-800 text-foreground">
+        <DialogContent className="sm:max-w-[425px] bg-zinc-900 border-zinc-800 text-zinc-100">
           <DialogHeader>
-            <DialogTitle className="text-foreground flex justify-between items-center">
+            <DialogTitle className="text-zinc-100 flex justify-between items-center">
               <span>Filters</span>
             </DialogTitle>
           </DialogHeader>
           <Tabs defaultValue="apps" className="w-full">
-            <TabsList className="grid grid-cols-3 bg-muted">
+            <TabsList className="grid grid-cols-3 bg-zinc-800">
               <TabsTrigger
                 value="apps"
                 className="data-[state=active]:bg-zinc-700"
@@ -256,11 +256,11 @@ export default function FilterComponent() {
                     onCheckedChange={(checked) =>
                       toggleAllApps(checked as boolean)
                     }
-                    className="border-border data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                    className="border-zinc-600 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
                   />
                   <Label
                     htmlFor="select-all-apps"
-                    className="text-sm font-normal text-foreground/80 cursor-pointer"
+                    className="text-sm font-normal text-zinc-300 cursor-pointer"
                   >
                     Select All
                   </Label>
@@ -271,11 +271,11 @@ export default function FilterComponent() {
                       id={`app-${app.id}`}
                       checked={tempSelectedApps.includes(app.id)}
                       onCheckedChange={() => toggleAppFilter(app.id)}
-                      className="border-border data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                      className="border-zinc-600 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
                     />
                     <Label
                       htmlFor={`app-${app.id}`}
-                      className="text-sm font-normal text-foreground/80 cursor-pointer"
+                      className="text-sm font-normal text-zinc-300 cursor-pointer"
                     >
                       {app.name}
                     </Label>
@@ -295,11 +295,11 @@ export default function FilterComponent() {
                     onCheckedChange={(checked) =>
                       toggleAllCategories(checked as boolean)
                     }
-                    className="border-border data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                    className="border-zinc-600 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
                   />
                   <Label
                     htmlFor="select-all-categories"
-                    className="text-sm font-normal text-foreground/80 cursor-pointer"
+                    className="text-sm font-normal text-zinc-300 cursor-pointer"
                   >
                     Select All
                   </Label>
@@ -315,11 +315,11 @@ export default function FilterComponent() {
                       onCheckedChange={() =>
                         toggleCategoryFilter(category.name)
                       }
-                      className="border-border data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                      className="border-zinc-600 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
                     />
                     <Label
                       htmlFor={`category-${category.name}`}
-                      className="text-sm font-normal text-foreground/80 cursor-pointer"
+                      className="text-sm font-normal text-zinc-300 cursor-pointer"
                     >
                       {category.name}
                     </Label>
@@ -336,11 +336,11 @@ export default function FilterComponent() {
                     onCheckedChange={(checked) =>
                       setShowArchived(checked as boolean)
                     }
-                    className="border-border data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                    className="border-zinc-600 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
                   />
                   <Label
                     htmlFor="show-archived"
-                    className="text-sm font-normal text-foreground/80 cursor-pointer"
+                    className="text-sm font-normal text-zinc-300 cursor-pointer"
                   >
                     Show Archived Memories
                   </Label>
@@ -353,7 +353,7 @@ export default function FilterComponent() {
             {hasTempFilters && (
               <Button
                 onClick={handleClearFilters}
-                className="bg-muted hover:bg-muted text-foreground/80"
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
               >
                 Clear All
               </Button>
@@ -361,7 +361,7 @@ export default function FilterComponent() {
             {/* Apply filters button */}
             <Button
               onClick={handleApplyFilters}
-              className="bg-primary hover:bg-primary/80 text-foreground"
+              className="bg-primary hover:bg-primary/80 text-white"
             >
               Apply Filters
             </Button>
@@ -384,9 +384,9 @@ export default function FilterComponent() {
             <ChevronDown className="h-4 w-4 ml-2" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-56 bg-zinc-900 border-zinc-800 text-foreground">
+        <DropdownMenuContent className="w-56 bg-zinc-900 border-zinc-800 text-zinc-100">
           <DropdownMenuLabel>Sort by</DropdownMenuLabel>
-          <DropdownMenuSeparator className="bg-muted" />
+          <DropdownMenuSeparator className="bg-zinc-800" />
           <DropdownMenuGroup>
             {columns.map((column) => (
               <DropdownMenuItem

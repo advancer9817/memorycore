@@ -83,10 +83,10 @@ export function AppFilters() {
   return (
     <div className="flex items-center gap-2">
       <div className="relative flex-1">
-        <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
         <Input
           placeholder="Search agents or clients..."
-          className="pl-8 bg-background border-border max-w-[500px]"
+          className="pl-8 bg-zinc-950 border-zinc-800 max-w-[500px]"
           value={localSearch}
           onChange={handleSearchChange}
         />
@@ -110,7 +110,7 @@ export function AppFilters() {
         <DropdownMenuTrigger asChild>
           <Button
             variant="outline"
-            className="h-9 px-4 border-border bg-card hover:bg-muted"
+            className="h-9 px-4 border-zinc-700 bg-zinc-900 hover:bg-zinc-800"
           >
             {filters.sortDirection === "asc" ? (
               <SortDesc className="h-4 w-4 mr-2" />
@@ -121,9 +121,9 @@ export function AppFilters() {
             <ChevronDown className="h-4 w-4 ml-2" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-56 bg-zinc-900 border-zinc-800 text-foreground">
+        <DropdownMenuContent className="w-56 bg-zinc-900 border-zinc-800 text-zinc-100">
           <DropdownMenuLabel>Sort by</DropdownMenuLabel>
-          <DropdownMenuSeparator className="bg-muted" />
+          <DropdownMenuSeparator className="bg-zinc-800" />
           <DropdownMenuGroup>
             {sortOptions.map((option) => (
               <DropdownMenuItem
