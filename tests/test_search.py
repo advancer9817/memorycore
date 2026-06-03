@@ -58,9 +58,11 @@ def test_punctuation_only_query_does_not_crash():
 
 
 def test_search_updates_last_accessed_at():
+    import time
     add_sample_records()
     assert lm.get_record("alpha")["last_accessed_at"] is None
 
     assert lm.search_memory_records("keyword", status="active")
+    time.sleep(0.15)  # last_accessed_at write is async
 
     assert lm.get_record("alpha")["last_accessed_at"] is not None

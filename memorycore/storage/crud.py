@@ -17,7 +17,7 @@ from memorycore.models import (
     validate_type,
 )
 from memorycore.privacy import redact_record_fields
-from memorycore.storage.db import _managed_query, managed_conn
+from memorycore.storage.db import _managed_query, managed_conn, read_conn
 from memorycore.storage.audit import log_audit_event
 from memorycore.storage.atomization import atomize_record, should_atomize
 from memorycore.storage.entities import sync_memory_entities
@@ -42,33 +42,32 @@ except Exception:
 
 
 def _sync_to_vector(record: dict[str, Any]) -> None:
-    """Fire-and-forget Qdrant sync after SQLite write. Never raises.
-
-    Non-active records are deleted from the vector index so they never surface
-    in semantic search results. Active records are upserted with fresh payload.
-    """
-    try:
-        if _get_vector_store is None:
-            return
-        vs = _get_vector_store(load_config())
-        status = record.get("status", "active")
-        if status != "active":
-            vs.delete(record["id"])
-            return
-        text = f"{record.get('title', '')} {record.get('content', '')}".strip()
-        metadata = record.get("metadata") or {}
-        payload = {
-            "type": record.get("type", ""),
-            "scope": record.get("scope", ""),
-            "status": status,
-            "source_agent": record.get("source_agent", ""),
-            "tags": record.get("tags", []),
-            "kind": metadata.get("kind", ""),
-            "parent_id": metadata.get("parent_id", ""),
-        }
-        vs.upsert(record["id"], text, payload)
-    except Exception as exc:
-        logger.warning("_sync_to_vector: failed for id=%s: %s", record.get("id"), exc)
+    """Async fire-and-forget Qdrant sync. Never raises."""
+    import threading as _threading
+    def _run():
+        try:
+            if _get_vector_store is None:
+                return
+            vs = _get_vector_store(load_config())
+            status = record.get("status", "active")
+            if status != "active":
+                vs.delete(record["id"])
+                return
+            text = f"{record.get('title', '')} {record.get('content', '')}".strip()
+            metadata = record.get("metadata") or {}
+            payload = {
+                "type": record.get("type", ""),
+                "scope": record.get("scope", ""),
+                "status": status,
+                "source_agent": record.get("source_agent", ""),
+                "tags": record.get("tags", []),
+                "kind": metadata.get("kind", ""),
+                "parent_id": metadata.get("parent_id", ""),
+            }
+            vs.upsert(record["id"], text, payload)
+        except Exception as exc:
+            logger.warning("_sync_to_vector: failed for id=%s: %s", record.get("id"), exc)
+    _threading.Thread(target=_run, daemon=True).start()
 
 
 def _sync_entities(record: dict[str, Any], conn: Any | None = None) -> None:
@@ -306,7 +305,7 @@ def list_recent(limit: int = 10, cap: int | None = None) -> list[dict[str, Any]]
     limit_value = max(1, int(limit))
     if cap is not None:
         limit_value = min(limit_value, int(cap))
-    with managed_conn() as conn:
+    with read_conn() as conn:
         rows = conn.execute(
             "SELECT * FROM memories ORDER BY updated_at DESC LIMIT ?", (limit_value,)
         ).fetchall()
@@ -314,7 +313,7 @@ def list_recent(limit: int = 10, cap: int | None = None) -> list[dict[str, Any]]
 
 
 def get_record(memory_id: str) -> dict[str, Any] | None:
-    with managed_conn() as conn:
+    with read_conn() as conn:
         row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
     return row_to_dict(row) if row else None
 
@@ -329,7 +328,7 @@ def timeline(query: str = "", scope: str = "", limit: int = 20) -> list[dict[str
 
 
 def get_memory_stats() -> dict[str, Any]:
-    with managed_conn() as conn:
+    with read_conn() as conn:
         type_dist = {r["type"]: r["cnt"] for r in conn.execute(
             "SELECT type, COUNT(*) as cnt FROM memories GROUP BY type"
         ).fetchall()}

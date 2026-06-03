@@ -9,8 +9,8 @@ from typing import Any, Callable
 from memorycore.extraction import extraction_config_from_dict, _call_llm
 from memorycore.models import finite_float, load_config, local_now, normalize_list, now, parse_ts, validate_type
 from memorycore.storage.audit import log_audit_event
-from memorycore.storage.crud import add_memory_record, update_status
-from memorycore.storage.db import _managed_query, read_conn
+from memorycore.storage.crud import add_memory_record, update_status, update_status_batch as _usb
+from memorycore.storage.db import _managed_query, managed_conn as _managed_conn, read_conn
 
 logger = logging.getLogger(__name__)
 
@@ -270,10 +270,9 @@ def rollup_report(
         base["summary"]["created"] = len(created)
         return base
 
-    archived: list[str] = []
-    for source_id in source_ids:
-        update_status(source_id, "archived")
-        archived.append(source_id)
+    with _managed_conn() as _bc:
+        _usb(_bc, [(sid, "archived") for sid in source_ids])
+    archived: list[str] = list(source_ids)
     base["created_records"] = created
     base["archived_source_ids"] = archived
     base["summary"]["created"] = len(created)

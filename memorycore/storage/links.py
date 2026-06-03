@@ -5,7 +5,7 @@ import uuid
 from typing import Any
 
 from memorycore.models import VALID_RELATION_TYPES, now
-from memorycore.storage.db import managed_conn
+from memorycore.storage.db import managed_conn, read_conn
 
 
 def add_link(
@@ -55,7 +55,7 @@ def query_links(
     rel_filter = " AND relation_type=?" if relation_type else ""
     params_base = [relation_type] if relation_type else []
 
-    with managed_conn() as conn:
+    with read_conn() as conn:
         outgoing: list[dict] = []
         incoming: list[dict] = []
 

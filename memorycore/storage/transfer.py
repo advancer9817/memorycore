@@ -194,22 +194,43 @@ def memory_backup(path: str | None = None) -> dict[str, Any]:
 
 
 def memory_rebuild_vectors(dry_run: bool = True, limit: int = 5000) -> dict[str, Any]:
-    from memorycore.storage.crud import _sync_to_vector
+    from memorycore.storage.crud import row_to_dict
+    from memorycore.vector_store import get_vector_store
 
     cap = max(1, min(int(limit), 5000))
     with managed_conn() as conn:
-        rows = [dict(row) for row in conn.execute(
+        rows = conn.execute(
             "SELECT * FROM memories WHERE status != 'archived' ORDER BY updated_at DESC LIMIT ?",
             (cap,),
-        ).fetchall()]
+        ).fetchall()
     if dry_run:
         return {"dry_run": True, "planned": len(rows), "rebuilt": 0}
+    cfg = load_config()
+    vs = get_vector_store(cfg)
     rebuilt = 0
+    errors = 0
     for row in rows:
-        _sync_to_vector(row)
-        rebuilt += 1
-    log_audit_event("memory_vector_rebuild", detail={"rebuilt": rebuilt})
-    return {"dry_run": False, "planned": len(rows), "rebuilt": rebuilt}
+        record = row_to_dict(row)
+        try:
+            text = f"{record.get('title', '')} {record.get('content', '')}".strip()
+            metadata = record.get("metadata") or {}
+            payload = {
+                "type": record.get("type", ""),
+                "scope": record.get("scope", ""),
+                "status": record.get("status", "active"),
+                "source_agent": record.get("source_agent", ""),
+                "tags": record.get("tags", []),
+                "kind": metadata.get("kind", ""),
+                "parent_id": metadata.get("parent_id", ""),
+            }
+            vs.upsert(record["id"], text, payload)
+            rebuilt += 1
+        except Exception as exc:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("rebuild_vectors: failed for %s: %s", record["id"], exc)
+            errors += 1
+    log_audit_event("memory_vector_rebuild", detail={"rebuilt": rebuilt, "errors": errors})
+    return {"dry_run": False, "planned": len(rows), "rebuilt": rebuilt, "errors": errors}
 
 
 def memory_vector_audit(dry_run: bool = True, limit: int = 100) -> dict[str, Any]:

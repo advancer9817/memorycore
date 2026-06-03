@@ -145,12 +145,30 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return merged
 
 
+_config_cache: dict[str, Any] = {}
+
+
+def invalidate_config_cache() -> None:
+    _config_cache.clear()
+
+
 def load_config() -> dict[str, Any]:
     path = config_path()
+    try:
+        mtime = path.stat().st_mtime if path.exists() else 0.0
+    except OSError:
+        mtime = 0.0
+    key = str(path)
+    cached = _config_cache.get(key)
+    if cached is not None and cached["mtime"] == mtime:
+        return cached["cfg"]
     if not path.exists():
-        return _deep_merge(DEFAULT_CONFIG, {})
-    parsed = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return _deep_merge(DEFAULT_CONFIG, parsed)
+        cfg = _deep_merge(DEFAULT_CONFIG, {})
+    else:
+        parsed = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        cfg = _deep_merge(DEFAULT_CONFIG, parsed)
+    _config_cache[key] = {"mtime": mtime, "cfg": cfg}
+    return cfg
 
 
 def validate_config(cfg: dict[str, Any]) -> list[str]:

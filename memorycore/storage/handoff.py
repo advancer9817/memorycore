@@ -7,7 +7,7 @@ from typing import Any
 from memorycore.models import as_json, from_json, normalize_list, now
 from memorycore.storage.agents import send_agent_message
 from memorycore.storage.audit import log_audit_event
-from memorycore.storage.db import managed_conn
+from memorycore.storage.db import managed_conn, read_conn
 
 _HANDOFF_STATUSES = {"ack", "done", "failed"}
 
@@ -111,7 +111,7 @@ def _auto_route_agent(task: str, exclude: str = "") -> str:
     score, or empty string if none found.
     """
     task_lower = task.lower()
-    with managed_conn() as conn:
+    with read_conn() as conn:
         presence_rows = conn.execute(
             "SELECT agent_id FROM agent_presence WHERE status IN ('online', 'idle') AND agent_id != ?",
             (exclude,),
@@ -146,7 +146,7 @@ def agent_handoff_update(
 ) -> dict[str, Any]:
     if status not in _HANDOFF_STATUSES:
         return {"error": f"invalid handoff status '{status}', must be one of {sorted(_HANDOFF_STATUSES)}"}
-    with managed_conn() as conn:
+    with read_conn() as conn:
         row = conn.execute("SELECT * FROM agent_messages WHERE id=?", (message_id,)).fetchone()
     if row is None:
         return {"error": f"message not found: {message_id}"}
@@ -219,7 +219,7 @@ def agent_capability_search(
         params.append(namespace)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     params.append(cap)
-    with managed_conn() as conn:
+    with read_conn() as conn:
         rows = conn.execute(
             f"SELECT * FROM agent_capabilities {where} ORDER BY updated_at DESC LIMIT ?",
             params,

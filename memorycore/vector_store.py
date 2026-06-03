@@ -29,6 +29,43 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Module-level httpx connection pools — avoids TCP handshake per embed call
+_ollama_client: "Any" = None
+_ollama_client_key: tuple = ()
+_openai_embed_client: "Any" = None
+_openai_embed_client_key: tuple = ()
+
+
+def _get_ollama_client(config: "EmbedConfig") -> "Any":
+    global _ollama_client, _ollama_client_key
+    import httpx
+    key = (config.ollama_url, config.timeout)
+    if _ollama_client is None or _ollama_client_key != key:
+        if _ollama_client is not None:
+            try:
+                _ollama_client.close()
+            except Exception:
+                pass
+        _ollama_client = httpx.Client(timeout=config.timeout, limits=httpx.Limits(max_keepalive_connections=4, max_connections=8))
+        _ollama_client_key = key
+    return _ollama_client
+
+
+def _get_openai_embed_client(config: "EmbedConfig") -> "Any":
+    global _openai_embed_client, _openai_embed_client_key
+    import httpx
+    key = (config.api_url, config.timeout)
+    if _openai_embed_client is None or _openai_embed_client_key != key:
+        if _openai_embed_client is not None:
+            try:
+                _openai_embed_client.close()
+            except Exception:
+                pass
+        _openai_embed_client = httpx.Client(timeout=config.timeout, limits=httpx.Limits(max_keepalive_connections=4, max_connections=8))
+        _openai_embed_client_key = key
+    return _openai_embed_client
+
+
 # ---------------------------------------------------------------------------
 # Embedding config
 # ---------------------------------------------------------------------------
@@ -173,10 +210,10 @@ def _embed_ollama(text: str, config: EmbedConfig) -> list[float]:
     try:
         import httpx
         url = config.ollama_url.rstrip("/") + "/api/embed"
-        with httpx.Client(timeout=config.timeout) as client:
-            resp = client.post(url, json={"model": config.model, "input": text})
-            resp.raise_for_status()
-            data = resp.json()
+        client = _get_ollama_client(config)
+        resp = client.post(url, json={"model": config.model, "input": text})
+        resp.raise_for_status()
+        data = resp.json()
     except ImportError:
         import urllib.request
         url = config.ollama_url.rstrip("/") + "/api/embed"
@@ -207,10 +244,10 @@ def _embed_openai(text: str, config: EmbedConfig) -> list[float]:
         headers["Authorization"] = f"Bearer {config.api_key}"
     try:
         import httpx
-        with httpx.Client(timeout=config.timeout) as client:
-            resp = client.post(url, json=payload, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
+        client = _get_openai_embed_client(config)
+        resp = client.post(url, json=payload, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
     except ImportError:
         import urllib.request
         req = urllib.request.Request(
