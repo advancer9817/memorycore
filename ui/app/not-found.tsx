@@ -43,7 +43,7 @@ export default function NotFound({
       <div className="">
         <Button
           variant="outline"
-          className="bg-primary text-white hover:bg-primary/80"
+          className="bg-primary text-foreground hover:bg-primary/80"
         >
           <Link href="/">Go Home</Link>
         </Button>

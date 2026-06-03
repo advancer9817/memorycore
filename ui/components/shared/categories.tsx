@@ -176,7 +176,7 @@ const Categories = ({
                 className={
                   isPaused
                     ? pausedStyle
-                    : "text-muted-foreground bg-zinc-500/10 border-zinc-500/20 hover:bg-zinc-500/20"
+                    : "text-muted-foreground bg-muted border-border hover:bg-muted/80"
                 }
               >
                 +{remainingCount}

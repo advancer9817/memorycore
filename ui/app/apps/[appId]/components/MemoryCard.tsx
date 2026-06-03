@@ -144,9 +144,9 @@ export function MemoryCard({
               </Link>
             )}
             {app_name && (
-              <div className="flex items-center gap-1 bg-zinc-700 px-3 py-1 rounded-lg">
+              <div className="flex items-center gap-1 bg-muted px-3 py-1 rounded-lg">
                 <span className="text-sm text-muted-foreground">Created by:</span>
-                <div className="w-5 h-5 rounded-full bg-zinc-700 flex items-center justify-center overflow-hidden">
+                <div className="w-5 h-5 rounded-full bg-muted flex items-center justify-center overflow-hidden">
                   <Image
                     src={appConfig.iconImage}
                     alt={appLabel}

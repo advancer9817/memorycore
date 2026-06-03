@@ -228,19 +228,19 @@ export default function FilterComponent() {
             <TabsList className="grid grid-cols-3 bg-muted">
               <TabsTrigger
                 value="apps"
-                className="data-[state=active]:bg-zinc-700"
+                className="data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
               >
                 Apps
               </TabsTrigger>
               <TabsTrigger
                 value="categories"
-                className="data-[state=active]:bg-zinc-700"
+                className="data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
               >
                 Categories
               </TabsTrigger>
               <TabsTrigger
                 value="archived"
-                className="data-[state=active]:bg-zinc-700"
+                className="data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
               >
                 Archived
               </TabsTrigger>

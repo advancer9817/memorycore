@@ -113,7 +113,7 @@ export function MemoryTable() {
           <TableRow className="bg-muted hover:bg-muted">
             <TableHead className="w-[50px] pl-4">
               <Checkbox
-                className="data-[state=checked]:border-primary border-zinc-500/50"
+                className="data-[state=checked]:border-primary border-border/50"
                 checked={isAllSelected}
                 data-state={
                   isPartiallySelected
@@ -149,9 +149,9 @@ export function MemoryTable() {
                 Created On
               </div>
             </TableHead>
-            <TableHead className="text-right border-border flex justify-center">
-              <div className="flex items-center justify-end">
-                <MoreHorizontal className="h-4 w-4 mr-2" />
+            <TableHead className="text-right border-border">
+              <div className="flex items-center justify-end pr-2">
+                <MoreHorizontal className="h-4 w-4" />
               </div>
             </TableHead>
           </TableRow>
@@ -168,7 +168,7 @@ export function MemoryTable() {
             >
               <TableCell className="pl-4">
                 <Checkbox
-                  className="data-[state=checked]:border-primary border-zinc-500/50"
+                  className="data-[state=checked]:border-primary border-border/50"
                   checked={selectedMemoryIds.includes(memory.id)}
                   onCheckedChange={(checked) =>
                     handleSelectMemory(memory.id, checked as boolean)
@@ -229,7 +229,7 @@ export function MemoryTable() {
               <TableCell className="w-[140px] text-center">
                 {formatDate(memory.created_at)}
               </TableCell>
-              <TableCell className="text-right flex justify-center">
+              <TableCell className="text-right">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="icon" className="h-8 w-8">
