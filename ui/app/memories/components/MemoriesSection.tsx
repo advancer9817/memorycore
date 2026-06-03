@@ -66,9 +66,9 @@ export function MemoriesSection() {
       <div className="w-full bg-transparent">
         <MemoryTableSkeleton />
         <div className="flex items-center justify-between mt-4">
-          <div className="h-8 w-32 bg-zinc-800 rounded animate-pulse" />
-          <div className="h-8 w-48 bg-zinc-800 rounded animate-pulse" />
-          <div className="h-8 w-32 bg-zinc-800 rounded animate-pulse" />
+          <div className="h-8 w-32 bg-muted rounded animate-pulse" />
+          <div className="h-8 w-48 bg-muted rounded animate-pulse" />
+          <div className="h-8 w-32 bg-muted rounded animate-pulse" />
         </div>
       </div>
     );
@@ -85,7 +85,7 @@ export function MemoriesSection() {
                 pageSize={itemsPerPage}
                 onPageSizeChange={handlePageSizeChange}
               />
-              <div className="text-sm text-zinc-500 mr-2">
+              <div className="text-sm text-muted-foreground mr-2">
                 Showing {(currentPage - 1) * itemsPerPage + 1} to{" "}
                 {Math.min(currentPage * itemsPerPage, totalItems)} of{" "}
                 {totalItems} memories
@@ -99,7 +99,7 @@ export function MemoriesSection() {
           </>
         ) : (
           <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="rounded-full bg-zinc-800 p-3 mb-4">
+            <div className="rounded-full bg-muted p-3 mb-4">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 width="24"
@@ -110,7 +110,7 @@ export function MemoriesSection() {
                 strokeWidth="2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                className="h-6 w-6 text-zinc-400"
+                className="h-6 w-6 text-muted-foreground"
               >
                 <path d="M21 9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"></path>
                 <path d="M16 2v6h6"></path>
@@ -119,7 +119,7 @@ export function MemoriesSection() {
               </svg>
             </div>
             <h3 className="text-lg font-medium">No memories found</h3>
-            <p className="text-zinc-400 mt-1 mb-4">
+            <p className="text-muted-foreground mt-1 mb-4">
               {selectedCategory !== "all" || selectedClient !== "all"
                 ? "Try adjusting your filters"
                 : "Create your first memory to see it here"}

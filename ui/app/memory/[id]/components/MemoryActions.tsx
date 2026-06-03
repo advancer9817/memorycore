@@ -63,15 +63,15 @@ export function MemoryActions({
             disabled={isLoading}
             variant="outline"
             size="sm"
-            className="shadow-md bg-zinc-900 border border-zinc-700/50 hover:bg-zinc-950 text-zinc-400"
+            className="shadow-md bg-card border border-border/50 hover:bg-background text-muted-foreground"
           >
             <span className="font-semibold">{getStateLabel()}</span>
             <ChevronDown className="h-3 w-3 mt-1 -ml-1" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-40 bg-zinc-900 border-zinc-800 text-zinc-100">
+        <DropdownMenuContent className="w-40 bg-card border-border text-foreground">
           <DropdownMenuLabel>Change State</DropdownMenuLabel>
-          <DropdownMenuSeparator className="bg-zinc-800" />
+          <DropdownMenuSeparator className="bg-muted" />
           <DropdownMenuItem
             onClick={() => handleStateChange("active")}
             className="cursor-pointer flex items-center"
@@ -104,7 +104,7 @@ export function MemoryActions({
         variant="outline"
         size="sm"
         onClick={handleEdit}
-        className="shadow-md bg-zinc-900 border border-zinc-700/50 hover:bg-zinc-950 text-zinc-400"
+        className="shadow-md bg-card border border-border/50 hover:bg-background text-muted-foreground"
       >
         <Pencil className="h-3 w-3 -mr-1" />
         <span className="font-semibold">Edit</span>

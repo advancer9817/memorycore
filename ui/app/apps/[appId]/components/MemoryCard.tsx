@@ -62,11 +62,11 @@ export function MemoryCard({
     constants[app_name as keyof typeof constants]?.name || app_name || appConfig.name;
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900 overflow-hidden group">
+    <div className="rounded-lg border border-border bg-card overflow-hidden group">
       <div className="p-4">
         <div className="border-l-2 border-primary pl-4 mb-4">
           <p
-            className={`${state !== "active" ? "text-zinc-400" : "text-white"}`}
+            className={`${state !== "active" ? "text-muted-foreground" : "text-foreground"}`}
           >
             {content}
           </p>
@@ -74,8 +74,8 @@ export function MemoryCard({
 
         {metadata && Object.keys(metadata).length > 0 && (
           <div className="mb-4">
-            <p className="text-xs text-zinc-500 uppercase mb-2">METADATA</p>
-            <div className="bg-zinc-800 rounded p-3 text-zinc-400">
+            <p className="text-xs text-muted-foreground uppercase mb-2">METADATA</p>
+            <div className="bg-muted rounded p-3 text-muted-foreground">
               <pre className="whitespace-pre-wrap">
                 {JSON.stringify(metadata, null, 2)}
               </pre>
@@ -92,7 +92,7 @@ export function MemoryCard({
 
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-2">
-            <span className="text-zinc-400 text-sm">
+            <span className="text-muted-foreground text-sm">
               {access_count ? (
                 <span className="relative top-1">
                   Accessed {access_count} times
@@ -116,7 +116,7 @@ export function MemoryCard({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 text-zinc-500 hover:text-primary"
+                    className="h-8 w-8 text-muted-foreground hover:text-primary"
                     onClick={() => onEdit(id)}
                   >
                     <Edit className="h-4 w-4" />
@@ -126,7 +126,7 @@ export function MemoryCard({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 text-zinc-500 hover:text-red-400"
+                    className="h-8 w-8 text-muted-foreground hover:text-red-400"
                     onClick={() => setConfirmDelete(true)}
                   >
                     <Trash2 className="h-4 w-4" />
@@ -138,14 +138,14 @@ export function MemoryCard({
             {!app_name && (
               <Link
                 href={`/memory/${id}`}
-                className="hover:cursor-pointer bg-zinc-800 hover:bg-zinc-700 flex items-center px-3 py-1 text-sm rounded-lg text-white p-0 hover:text-white"
+                className="hover:cursor-pointer bg-muted hover:bg-muted flex items-center px-3 py-1 text-sm rounded-lg text-foreground p-0 hover:text-foreground"
               >
                 View Details
               </Link>
             )}
             {app_name && (
               <div className="flex items-center gap-1 bg-zinc-700 px-3 py-1 rounded-lg">
-                <span className="text-sm text-zinc-400">Created by:</span>
+                <span className="text-sm text-muted-foreground">Created by:</span>
                 <div className="w-5 h-5 rounded-full bg-zinc-700 flex items-center justify-center overflow-hidden">
                   <Image
                     src={appConfig.iconImage}
@@ -154,7 +154,7 @@ export function MemoryCard({
                     height={24}
                   />
                 </div>
-                <p className="text-sm text-zinc-100 font-semibold">
+                <p className="text-sm text-foreground font-semibold">
                   {appLabel}
                 </p>
               </div>
@@ -164,19 +164,19 @@ export function MemoryCard({
       </div>
 
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <AlertDialogContent className="bg-zinc-900 border-zinc-800">
+        <AlertDialogContent className="bg-card border-border">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-white">Delete this memory?</AlertDialogTitle>
-            <AlertDialogDescription className="text-zinc-400">
+            <AlertDialogTitle className="text-foreground">Delete this memory?</AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground">
               This will archive the memory. This action cannot be easily undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700">
+            <AlertDialogCancel className="bg-muted border-border text-foreground/80 hover:bg-muted">
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
-              className="bg-red-600 hover:bg-red-700 text-white"
+              className="bg-red-600 hover:bg-red-700 text-foreground"
               onClick={() => {
                 onDelete?.(id);
                 setConfirmDelete(false);

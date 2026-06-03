@@ -36,7 +36,7 @@ function statusClass(status?: string) {
   if (status === "online") return "border-emerald-700 bg-emerald-500/10 text-emerald-300";
   if (status === "idle") return "border-yellow-700 bg-yellow-500/10 text-yellow-300";
   if (status === "busy") return "border-sky-700 bg-sky-500/10 text-sky-300";
-  return "border-zinc-700 bg-zinc-800 text-zinc-300";
+  return "border-border bg-muted text-foreground/80";
 }
 
 export function AppGrid() {
@@ -84,7 +84,7 @@ export function AppGrid() {
 
   if (apps.length === 0) {
     return (
-      <div className="text-center text-zinc-500 py-8">
+      <div className="text-center text-muted-foreground py-8">
         No agents or clients found matching your filters
       </div>
     );
@@ -94,31 +94,31 @@ export function AppGrid() {
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {summary.map((item) => (
-          <Card key={item.label} className="bg-zinc-900 text-white border-zinc-800">
+          <Card key={item.label} className="bg-card text-foreground border-border">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-zinc-400">{item.label}</CardTitle>
-              <item.icon className="h-4 w-4 text-zinc-500" />
+              <CardTitle className="text-sm font-medium text-muted-foreground">{item.label}</CardTitle>
+              <item.icon className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-semibold text-white">{item.value}</div>
+              <div className="text-2xl font-semibold text-foreground">{item.value}</div>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      <Card className="bg-zinc-900 text-white border-zinc-800">
-        <CardHeader className="border-b border-zinc-800 px-4 py-3">
+      <Card className="bg-card text-foreground border-border">
+        <CardHeader className="border-b border-border px-4 py-3">
           <CardTitle className="text-base font-semibold">Agent Activity</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
-              <TableRow className="border-zinc-800 hover:bg-transparent">
-                <TableHead className="text-zinc-400">Agent / Client</TableHead>
-                <TableHead className="text-zinc-400">Status</TableHead>
-                <TableHead className="text-right text-zinc-400">Memories</TableHead>
-                <TableHead className="text-zinc-400">Last Activity</TableHead>
-                <TableHead className="text-right text-zinc-400">Action</TableHead>
+              <TableRow className="border-border hover:bg-transparent">
+                <TableHead className="text-muted-foreground">Agent / Client</TableHead>
+                <TableHead className="text-muted-foreground">Status</TableHead>
+                <TableHead className="text-right text-muted-foreground">Memories</TableHead>
+                <TableHead className="text-muted-foreground">Last Activity</TableHead>
+                <TableHead className="text-right text-muted-foreground">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -128,17 +128,17 @@ export function AppGrid() {
                 return (
                   <TableRow
                     key={app.id}
-                    className="border-zinc-800 hover:bg-zinc-800/60 cursor-pointer"
+                    className="border-border hover:bg-muted/60 cursor-pointer"
                     onClick={() => router.push(`/apps/${app.id}`)}
                   >
                     <TableCell>
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center overflow-hidden">
+                        <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center overflow-hidden">
                           <Image src={appConfig.iconImage} alt={appLabel} width={32} height={32} />
                         </div>
                         <div>
-                          <div className="font-medium text-zinc-100">{appLabel}</div>
-                          <div className="text-xs text-zinc-500">{app.id}</div>
+                          <div className="font-medium text-foreground">{appLabel}</div>
+                          <div className="text-xs text-muted-foreground">{app.id}</div>
                         </div>
                       </div>
                     </TableCell>
@@ -150,7 +150,7 @@ export function AppGrid() {
                     <TableCell className="text-right font-medium">
                       {app.total_memories_created.toLocaleString()}
                     </TableCell>
-                    <TableCell className="text-zinc-400">
+                    <TableCell className="text-muted-foreground">
                       {formatActivity(app.last_activity_at || app.last_seen_at)}
                     </TableCell>
                     <TableCell className="text-right">

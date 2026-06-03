@@ -19,7 +19,7 @@ export function PageSizeSelector({
 
   return (
     <div className="flex items-center gap-2">
-      <span className="text-sm text-zinc-500">Show</span>
+      <span className="text-sm text-muted-foreground">Show</span>
       <Select
         value={pageSize.toString()}
         onValueChange={(value) => onPageSizeChange(Number(value))}
@@ -35,7 +35,7 @@ export function PageSizeSelector({
           ))}
         </SelectContent>
       </Select>
-      <span className="text-sm text-zinc-500">items</span>
+      <span className="text-sm text-muted-foreground">items</span>
     </div>
   );
 }

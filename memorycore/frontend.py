@@ -307,6 +307,8 @@ async def _dispatch_api(request: Request, parts: list[str], query: dict[str, lis
     if parts == ["entities"] and method == "GET":
         return entity_search(_str_q(query, "query", _str_q(query, "q", "")) or "", _int_q(query, "limit", 20))
 
+    if parts == ["graph"] and method == "GET":
+        return _graph_payload()
     raise LookupError(f"route not found: /api/{'/'.join(parts)}")
 
 
@@ -779,6 +781,39 @@ def _check_origin(request: Request) -> Response | None:
     if origin_host and server_host and origin_host != server_host:
         return _json_error("bad_origin", "mutating requests must use same origin", 403)
     return None
+
+
+def _graph_payload(limit: int = 500) -> dict[str, Any]:
+    from memorycore.storage.db import managed_conn
+
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+
+    with managed_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, title, type, status FROM memories WHERE status IN ('active','candidate') LIMIT ?",
+            (limit,),
+        ).fetchall()
+        for row in rows:
+            nodes.append({
+                "id": row[0],
+                "title": (row[1] or "")[:80],
+                "type": row[2] or "unknown",
+                "status": row[3] or "active",
+            })
+
+        link_rows = conn.execute(
+            "SELECT source_id, target_id, relation_type, weight FROM memory_links LIMIT 2000"
+        ).fetchall()
+        for lrow in link_rows:
+            edges.append({
+                "source": lrow[0],
+                "target": lrow[1],
+                "relation_type": lrow[2] or "related_to",
+                "weight": lrow[3] if lrow[3] is not None else 1.0,
+            })
+
+    return {"nodes": nodes, "edges": edges}
 
 
 def _json_ok(data: Any) -> JSONResponse:

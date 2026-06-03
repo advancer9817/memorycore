@@ -19,12 +19,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="h-screen font-sans antialiased flex flex-col bg-zinc-950">
+      <body className="h-screen font-sans antialiased flex flex-col bg-background">
         <Providers>
           <ThemeProvider
             attribute="class"
-            defaultTheme="dark"
-            enableSystem
+            defaultTheme="light"
+            enableSystem={false}
             disableTransitionOnChange
           >
             <Navbar />

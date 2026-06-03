@@ -33,30 +33,30 @@ export function RelatedMemories({ memoryId }: RelatedMemoriesProps) {
 
   if (isLoading) {
     return (
-      <div className="w-full max-w-2xl mx-auto rounded-lg overflow-hidden bg-zinc-900 text-white p-6">
-        <p className="text-center text-zinc-500">Loading related memories...</p>
+      <div className="w-full max-w-2xl mx-auto rounded-lg overflow-hidden bg-card text-foreground p-6">
+        <p className="text-center text-muted-foreground">Loading related memories...</p>
       </div>
     );
   }
 
   if (!relatedMemories.length) {
     return (
-      <div className="w-full max-w-2xl mx-auto rounded-lg overflow-hidden bg-zinc-900 text-white p-6">
-        <p className="text-center text-zinc-500">No related memories found</p>
+      <div className="w-full max-w-2xl mx-auto rounded-lg overflow-hidden bg-card text-foreground p-6">
+        <p className="text-center text-muted-foreground">No related memories found</p>
       </div>
     );
   }
 
   return (
-    <div className="w-full max-w-2xl mx-auto rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800 text-white">
-      <div className="px-6 py-4 flex justify-between items-center bg-zinc-800 border-b border-zinc-800">
+    <div className="w-full max-w-2xl mx-auto rounded-lg overflow-hidden bg-card border border-border text-foreground">
+      <div className="px-6 py-4 flex justify-between items-center bg-muted border-b border-border">
         <h2 className="font-semibold">Related Memories</h2>
       </div>
       <div className="space-y-6 p-6">
         {relatedMemories.map((memory: Memory) => (
           <div
             key={memory.id}
-            className="border-l-2 border-zinc-800 pl-6 py-1 hover:bg-zinc-700/10 transition-colors cursor-pointer"
+            className="border-l-2 border-border pl-6 py-1 hover:bg-muted/10 transition-colors cursor-pointer"
           >
             <Link href={`/memory/${memory.id}`}>
               <h3 className="font-medium mb-3">{memory.memory}</h3>
@@ -76,7 +76,7 @@ export function RelatedMemories({ memoryId }: RelatedMemoriesProps) {
                   )}
                 </div>
                 <div className="flex items-center gap-4">
-                  <div className="text-zinc-400 text-sm">
+                  <div className="text-muted-foreground text-sm">
                     {formatDate(memory.created_at)}
                   </div>
                 </div>

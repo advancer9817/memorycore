@@ -145,7 +145,7 @@ const Categories = ({
   const baseBadgeStyle =
     "backdrop-blur-sm transition-colors hover:bg-opacity-20";
   const pausedStyle =
-    "text-zinc-500 bg-zinc-800/40 border-zinc-700/40 hover:bg-zinc-800/60";
+    "text-muted-foreground bg-muted/40 border-border/40 hover:bg-muted/60";
 
   if (concat) {
     const remainingCount = categories.length - 1;
@@ -176,14 +176,14 @@ const Categories = ({
                 className={
                   isPaused
                     ? pausedStyle
-                    : "text-zinc-400 bg-zinc-500/10 border-zinc-500/20 hover:bg-zinc-500/20"
+                    : "text-muted-foreground bg-zinc-500/10 border-zinc-500/20 hover:bg-zinc-500/20"
                 }
               >
                 +{remainingCount}
               </Badge>
             </PopoverTrigger>
             <PopoverContent
-              className="w-auto p-2 border bg-[#27272A] border-zinc-700/60 rounded-2xl"
+              className="w-auto p-2 border bg-[#27272A] border-border/60 rounded-2xl"
               onMouseEnter={() => setIsOpen(true)}
               onMouseLeave={() => setIsOpen(false)}
             >

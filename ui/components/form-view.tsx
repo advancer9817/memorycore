@@ -280,13 +280,13 @@ export function FormView({ settings, onChange }: FormViewProps) {
         </CardHeader>
         <CardContent className="space-y-6">
           {/* Export Section */}
-          <div className="p-4 border border-zinc-800 rounded-lg space-y-2">
+          <div className="p-4 border border-border rounded-lg space-y-2">
             <div className="text-sm font-medium">Export</div>
             <p className="text-xs text-muted-foreground">Download a ZIP containing your memories.</p>
             <div>
               <Button
                 type="button"
-                className="bg-zinc-800 hover:bg-zinc-700"
+                className="bg-muted hover:bg-muted"
                 onClick={async () => {
                   try {
                     const res = await fetch(`${API_URL}/api/v1/backup/export`, {
@@ -316,7 +316,7 @@ export function FormView({ settings, onChange }: FormViewProps) {
           </div>
 
           {/* Import Section */}
-          <div className="p-4 border border-zinc-800 rounded-lg space-y-2">
+          <div className="p-4 border border-border rounded-lg space-y-2">
             <div className="text-sm font-medium">Import</div>
             <p className="text-xs text-muted-foreground">Upload a ZIP archive to import memories. Default settings will be used.</p>
             <div className="flex items-center gap-3 flex-wrap">
@@ -333,7 +333,7 @@ export function FormView({ settings, onChange }: FormViewProps) {
               />
               <Button
                 type="button"
-                className="bg-zinc-800 hover:bg-zinc-700"
+                className="bg-muted hover:bg-muted"
                 onClick={() => {
                   if (fileInputRef.current) fileInputRef.current.click()
                 }}

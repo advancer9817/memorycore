@@ -59,6 +59,10 @@ export function Navbar() {
       match: /^\/settings$/,
       getFetchers: () => [configApi.fetchConfig],
     },
+    {
+      match: /^\/graph$/,
+      getFetchers: () => [],
+    },
   ];
 
   const getFetchersForPath = (path: string) => {
@@ -87,22 +91,22 @@ export function Navbar() {
     return pathname.startsWith(href.substring(0, 5));
   };
 
-  const activeClass = "bg-zinc-800 text-white border-zinc-600";
-  const inactiveClass = "text-zinc-300";
+  const activeClass = "text-primary font-medium underline underline-offset-4";
+  const inactiveClass = "text-foreground/70 hover:text-foreground";
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-zinc-800 bg-zinc-950/95 backdrop-blur supports-[backdrop-filter]:bg-zinc-950/60">
+    <header className="sticky top-0 z-50 w-full border-b border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
       <div className="container flex h-14 items-center justify-between">
         <Link href="/" className="flex items-center gap-2">
           <Image src="/logo.svg" alt="MemoryCore" width={26} height={26} />
-          <span className="text-xl font-medium">MemoryCore</span>
+          <span className="text-xl font-medium text-foreground">MemoryCore</span>
         </Link>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           <Link href="/">
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
-              className={`flex items-center gap-2 border-none ${
+              className={`flex items-center gap-2 ${
                 isActive("/") ? activeClass : inactiveClass
               }`}
             >
@@ -112,9 +116,9 @@ export function Navbar() {
           </Link>
           <Link href="/memories">
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
-              className={`flex items-center gap-2 border-none ${
+              className={`flex items-center gap-2 ${
                 isActive("/memories") ? activeClass : inactiveClass
               }`}
             >
@@ -124,9 +128,9 @@ export function Navbar() {
           </Link>
           <Link href="/apps">
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
-              className={`flex items-center gap-2 border-none ${
+              className={`flex items-center gap-2 ${
                 isActive("/apps") ? activeClass : inactiveClass
               }`}
             >
@@ -134,11 +138,22 @@ export function Navbar() {
               Apps
             </Button>
           </Link>
+          <Link href="/graph">
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`flex items-center gap-2 ${
+                isActive("/graph") ? activeClass : inactiveClass
+              }`}
+            >
+              Graph
+            </Button>
+          </Link>
           <Link href="/settings">
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
-              className={`flex items-center gap-2 border-none ${
+              className={`flex items-center gap-2 ${
                 isActive("/settings") ? activeClass : inactiveClass
               }`}
             >
@@ -152,7 +167,7 @@ export function Navbar() {
             onClick={handleRefresh}
             variant="outline"
             size="sm"
-            className="border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800"
+            className="border-border hover:bg-muted"
           >
             <FiRefreshCcw className="transition-transform duration-300 group-hover:rotate-180" />
             Refresh

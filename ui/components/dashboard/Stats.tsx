@@ -20,19 +20,19 @@ const Stats = () => {
   }, []);
 
   return (
-    <div className="bg-zinc-900 rounded-lg border border-zinc-800">
-      <div className="bg-zinc-800 border-b border-zinc-800 rounded-t-lg p-4">
-        <div className="text-white text-xl font-semibold">Memories Stats</div>
+    <div className="bg-card rounded-lg border border-border">
+      <div className="bg-muted border-b border-border rounded-t-lg p-4">
+        <div className="text-foreground text-xl font-semibold">Memories Stats</div>
       </div>
       <div className="space-y-3 p-4">
         <div>
-          <p className="text-zinc-400">Total Memories</p>
-          <h3 className="text-lg font-bold text-white">
+          <p className="text-muted-foreground">Total Memories</p>
+          <h3 className="text-lg font-bold text-foreground">
             {totalMemories} Memories
           </h3>
         </div>
         <div>
-          <p className="text-zinc-400">Total Apps Connected</p>
+          <p className="text-muted-foreground">Total Apps Connected</p>
           <div className="flex flex-col items-start gap-1 mt-2">
             <div className="flex -space-x-2">
               {apps.map((app) => (
@@ -58,7 +58,7 @@ const Stats = () => {
                 </div>
               ))}
             </div>
-            <h3 className="text-lg font-bold text-white">{totalApps} Apps</h3>
+            <h3 className="text-lg font-bold text-foreground">{totalApps} Apps</h3>
           </div>
         </div>
       </div>

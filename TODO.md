@@ -71,3 +71,40 @@
 - [x] `deploy.sh` 安装默认 Python extras：部署脚本现在在 `requirements.txt` 后继续执行 `pip install -e ".[all]"`，确保 Qdrant 与 extraction 随一键部署补齐；`sentence-transformers` fallback 作为显式重依赖 extra 安装。
 - [x] `deploy.sh` 默认自动补齐运行时依赖：一键部署默认开启 host 依赖 bootstrap、Docker/Qdrant service、Ollama 安装/启动与 embedding 模型拉取，并提供 `--no-bootstrap-deps`、`--no-ollama`、`--no-qdrant`、`--no-pull-*` 作为显式降级开关。
 - [x] 修复 `.[all]` 安装过重/卡住问题：`sentence-transformers` 作为默认 all extra 会触发大包下载，在当前环境长时间无进展；现已将 `.[all]` 收敛为 vector + extraction，新增 `.[full]` 并保留 `.[embedding]` 作为显式本地 fallback 安装路径。
+
+## UI 风格重构 — Claude 设计语言
+
+> 背景：当前 UI 沿用 OpenMemory fork 的紫色主题（`--primary: 260 94% 59%` 即亮紫），整体是 zinc-900/950 暗底 + 紫色高亮。需要改为 Claude 风格：暖米色/沙色为主调，橙棕色作为 accent，圆润卡片，柔和排版，去掉硬科技感。
+> Claude 设计语言参考：背景 `#F5F0E8`（暖纸色），卡片 `#FFFFFF`，accent `#DA7756`（Claude 橙），文字 `#2D2B28`（暖黑），辅助文字 `#8B8680`，border `#E8E0D4`，圆角 `12-16px`，字体 Söhne/Inter。
+
+- [x] 替换 CSS 变量色板：`globals.css` 中 `--primary` 从紫色改为 Claude 橙 `#DA7756`，`--background` 改为暖米色，`--card` 改为白色，`--border`/`--muted` 改为暖灰
+- [x] Navbar 重构：去掉 zinc-950 暗底，改为白底 + 底部细线分隔；logo 改用暖色调；导航按钮改为文字链接 + hover 下划线
+- [x] Dashboard 页（`app/page.tsx` + `Install.tsx`）：Memory Operations 卡片改为白底圆角卡，统计数字用 Claude 橙色高亮；Curator 区域简化
+- [x] Memories 列表页（`app/memories/`）：表格改为卡片式列表，搜索栏用圆角输入框 + 暖灰边框；分类 badge 改为柔和色调的 pill
+- [x] Apps 页（`app/apps/`）：Agent Activity 表格改为白底卡片列表；status badge 保留语义色但柔化
+- [x] Memory 详情页（`app/memory/[id]/`）：内容区域用左竖线引用样式，metadata 区域收起折叠；RelatedMemories 改为卡片网格
+- [x] Settings 页：表单控件对齐 Claude 风格——圆角输入框、暖色 toggle/switch
+- [x] 全局字体：优先 Inter，回退 system-ui；去掉 monospace 硬编码
+
+## 记忆图谱可视化
+
+> 背景：后端有 `memory_links`（14 条：related_to/supports/contradicts）和 `memory_entities`（78 条），但 UI 没有图形化展示。需要一个力导向图页面，展示记忆之间的关系网络和实体聚类。
+
+- [x] 新增 `/graph` 页面，Navbar 加入入口
+- [x] 后端新增 `/api/graph` 端点：返回 `{nodes: [{id, title, type, status}], edges: [{source, target, relation_type, weight}]}` 格式，合并 memories + links 数据
+- [x] 前端用 force-directed graph 库（d3-force 或 react-force-graph）渲染节点和连线
+- [x] 节点按 memory type 着色，边按 relation_type 区分样式（实线/虚线/颜色）
+- [x] 支持点击节点跳转到 `/memory/{id}` 详情页
+- [x] 支持缩放、拖拽、搜索高亮
+
+## Atomization Backfill — 数据质量
+
+> 背景：atomization 代码已完成（`storage/atomization.py`，252 行），`memory_atomize_report` MCP 工具已注册，但从未对历史数据运行过。当前 1044 条记忆中 0 条 atomic facts，14 条 links，78 个 entities。长记忆中的局部事实被整段 embedding 稀释，召回质量受限。
+
+- [x] 对 active 记忆执行 dry-run atomization：`memory_atomize_report(dry_run=true, limit=500)`，评估可拆分的 parent 数量和预期 child facts 数量
+- [x] 检查 atomization 质量：抽样 5-10 条长记忆的拆分结果，确认 child facts 自包含、无信息丢失、hash 去重有效
+- [x] 执行 apply：`memory_atomize_report(dry_run=false, limit=500)` 对历史长记忆实际拆分，生成 atomic facts + parent/child links
+- [x] 验证 child facts 写入 Qdrant 向量索引：`memory_vector_audit(dry_run=true)` 检查 SQLite/Qdrant 一致性
+- [x] 修复 `memory_entities` 表在生产库缺失问题：当前只有旧路径 `~/.agent-memory/local-memory-mcp/memory.sqlite3` 有该表的空壳，生产库 `project/memorycore/memory.sqlite3` 虽有表但仅 78 条，需检查 entity 提取是否在写入路径中正常触发
+- [x] 对 active 记忆重新运行 entity 提取，填充 entity/alias 索引
+- [x] 运行 `memory_context` 对比测试：atomization 前后，查询 `local_memory`/`lmmcp`/端口/路径 等关键词的召回命中率变化
