@@ -1,11 +1,12 @@
 """Audit event logging and retrieval."""
 from __future__ import annotations
 
+import threading
 import uuid
 from typing import Any
 
 from memorycore.models import as_json, now
-from memorycore.storage.db import _managed_query, managed_conn
+from memorycore.storage.db import _managed_query, managed_conn, read_conn
 
 
 def log_audit_event(
@@ -13,16 +14,23 @@ def log_audit_event(
     memory_id: str | None = None,
     agent: str = "unknown",
     detail: dict[str, Any] | None = None,
-) -> None:
-    """Write one row to audit_events. Fire-and-forget; never raises."""
-    try:
-        with managed_conn() as conn:
-            conn.execute(
-                "INSERT INTO audit_events (id, event_type, memory_id, agent, detail_json, created_at) VALUES (?,?,?,?,?,?)",
-                (str(uuid.uuid4()), event_type, memory_id, agent, as_json(detail or {}), now()),
-            )
-    except Exception:
-        pass  # audit must never block the main write path
+) -> threading.Thread:
+    """Write one row to audit_events. Fire-and-forget; never raises. Returns the thread."""
+    params = (str(uuid.uuid4()), event_type, memory_id, agent, as_json(detail or {}), now())
+
+    def _write():
+        try:
+            with managed_conn() as conn:
+                conn.execute(
+                    "INSERT INTO audit_events (id, event_type, memory_id, agent, detail_json, created_at) VALUES (?,?,?,?,?,?)",
+                    params,
+                )
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_write, daemon=True)
+    t.start()
+    return t
 
 
 def get_audit_log(
@@ -42,8 +50,9 @@ def get_audit_log(
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     limit = max(1, min(int(limit), 500))
     params.append(limit)
-    rows = _managed_query(
-        f"SELECT * FROM audit_events {where} ORDER BY created_at DESC LIMIT ?",
-        params,
-    )
+    with read_conn() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM audit_events {where} ORDER BY created_at DESC LIMIT ?",
+            params,
+        ).fetchall()
     return [dict(r) for r in rows]

@@ -112,27 +112,36 @@ def _record_context_quality_event(
     # Throttle: only write when records were actually used (hit_rate > 0)
     if quality.get("used_count", 0) == 0:
         return
-    with managed_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO context_quality_events (
-              id, task, task_type, agent, project_path, scope, total_candidates,
-              used_count, filtered_count, hit_rate, filter_rate, ineffective_rate,
-              type_weights_json, created_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """,
-            (
-                str(uuid.uuid4()), task, task_type, agent, project_path or "", scope or "global",
-                quality["total_candidates"], quality["used_count"], quality["filtered_count"],
-                quality["hit_rate"], quality["filter_rate"], quality["ineffective_rate"],
-                as_json(type_weights), now(),
-            ),
-        )
+    import threading
+    params = (
+        str(uuid.uuid4()), task, task_type, agent, project_path or "", scope or "global",
+        quality["total_candidates"], quality["used_count"], quality["filtered_count"],
+        quality["hit_rate"], quality["filter_rate"], quality["ineffective_rate"],
+        as_json(type_weights), now(),
+    )
+
+    def _write():
+        try:
+            with managed_conn() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO context_quality_events (
+                      id, task, task_type, agent, project_path, scope, total_candidates,
+                      used_count, filtered_count, hit_rate, filter_rate, ineffective_rate,
+                      type_weights_json, created_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    params,
+                )
+        except Exception:
+            pass
+
+    threading.Thread(target=_write, daemon=True).start()
 
 
 def get_context_quality_stats(limit: int = 500) -> dict[str, Any]:
     cap = max(1, min(int(limit), 5000))
-    with managed_conn() as conn:
+    with read_conn() as conn:
         rows = conn.execute(
             "SELECT * FROM context_quality_events ORDER BY created_at DESC LIMIT ?",
             (cap,),
