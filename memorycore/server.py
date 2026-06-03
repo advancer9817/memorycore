@@ -309,45 +309,53 @@ def memory_ingest(
     Returns:
         {"added": int, "updated": int, "skipped": int, "errors": int, "elapsed_s": float}
     """
-    import concurrent.futures
+    import threading
     from memorycore.dedup import ingest
 
-    def _run():
-        return ingest(
-            messages,
-            user_id=user_id,
-            agent_id=agent_id,
-            cfg=load_config(),
-            _add_memory_fn=add_memory_record,
-            _update_memory_fn=update_memory_content,
-        )
+    result_box: list = []
+    exc_box: list = []
 
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(_run)
-            result = future.result(timeout=int(timeout_s))
-        return {
-            "added": result.added,
-            "updated": result.updated,
-            "skipped": result.skipped,
-            "errors": result.errors,
-            "elapsed_s": result.elapsed_s,
-            "extraction_elapsed_s": result.extraction_elapsed_s,
-            "degraded": False,
-        }
-    except concurrent.futures.TimeoutError:
+    def _run():
+        try:
+            result_box.append(ingest(
+                messages,
+                user_id=user_id,
+                agent_id=agent_id,
+                cfg=load_config(),
+                _add_memory_fn=add_memory_record,
+                _update_memory_fn=update_memory_content,
+            ))
+        except Exception as exc:
+            exc_box.append(exc)
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join(timeout=float(timeout_s))
+
+    if t.is_alive():
         return {
             "added": 0, "updated": 0, "skipped": len(messages), "errors": 1,
             "elapsed_s": float(timeout_s), "extraction_elapsed_s": 0.0,
             "degraded": True, "reason": f"ingest timed out after {timeout_s}s",
         }
-    except Exception as exc:
+    if exc_box:
+        exc = exc_box[0]
         return {
             "added": 0, "updated": 0, "skipped": len(messages), "errors": 1,
             "elapsed_s": 0.0, "extraction_elapsed_s": 0.0,
             "degraded": True,
             "reason": f"ingest pipeline unavailable: {type(exc).__name__}: {exc}",
         }
+    result = result_box[0]
+    return {
+        "added": result.added,
+        "updated": result.updated,
+        "skipped": result.skipped,
+        "errors": result.errors,
+        "elapsed_s": result.elapsed_s,
+        "extraction_elapsed_s": result.extraction_elapsed_s,
+        "degraded": False,
+    }
 
 
 @mcp.tool()

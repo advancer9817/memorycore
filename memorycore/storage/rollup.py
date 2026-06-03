@@ -10,7 +10,7 @@ from memorycore.extraction import extraction_config_from_dict, _call_llm
 from memorycore.models import finite_float, load_config, local_now, normalize_list, now, parse_ts, validate_type
 from memorycore.storage.audit import log_audit_event
 from memorycore.storage.crud import add_memory_record, update_status
-from memorycore.storage.db import _managed_query
+from memorycore.storage.db import _managed_query, read_conn
 
 logger = logging.getLogger(__name__)
 
