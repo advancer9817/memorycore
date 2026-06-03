@@ -66,7 +66,14 @@ export default function GraphPage() {
   useEffect(() => {
     fetch(`${getApiBaseUrl()}/api/graph`)
       .then((r) => r.json())
-      .then((p) => setData(p.data ?? p))
+      .then((p) => {
+        const raw = p.data ?? p;
+        const nodeIds = new Set(raw.nodes.map((n: GraphNode) => n.id));
+        const safeEdges = raw.edges.filter(
+          (e: GraphEdge) => nodeIds.has(e.source) && nodeIds.has(e.target)
+        );
+        setData({ nodes: raw.nodes, edges: safeEdges });
+      })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
   }, []);

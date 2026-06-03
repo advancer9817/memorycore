@@ -134,6 +134,17 @@ export function Navbar() {
               Apps
             </Button>
           </Link>
+          <Link href="/graph">
+            <Button
+              variant="outline"
+              size="sm"
+              className={`flex items-center gap-2 border-none ${
+                isActive("/graph") ? activeClass : inactiveClass
+              }`}
+            >
+              Graph
+            </Button>
+          </Link>
           <Link href="/settings">
             <Button
               variant="outline"
@@ -144,17 +155,6 @@ export function Navbar() {
             >
               <Settings />
               Settings
-            </Button>
-          </Link>
-          <Link href="/graph">
-            <Button
-              variant="outline"
-              size="sm"
-              className={`flex items-center gap-2 border-none ${
-                isActive("/graph") ? activeClass : inactiveClass
-              }`}
-            >
-              Graph
             </Button>
           </Link>
         </div>

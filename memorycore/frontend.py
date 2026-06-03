@@ -555,11 +555,25 @@ def _memory_categories() -> dict[str, Any]:
 
 
 _KNOWN_AGENTS = {
-    "claude", "claude-code",
+    "agent", "claude", "claude-code",
     "codex",
-    "hermes", "hermes-cli",
+    "hermes", "hermes-cli", "hermes-default", "hermes-default-router", "hermes-research",
     "gemini",
     "opencode",
+    "gpt-5.5", "gpt-5.5-router",
+    "memory-rollup",
+    "default-router",
+}
+
+_AGENT_DISPLAY_NAME: dict[str, str] = {
+    "agent": "claude",
+    "claude-code": "claude",
+    "hermes-cli": "hermes",
+    "hermes-default": "hermes",
+    "hermes-default-router": "hermes",
+    "hermes-research": "hermes",
+    "gpt-5.5-router": "gpt-5.5",
+    "default-router": "hermes",
 }
 
 def _apps_list(
@@ -575,9 +589,9 @@ def _apps_list(
     apps_by_id: dict[str, dict[str, Any]] = {}
     for row in rows:
         app = str(row.get("source_agent") or "manual")
-        # Only show known agent clients, not models or internal processes
         if app not in _KNOWN_AGENTS:
             continue
+        app = _AGENT_DISPLAY_NAME.get(app, app)
         if name and name.lower() not in app.lower():
             continue
         current = apps_by_id.setdefault(app, {
@@ -805,13 +819,15 @@ def _graph_payload(limit: int = 500) -> dict[str, Any]:
         link_rows = conn.execute(
             "SELECT source_id, target_id, relation_type, weight FROM memory_links LIMIT 2000"
         ).fetchall()
+        node_ids = {n["id"] for n in nodes}
         for lrow in link_rows:
-            edges.append({
-                "source": lrow[0],
-                "target": lrow[1],
-                "relation_type": lrow[2] or "related_to",
-                "weight": lrow[3] if lrow[3] is not None else 1.0,
-            })
+            if lrow[0] in node_ids and lrow[1] in node_ids:
+                edges.append({
+                    "source": lrow[0],
+                    "target": lrow[1],
+                    "relation_type": lrow[2] or "related_to",
+                    "weight": lrow[3] if lrow[3] is not None else 1.0,
+                })
 
     return {"nodes": nodes, "edges": edges}
 
