@@ -61,6 +61,10 @@ export const Install = () => {
     setLoading(false);
   };
 
+  useEffect(() => {
+    fetchStatus();
+  }, []);
+
   const applyCurator = async () => {
     const started = new Date();
     setApplying(true);

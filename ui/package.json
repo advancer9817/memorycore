@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --port 18318",
     "build": "next build",
     "start": "PORT=18318 HOSTNAME=127.0.0.1 node .next/standalone/server.js",
     "lint": "next lint",

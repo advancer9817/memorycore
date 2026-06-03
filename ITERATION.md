@@ -2352,3 +2352,24 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 - 原设计全部基于 SQL 阈值（importance / feedback_score / updated_at），无语义理解
 - `Planned Actions: 0` 是正常结果（记忆质量尚可），但 UI 没有任何解释，用户易误以为失败
 - 本次新增 LLM curator 作为语义补充层；UI 可后续加 "为什么没有 action" 的说明文本
+
+## [迭代 94] 2026-06-03 — Dashboard 初始化、Origin 修复、端口统一、时间显示修复
+
+### 变更
+
+**修复：Dashboard 初始数据不加载**
+- `ui/components/dashboard/Install.tsx`：`fetchStatus()` 已定义但未在 mount 时调用，页面初始显示全零/unknown
+- 新增 `useEffect(() => { fetchStatus(); }, [])` 触发初始加载
+
+**修复：Curator POST 请求 "mutating requests must use same origin" 403**
+- `memorycore/frontend.py` `_check_origin()`：浏览器通过 `localhost:18318` 访问 UI，POST 到 `127.0.0.1:8318` API，hostname 字符串不匹配
+- 新增 loopback 别名集合 `{"localhost", "127.0.0.1", "::1"}`，双方均为 loopback 时直接放行
+
+**修复：记忆列表 "Created On" 全部显示 "Just Now"**
+- `ui/lib/helpers.ts` `formatDate()`：接收的 timestamp 已是毫秒（`new Date(item.created_at).getTime()`），但函数内再 `* 1000` 导致日期溢出到未来，`diffInSeconds` 为负值，始终命中 `< 60` 分支
+- 移除多余的 `* 1000`，同时支持 `number | string` 入参
+
+**变更：UI dev 端口统一为 18318**
+- `ui/package.json`：`next dev` → `next dev --port 18318`
+- `ui/playwright.config.ts`：默认端口 `3000` → `18318`
+- `scripts/mcore-ui.service`：ExecStart 改为 `next dev --port __UI_PORT__`

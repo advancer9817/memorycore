@@ -761,6 +761,12 @@ def _check_origin(request: Request) -> Response | None:
     # (e.g. localhost:3000) can still POST to the API (e.g. localhost:8318).
     origin_host = origin.split("://")[-1].split(":")[0].split("/")[0]
     server_host = host.split(":")[0]
+    # Treat localhost and 127.0.0.1 as equivalent
+    loopback_aliases = {"localhost", "127.0.0.1", "::1"}
+    origin_is_loopback = origin_host in loopback_aliases
+    server_is_loopback = server_host in loopback_aliases
+    if origin_is_loopback and server_is_loopback:
+        return None
     if origin_host and server_host and origin_host != server_host:
         return _json_error("bad_origin", "mutating requests must use same origin", 403)
     return None

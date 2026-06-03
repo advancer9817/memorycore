@@ -4,8 +4,10 @@ const capitalize = (str: string) => {
     return str.toUpperCase()[0] + str.slice(1)
 }
 
-function formatDate(timestamp: number) {
-    const date = new Date(timestamp * 1000);
+function formatDate(timestamp: number | string) {
+    const date = typeof timestamp === 'number'
+        ? new Date(timestamp)
+        : new Date(timestamp);
     // Format as relative time (e.g., "5 minutes ago", "2 hours ago", "3 days ago")
     const now = new Date();
     const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);

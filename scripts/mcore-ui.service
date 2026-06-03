@@ -6,13 +6,11 @@ Wants=mcore.service
 [Service]
 Type=simple
 WorkingDirectory=__ROOT__/ui
-ExecStart=__NODE__ .next/standalone/server.js
+ExecStart=__NODE__ __ROOT__/ui/node_modules/next/dist/bin/next dev --port __UI_PORT__
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-Environment=PORT=__UI_PORT__
-Environment=HOSTNAME=__MCORE_HOST__
 
 [Install]
 WantedBy=default.target
