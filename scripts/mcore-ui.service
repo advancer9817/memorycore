@@ -1,0 +1,18 @@
+[Unit]
+Description=MemoryCore Web UI (HTTP :__UI_PORT__)
+After=mcore.service
+Wants=mcore.service
+
+[Service]
+Type=simple
+WorkingDirectory=__ROOT__/ui
+ExecStart=__NODE__ .next/standalone/server.js
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=PORT=__UI_PORT__
+Environment=HOSTNAME=__MCORE_HOST__
+
+[Install]
+WantedBy=default.target

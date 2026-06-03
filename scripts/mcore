@@ -1,191 +1,30 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# mcore — MemoryCore service manager
+# Delegates start/stop/restart/status to systemd; passes everything else to the Python CLI.
+#
+# Usage:
+#   mcore start|stop|restart [all|server|ui]   — manage services (default: all)
+#   mcore status                                — show status of all services
+#   mcore <subcommand> [args...]                — Python CLI passthrough
 
-MCP_DIR="${MCORE_DIR:-$HOME/project/memorycore}"
-PYTHON="${MCORE_PYTHON:-$MCP_DIR/.venv/bin/python}"
-HOST="${MCORE_HOST:-127.0.0.1}"
-PORT="${MCORE_PORT:-8318}"
-DB="${LOCAL_MEMORY_DB:-$MCP_DIR/memory.sqlite3}"
-PID_FILE="${MCORE_PID_FILE:-/tmp/mcore.pid}"
-LOG_FILE="${MCORE_LOG_FILE:-$MCP_DIR/mcore.log}"
-SYNC_FILE="${SYNC_FILE:-memory-sync/memories.json}"
-SYNC_REMOTE="${SYNC_REMOTE:-origin}"
-# Set to 0 to disable automatic memory sync on start/stop
-AUTO_SYNC="${MCORE_AUTO_SYNC:-1}"
+PYTHON="${MCORE_PYTHON:-__PYTHON__}"
+TARGET="${2:-all}"
 
-service_cmd_matches() {
-  local pid="$1"
-  ps -p "$pid" -o args= 2>/dev/null | grep -q "memorycore.*serve.*--port $PORT"
-}
-
-port_pid() {
-  command -v ss >/dev/null 2>&1 || return 1
-  local pid
-  pid="$(ss -ltnp "sport = :$PORT" 2>/dev/null | grep -m1 -o 'pid=[0-9]\+' | cut -d= -f2 || true)"
-  [[ -n "$pid" ]] || return 1
-  echo "$pid"
-}
-
-pid_file_pid() {
-  local pid
-  [ -f "$PID_FILE" ] || return 1
-  pid="$(cat "$PID_FILE" 2>/dev/null || true)"
-  [[ -n "$pid" ]] || return 1
-  service_cmd_matches "$pid" || return 1
-  echo "$pid"
-}
-
-running_pid() {
-  local pid
-  pid="$(port_pid || true)"
-  if [[ -n "$pid" ]]; then
-    if service_cmd_matches "$pid"; then
-      echo "$pid"
-      return 0
-    fi
-    # Something else is on the port — not our service
-    return 1
-  fi
-
-  pid="$(pid_file_pid || true)"
-  if [[ -n "$pid" ]]; then
-    echo "$pid"
-    return 0
-  fi
-
-  return 1
-}
-
-# Auto-sync helpers — never fatal, always log
-_sync_pull() {
-  if [[ "$AUTO_SYNC" != "1" ]]; then return 0; fi
-  local sync_path="$MCP_DIR/$SYNC_FILE"
-  echo "[mcore] auto-sync: pulling from git remote ..." >&2
-  cd "$MCP_DIR"
-  if ! git pull "$SYNC_REMOTE" --ff-only --quiet 2>/dev/null; then
-    echo "[mcore] auto-sync: git pull skipped (not a git repo or diverged)" >&2
-    return 0
-  fi
-  if [[ ! -f "$sync_path" ]]; then
-    echo "[mcore] auto-sync: no sync file at $sync_path, skipping import" >&2
-    return 0
-  fi
-  echo "[mcore] auto-sync: importing memories (conflict_policy=newer) ..." >&2
-  "$PYTHON" -m memorycore import "$sync_path" \
-    --conflict-policy newer --apply 2>&1 | grep -v "^$" | sed 's/^/[mcore] import: /' >&2 || true
-}
-
-_sync_push() {
-  if [[ "$AUTO_SYNC" != "1" ]]; then return 0; fi
-  local sync_path="$MCP_DIR/$SYNC_FILE"
-  echo "[mcore] auto-sync: exporting memories ..." >&2
-  mkdir -p "$(dirname "$sync_path")"
-  "$PYTHON" -m memorycore export "$sync_path" --memories-only 2>/dev/null || {
-    echo "[mcore] auto-sync: export failed, skipping push" >&2
-    return 0
-  }
-  cd "$MCP_DIR"
-  if ! git rev-parse --git-dir &>/dev/null; then
-    echo "[mcore] auto-sync: not a git repo, skipping push" >&2
-    return 0
-  fi
-  git add "$SYNC_FILE" 2>/dev/null || true
-  if git diff --cached --quiet; then
-    echo "[mcore] auto-sync: no changes in sync file, skipping commit" >&2
-    return 0
-  fi
-  local ts device
-  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  device="$(hostname -s 2>/dev/null || echo unknown)"
-  local count
-  count="$("$PYTHON" -c "
-import json, sys
-d = json.load(open('$sync_path'))
-print(d['counts'].get('memories', 0))
-" 2>/dev/null || echo '?')"
-  git commit -m "chore(memory-sync): $device @ $ts — ${count} memories" --quiet
-  echo "[mcore] auto-sync: pushing to $SYNC_REMOTE ..." >&2
-  git push "$SYNC_REMOTE" --quiet 2>/dev/null || \
-    echo "[mcore] auto-sync: git push failed (remote may be unreachable)" >&2
-}
-
-start() {
-  local pid
-  if pid="$(running_pid 2>/dev/null || true)" && [[ -n "$pid" ]]; then
-    echo "already running (pid: $pid, endpoint: http://$HOST:$PORT/mcp, db: $DB)"
-    [[ -f "$PID_FILE" ]] || echo "$pid" > "$PID_FILE"
-    return 0
-  fi
-  rm -f "$PID_FILE"
-  mkdir -p "$MCP_DIR" "$(dirname "$PID_FILE")"
-  if [ ! -x "$PYTHON" ]; then
-    echo "python not found/executable: $PYTHON" >&2
-    return 1
-  fi
-  # Pull + import before starting so this session starts with latest memories
-  _sync_pull || true
-  cd "$MCP_DIR"
-  nohup env LOCAL_MEMORY_DB="$DB" PYTHONPATH="$MCP_DIR" "$PYTHON" -m memorycore serve --host "$HOST" --port "$PORT" >> "$LOG_FILE" 2>&1 &
-  echo $! > "$PID_FILE"
-  sleep 1
-  local post_pid
-  post_pid="$(running_pid 2>/dev/null || true)"
-  if [[ -n "$post_pid" ]]; then
-    echo "started (pid: $post_pid, endpoint: http://$HOST:$PORT/mcp, db: $DB)"
-  else
-    echo "failed — check $LOG_FILE" >&2
-    return 1
-  fi
-}
-
-stop() {
-  local pid
-  pid="$(running_pid 2>/dev/null || true)"
-  if [[ -n "$pid" ]]; then
-    kill "$pid" 2>/dev/null || true
-    for _ in 1 2 3 4 5; do
-      kill -0 "$pid" 2>/dev/null || break
-      sleep 0.5
-    done
-    kill -9 "$pid" 2>/dev/null || true
-    rm -f "$PID_FILE"
-    echo "stopped"
-  else
-    rm -f "$PID_FILE"
-    echo "not running"
-  fi
-  # Export + push after stopping so latest memories are committed
-  _sync_push || true
-}
-
-status() {
-  local pid
-  pid="$(running_pid 2>/dev/null || true)"
-  if [[ -n "$pid" ]]; then
-    # Reconcile PID file if stale
-    local file_pid=""
-    [[ -f "$PID_FILE" ]] && file_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
-    if [[ "$file_pid" != "$pid" ]]; then
-      echo "$pid" > "$PID_FILE"
-    fi
-    echo "running (pid: $pid, endpoint: http://$HOST:$PORT/mcp, db: $DB)"
-  else
-    rm -f "$PID_FILE"
-    echo "stopped"
-    return 1
-  fi
+svc_op() {
+  local op="$1"
+  case "$TARGET" in
+    all)    systemctl --user "$op" mcore.service mcore-ui.service ;;
+    ui)     systemctl --user "$op" mcore-ui.service ;;
+    server) systemctl --user "$op" mcore.service ;;
+    *)      echo "Unknown target: $TARGET (use: all, ui, server)" >&2; exit 1 ;;
+  esac
 }
 
 case "${1:-}" in
-  start)   start ;;
-  stop)    stop ;;
-  restart) stop >/dev/null || true; start ;;
-  status)  status ;;
-  logs)    tail -n "${2:-80}" "$LOG_FILE" ;;
-  sync)
-    # Manual sync: export+push then pull+import
-    _sync_push || true
-    _sync_pull || true
-    ;;
-  *) echo "Usage: mcore {start|stop|restart|status|logs [N]|sync}" >&2; exit 2 ;;
+  start)   svc_op start ;;
+  stop)    svc_op stop ;;
+  restart) svc_op restart ;;
+  status)  systemctl --user status mcore.service mcore-ui.service --no-pager ;;
+  "")      echo "Usage: mcore {start|stop|restart|status} [all|server|ui]" >&2; exit 2 ;;
+  *)       exec "$PYTHON" -m memorycore "$@" ;;
 esac

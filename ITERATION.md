@@ -2071,6 +2071,29 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
+## [迭代 94] 2026-06-03 — mcore-ui.service + mcore 命令统一由 install_services.sh 管理
+
+### 变更
+
+**新增：`scripts/mcore-ui.service`**
+- Next.js Web UI 的 systemd 单元模板，占位符：`__ROOT__`、`__NODE__`、`__MCORE_HOST__`、`__UI_PORT__`
+- 依赖 `mcore.service`，默认端口 `18318`
+
+**更新：`scripts/mcore`**
+- 从原来的 daemon 模式（nohup + pid 文件）改为 systemd 委托模式
+- 支持 `start|stop|restart [all|server|ui]` 管理对应 service，无目标参数时默认 `all`
+- `status` 同时显示 `mcore.service` 和 `mcore-ui.service` 状态
+- 其他子命令透传给 Python CLI（`python -m memorycore`）
+- 模板占位符 `__PYTHON__` 由 `install_services.sh` 替换
+
+**更新：`scripts/install_services.sh`**
+- 新增 `--ui-port` 参数（默认 `18318`）
+- 新增 `NODE_BIN` 检测（`command -v node`），可通过 `--node` 覆盖
+- 新增 `install_mcore_cmd()`：将 `scripts/mcore` 模板展开后安装到 `~/.local/bin/mcore`，替换旧的手动维护方式
+- `install_systemd()` 中加入 `mcore-ui.service` 安装步骤：若 node 未找到或 `.next/standalone/server.js` 不存在则跳过并打印提示
+
+---
+
 ## 日志格式规范
 
 每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：

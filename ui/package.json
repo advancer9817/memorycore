@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "PORT=18318 HOSTNAME=127.0.0.1 node .next/standalone/server.js",
     "lint": "next lint",
     "test:e2e": "playwright test"
   },
