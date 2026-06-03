@@ -110,11 +110,11 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                   </div>
                   <div className="flex items-center gap-2 min-w-[300px] justify-end">
                     <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1 bg-muted px-3 py-1 rounded-lg">
+                      <div className="flex items-center gap-1 bg-zinc-700 px-3 py-1 rounded-lg">
                         <span className="text-sm text-muted-foreground">
                           Created by:
                         </span>
-                        <div className="w-4 h-4 rounded-full bg-muted flex items-center justify-center overflow-hidden">
+                        <div className="w-4 h-4 rounded-full bg-zinc-700 flex items-center justify-center overflow-hidden">
                           <Image
                             src={appConfig.iconImage}
                             alt={appLabel}

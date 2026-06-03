@@ -113,7 +113,7 @@ export function MemoryTable() {
           <TableRow className="bg-muted hover:bg-muted">
             <TableHead className="w-[50px] pl-4">
               <Checkbox
-                className="data-[state=checked]:border-primary border-border/50"
+                className="data-[state=checked]:border-primary border-zinc-500/50"
                 checked={isAllSelected}
                 data-state={
                   isPartiallySelected
@@ -168,7 +168,7 @@ export function MemoryTable() {
             >
               <TableCell className="pl-4">
                 <Checkbox
-                  className="data-[state=checked]:border-primary border-border/50"
+                  className="data-[state=checked]:border-primary border-zinc-500/50"
                   checked={selectedMemoryIds.includes(memory.id)}
                   onCheckedChange={(checked) =>
                     handleSelectMemory(memory.id, checked as boolean)
@@ -238,7 +238,7 @@ export function MemoryTable() {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent
                     align="end"
-                    className="bg-card border-border"
+                    className="bg-zinc-900 border-zinc-800"
                   >
                     <DropdownMenuItem
                       className="cursor-pointer"

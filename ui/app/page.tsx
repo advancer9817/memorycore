@@ -7,7 +7,7 @@ import "@/styles/animation.css";
 
 export default function DashboardPage() {
   return (
-    <div className="py-6">
+    <div className="text-white py-6">
       <div className="container">
         <div className="w-full mx-auto space-y-6">
           <div>

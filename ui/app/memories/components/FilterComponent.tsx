@@ -201,7 +201,7 @@ export default function FilterComponent() {
         <DialogTrigger asChild>
           <Button
             variant="outline"
-            className={`h-9 px-4 border-border/50 bg-card hover:bg-muted ${
+            className={`h-9 px-4 border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800 ${
               hasActiveFilters ? "border-primary" : ""
             }`}
           >
@@ -218,7 +218,7 @@ export default function FilterComponent() {
             )}
           </Button>
         </DialogTrigger>
-        <DialogContent className="sm:max-w-[425px] bg-card border-border text-foreground">
+        <DialogContent className="sm:max-w-[425px] bg-zinc-900 border-zinc-800 text-foreground">
           <DialogHeader>
             <DialogTitle className="text-foreground flex justify-between items-center">
               <span>Filters</span>
@@ -228,19 +228,19 @@ export default function FilterComponent() {
             <TabsList className="grid grid-cols-3 bg-muted">
               <TabsTrigger
                 value="apps"
-                className="data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+                className="data-[state=active]:bg-zinc-700"
               >
                 Apps
               </TabsTrigger>
               <TabsTrigger
                 value="categories"
-                className="data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+                className="data-[state=active]:bg-zinc-700"
               >
                 Categories
               </TabsTrigger>
               <TabsTrigger
                 value="archived"
-                className="data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+                className="data-[state=active]:bg-zinc-700"
               >
                 Archived
               </TabsTrigger>
@@ -373,7 +373,7 @@ export default function FilterComponent() {
         <DropdownMenuTrigger asChild>
           <Button
             variant="outline"
-            className="h-9 px-4 border-border/50 bg-card hover:bg-muted"
+            className="h-9 px-4 border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800"
           >
             {filters.sortDirection === "asc" ? (
               <SortAsc className="h-4 w-4" />
@@ -384,7 +384,7 @@ export default function FilterComponent() {
             <ChevronDown className="h-4 w-4 ml-2" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-56 bg-card border-border text-foreground">
+        <DropdownMenuContent className="w-56 bg-zinc-900 border-zinc-800 text-foreground">
           <DropdownMenuLabel>Sort by</DropdownMenuLabel>
           <DropdownMenuSeparator className="bg-muted" />
           <DropdownMenuGroup>

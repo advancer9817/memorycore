@@ -119,7 +119,7 @@ export default function GraphPage() {
           </div>
         )}
         {error && (
-          <div className="absolute inset-0 flex items-center justify-center text-destructive">
+          <div className="absolute inset-0 flex items-center justify-center text-red-300">
             {error}
           </div>
         )}

@@ -56,7 +56,7 @@ const AppDetailCard = ({
           <div className="w-5 h-5 flex items-center justify-center">
             {appConfig.iconImage ? (
               <div>
-                <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center overflow-hidden">
+                <div className="w-6 h-6 rounded-full bg-zinc-700 flex items-center justify-center overflow-hidden">
                   <Image
                     src={appConfig.iconImage}
                     alt={appConfig.name}

@@ -4,50 +4,48 @@
 
 @layer base {
   :root {
-    /* Claude warm design language */
-    --background: 36 33% 94%;       /* #F5F0E8 warm paper */
-    --foreground: 26 8% 17%;        /* #2D2B28 warm black */
-    --card: 0 0% 100%;              /* #FFFFFF white cards */
-    --card-foreground: 26 8% 17%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 26 8% 17%;
-    --primary: 14 63% 65%;          /* #DA7756 Claude orange */
-    --primary-foreground: 0 0% 100%;
-    --secondary: 30 20% 90%;        /* warm light gray */
-    --secondary-foreground: 26 8% 17%;
-    --muted: 30 20% 90%;
-    --muted-foreground: 22 5% 52%;  /* #8B8680 aux text */
-    --accent: 30 20% 90%;
-    --accent-foreground: 26 8% 17%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 30 22% 87%;           /* #E8E0D4 warm border */
-    --input: 30 22% 87%;
-    --ring: 14 63% 65%;
-    --radius: 0.75rem;              /* 12px rounded */
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 260 94% 59%;
+    --primary-foreground: 355.7 100% 97.3%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 260 94% 59%;
+    --radius: 0.5rem;
   }
 
-  /* Keep dark alias identical to light — single warm theme */
   .dark {
-    --background: 36 33% 94%;
-    --foreground: 26 8% 17%;
-    --card: 0 0% 100%;
-    --card-foreground: 26 8% 17%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 26 8% 17%;
-    --primary: 14 63% 65%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 30 20% 90%;
-    --secondary-foreground: 26 8% 17%;
-    --muted: 30 20% 90%;
-    --muted-foreground: 22 5% 52%;
-    --accent: 30 20% 90%;
-    --accent-foreground: 26 8% 17%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 30 22% 87%;
-    --input: 30 22% 87%;
-    --ring: 14 63% 65%;
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 260 94% 59%;
+    --primary-foreground: 355.7 100% 97.3%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 260 94% 59%;
   }
 }
 
@@ -57,6 +55,5 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: Inter, system-ui, sans-serif;
   }
 }

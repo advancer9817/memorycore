@@ -175,98 +175,98 @@ export const Install = () => {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-base font-medium text-muted-foreground">Memory Operations</h2>
+        <h2 className="text-base font-medium text-zinc-400">Memory Operations</h2>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="bg-card border-border shadow-sm">
+        <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center justify-between">
+            <CardTitle className="text-sm font-medium text-zinc-400 flex items-center justify-between">
               Total Memories <Database className="h-4 w-4 text-muted-foreground" />
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-semibold text-primary">{status?.stats.total ?? "-"}</div>
+            <div className="text-2xl font-semibold text-white">{status?.stats.total ?? "-"}</div>
           </CardContent>
         </Card>
-        <Card className="bg-card border-border shadow-sm">
+        <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center justify-between">
+            <CardTitle className="text-sm font-medium text-zinc-400 flex items-center justify-between">
               Active <Activity className="h-4 w-4 text-muted-foreground" />
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-semibold text-primary">{byStatus.active ?? 0}</div>
+            <div className="text-2xl font-semibold text-white">{byStatus.active ?? 0}</div>
           </CardContent>
         </Card>
-        <Card className="bg-card border-border shadow-sm">
+        <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center justify-between">
+            <CardTitle className="text-sm font-medium text-zinc-400 flex items-center justify-between">
               Candidates <Sparkles className="h-4 w-4 text-muted-foreground" />
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-semibold text-primary">{byStatus.candidate ?? 0}</div>
+            <div className="text-2xl font-semibold text-white">{byStatus.candidate ?? 0}</div>
           </CardContent>
         </Card>
-        <Card className="bg-card border-border shadow-sm">
+        <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center justify-between">
+            <CardTitle className="text-sm font-medium text-zinc-400 flex items-center justify-between">
               Archived <Archive className="h-4 w-4 text-muted-foreground" />
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-semibold text-primary">{byStatus.archived ?? 0}</div>
+            <div className="text-2xl font-semibold text-white">{byStatus.archived ?? 0}</div>
           </CardContent>
         </Card>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
-        <Card className="bg-card border-border shadow-sm">
-          <CardHeader className="py-4 border-b border-border">
-            <CardTitle className="text-foreground text-base">Curator Schedule</CardTitle>
+        <Card className="bg-zinc-900 border-zinc-800">
+          <CardHeader className="py-4 border-b border-zinc-800">
+            <CardTitle className="text-white text-base">Curator Schedule</CardTitle>
           </CardHeader>
           <CardContent className="py-4 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Timer</span>
-              <Badge variant="outline" className="border-emerald-400 bg-emerald-50 text-emerald-700">
+              <span className="text-zinc-400">Timer</span>
+              <Badge variant="outline" className="border-emerald-700 bg-emerald-500/10 text-emerald-300">
                 {status?.timer.ActiveState || "unknown"}
               </Badge>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Last run</span>
-              <span className="text-foreground">{formatTime(lastRun)}</span>
+              <span className="text-zinc-400">Last run</span>
+              <span className="text-zinc-100">{formatTime(lastRun)}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Next run</span>
-              <span className="text-foreground">{formatTime(nextRun)}</span>
+              <span className="text-zinc-400">Next run</span>
+              <span className="text-zinc-100">{formatTime(nextRun)}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Last result</span>
+              <span className="text-zinc-400">Last result</span>
               <span className="text-foreground">{lastResult}</span>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="bg-card border-border shadow-sm">
-          <CardHeader className="py-4 border-b border-border">
-            <CardTitle className="text-foreground text-base">Curator Dry Run</CardTitle>
+        <Card className="bg-zinc-900 border-zinc-800">
+          <CardHeader className="py-4 border-b border-zinc-800">
+            <CardTitle className="text-white text-base">Curator Dry Run</CardTitle>
           </CardHeader>
           <CardContent className="py-4 space-y-3">
             <div className="grid grid-cols-2 gap-3 text-sm">
-              <div className="rounded-lg bg-muted px-3 py-2">
+              <div className="rounded-md bg-zinc-800 px-3 py-2">
                 <div className="text-muted-foreground">Scanned</div>
                 <div className="text-lg font-semibold">{status?.curator.scanned ?? "-"}</div>
               </div>
-              <div className="rounded-lg bg-muted px-3 py-2">
+              <div className="rounded-md bg-zinc-800 px-3 py-2">
                 <div className="text-muted-foreground">Planned Actions</div>
                 <div className="text-lg font-semibold">{summary.planned_actions ?? 0}</div>
               </div>
-              <div className="rounded-lg bg-muted px-3 py-2">
+              <div className="rounded-md bg-zinc-800 px-3 py-2">
                 <div className="text-muted-foreground">Skill Promotions</div>
                 <div className="text-lg font-semibold">{summary.skill_promotions ?? 0}</div>
               </div>
-              <div className="rounded-lg bg-muted px-3 py-2">
+              <div className="rounded-md bg-zinc-800 px-3 py-2">
                 <div className="text-muted-foreground">Duplicates</div>
                 <div className="text-lg font-semibold">{summary.duplicates ?? 0}</div>
               </div>
@@ -287,18 +287,18 @@ export const Install = () => {
               <Brain className="h-4 w-4 mr-2" />
               {llmRunning ? "LLM analysing..." : "Run LLM Curator"}
             </Button>
-            <div className="rounded-xl border border-border bg-background px-3 py-3 text-sm">
+            <div className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm">
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Manual run</span>
                 <Badge
                   variant="outline"
                   className={
                     runState.state === "succeeded"
-                      ? "border-emerald-400 bg-emerald-50 text-emerald-700"
+                      ? "border-emerald-700 bg-emerald-500/10 text-emerald-300"
                       : runState.state === "failed"
-                        ? "border-red-400 bg-red-50 text-red-700"
+                        ? "border-red-700 bg-red-500/10 text-red-300"
                         : runState.state === "running"
-                          ? "border-sky-400 bg-sky-50 text-sky-700"
+                          ? "border-sky-700 bg-sky-500/10 text-sky-300"
                           : "border-border bg-muted text-muted-foreground"
                   }
                 >
@@ -309,7 +309,7 @@ export const Install = () => {
                 <div className="mt-2 grid grid-cols-2 gap-2 text-muted-foreground">
                   <div>
                     <div className="text-muted-foreground">Started</div>
-                    <div className="text-foreground">{formatTime(runState.startedAt)}</div>
+                    <div className="text-zinc-100">{formatTime(runState.startedAt)}</div>
                   </div>
                   <div>
                     <div className="text-muted-foreground">Elapsed</div>
@@ -321,45 +321,45 @@ export const Install = () => {
               )}
               {runState.summary && (
                 <div className="mt-3 grid grid-cols-3 gap-2">
-                  <div className="rounded-lg bg-muted px-2 py-1">
+                  <div className="rounded bg-zinc-800 px-2 py-1">
                     <div className="text-muted-foreground">Actions</div>
-                    <div className="text-foreground font-medium">{runState.summary.actions ?? 0}</div>
+                    <div className="text-zinc-100 font-medium">{runState.summary.actions ?? 0}</div>
                   </div>
-                  <div className="rounded-lg bg-muted px-2 py-1">
+                  <div className="rounded bg-zinc-800 px-2 py-1">
                     <div className="text-muted-foreground">Promote</div>
-                    <div className="text-foreground font-medium">{runState.summary.skill_promotions ?? 0}</div>
+                    <div className="text-zinc-100 font-medium">{runState.summary.skill_promotions ?? 0}</div>
                   </div>
-                  <div className="rounded-lg bg-muted px-2 py-1">
+                  <div className="rounded bg-zinc-800 px-2 py-1">
                     <div className="text-muted-foreground">Archive</div>
-                    <div className="text-foreground font-medium">{runState.summary.archive ?? 0}</div>
+                    <div className="text-zinc-100 font-medium">{runState.summary.archive ?? 0}</div>
                   </div>
                 </div>
               )}
               {runState.actions && runState.actions.length > 0 && (
                 <div className="mt-3 space-y-2">
                   {runState.actions.slice(0, 3).map((action) => (
-                    <div key={`${action.id}-${action.action}`} className="rounded-lg bg-muted px-2 py-1">
+                    <div key={`${action.id}-${action.action}`} className="rounded bg-zinc-800 px-2 py-1">
                       <span className="text-primary">{action.action}</span>
                       <span className="text-muted-foreground"> · {action.title || action.id}</span>
                     </div>
                   ))}
                 </div>
               )}
-              {runState.error && <div className="mt-2 text-destructive">{runState.error}</div>}
+              {runState.error && <div className="mt-2 text-red-300">{runState.error}</div>}
             </div>
             {/* LLM Curator results */}
             {llmRunState.state !== "idle" && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50/40 px-3 py-3 text-sm">
+              <div className="rounded-xl border border-violet-800 bg-zinc-950 px-3 py-3 text-sm">
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">LLM analysis</span>
                   <Badge
                     variant="outline"
                     className={
                       llmRunState.state === "succeeded"
-                        ? "border-amber-500 bg-amber-50 text-amber-700"
+                        ? "border-violet-600 bg-violet-500/10 text-violet-300"
                         : llmRunState.state === "failed"
-                          ? "border-red-400 bg-red-50 text-red-700"
-                          : "border-sky-400 bg-sky-50 text-sky-700"
+                          ? "border-red-700 bg-red-500/10 text-red-300"
+                          : "border-sky-700 bg-sky-500/10 text-sky-300"
                     }
                   >
                     {llmRunState.state}
@@ -372,24 +372,24 @@ export const Install = () => {
                 )}
                 {llmRunState.summary && (
                   <div className="mt-2 grid grid-cols-3 gap-2">
-                    <div className="rounded-lg bg-muted px-2 py-1">
+                    <div className="rounded bg-zinc-800 px-2 py-1">
                       <div className="text-muted-foreground">Duplicates</div>
-                      <div className="text-foreground font-medium">{llmRunState.summary.semantic_duplicates ?? 0}</div>
+                      <div className="text-zinc-100 font-medium">{llmRunState.summary.semantic_duplicates ?? 0}</div>
                     </div>
-                    <div className="rounded-lg bg-muted px-2 py-1">
+                    <div className="rounded bg-zinc-800 px-2 py-1">
                       <div className="text-muted-foreground">Contradictions</div>
-                      <div className="text-foreground font-medium">{llmRunState.summary.contradictions ?? 0}</div>
+                      <div className="text-zinc-100 font-medium">{llmRunState.summary.contradictions ?? 0}</div>
                     </div>
-                    <div className="rounded-lg bg-muted px-2 py-1">
+                    <div className="rounded bg-zinc-800 px-2 py-1">
                       <div className="text-muted-foreground">Reassessed</div>
-                      <div className="text-foreground font-medium">{llmRunState.summary.importance_reassessments ?? 0}</div>
+                      <div className="text-zinc-100 font-medium">{llmRunState.summary.importance_reassessments ?? 0}</div>
                     </div>
                   </div>
                 )}
                 {llmRunState.findings && llmRunState.findings.length > 0 && (
                   <div className="mt-3 max-h-64 overflow-y-auto space-y-1 pr-1">
                     {llmRunState.findings.map((f, i) => (
-                      <div key={i} className="rounded-lg bg-muted px-2 py-1 text-xs">
+                      <div key={i} className="rounded bg-zinc-800 px-2 py-1 text-xs">
                         <span className="text-primary">{f.action}</span>
                         <span className="text-muted-foreground"> · {f.title || "—"}</span>
                         {f.reason && <div className="text-muted-foreground mt-0.5">{f.reason}</div>}
@@ -397,7 +397,7 @@ export const Install = () => {
                     ))}
                   </div>
                 )}
-                {llmRunState.error && <div className="mt-2 text-destructive">{llmRunState.error}</div>}
+                {llmRunState.error && <div className="mt-2 text-red-300">{llmRunState.error}</div>}
               </div>
             )}
           </CardContent>

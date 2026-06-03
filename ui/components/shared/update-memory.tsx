@@ -53,7 +53,7 @@ const UpdateMemory = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[525px] bg-card border-border z-50">
+      <DialogContent className="sm:max-w-[525px] bg-zinc-900 border-zinc-800 z-50">
         <DialogHeader>
           <DialogTitle>Update Memory</DialogTitle>
           <DialogDescription>Edit your existing memory</DialogDescription>

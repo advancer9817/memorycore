@@ -104,7 +104,7 @@ export function MemoryFilters() {
         {hasActiveFilters && (
           <Button
             variant="outline"
-            className="bg-card text-foreground/80 hover:bg-muted"
+            className="bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
             onClick={handleClearAllFilters}
           >
             Clear Filters
@@ -116,14 +116,14 @@ export function MemoryFilters() {
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="outline"
-                  className="border-border/50 bg-card hover:bg-muted"
+                  className="border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800"
                 >
                   Actions
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="end"
-                className="bg-card border-border"
+                className="bg-zinc-900 border-zinc-800"
               >
                 <DropdownMenuItem onClick={handleArchiveSelected}>
                   <Archive className="mr-2 h-4 w-4" />

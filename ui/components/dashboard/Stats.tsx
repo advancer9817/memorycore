@@ -41,7 +41,7 @@ const Stats = () => {
                   className={`h-8 w-8 rounded-full bg-primary flex items-center justify-center text-xs`}
                 >
                   <div>
-                    <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center overflow-hidden">
+                    <div className="w-7 h-7 rounded-full bg-zinc-700 flex items-center justify-center overflow-hidden">
                       <Image
                         src={
                           constants[app.name as keyof typeof constants]

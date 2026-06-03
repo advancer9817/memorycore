@@ -96,10 +96,10 @@ export function AppFilters() {
         value={String(filters.isActive)}
         onValueChange={handleActiveFilterChange}
       >
-        <SelectTrigger className="w-[130px] border-border/50 bg-card hover:bg-muted">
+        <SelectTrigger className="w-[130px] border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800">
           <SelectValue placeholder="Status" />
         </SelectTrigger>
-        <SelectContent className="border-border/50 bg-card hover:bg-muted">
+        <SelectContent className="border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800">
           <SelectItem value="all">All Status</SelectItem>
           <SelectItem value="true">Active</SelectItem>
           <SelectItem value="false">Inactive</SelectItem>
@@ -121,7 +121,7 @@ export function AppFilters() {
             <ChevronDown className="h-4 w-4 ml-2" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-56 bg-card border-border text-foreground">
+        <DropdownMenuContent className="w-56 bg-zinc-900 border-zinc-800 text-foreground">
           <DropdownMenuLabel>Sort by</DropdownMenuLabel>
           <DropdownMenuSeparator className="bg-muted" />
           <DropdownMenuGroup>

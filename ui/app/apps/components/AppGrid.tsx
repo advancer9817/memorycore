@@ -133,7 +133,7 @@ export function AppGrid() {
                   >
                     <TableCell>
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center overflow-hidden">
+                        <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center overflow-hidden">
                           <Image src={appConfig.iconImage} alt={appLabel} width={32} height={32} />
                         </div>
                         <div>

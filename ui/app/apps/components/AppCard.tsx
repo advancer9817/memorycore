@@ -28,7 +28,7 @@ export function AppCard({ app }: AppCardProps) {
         <div className="flex items-center gap-1">
           <div className="relative z-10 rounded-full overflow-hidden bg-[#2a2a2a] w-6 h-6 flex items-center justify-center flex-shrink-0">
             {appConfig.iconImage ? (
-              <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center overflow-hidden">
+              <div className="w-6 h-6 rounded-full bg-zinc-700 flex items-center justify-center overflow-hidden">
                 <Image
                   src={appConfig.iconImage}
                   alt={appConfig.name}

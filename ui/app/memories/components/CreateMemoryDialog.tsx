@@ -49,7 +49,7 @@ export function CreateMemoryDialog() {
           Create Memory
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[525px] bg-card border-border">
+      <DialogContent className="sm:max-w-[525px] bg-zinc-900 border-zinc-800">
         <DialogHeader>
           <DialogTitle>Create New Memory</DialogTitle>
           <DialogDescription>
