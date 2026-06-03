@@ -489,17 +489,29 @@ def build_context_pack(
         },
     }[mode]
 
-    # --- Hybrid retrieval: FTS5 + Qdrant vector search + entity aliases ---
-    fts_records = search_memory_records(task, scope=scope, project_path=project_path, status="active", limit=40)
-    if not fts_records:
-        fts_records = _keyword_scan_records(task, scope=scope, project_path=project_path, limit=40)
-    vector_hits: dict[str, float] = dict(_vector_search_ids(task, top_k=mode_settings["vector_top_k"]))
-    entity_hits = entity_search(
-        task,
-        limit=mode_settings["entity_limit"],
-        scope=scope,
-        project_path=project_path,
-    )
+    # --- Hybrid retrieval: FTS5 + Qdrant vector search + entity aliases (concurrent) ---
+    import concurrent.futures as _cf
+
+    def _fetch_fts():
+        rows = search_memory_records(task, scope=scope, project_path=project_path, status="active", limit=40)
+        if not rows:
+            rows = _keyword_scan_records(task, scope=scope, project_path=project_path, limit=40)
+        return rows
+
+    def _fetch_vector():
+        return dict(_vector_search_ids(task, top_k=mode_settings["vector_top_k"]))
+
+    def _fetch_entity():
+        return entity_search(task, limit=mode_settings["entity_limit"], scope=scope, project_path=project_path)
+
+    with _cf.ThreadPoolExecutor(max_workers=3) as _pool:
+        _fts_fut = _pool.submit(_fetch_fts)
+        _vec_fut = _pool.submit(_fetch_vector)
+        _ent_fut = _pool.submit(_fetch_entity)
+        fts_records: list[dict[str, Any]] = _fts_fut.result()
+        vector_hits: dict[str, float] = _vec_fut.result()
+        entity_hits = _ent_fut.result()
+
     entity_boosts: dict[str, float] = {}
     for record in fts_records:
         record["_retrieval_sources"] = record.get("_retrieval_sources") or ["fts"]

@@ -24,7 +24,7 @@ from datetime import timedelta
 from typing import Any
 
 from memorycore.models import local_now, normalize_list, normalize_title_key, now
-from memorycore.storage.db import _managed_query, managed_conn
+from memorycore.storage.db import _managed_query, managed_conn, read_conn
 from memorycore.storage.audit import log_audit_event
 
 # Decay: records that were used and then forgotten
@@ -68,207 +68,159 @@ def curator_report(
     now_dt = local_now()
     cap = max(1, min(int(limit), 5000))
 
-    all_rows = _managed_query("SELECT * FROM memories ORDER BY updated_at DESC LIMIT ?", (cap,))
-    by_title: dict[str, list[dict[str, Any]]] = {}
-    for r in all_rows:
-        by_title.setdefault(normalize_title_key(r.get("title", "")), []).append(r)
-    duplicate_title_groups = [v for k, v in by_title.items() if k and len(v) > 1]
+    # Single read — all subsequent categorisation is Python-side filtering.
+    with read_conn() as conn:
+        all_rows = [
+            dict(r) for r in
+            conn.execute("SELECT * FROM memories ORDER BY updated_at DESC LIMIT ?", (cap,)).fetchall()
+        ]
+    total_scanned_count = len(all_rows)
 
-    # Low-feedback: only mark stale if score is truly bad AND not a precious type
-    low_feedback_candidates = _managed_query(
-        "SELECT * FROM memories WHERE status IN ('active','candidate')"
-        " AND feedback_score < -1.0"
-        " AND type NOT IN ('user_profile','environment_fact','decision','project_memory','skill_candidate')"
-        " AND decay_policy != 'freeze'"
-        " LIMIT ?",
-        (cap,),
-    )
-
-    # Decay: only truly forgotten records that were once used
-    decay_cutoff = (now_dt - timedelta(days=_DECAY_INTERVAL_DAYS)).isoformat()
-    auto_decay_candidates = _managed_query(
-        """SELECT * FROM memories WHERE status = 'active'
-             AND decay_policy = 'review'
-             AND (last_accessed_at IS NULL OR last_accessed_at < ?)
-             AND effectiveness_score < 0.3
-             AND importance < 0.5
-             AND injected_count > 0
-             AND confidence > ?
-           ORDER BY confidence DESC LIMIT ?""",
-        (decay_cutoff, _DECAY_MIN_CONFIDENCE, cap),
-    )
-
-    # ── Episodic stale/archive ────────────────────────────────────────────────
-    episodic_stale_cutoff = (now_dt - timedelta(days=_STALE_DAYS_EPISODIC)).isoformat()
+    # Pre-compute cutoffs
+    decay_cutoff         = (now_dt - timedelta(days=_DECAY_INTERVAL_DAYS)).isoformat()
+    episodic_stale_cutoff   = (now_dt - timedelta(days=_STALE_DAYS_EPISODIC)).isoformat()
     episodic_archive_cutoff = (now_dt - timedelta(days=_ARCHIVE_DAYS_EPISODIC)).isoformat()
-    episodic_stale_candidates = _managed_query(
-        """SELECT * FROM memories WHERE type = 'episodic_memory'
-             AND status = 'active'
-             AND datetime(updated_at) < datetime(?)
-             AND importance < 0.65
-             AND decay_policy != 'freeze'
-           ORDER BY updated_at ASC LIMIT ?""",
-        (episodic_stale_cutoff, cap),
-    )
-    episodic_archive_candidates = _managed_query(
-        """SELECT * FROM memories WHERE type = 'episodic_memory'
-             AND status = 'stale'
-             AND datetime(updated_at) < datetime(?)
-           ORDER BY updated_at ASC LIMIT ?""",
-        (episodic_archive_cutoff, cap),
-    )
+    episodic_cand_cutoff    = (now_dt - timedelta(days=_CANDIDATE_TTL_EPISODIC_DAYS)).isoformat()
+    precious_cand_cutoff    = (now_dt - timedelta(days=_CANDIDATE_TTL_PRECIOUS_DAYS)).isoformat()
+    default_cand_cutoff     = (now_dt - timedelta(days=_CANDIDATE_TTL_DEFAULT_DAYS)).isoformat()
+    never_accessed_cutoff   = (now_dt - timedelta(days=_NEVER_ACCESSED_CANDIDATE_DAYS)).isoformat()
+    stale_cutoff            = (now_dt - timedelta(days=max(1, int(stale_after_days)))).isoformat()
+    archive_cutoff          = (now_dt - timedelta(days=max(1, int(archive_after_days)))).isoformat()
+    contradicted_cutoff     = (now_dt - timedelta(days=_CONTRADICTED_ARCHIVE_DAYS)).isoformat()
+    revival_cutoff          = (now_dt - timedelta(days=7)).isoformat()
+    now_ts = now()
 
-    # ── Candidate timeouts (tiered by type) ──────────────────────────────────
-    episodic_candidate_cutoff = (now_dt - timedelta(days=_CANDIDATE_TTL_EPISODIC_DAYS)).isoformat()
-    precious_candidate_cutoff = (now_dt - timedelta(days=_CANDIDATE_TTL_PRECIOUS_DAYS)).isoformat()
-    default_candidate_cutoff = (now_dt - timedelta(days=_CANDIDATE_TTL_DEFAULT_DAYS)).isoformat()
+    _PRECIOUS = {"user_profile", "environment_fact", "decision", "project_memory", "skill_candidate"}
 
-    # episodic candidates: 7-day window
-    dead_candidates_episodic = _managed_query(
-        """SELECT * FROM memories WHERE status = 'candidate'
-             AND type = 'episodic_memory'
-             AND datetime(updated_at) < datetime(?)
-             AND importance < 0.65
-             AND decay_policy != 'freeze'
-           ORDER BY updated_at ASC LIMIT ?""",
-        (episodic_candidate_cutoff, cap),
-    )
-    # precious type candidates: 30-day window, only if importance and feedback both low
-    dead_candidates_precious = _managed_query(
-        """SELECT * FROM memories WHERE status = 'candidate'
-             AND type IN ('user_profile','environment_fact','decision','project_memory','skill_candidate')
-             AND datetime(updated_at) < datetime(?)
-             AND importance < 0.4
-             AND feedback_score < 0
-             AND decay_policy != 'freeze'
-           ORDER BY updated_at ASC LIMIT ?""",
-        (precious_candidate_cutoff, cap),
-    )
-    # other candidate types: 7-day window
-    dead_candidates_default = _managed_query(
-        """SELECT * FROM memories WHERE status = 'candidate'
-             AND type NOT IN ('episodic_memory','user_profile','environment_fact',
-                              'decision','project_memory','skill_candidate')
-             AND datetime(updated_at) < datetime(?)
-             AND importance < 0.5
-             AND decay_policy != 'freeze'
-           ORDER BY updated_at ASC LIMIT ?""",
-        (default_candidate_cutoff, cap),
-    )
+    def _s(r: dict, key: str, default: Any = None) -> Any:
+        v = r.get(key)
+        return default if v is None else v
+
+    by_title: dict[str, list[dict[str, Any]]] = {}
+    low_feedback_candidates: list[dict] = []
+    auto_decay_candidates: list[dict] = []
+    episodic_stale_candidates: list[dict] = []
+    episodic_archive_candidates: list[dict] = []
+    dead_candidates_episodic: list[dict] = []
+    dead_candidates_precious: list[dict] = []
+    dead_candidates_default: list[dict] = []
+    never_accessed_candidates: list[dict] = []
+    stale_candidates: list[dict] = []
+    precious_stale_candidates: list[dict] = []
+    archive_candidates: list[dict] = []
+    contradicted_archive_candidates: list[dict] = []
+    revival_candidates: list[dict] = []
+    promote_candidates: list[dict] = []
+    skill_promotion_candidates: list[dict] = []
+    evolution_candidates: list[dict] = []
+
+    for r in all_rows:
+        typ = _s(r, "type", "")
+        status = _s(r, "status", "")
+        importance = float(_s(r, "importance", 0.5))
+        feedback = float(_s(r, "feedback_score", 0.0))
+        confidence = float(_s(r, "confidence", 0.7))
+        decay = _s(r, "decay_policy", "review")
+        updated = _s(r, "updated_at", "")
+        last_accessed = _s(r, "last_accessed_at")
+        injected = int(_s(r, "injected_count", 0))
+        effectiveness = float(_s(r, "effectiveness_score", 0.5))
+        content_len = len(_s(r, "content", ""))
+        last_injected = _s(r, "last_injected_at")
+
+        # title dedup
+        key = normalize_title_key(_s(r, "title", ""))
+        if key:
+            by_title.setdefault(key, []).append(r)
+
+        if decay == "freeze":
+            continue
+
+        # low feedback → mark stale
+        if status in ("active", "candidate") and feedback < -1.0 and typ not in _PRECIOUS:
+            low_feedback_candidates.append(r)
+
+        # auto decay
+        if (status == "active" and decay == "review"
+                and (last_accessed is None or last_accessed < decay_cutoff)
+                and effectiveness < 0.3 and importance < 0.5
+                and injected > 0 and confidence > _DECAY_MIN_CONFIDENCE):
+            auto_decay_candidates.append(r)
+
+        if typ == "episodic_memory":
+            if status == "active" and updated < episodic_stale_cutoff and importance < 0.65:
+                episodic_stale_candidates.append(r)
+            if status == "stale" and updated < episodic_archive_cutoff:
+                episodic_archive_candidates.append(r)
+            if (status == "candidate" and updated < episodic_cand_cutoff and importance < 0.65):
+                dead_candidates_episodic.append(r)
+
+        if status == "candidate":
+            if typ in _PRECIOUS:
+                if updated < precious_cand_cutoff and importance < 0.4 and feedback < 0:
+                    dead_candidates_precious.append(r)
+            elif typ != "episodic_memory":
+                if updated < default_cand_cutoff and importance < 0.5:
+                    dead_candidates_default.append(r)
+            # never-accessed candidate
+            if (last_accessed is None and injected == 0
+                    and updated < never_accessed_cutoff and typ not in _PRECIOUS):
+                never_accessed_candidates.append(r)
+            # promote
+            if (importance >= _PROMOTE_IMPORTANCE_THRESHOLD and feedback >= 0) or injected >= _PROMOTE_INJECTED_THRESHOLD:
+                promote_candidates.append(r)
+
+        # default stale: non-precious, non-episodic
+        if (status == "active" and typ not in _PRECIOUS and typ != "episodic_memory"
+                and updated < stale_cutoff and importance < 0.45
+                and feedback <= -0.5 and decay not in ("freeze", "stable")):
+            stale_candidates.append(r)
+
+        # precious stale
+        if (status == "active" and typ in _PRECIOUS
+                and feedback < -2.0 and importance < 0.3 and decay not in ("freeze", "stable")):
+            precious_stale_candidates.append(r)
+
+        # archive stale non-episodic
+        if status == "stale" and typ != "episodic_memory" and updated < archive_cutoff:
+            archive_candidates.append(r)
+
+        # contradicted auto-archive
+        if status == "contradicted" and (last_accessed is None or last_accessed < contradicted_cutoff):
+            contradicted_archive_candidates.append(r)
+
+        # stale revival
+        if (status == "stale" and typ != "episodic_memory"
+                and last_injected is not None and last_injected >= revival_cutoff
+                and effectiveness >= 0.5 and feedback >= 0):
+            revival_candidates.append(r)
+
+        # skill promotions
+        if typ == "skill_candidate" and status in ("active", "candidate") and importance >= 0.65 and feedback >= 0:
+            skill_promotion_candidates.append(r)
+
+        # evolution / contradiction detection
+        if status in ("active", "candidate") and (content_len < 50 or feedback < -1.5):
+            evolution_candidates.append(r)
+
+    duplicate_title_groups = [v for k, v in by_title.items() if k and len(v) > 1]
     dead_candidates = dead_candidates_episodic + dead_candidates_precious + dead_candidates_default
 
-    # ── Never-accessed candidate auto-archive ─────────────────────────────
-    never_accessed_cutoff = (now_dt - timedelta(days=_NEVER_ACCESSED_CANDIDATE_DAYS)).isoformat()
-    never_accessed_candidates = _managed_query(
-        """SELECT * FROM memories WHERE status = 'candidate'
-             AND last_accessed_at IS NULL
-             AND injected_count = 0
-             AND datetime(updated_at) < datetime(?)
-             AND type NOT IN ('user_profile','environment_fact','decision','project_memory','skill_candidate')
-             AND decay_policy != 'freeze'
-           ORDER BY updated_at ASC LIMIT ?""",
-        (never_accessed_cutoff, cap),
-    )
-
-    # ── Default stale: non-precious, non-episodic, long-lived active ──────────
-    stale_cutoff = (now_dt - timedelta(days=max(1, int(stale_after_days)))).isoformat()
-    stale_candidates = _managed_query(
-        """SELECT * FROM memories WHERE status = 'active'
-             AND type NOT IN ('user_profile','environment_fact','decision','project_memory','skill_candidate','episodic_memory')
-             AND datetime(updated_at) < datetime(?)
-             AND importance < 0.45
-             AND feedback_score <= -0.5
-             AND decay_policy NOT IN ('freeze', 'stable')
-           ORDER BY updated_at ASC LIMIT ?""",
-        (stale_cutoff, cap),
-    )
-
-    # precious type stale: only when feedback very negative (stable/freeze immune)
-    precious_stale_candidates = _managed_query(
-        """SELECT * FROM memories WHERE status = 'active'
-             AND type IN ('user_profile','environment_fact','decision','project_memory','skill_candidate')
-             AND feedback_score < -2.0
-             AND importance < 0.3
-             AND decay_policy NOT IN ('freeze', 'stable')
-           ORDER BY feedback_score ASC LIMIT ?""",
-        (cap,),
-    )
-
-    # ── Default archive: stale past archive threshold ─────────────────────────
-    archive_cutoff = (now_dt - timedelta(days=max(1, int(archive_after_days)))).isoformat()
-    archive_candidates = _managed_query(
-        """SELECT * FROM memories WHERE status = 'stale'
-             AND type NOT IN ('episodic_memory')
-             AND updated_at < ?
-           ORDER BY updated_at ASC LIMIT ?""",
-        (archive_cutoff, cap),
-    )
-
-    # ── contradicted auto-archive ─────────────────────────────────────────────
-    contradicted_cutoff = (now_dt - timedelta(days=_CONTRADICTED_ARCHIVE_DAYS)).isoformat()
-    contradicted_archive_candidates = _managed_query(
-        """SELECT * FROM memories WHERE status = 'contradicted'
-             AND (last_accessed_at IS NULL OR last_accessed_at < ?)
-           ORDER BY last_accessed_at ASC LIMIT ?""",
-        (contradicted_cutoff, cap),
-    )
-
-    # ── stale → active revival ────────────────────────────────────────────────
-    revival_cutoff = (now_dt - timedelta(days=7)).isoformat()
-    revival_candidates = _managed_query(
-        """SELECT * FROM memories WHERE status = 'stale'
-             AND type != 'episodic_memory'
-             AND last_injected_at >= ?
-             AND effectiveness_score >= 0.5
-             AND feedback_score >= 0
-           ORDER BY effectiveness_score DESC LIMIT ?""",
-        (revival_cutoff, cap),
-    )
-
-    # ── Auto-promote: high-importance candidates or frequently used ───────────
-    promote_candidates = _managed_query(
-        """SELECT * FROM memories WHERE status = 'candidate'
-             AND (
-               (importance >= ? AND feedback_score >= 0)
-               OR injected_count >= ?
-             )
-           ORDER BY importance DESC LIMIT ?""",
-        (_PROMOTE_IMPORTANCE_THRESHOLD, _PROMOTE_INJECTED_THRESHOLD, cap),
-    )
-
-    # ── Skill promotions ──────────────────────────────────────────────────────
-    skill_promotion_candidates = _managed_query(
-        """SELECT * FROM memories WHERE type = 'skill_candidate'
-             AND status IN ('active','candidate') AND importance >= 0.65 AND feedback_score >= 0
-           LIMIT ?""",
-        (cap,),
-    )
-
-    # ── Contradiction detection ───────────────────────────────────────────────
-    evolution_candidates = _managed_query(
-        """SELECT * FROM memories WHERE status IN ('active','candidate')
-             AND (LENGTH(content) < 50 OR feedback_score < -1.5)
-           ORDER BY feedback_score ASC LIMIT ?""",
-        (min(cap, 50),),
-    )
-    contradiction_candidates: list[dict[str, Any]] = []
-    active_by_key: dict[str, list[dict[str, Any]]] = {}
-    contradicted_by_key: dict[str, list[dict[str, Any]]] = {}
+    # contradiction candidates (title-key overlap between active and contradicted)
+    active_by_key: dict[str, list[dict]] = {}
+    contradicted_by_key: dict[str, list[dict]] = {}
     for r in all_rows:
-        key = normalize_title_key(r.get("title", ""))
-        if not key:
+        k = normalize_title_key(_s(r, "title", ""))
+        if not k:
             continue
         if r.get("status") == "active":
-            active_by_key.setdefault(key, []).append(r)
+            active_by_key.setdefault(k, []).append(r)
         elif r.get("status") == "contradicted":
-            contradicted_by_key.setdefault(key, []).append(r)
-    for key, active_items in active_by_key.items():
-        if key in contradicted_by_key:
-            contradiction_candidates.append({
-                "title_key": key,
-                "active": active_items,
-                "contradicted": contradicted_by_key[key],
-            })
+            contradicted_by_key.setdefault(k, []).append(r)
+    contradiction_candidates: list[dict] = [
+        {"title_key": k, "active": v, "contradicted": contradicted_by_key[k]}
+        for k, v in active_by_key.items() if k in contradicted_by_key
+    ]
 
     # ── Build action plan ─────────────────────────────────────────────────────
     allow_set = set(normalize_list(allow_actions))
@@ -375,7 +327,7 @@ def curator_report(
             },
         )
 
-    total_scanned = _managed_query("SELECT COUNT(*) as cnt FROM memories", ())[0]["cnt"]
+    total_scanned = total_scanned_count
     all_stale = stale_candidates + episodic_stale_candidates + precious_stale_candidates
     all_archive = archive_candidates + episodic_archive_candidates + list(contradicted_archive_candidates)
     return {
