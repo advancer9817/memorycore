@@ -12,7 +12,7 @@ from memorycore.injection_guard import (
     warning_for_filtered_memory,
 )
 from memorycore.models import as_json, fts_phrase, normalize_list, now, row_to_dict
-from memorycore.storage.db import _managed_query, managed_conn
+from memorycore.storage.db import _managed_query, managed_conn, read_conn
 from memorycore.storage.entities import entity_search
 
 logger = logging.getLogger(__name__)
@@ -182,7 +182,7 @@ def _fallback_candidate_count(scope: str = "", project_path: str = "", limit: in
         clauses.append("(project_path = ? OR project_path = '')")
         params.append(project_path)
     params.append(max(1, min(int(limit), 100)))
-    with managed_conn() as conn:
+    with read_conn() as conn:
         rows = conn.execute(
             f"SELECT id FROM memories WHERE {' AND '.join(clauses)} LIMIT ?",
             params,
@@ -198,40 +198,65 @@ def _keyword_scan_records(
 ) -> list[dict[str, Any]]:
     """Context-only relaxed recall when strict FTS has no hits.
 
-    This avoids falling back to unrelated high-importance memories while still
-    recovering relevant rows when FTS5 is missing legacy backfill or a long
-    prompt contains extra terms that make the AND query too strict.
+    Tries FTS5 OR-query first (index-accelerated); falls back to LIKE scan only
+    when FTS5 returns nothing (e.g. legacy rows missing from index).
     """
     terms = _query_terms(task)
     if not terms:
         return []
-    clauses = ["status = 'active'", "(valid_until IS NULL OR valid_until > ?)"]
-    params: list[Any] = [now()]
+
+    scope_clauses: list[str] = ["status = 'active'", "(valid_until IS NULL OR valid_until > ?)"]
+    scope_params: list[Any] = [now()]
     if scope:
-        clauses.append("(scope = ? OR scope = 'global')")
-        params.append(scope)
+        scope_clauses.append("(scope = ? OR scope = 'global')")
+        scope_params.append(scope)
     if project_path:
-        clauses.append("(project_path = ? OR project_path = '')")
-        params.append(project_path)
-    term_clauses: list[str] = []
-    for term in terms[:8]:
-        term_clauses.append(
-            "(lower(title) LIKE ? OR lower(content) LIKE ? OR lower(tags_json) LIKE ?)"
-        )
-        like = f"%{term}%"
-        params.extend([like, like, like])
-    if term_clauses:
-        clauses.append("(" + " OR ".join(term_clauses) + ")")
-    params.append(max(1, min(int(limit), 100)))
-    with managed_conn() as conn:
-        rows = conn.execute(
-            f"""SELECT * FROM memories
-                WHERE {' AND '.join(clauses)}
-                ORDER BY importance DESC, effectiveness_score DESC, feedback_score DESC, updated_at DESC
-                LIMIT ?""",
-            params,
-        ).fetchall()
-    records = [row_to_dict(row) for row in rows]
+        scope_clauses.append("(project_path = ? OR project_path = '')")
+        scope_params.append(project_path)
+    scope_where = " AND ".join(scope_clauses)
+
+    # --- Fast path: FTS5 OR query ---
+    fts_query = " OR ".join(f'"{t}"' for t in terms[:8])
+    fts_params = [fts_query] + scope_params + [max(1, min(int(limit), 100))]
+    try:
+        with read_conn() as conn:
+            rows = conn.execute(
+                f"""SELECT m.* FROM memories m
+                    JOIN memories_fts f ON f.id = m.id
+                    WHERE memories_fts MATCH ?
+                      AND {scope_where}
+                    ORDER BY importance DESC, effectiveness_score DESC, updated_at DESC
+                    LIMIT ?""",
+                fts_params,
+            ).fetchall()
+        records = [row_to_dict(r) for r in rows]
+    except Exception:
+        records = []
+
+    # --- Slow path: LIKE scan fallback ---
+    if not records:
+        like_clauses = list(scope_clauses)
+        like_params = list(scope_params)
+        term_clauses: list[str] = []
+        for term in terms[:8]:
+            term_clauses.append(
+                "(lower(title) LIKE ? OR lower(content) LIKE ? OR lower(tags_json) LIKE ?)"
+            )
+            like = f"%{term}%"
+            like_params.extend([like, like, like])
+        if term_clauses:
+            like_clauses.append("(" + " OR ".join(term_clauses) + ")")
+        like_params.append(max(1, min(int(limit), 100)))
+        with read_conn() as conn:
+            rows = conn.execute(
+                f"""SELECT * FROM memories
+                    WHERE {' AND '.join(like_clauses)}
+                    ORDER BY importance DESC, effectiveness_score DESC, feedback_score DESC, updated_at DESC
+                    LIMIT ?""",
+                like_params,
+            ).fetchall()
+        records = [row_to_dict(row) for row in rows]
+
     matched = [
         record for record in records
         if _lexical_relevance(task, record) >= _MIN_KEYWORD_LEXICAL_RELEVANCE_SCORE
@@ -303,14 +328,37 @@ def search_memory_records(
         sql += " ORDER BY m.importance DESC, m.effectiveness_score DESC, m.feedback_score DESC, m.updated_at DESC"
     sql += " LIMIT ?"
     params.append(max(1, min(int(limit), 100)))
-    with managed_conn() as conn:
+    with read_conn() as conn:
         rows = [row_to_dict(r) for r in conn.execute(sql, params).fetchall()]
-        if rows:
-            conn.executemany(
-                "UPDATE memories SET last_accessed_at=? WHERE id=?",
-                [(now(), r["id"]) for r in rows],
-            )
+    if rows:
+        import threading
+        ids = [(now(), r["id"]) for r in rows]
+        threading.Thread(
+            target=_write_last_accessed,
+            args=(ids,),
+            daemon=True,
+        ).start()
     return rows
+
+
+def _write_last_accessed(ids: list[tuple[str, str]]) -> None:
+    try:
+        with managed_conn() as conn:
+            conn.executemany("UPDATE memories SET last_accessed_at=? WHERE id=?", ids)
+    except Exception:
+        pass
+
+
+def _write_injected_counts(ids: list[str], ts: str) -> None:
+    try:
+        with managed_conn() as conn:
+            conn.executemany(
+                "UPDATE memories SET injected_count = injected_count + 1,"
+                " last_injected_at = ?, last_accessed_at = ? WHERE id = ?",
+                [(ts, ts, mid) for mid in ids],
+            )
+    except Exception:
+        pass
 
 
 def get_active_warnings(
@@ -630,14 +678,14 @@ def build_context_pack(
         used_ids.extend(section_used_ids)
     text = "\n".join(lines).strip()
     if used_ids:
+        import threading
         ts = now()
-        with managed_conn() as conn:
-            for mid in used_ids:
-                conn.execute(
-                    """UPDATE memories SET injected_count = injected_count + 1,
-                           last_injected_at = ?, last_accessed_at = ? WHERE id = ?""",
-                    (ts, ts, mid),
-                )
+        ids_snapshot = list(used_ids)
+        threading.Thread(
+            target=_write_injected_counts,
+            args=(ids_snapshot, ts),
+            daemon=True,
+        ).start()
     active_count = sum(1 for r in records if r["status"] == "active")
     warnings = (get_active_warnings(used_ids) if used_ids else []) + injection_warnings
     hit_rate = round(len(used_ids) / max(len(records), 1), 3)

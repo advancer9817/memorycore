@@ -56,6 +56,38 @@ logger = logging.getLogger(__name__)
 _START_TIME = time.time()
 _MUTATING_METHODS = {"POST", "PATCH", "PUT", "DELETE"}
 
+# ---------------------------------------------------------------------------
+# LLM Curator background job registry
+# ---------------------------------------------------------------------------
+import threading
+import uuid
+
+_llm_curator_jobs: dict[str, dict] = {}  # job_id -> {status, result, error}
+_llm_curator_lock = threading.Lock()
+
+
+def _run_llm_curator_job(job_id: str, cfg: Any, limit: int, sim_threshold: float, apply: bool) -> None:
+    """Runs in a daemon thread; updates _llm_curator_jobs on completion."""
+    from memorycore.storage.curator_llm import llm_curator_report, apply_llm_curator
+    from memorycore.storage import memory_rebuild_vectors
+    try:
+        report = llm_curator_report(config=cfg, limit=limit, sim_threshold=sim_threshold)
+        if apply:
+            applied = apply_llm_curator(report, dry_run=False)
+            report["applied"] = applied
+        # Rebuild vector index after curation
+        try:
+            rebuild_result = memory_rebuild_vectors()
+            report["rebuild_vectors"] = rebuild_result
+        except Exception as exc:
+            report["rebuild_vectors_error"] = str(exc)
+        with _llm_curator_lock:
+            _llm_curator_jobs[job_id] = {"status": "done", "result": report}
+    except Exception as exc:
+        logger.warning("[llm-curator job %s] failed: %s", job_id, exc)
+        with _llm_curator_lock:
+            _llm_curator_jobs[job_id] = {"status": "error", "error": str(exc)}
+
 
 @dataclass
 class FrontendConfig:
@@ -235,19 +267,27 @@ async def _dispatch_api(request: Request, parts: list[str], query: dict[str, lis
             allow_actions=body.get("allow_actions"), deny_actions=body.get("deny_actions"),
         )
     if parts == ["curator", "llm"] and method == "POST":
-        from memorycore.storage.curator_llm import llm_curator_report, apply_llm_curator
         from memorycore.models import load_config
         cfg = load_config()
-        dry_run = body.get("dry_run", True)
-        report = llm_curator_report(
-            config=cfg,
-            limit=int(body.get("limit", 200)),
-            sim_threshold=float(body.get("sim_threshold", 0.72)),
+        apply = not body.get("dry_run", True)
+        job_id = str(uuid.uuid4())
+        with _llm_curator_lock:
+            _llm_curator_jobs[job_id] = {"status": "running"}
+        t = threading.Thread(
+            target=_run_llm_curator_job,
+            args=(job_id, cfg, int(body.get("limit", 200)), float(body.get("sim_threshold", 0.72)), apply),
+            daemon=True,
+            name=f"llm-curator-{job_id[:8]}",
         )
-        if not dry_run:
-            applied = apply_llm_curator(report, dry_run=False)
-            report["applied"] = applied
-        return report
+        t.start()
+        return {"job_id": job_id, "status": "running"}
+    if len(parts) == 3 and parts[:2] == ["curator", "llm"] and method == "GET":
+        job_id = parts[2]
+        with _llm_curator_lock:
+            job = _llm_curator_jobs.get(job_id)
+        if job is None:
+            raise LookupError(f"job {job_id} not found")
+        return job
     if parts == ["links"] and method == "POST":
         return add_link(body.get("source_id", ""), body.get("target_id", ""), body.get("relation_type", "related_to"), body.get("weight", 1.0), body.get("note", ""), body.get("source_agent", "frontend"))
     if len(parts) == 2 and parts[0] == "links" and method == "GET":

@@ -60,6 +60,13 @@ def managed_conn():
             raise
 
 
+@contextmanager
+def read_conn():
+    """Shared read-only context — no write lock, no commit overhead."""
+    conn = connect()
+    yield conn
+
+
 def _commit_with_retry(conn: sqlite3.Connection) -> None:
     for attempt in range(_LOCK_RETRY_ATTEMPTS):
         try:
@@ -73,7 +80,7 @@ def _commit_with_retry(conn: sqlite3.Connection) -> None:
 
 
 def _managed_query(sql: str, params: tuple = ()) -> list[dict[str, Any]]:
-    with managed_conn() as conn:
+    with read_conn() as conn:
         return [row_to_dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
