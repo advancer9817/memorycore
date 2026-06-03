@@ -261,7 +261,13 @@ def _call_llm(system_prompt: str, user_prompt: str, config: ExtractionConfig) ->
     except ImportError:
         return _call_llm_urllib(system_prompt, user_prompt, config)
 
-    url = config.base_url.rstrip("/") + "/chat/completions"
+    base = config.base_url.rstrip("/")
+    # Auto-add /v1 prefix if the base URL doesn't end with /v1 or /v1/...
+    # This handles proxies like CPA that expose /v1/chat/completions
+    if not (base.endswith("/v1") or "/v1/" in base.split("://", 1)[-1]):
+        url = base + "/v1/chat/completions"
+    else:
+        url = base + "/chat/completions"
     payload = {
         "model": config.model,
         "messages": [
@@ -280,7 +286,9 @@ def _call_llm(system_prompt: str, user_prompt: str, config: ExtractionConfig) ->
     resp = client.post(url, json=payload, headers=headers)
     resp.raise_for_status()
     data = resp.json()
-    return data["choices"][0]["message"]["content"]
+    msg = data["choices"][0]["message"]
+    # Claude models return reasoning in reasoning_content; content is the JSON answer
+    return msg.get("content") or msg.get("reasoning_content") or ""
 
 
 def _call_llm_urllib(
@@ -289,7 +297,11 @@ def _call_llm_urllib(
     """Fallback using stdlib urllib (no httpx)."""
     import urllib.request
 
-    url = config.base_url.rstrip("/") + "/chat/completions"
+    base = config.base_url.rstrip("/")
+    if not (base.endswith("/v1") or "/v1/" in base.split("://", 1)[-1]):
+        url = base + "/v1/chat/completions"
+    else:
+        url = base + "/chat/completions"
     payload = json.dumps({
         "model": config.model,
         "messages": [

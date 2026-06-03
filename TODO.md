@@ -108,3 +108,43 @@
 - [x] 修复 `memory_entities` 表在生产库缺失问题：当前只有旧路径 `~/.agent-memory/local-memory-mcp/memory.sqlite3` 有该表的空壳，生产库 `project/memorycore/memory.sqlite3` 虽有表但仅 78 条，需检查 entity 提取是否在写入路径中正常触发
 - [x] 对 active 记忆重新运行 entity 提取，填充 entity/alias 索引
 - [x] 运行 `memory_context` 对比测试：atomization 前后，查询 `local_memory`/`lmmcp`/端口/路径 等关键词的召回命中率变化
+
+## 性能与并发（迭代 96 后续）
+
+- [ ] `WAL checkpoint` 策略优化：当前 `wal_autocheckpoint=500` 在高频写场景下偶发短暂停顿，可改为 `PASSIVE` 模式并在低峰后台触发
+- [ ] `build_context_pack` 中 extra_records 补充查询仍用 `managed_conn`，改为 `read_conn`
+- [ ] LLM Curator job registry 无 TTL 清理：`_llm_curator_jobs` dict 会无限增长，应在 succeeded/error 后 30 分钟自动清除
+- [ ] `_write_injected_counts` / `_write_last_accessed` daemon thread 在进程退出时可能丢失最后几条写回，考虑改为共享队列 + 单写线程
+- [ ] `atomize_record` 在批量写入时产生过多独立事务（每个 child 一次），应传入 `conn` 复用事务
+
+## LLM Curator 改进（迭代 96 后续）
+
+- [ ] 语义去重：当前只做"是否重复"二分判断，应返回"保留哪个 + 合并补充信息"，对高 importance 记忆不直接归档而是合并内容
+- [ ] 拆分执行：目前 split 时子记忆 `importance` 直接继承 parent 均值，应让 LLM 对每条子记忆单独评分
+- [ ] LLM Curator 应每次随机打乱候选顺序（已实现），但还缺少"已审查记忆跳过冷却期"机制，避免同一批记忆被重复评估
+- [ ] `_find_semantic_duplicate_candidates` 对大库（>1000 条）每条都做向量搜索，O(N) Qdrant 请求；改为批量 clustering 或限制候选池
+- [ ] LLM Curator 结果面板应支持"接受/拒绝"单条 finding，而不只是全量 apply
+
+## Graph 图谱改进（迭代 96 后续）
+
+- [ ] Graph 节点标签：当前只在 hover 时显示，高 importance 节点应常驻显示 title（Three.js Sprite/CSS2DRenderer）
+- [ ] Graph 节点缺少 status 过滤（candidate/stale 节点也在图中），应加 status 筛选按钮
+- [ ] Graph 导出功能：截图保存或导出 JSON 供外部分析
+- [ ] Graph 侧边栏详情：目前只读，应支持直接编辑 importance/status
+- [ ] 图谱初始化时节点聚集在中心（3D force 模拟未收敛），应在后端预计算初始坐标或在前端增加"稳定后显示"状态
+
+## UI/UX 改进（迭代 96 后续）
+
+- [ ] 记忆列表 Created On 列支持点击排序切换 asc/desc（目前只能通过 URL 参数控制）
+- [ ] LLM Curator 面板 findings 超过 20 条时应分页或收折，避免长列表导致滚动体验差
+- [ ] Dashboard Curator Operations 卡片：Manual run 展示最多 3 条 actions，应加"查看全部"展开
+- [ ] 记忆列表 page size 选择器（当前 20，可选 50/100/全部）
+- [ ] 页面刷新后 LLM Curator job 轮询能自动恢复（已实现），但 UI 缺少"正在恢复中..."的 loading 状态提示
+
+## 测试覆盖
+
+- [ ] `test_search.py`：补充 `last_accessed_at` 异步写回的并发一致性测试
+- [ ] 补 LLM Curator job 轮询逻辑的单元测试（mock job registry）
+- [ ] Graph API `/api/graph` 补集成测试（节点数量、edge 过滤、importance 字段）
+- [ ] `extraction.py` URL 路径拼接逻辑补参数化测试（带/不带 `/v1` 前缀）
+

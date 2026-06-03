@@ -29,20 +29,49 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Cosine similarity threshold for candidate pairs fed to the LLM
-_SIM_THRESHOLD = 0.72
-# Max pairs per LLM call to keep prompts manageable
+_SIM_THRESHOLD = 0.60          # 降低：更多相似对送 LLM 判断
 _BATCH_SIZE = 10
 # Max memories evaluated for importance re-assessment per run
-_IMPORTANCE_LIMIT = 50
+_IMPORTANCE_LIMIT = 100        # 从 50 提升到 100
+# Long-content threshold: memories with content > this many chars are candidates for splitting
+_SPLIT_CONTENT_THRESHOLD = 400
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _call_llm(prompt: str, system: str, config: Any) -> str:
+def _call_llm_with_thinking(prompt: str, system: str, config: Any) -> tuple[str, str]:
+    """Call LLM and return (json_content, thinking).
+
+    DeepSeek v3 and R1 wrap chain-of-thought in <think>...</think> before the JSON.
+    Claude returns markdown-fenced JSON (```json...```).
+    We extract thinking separately and return the clean JSON string.
+    """
     from memorycore.extraction import _call_llm as _base_call
-    return _base_call(system, prompt, config)
+    import re as _re
+    raw = _base_call(system, prompt, config)
+    # Extract <think>...</think> block if present
+    thinking_match = _re.search(r"<think>(.*?)</think>", raw, _re.DOTALL)
+    thinking = thinking_match.group(1).strip() if thinking_match else ""
+    # Strip thinking block from the JSON content
+    content = _re.sub(r"<think>.*?</think>", "", raw, flags=_re.DOTALL).strip()
+    # Strip markdown code fences: ```json...``` or ```...```
+    fence_match = _re.search(r"```(?:json)?\s*([\s\S]*?)```", content)
+    if fence_match:
+        content = fence_match.group(1).strip()
+    # If still not clean JSON, try to find the outermost { ... }
+    if not content.startswith("{"):
+        start = content.find("{")
+        end = content.rfind("}") + 1
+        if start >= 0 and end > start:
+            content = content[start:end]
+    return content, thinking
+
+
+def _call_llm(prompt: str, system: str, config: Any) -> str:
+    content, _ = _call_llm_with_thinking(prompt, system, config)
+    return content
 
 
 def _load_extraction_config(config: dict[str, Any]) -> Any:
@@ -161,7 +190,7 @@ def _llm_judge_duplicates(
         )
         prompt = f"Evaluate these memory pairs for semantic duplication:{items_text}"
         try:
-            raw = _call_llm(prompt, system, llm_config)
+            raw, thinking = _call_llm_with_thinking(prompt, system, llm_config)
             data = json.loads(raw)
             for item in data.get("results", []):
                 idx = item.get("index", 0)
@@ -182,6 +211,9 @@ def _llm_judge_duplicates(
                         "reason": item.get("reason", "semantic duplicate"),
                         "keep_title": a["title"] if keep_id == a["id"] else b["title"],
                         "drop_title": b["title"] if drop_id == b["id"] else a["title"],
+                        "llm_thinking": thinking,
+                        "llm_raw": raw,
+                        "llm_prompt": prompt,
                     })
         except Exception as exc:
             logger.warning("LLM duplicate judgement failed: %s", exc)
@@ -269,7 +301,7 @@ def _llm_judge_contradictions(
         )
         prompt = f"Check these memory pairs for contradictions:{items_text}"
         try:
-            raw = _call_llm(prompt, system, llm_config)
+            raw, thinking = _call_llm_with_thinking(prompt, system, llm_config)
             data = json.loads(raw)
             for item in data.get("results", []):
                 idx = item.get("index", 0)
@@ -287,6 +319,9 @@ def _llm_judge_contradictions(
                         "reason": item.get("reason", "semantic contradiction"),
                         "newer_title": a["title"] if newer_id == a["id"] else b["title"],
                         "older_title": b["title"] if older_id == b["id"] else a["title"],
+                        "llm_thinking": thinking,
+                        "llm_raw": raw,
+                        "llm_prompt": prompt,
                     })
         except Exception as exc:
             logger.warning("LLM contradiction judgement failed: %s", exc)
@@ -325,7 +360,7 @@ def _llm_reassess_importance(
         )
         prompt = f"Re-evaluate the long-term importance of these memories:\n{items_text}"
         try:
-            raw = _call_llm(prompt, system, llm_config)
+            raw, thinking = _call_llm_with_thinking(prompt, system, llm_config)
             data = json.loads(raw)
             for item in data.get("results", []):
                 idx = item.get("index", 0)
@@ -344,6 +379,9 @@ def _llm_reassess_importance(
                     "old_importance": m.get("importance", 0.5),
                     "new_importance": new_imp,
                     "reason": item.get("reason", ""),
+                    "llm_thinking": thinking,
+                    "llm_raw": raw,
+                    "llm_prompt": prompt,
                 })
         except Exception as exc:
             logger.warning("LLM importance reassessment failed: %s", exc)
@@ -351,8 +389,59 @@ def _llm_reassess_importance(
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# 4. Long-content split detection
 # ---------------------------------------------------------------------------
+
+def _llm_detect_splittable(
+    memories: list[dict[str, Any]],
+    llm_config: Any,
+) -> list[dict[str, Any]]:
+    """Ask LLM to identify memories whose content bundles multiple distinct facts
+    that would be better stored as separate atomic memories."""
+    results = []
+    for i in range(0, len(memories), _BATCH_SIZE):
+        batch = memories[i: i + _BATCH_SIZE]
+        items_text = ""
+        for idx, m in enumerate(batch):
+            items_text += (
+                f"\n[{idx}] id={m['id'][:8]} type={m.get('type')}\n"
+                f"  title: {m.get('title')!r}\n"
+                f"  content ({len(m.get('content',''))} chars): {m.get('content', '')[:400]!r}\n"
+            )
+        system = (
+            "You are a memory curator. Identify memories whose content contains multiple "
+            "distinct, separable facts that would be more useful as individual atomic memories. "
+            "Only flag genuinely compound memories (2+ clearly distinct facts bundled together). "
+            "For each splittable memory, propose 2-4 concise atomic sub-memories as plain text. "
+            "Return JSON with key 'results': list of "
+            "{'index': int, 'splittable': bool, 'reason': str ≤20 words, "
+            "'sub_memories': [{'title': str, 'content': str}]}. "
+            "If a memory is already atomic or splitting would lose context, set splittable=false."
+        )
+        prompt = f"Analyse these memories for split opportunities:{items_text}"
+        try:
+            raw, thinking = _call_llm_with_thinking(prompt, system, llm_config)
+            data = json.loads(raw)
+            for item in data.get("results", []):
+                idx = item.get("index", 0)
+                if not isinstance(idx, int) or idx >= len(batch):
+                    continue
+                if not item.get("splittable"):
+                    continue
+                m = batch[idx]
+                results.append({
+                    "action": "split",
+                    "id": m["id"],
+                    "title": m.get("title"),
+                    "reason": item.get("reason", "compound memory"),
+                    "sub_memories": item.get("sub_memories", []),
+                    "llm_thinking": thinking,
+                    "llm_raw": raw,
+                    "llm_prompt": prompt,
+                })
+        except Exception as exc:
+            logger.warning("LLM split detection failed: %s", exc)
+    return results
 
 def llm_curator_report(
     config: dict[str, Any] | None = None,
@@ -406,30 +495,44 @@ def llm_curator_report(
     else:
         errors.append("Vector store not available — skipping semantic dedup and contradiction detection")
 
-    # --- Importance re-evaluation (no vector store needed) ---
+    # --- Importance re-evaluation — ALL active memories sampled, not just edge cases ---
     importance_reassessments: list[dict] = []
     try:
-        candidates = [
-            m for m in memories
-            if m.get("injected_count", 0) == 0
-            or m.get("feedback_score", 0) < -0.5
-            or m.get("importance", 0.5) > 0.8
-        ][:_IMPORTANCE_LIMIT]
+        # Sample broadly: rotate through all memories so every memory gets reviewed over time
+        import random as _random
+        all_candidates = list(memories)
+        _random.shuffle(all_candidates)
+        candidates = all_candidates[:_IMPORTANCE_LIMIT]
         if candidates:
             importance_reassessments = _llm_reassess_importance(candidates, llm_config)
     except Exception as exc:
         errors.append(f"Importance reassessment failed: {exc}")
         logger.warning("importance reassessment error: %s", exc)
 
+    # --- Long-content split detection ---
+    split_candidates: list[dict] = []
+    try:
+        long_memories = [
+            m for m in memories
+            if len(m.get("content", "")) > _SPLIT_CONTENT_THRESHOLD
+        ][:20]  # up to 20 long memories per run
+        if long_memories:
+            split_candidates = _llm_detect_splittable(long_memories, llm_config)
+    except Exception as exc:
+        errors.append(f"Split detection failed: {exc}")
+        logger.warning("split detection error: %s", exc)
+
     return {
         "semantic_duplicates": semantic_duplicates,
         "contradictions": contradictions,
         "importance_reassessments": importance_reassessments,
+        "split_candidates": split_candidates,
         "errors": errors,
         "summary": {
             "semantic_duplicates": len(semantic_duplicates),
             "contradictions": len(contradictions),
             "importance_reassessments": len(importance_reassessments),
+            "split_candidates": len(split_candidates),
         },
     }
 
@@ -489,6 +592,53 @@ def apply_llm_curator(report: dict[str, Any], dry_run: bool = True) -> dict[str,
                         (new_imp, now_ts, mem_id),
                     )
                 applied["importance_updated"] += 1
+
+        # Apply split operations: create sub-memories and archive the original
+        applied["split"] = 0
+        for split in report.get("split_candidates", []):
+            orig_id = split.get("id")
+            sub_memories = split.get("sub_memories", [])
+            if not orig_id or not sub_memories:
+                continue
+            # Get original for metadata inheritance
+            orig_row = conn.execute("SELECT * FROM memories WHERE id=?", (orig_id,)).fetchone()
+            if not orig_row:
+                continue
+            from memorycore.models import row_to_dict, now as _now_fn
+            orig = row_to_dict(orig_row)
+            # Archive original
+            conn.execute(
+                "UPDATE memories SET status='archived', updated_at=? WHERE id=?",
+                (now_ts, orig_id),
+            )
+            # Create sub-memories
+            import uuid as _uuid
+            for sub in sub_memories:
+                sub_title = str(sub.get("title") or "")[:120].strip()
+                sub_content = str(sub.get("content") or "").strip()
+                if not sub_title or not sub_content:
+                    continue
+                sub_id = str(_uuid.uuid4())
+                conn.execute(
+                    """INSERT INTO memories
+                       (id,type,scope,title,content,tags_json,source,source_agent,project_path,
+                        created_at,updated_at,confidence,importance,status,decay_policy,
+                        related_ids_json,metadata_json,valid_from,valid_until)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        sub_id, orig.get("type", "project_memory"), orig.get("scope", "global"),
+                        sub_title, sub_content,
+                        orig.get("tags_json", "[]"), "llm_curator", "llm_curator",
+                        orig.get("project_path", ""),
+                        now_ts, now_ts,
+                        float(orig.get("confidence", 0.7)), float(orig.get("importance", 0.5)),
+                        "active", orig.get("decay_policy", "review"),
+                        "[]",
+                        '{"kind":"atomic_fact","parent_id":"' + orig_id + '"}',
+                        None, None,
+                    ),
+                )
+            applied["split"] += 1
 
     from memorycore.storage.audit import log_audit_event
     log_audit_event("llm_curator_apply", detail={**applied, "dry_run": False})

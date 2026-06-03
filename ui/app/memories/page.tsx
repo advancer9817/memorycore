@@ -17,7 +17,9 @@ export default function MemoriesPage() {
     if (!searchParams.has("page") || !searchParams.has("size")) {
       const params = new URLSearchParams(searchParams.toString());
       if (!searchParams.has("page")) params.set("page", "1");
-      if (!searchParams.has("size")) params.set("size", "10");
+      if (!searchParams.has("size")) params.set("size", "20");
+      if (!searchParams.has("sort")) params.set("sort", "created_at");
+      if (!searchParams.has("dir")) params.set("dir", "desc");
       router.push(`?${params.toString()}`);
     }
   }, []);

@@ -64,6 +64,7 @@ import uuid
 
 _llm_curator_jobs: dict[str, dict] = {}  # job_id -> {status, result, error}
 _llm_curator_lock = threading.Lock()
+_latest_llm_job_id: list[str] = []  # single-element list used as mutable container
 
 
 def _run_llm_curator_job(job_id: str, cfg: Any, limit: int, sim_threshold: float, apply: bool) -> None:
@@ -272,7 +273,8 @@ async def _dispatch_api(request: Request, parts: list[str], query: dict[str, lis
         apply = not body.get("dry_run", True)
         job_id = str(uuid.uuid4())
         with _llm_curator_lock:
-            _llm_curator_jobs[job_id] = {"status": "running"}
+            _llm_curator_jobs[job_id] = {"status": "running", "job_id": job_id}
+            _latest_llm_job_id[:] = [job_id]
         t = threading.Thread(
             target=_run_llm_curator_job,
             args=(job_id, cfg, int(body.get("limit", 200)), float(body.get("sim_threshold", 0.72)), apply),
@@ -281,6 +283,13 @@ async def _dispatch_api(request: Request, parts: list[str], query: dict[str, lis
         )
         t.start()
         return {"job_id": job_id, "status": "running"}
+    if parts == ["curator", "llm", "latest"] and method == "GET":
+        with _llm_curator_lock:
+            job_id = _latest_llm_job_id[0] if _latest_llm_job_id else None
+            job = _llm_curator_jobs.get(job_id) if job_id else None
+        if job is None:
+            return {"status": "idle", "job_id": None}
+        return {**job, "job_id": job_id}
     if len(parts) == 3 and parts[:2] == ["curator", "llm"] and method == "GET":
         job_id = parts[2]
         with _llm_curator_lock:
@@ -364,40 +373,75 @@ def _dispatch_v1_compat(
         or (parts == ["memories", "filter"] and method in {"GET", "POST"})
     ):
         page = int(body.get("page", _int_q(query, "page", 1)) or 1)
-        size = int(body.get("size", _int_q(query, "size", _int_q(query, "page_size", 10))) or 10)
+        size = int(body.get("size", _int_q(query, "size", _int_q(query, "page_size", 20))) or 20)
         search_query = body.get("search_query") if method == "POST" else None
         search_query = search_query if search_query is not None else _str_q(query, "query", _str_q(query, "q", ""))
         show_archived = bool(body.get("show_archived", False)) if method == "POST" else _bool_q(query, "show_archived", False)
         status = "" if show_archived else _str_q(query, "status", "active")
-        rows = search_memory_records(
-            query=_str_q(query, "query", _str_q(query, "q", "")),
-            types=_list_q(query, "type") or _list_q(query, "types"),
-            scope=_str_q(query, "scope", ""),
-            project_path=_str_q(query, "project_path", ""),
-            tags=_list_q(query, "tag") or _list_q(query, "tags"),
-            status=status,
-            limit=max(size * page, _int_q(query, "limit", 50)),
-        )
+        app_ids = body.get("app_ids") or []
+        category_ids = body.get("category_ids") or []
+        sort_column = str(body.get("sort_column") or "created_at")
+        sort_direction = str(body.get("sort_direction") or "desc").lower()
+
+        # Fetch enough rows to paginate correctly: if no filters, get true total from DB
+        has_filters = bool(search_query or app_ids or category_ids)
+        if has_filters:
+            # With filters: fetch all matching, paginate in Python
+            fetch_limit = 5000
+        else:
+            # No filters: get true total count first, then only fetch the page we need
+            from memorycore.storage.db import read_conn as _rc
+            import sqlite3 as _sqlite3
+            _status_clause = "AND status = 'active'" if status == "active" else ("AND status != 'archived'" if not show_archived else "")
+            with _rc() as _conn:
+                true_total = _conn.execute(
+                    f"SELECT COUNT(*) FROM memories WHERE 1=1 {_status_clause}"
+                ).fetchone()[0]
+            fetch_limit = size  # only fetch the page we need
+
         if search_query:
             rows = search_memory_records(
                 query=str(search_query),
                 status=status,
-                limit=max(size * page, 50),
+                limit=fetch_limit if has_filters else max(size * page, 50),
             )
-        app_ids = body.get("app_ids") or []
-        category_ids = body.get("category_ids") or []
+        else:
+            rows = search_memory_records(
+                query="",
+                types=_list_q(query, "type") or _list_q(query, "types"),
+                scope=_str_q(query, "scope", ""),
+                project_path=_str_q(query, "project_path", ""),
+                tags=_list_q(query, "tag") or _list_q(query, "tags"),
+                status=status,
+                limit=fetch_limit if has_filters else 5000,
+            )
         if app_ids:
             app_set = {str(item) for item in app_ids}
             rows = [row for row in rows if str(row.get("source_agent") or "manual") in app_set]
         if category_ids:
             cat_set = {str(item) for item in category_ids}
             rows = [row for row in rows if cat_set.intersection({str(tag) for tag in row.get("tags", [])})]
-        sort_column = str(body.get("sort_column") or "created_at")
-        sort_direction = str(body.get("sort_direction") or "desc").lower()
         rows.sort(key=lambda row: str(row.get(sort_column) or row.get("created_at") or ""), reverse=sort_direction != "asc")
-        total = len(rows)
+
+        if has_filters:
+            total = len(rows)
+        else:
+            total = true_total  # type: ignore[possibly-undefined]
         start = max(page - 1, 0) * size
-        page_rows = rows[start:start + size]
+        page_rows = rows[start:start + size] if has_filters else rows[:size]
+        if not has_filters:
+            # For no-filter case, fetch just the page from DB directly
+            from memorycore.storage.db import read_conn as _rc2
+            _status_clause2 = "AND status = 'active'" if status == "active" else ("AND status != 'archived'" if not show_archived else "")
+            _sort_col = sort_column if sort_column in ("created_at", "updated_at", "importance", "feedback_score") else "created_at"
+            _sort_dir = "ASC" if sort_direction == "asc" else "DESC"
+            from memorycore.models import row_to_dict as _rtd
+            with _rc2() as _conn:
+                _rows = _conn.execute(
+                    f"SELECT * FROM memories WHERE 1=1 {_status_clause2} ORDER BY {_sort_col} {_sort_dir} LIMIT ? OFFSET ?",
+                    (size, start),
+                ).fetchall()
+            page_rows = [_rtd(r) for r in _rows]
         return {
             "items": [_memory_item(row) for row in page_rows],
             "total": total,
@@ -838,14 +882,14 @@ def _check_origin(request: Request) -> Response | None:
 
 
 def _graph_payload(limit: int = 500) -> dict[str, Any]:
-    from memorycore.storage.db import managed_conn
+    from memorycore.storage.db import read_conn
 
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
 
-    with managed_conn() as conn:
+    with read_conn() as conn:
         rows = conn.execute(
-            "SELECT id, title, type, status FROM memories WHERE status IN ('active','candidate') LIMIT ?",
+            "SELECT id, title, type, status, importance, feedback_score, injected_count FROM memories WHERE status IN ('active','candidate') LIMIT ?",
             (limit,),
         ).fetchall()
         for row in rows:
@@ -854,6 +898,9 @@ def _graph_payload(limit: int = 500) -> dict[str, Any]:
                 "title": (row[1] or "")[:80],
                 "type": row[2] or "unknown",
                 "status": row[3] or "active",
+                "importance": round(float(row[4] or 0.5), 2),
+                "feedback_score": round(float(row[5] or 0.0), 2),
+                "injected_count": int(row[6] or 0),
             })
 
         link_rows = conn.execute(

@@ -2426,3 +2426,74 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 - 新增 `ui/app/graph/page.tsx`：顶栏显示节点/边计数 + 搜索框，图例按 type 着色、按 relation_type 区分边样式
 - 新增 `ui/app/graph/ForceGraph.tsx`：`ssr: false` dynamic import，canvas 自定义渲染，点击节点跳转 `/memory/{id}`，支持缩放/拖拽/搜索高亮
 - 验证：`/api/graph` 返回 351 nodes / 292 edges，build 无错误
+
+## [迭代 96] 2026-06-04 — 全链路性能优化 + Graph 交互升级 + LLM Curator 修复
+
+### 变更
+
+**性能优化 — 数据库读写分离**
+- `storage/db.py`：新增 `read_conn()` 上下文管理器，只读路径不再持有写锁、不触发 commit
+- `_managed_query()` 改用 `read_conn`；`search_memory_records`、`entity_search`、`query_links`、`handoff` 路由检查、`dashboard`、`get_audit_log`、`get_context_quality_stats` 均改为只读连接
+- `curator.py`：15 次独立 `_managed_query` 合并为 1 次全量读 + Python 侧过滤，DB 往返 15→1
+- `search.py`：FTS/向量/实体三路检索并发化（`ThreadPoolExecutor(3)`），检索耗时从串行 sum 降至并行 max
+
+**性能优化 — 异步写回**
+- `search.py`：`last_accessed_at` 更新、`injected_count` 更新、`context_quality_events` 写入全部 offload 到 daemon thread，检索路径无阻塞写
+- `audit.py`：`log_audit_event` 改为 daemon thread，返回可 join 的 Thread；`apply_llm_curator` 后 rebuild_vectors 异步执行
+- `crud.py`：`_sync_to_vector`（Qdrant upsert）改为 daemon thread，DB 写入不再等待 Qdrant RTT（10-100ms）
+
+**性能优化 — 连接池与缓存**
+- `models.py`：`load_config()` 添加 mtime 缓存，冷调用 2ms → 缓存命中 0.06ms（34x speedup）；新增 `invalidate_config_cache()`
+- `extraction.py`：httpx 客户端改为模块级连接池（keep-alive 4）
+- `vector_store.py`：`_embed_ollama` / `_embed_openai` 改为模块级 httpx 连接池
+- `storage/rollup.py`：source memories 归档从逐条 `update_status` 改为 `update_status_batch`（单事务）
+- `storage/transfer.py`：`rebuild_vectors` 循环内单次 `load_config()` + 单次 `get_vector_store()`，消除 N 次磁盘 IO
+- `server.py`：`memory_ingest` 超时机制从 `ThreadPoolExecutor(max_workers=1)` 改为 `threading.Thread + join(timeout)`
+- `crud.py`：`list_recent`、`get_record`、`get_memory_stats` 改用 `read_conn`
+
+**Graph 页面重构**
+- 后端 `/api/graph` 节点新增 `importance`、`feedback_score`、`injected_count` 字段（改用 `read_conn`）
+- 新增 `ui/app/graph/types.ts`：统一类型定义，解决 page.tsx 命名导出与 Next.js 约束冲突
+- 交互式类型筛选：点击类型标签切换，带颜色圆点和高亮背景
+- 交互式链接类型筛选：按 relation_type 显示/隐藏边
+- 节点大小按 importance：`nodeVal = 1 + importance * 3`，直观区分重要程度
+- 重要节点（importance ≥ 0.7）变为琥珀金色，带半透明光晕球
+- Hover tooltip 增强：显示类型、标题、importance、注入次数
+- contradicts/supersedes 边添加流动粒子效果
+- 点击节点不再跳转，改为右侧弹出详情面板（type badge、重要性进度条、4 项统计卡片、跳转链接）
+- 右上角「★ 重要记忆」按钮，一键只显示高 importance 节点
+- 节点/链接计数实时显示过滤后数量
+- 三路检索并发改写 `Graph3D.tsx`，筛选变化重渲染图数据
+
+**记忆列表修复**
+- 默认 page size 10→20；默认排序 `created_at DESC`
+- 后端 `v1/memories/filter`：区分有筛选（Python 侧全量排序）与无筛选（先 COUNT(*) 获取真实总数，再 LIMIT/OFFSET 按需取页）；total 不再受 limit 截断影响（原本 50 条，现在返回真实 298 条）
+
+**LLM Curator 全面升级**
+- 语义相似阈值 0.72→0.60，更多相似对送 LLM 审查
+- 重要性重评候选从"仅边缘记忆"改为随机抽样全库（每次 100 条轮换）
+- 新增"长内容拆分"能力：content > 400 字符的记忆送 LLM 判断是否可拆分为原子事实，每次最多 20 条
+- `apply_llm_curator`：split 操作执行时归档原始记忆并创建子记忆（继承 type/scope/project_path，标记 `parent_id`）
+- `POST /curator/llm` 改为非阻塞，立即返回 `job_id`；新增 `GET /curator/llm/{job_id}` 轮询 + `GET /curator/llm/latest` 获取最新 job
+- 前端：2s 间隔轮询至完成，job_id 存 localStorage 支持刷新恢复；mount 时检查 `/curator/llm/latest` 自动接回运行中的 job
+- 计时器从 500ms 更新改为 100ms，流畅度提升 5x
+- UI 显示 4 格：重复/矛盾/重评/拆分；显示 errors 警告栏；每个 finding 可展开查看 LLM 原话/思考过程/Prompt
+
+**LLM 连通性修复（关键）**
+- `extraction.py`：URL 路径从 `/chat/completions` 修为 `/v1/chat/completions`（CPA 代理正确路径），修复导致所有 LLM 调用 404 失败的静默错误
+- `storage/curator_llm.py`：新增 `_call_llm_with_thinking()`，剥离 markdown code fence（Claude 返回 ` ```json...``` `），提取 `<think>...</think>` 思考内容，兜底提取 `{...}` JSON
+- `config.yaml`：`max_tokens` 2000→8000，解决中文长 reason 输出截断问题
+- 修复后验证：reassessment 从 0 提升至每批 4+ 条
+
+**Dashboard 布局重构**
+- Curator Schedule 从占半屏大卡片改为顶部紧凑横排信息条（Timer/Last run/Next run/Result 一行）
+- Curator Dry Run 改为全宽 Curator Operations 卡片，两按钮并排放置
+
+### 修复
+
+- `conftest.py`：`sync_audit` autouse fixture 在测试中对所有模块同步 patch `log_audit_event`，解决异步写回导致 audit 相关测试 race condition
+- `tests/test_search.py`：`last_accessed_at` 异步写回后加 `time.sleep(0.15)` 等待
+- `tests/test_audit.py`：log 后 `.join()` 确认写入再读取
+- `tests/test_deployment.py`：包名从 `local-memory-mcp` 更新为 `memorycore`
+- `3d-force-graph` npm 依赖补装（上游 ubuntu 提交引入但未 pnpm install）
+

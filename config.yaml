@@ -17,9 +17,9 @@ embedding:
   timeout: 30
 extraction:
   api_key: sk
-  base_url: http://127.0.0.1:8317/v1
-  max_tokens: 2000
-  model: gpt-5.5
+  base_url: http://127.0.0.1:8317
+  max_tokens: 8000
+  model: claude-sonnet-4-6
   temperature: 0.1
   timeout: 180
 qdrant:
