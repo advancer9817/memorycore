@@ -2399,3 +2399,30 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 **新增：`useAppsApi` deleteApp 方法**
 - `ui/hooks/useAppsApi.ts`：新增 `deleteApp(appId)` — 调用 `DELETE /api/v1/apps/{id}`，完成后刷新列表（当前不在 UI 中使用，供后续需要时调用）
+
+---
+
+## 迭代 37 — 2026-06-03
+
+### 完成内容
+
+**Atomization Backfill（数据质量）**
+- 对 active 历史长记忆执行 `memory_atomize_report(dry_run=false, limit=500)`
+- 20 条长记忆拆分为 139 条 atomic child facts，建立 278 条 parent/child links（`part_of` + `supports`）
+- `memory_vector_audit` 检测到 4 条缺失 Qdrant 向量，已自动重建
+- 生产库 `memory_entities` 表确认已有 1362 条（entity 提取在写入路径正常工作）
+- `memory_context` 对比验证：带 `atomic_fact` tag 的 child facts 已进入召回结果
+
+**UI 风格重构 — Claude 设计语言**
+- `app/globals.css`：`--primary` 改为 Claude 橙 `#DA7756`，`--background` 改为暖纸色 `#F5F0E8`，`--card` 改为白色，`--border` 改为暖灰，`--radius` 改为 `0.75rem`，字体改为 Inter
+- `layout.tsx`：去掉 `bg-zinc-950`，`defaultTheme` 改为 `light`
+- `Navbar.tsx`：白底 + 细线分隔，导航改为 `ghost` button + hover 下划线；新增 Graph 入口
+- `Install.tsx`：stat 数字改为 `text-primary`（Claude 橙），所有 `zinc-9xx` 改为语义 token
+- 全站：批量将 `text-white`、`bg-zinc-9xx`、`border-zinc-8xx` 等硬编码替换为语义 CSS 变量
+
+**记忆图谱可视化 — /graph 页面**
+- 后端 `frontend.py` 新增 `GET /api/graph` 端点，返回 `{nodes, edges}`（active + candidate 记忆 + memory_links）
+- 安装 `react-force-graph 1.48.2`
+- 新增 `ui/app/graph/page.tsx`：顶栏显示节点/边计数 + 搜索框，图例按 type 着色、按 relation_type 区分边样式
+- 新增 `ui/app/graph/ForceGraph.tsx`：`ssr: false` dynamic import，canvas 自定义渲染，点击节点跳转 `/memory/{id}`，支持缩放/拖拽/搜索高亮
+- 验证：`/api/graph` 返回 351 nodes / 292 edges，build 无错误
