@@ -2373,3 +2373,29 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 - `ui/package.json`：`next dev` → `next dev --port 18318`
 - `ui/playwright.config.ts`：默认端口 `3000` → `18318`
 - `scripts/mcore-ui.service`：ExecStart 改为 `next dev --port __UI_PORT__`
+
+## [迭代 95] 2026-06-03 — App 详情页记忆操作 + Last Activity 修复
+
+### 变更
+
+**新增：App 详情页每条记忆的删除和编辑功能**
+- `ui/app/apps/[appId]/components/MemoryCard.tsx`：新增 `onDelete` / `onEdit` 可选 prop；hover 时显示铅笔（编辑）和垃圾桶（删除）图标按钮；删除有 AlertDialog 二次确认弹窗
+- `ui/app/apps/[appId]/page.tsx`：
+  - `handleDelete`：调用 `deleteMemories()`，删后刷新记忆列表和详情；若该 agent 所有记忆删完则自动跳回 `/apps`
+  - `handleEdit`：调用 `handleOpenUpdateMemoryDialog()`，挂载 `<UpdateMemory>` 弹窗
+  - Created / Accessed tab 均传入 `onDelete`，Created tab 额外传入 `onEdit`
+
+**修复：App 详情页 "Invalid Date" 显示**
+- MemoryCard 原先对 `created_at` 盲目追加 `Z`（`created_at + "Z"`），导致已含时区的 ISO 字符串（如 `+08:00`）变成非法日期
+- 新增 `formatCreatedAt()` 直接用 `new Date(value)` 解析，自动处理任意 RFC3339 格式
+
+**修复：Apps 列表 "Last Activity Unknown"**
+- `ui/app/apps/components/AppGrid.tsx` `formatActivity()` 同样存在 `endsWith("Z") ? value : value+"Z"` 问题
+- 直接 `new Date(value)` 解析，移除条件拼接逻辑
+
+**回退：Apps 列表整体删除按钮**
+- 上一次误将删除按钮加在 App 列表行级，本次回退，行为改为点击整行跳转详情（原有行为）
+- 后端新增的 `DELETE /api/v1/apps/{appId}` 端点和 `_delete_app_memories()` 保留备用
+
+**新增：`useAppsApi` deleteApp 方法**
+- `ui/hooks/useAppsApi.ts`：新增 `deleteApp(appId)` — 调用 `DELETE /api/v1/apps/{id}`，完成后刷新列表（当前不在 UI 中使用，供后续需要时调用）

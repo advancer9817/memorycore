@@ -58,6 +58,7 @@ interface UseAppsApiReturn {
   fetchAppMemories: (appId: string, page?: number, pageSize?: number) => Promise<void>;
   fetchAppAccessedMemories: (appId: string, page?: number, pageSize?: number) => Promise<void>;
   updateAppDetails: (appId: string, details: { is_active: boolean }) => Promise<void>;
+  deleteApp: (appId: string) => Promise<{ archived_count: number }>;
   isLoading: boolean;
   error: string | null;
 }
@@ -185,12 +186,34 @@ export const useAppsApi = (): UseAppsApiReturn => {
     }
   };
 
+  const deleteApp = useCallback(async (appId: string): Promise<{ archived_count: number }> => {
+    setIsLoading(true);
+    try {
+      const response = await axios.delete<{ archived_count: number }>(
+        `${getApiBaseUrl()}/api/v1/apps/${appId}`
+      );
+      dispatch(setAppsSuccess(
+        (await axios.get<ApiResponse>(
+          `${getApiBaseUrl()}/api/v1/apps/?page_size=100`
+        )).data.apps
+      ));
+      setIsLoading(false);
+      return response.data;
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to delete app';
+      setError(errorMessage);
+      setIsLoading(false);
+      throw new Error(errorMessage);
+    }
+  }, [dispatch]);
+
   return {
     fetchApps,
     fetchAppDetails,
     fetchAppMemories,
     fetchAppAccessedMemories,
     updateAppDetails,
+    deleteApp,
     isLoading,
     error
   };

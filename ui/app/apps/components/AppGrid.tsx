@@ -22,7 +22,7 @@ import { AppCardSkeleton } from "@/skeleton/AppCardSkeleton";
 
 function formatActivity(value?: string) {
   if (!value) return "Never";
-  const date = new Date(value.endsWith("Z") ? value : `${value}Z`);
+  const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Unknown";
   return date.toLocaleString("en-US", {
     month: "short",

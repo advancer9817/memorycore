@@ -446,6 +446,8 @@ def _dispatch_v1_compat(
         return {"memories": [_memory_item(row) for row in rows], "total": len(rows), "page": page, "page_size": page_size}
     if len(parts) == 3 and parts[0] == "apps" and parts[2] == "accessed" and method == "GET":
         return {"memories": [], "total": 0, "page": _int_q(query, "page", 1), "page_size": _int_q(query, "page_size", 50)}
+    if len(parts) == 2 and parts[0] == "apps" and method == "DELETE":
+        return _delete_app_memories(parts[1])
     if len(parts) == 2 and parts[0] == "apps" and method == "PUT":
         return _app_details(parts[1])
     if parts == ["config"] and method == "GET":
@@ -647,6 +649,13 @@ def _app_details(app_id: str) -> dict[str, Any]:
         "first_accessed": None,
         "last_accessed": None,
     }
+
+
+def _delete_app_memories(app_id: str) -> dict[str, Any]:
+    rows = search_memory_records(status="active", limit=10000)
+    target_ids = [row["id"] for row in rows if (row.get("source_agent") or "manual") == app_id]
+    archived = [update_status(str(memory_id), "archived") for memory_id in target_ids]
+    return {"app_id": app_id, "archived_count": len(archived), "archived_ids": [item["id"] for item in archived]}
 
 
 def _systemctl_user_show(unit: str, properties: list[str]) -> dict[str, str]:

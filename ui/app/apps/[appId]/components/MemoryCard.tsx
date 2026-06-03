@@ -1,17 +1,46 @@
-import { ArrowRight } from "lucide-react";
+"use client";
+
+import { useState } from "react";
+import { Edit, Trash2 } from "lucide-react";
 import Categories from "@/components/shared/categories";
 import Link from "next/link";
 import { constants } from "@/components/shared/source-app";
 import Image from "next/image";
+import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
 interface MemoryCardProps {
   id: string;
   content: string;
   created_at: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   categories?: string[];
   access_count?: number;
   app_name: string;
   state: string;
+  onDelete?: (id: string) => void;
+  onEdit?: (id: string) => void;
+}
+
+function formatCreatedAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+  });
 }
 
 export function MemoryCard({
@@ -23,14 +52,17 @@ export function MemoryCard({
   access_count,
   app_name,
   state,
+  onDelete,
+  onEdit,
 }: MemoryCardProps) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const appConfig =
     constants[app_name as keyof typeof constants] || constants.default;
   const appLabel =
     constants[app_name as keyof typeof constants]?.name || app_name || appConfig.name;
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900 overflow-hidden">
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900 overflow-hidden group">
       <div className="p-4">
         <div className="border-l-2 border-primary pl-4 mb-4">
           <p
@@ -53,7 +85,7 @@ export function MemoryCard({
 
         <div className="mb-2">
           <Categories
-            categories={categories as any}
+            categories={categories as string[]}
             isPaused={state !== "active"}
           />
         </div>
@@ -66,13 +98,7 @@ export function MemoryCard({
                   Accessed {access_count} times
                 </span>
               ) : (
-                new Date(created_at + "Z").toLocaleDateString("en-US", {
-                  year: "numeric",
-                  month: "short",
-                  day: "numeric",
-                  hour: "numeric",
-                  minute: "numeric",
-                })
+                formatCreatedAt(created_at)
               )}
             </span>
 
@@ -83,17 +109,41 @@ export function MemoryCard({
             )}
           </div>
 
-          {!app_name && (
-            <Link
-              href={`/memory/${id}`}
-              className="hover:cursor-pointer bg-zinc-800 hover:bg-zinc-700 flex items-center px-3 py-1 text-sm rounded-lg text-white p-0 hover:text-white"
-            >
-              View Details
-              <ArrowRight className="ml-2 h-4 w-4" />
-            </Link>
-          )}
-          {app_name && (
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
+            {(onEdit || onDelete) && (
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                {onEdit && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-zinc-500 hover:text-primary"
+                    onClick={() => onEdit(id)}
+                  >
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                )}
+                {onDelete && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-zinc-500 hover:text-red-400"
+                    onClick={() => setConfirmDelete(true)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {!app_name && (
+              <Link
+                href={`/memory/${id}`}
+                className="hover:cursor-pointer bg-zinc-800 hover:bg-zinc-700 flex items-center px-3 py-1 text-sm rounded-lg text-white p-0 hover:text-white"
+              >
+                View Details
+              </Link>
+            )}
+            {app_name && (
               <div className="flex items-center gap-1 bg-zinc-700 px-3 py-1 rounded-lg">
                 <span className="text-sm text-zinc-400">Created by:</span>
                 <div className="w-5 h-5 rounded-full bg-zinc-700 flex items-center justify-center overflow-hidden">
@@ -108,10 +158,35 @@ export function MemoryCard({
                   {appLabel}
                 </p>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
+
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent className="bg-zinc-900 border-zinc-800">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white">Delete this memory?</AlertDialogTitle>
+            <AlertDialogDescription className="text-zinc-400">
+              This will archive the memory. This action cannot be easily undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={() => {
+                onDelete?.(id);
+                setConfirmDelete(false);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
