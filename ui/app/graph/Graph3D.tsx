@@ -1,8 +1,7 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { ForceGraph3D } from "react-force-graph";
 
 const TYPE_COLORS: Record<string, string> = {
   project_memory: "#DA7756",
@@ -38,7 +37,6 @@ interface GraphLink {
   target: string;
   relation_type: string;
   weight: number;
-  color?: string;
 }
 
 interface Props {
@@ -50,69 +48,78 @@ interface Props {
 }
 
 export default function Graph3D({ nodes, links, search, width, height }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const graphRef = useRef<any>(null);
   const router = useRouter();
 
-  const graphData = {
-    nodes: nodes.map((n) => ({ ...n })),
-    links: links.map((l) => ({
-      ...l,
-      color: EDGE_COLORS[l.relation_type] ?? EDGE_COLORS.related_to,
-    })),
-  };
+  useEffect(() => {
+    if (!containerRef.current) return;
 
-  const highlightIds =
-    search.length > 1
-      ? new Set(
-          nodes
-            .filter(
-              (n) =>
-                (n.title ?? "").toLowerCase().includes(search.toLowerCase()) ||
-                n.type.toLowerCase().includes(search.toLowerCase())
-            )
-            .map((n) => n.id)
+    let fg: any;
+
+    import("3d-force-graph").then((mod) => {
+      const ForceGraph3D = mod.default;
+      fg = ForceGraph3D()(containerRef.current!)
+        .width(width)
+        .height(height)
+        .backgroundColor("#09090b")
+        .nodeColor((n: GraphNode) => TYPE_COLORS[n.type] ?? TYPE_COLORS.unknown)
+        .nodeRelSize(4)
+        .nodeLabel((n: GraphNode) =>
+          `<div style="background:rgba(0,0,0,.85);padding:6px 10px;border-radius:6px;font-size:12px;max-width:280px">
+            <b style="color:${TYPE_COLORS[n.type] ?? "#ccc"}">${n.type.replace(/_/g, " ")}</b><br/>
+            ${(n.title ?? n.id).slice(0, 120)}
+          </div>`
         )
-      : null;
+        .linkColor((l: GraphLink) => EDGE_COLORS[l.relation_type] ?? "#444")
+        .linkOpacity(0.4)
+        .linkWidth((l: GraphLink) => Math.min(2, 0.5 + (l.weight ?? 1)))
+        .onNodeClick((n: GraphNode) => router.push(`/memory/${n.id}`))
+        .graphData({
+          nodes: nodes.map((n) => ({ ...n })),
+          links: links.map((l) => ({ ...l })),
+        });
 
-  const nodeColor = useCallback(
-    (node: GraphNode) => {
-      if (highlightIds) {
-        return highlightIds.has(node.id)
-          ? (TYPE_COLORS[node.type] ?? TYPE_COLORS.unknown)
+      graphRef.current = fg;
+    });
+
+    return () => {
+      fg?._destructor?.();
+      if (containerRef.current) containerRef.current.innerHTML = "";
+    };
+  }, []);
+
+  // Update size
+  useEffect(() => {
+    graphRef.current?.width(width).height(height);
+  }, [width, height]);
+
+  // Update highlight on search change
+  useEffect(() => {
+    const fg = graphRef.current;
+    if (!fg) return;
+    const hitIds =
+      search.length > 1
+        ? new Set(
+            nodes
+              .filter(
+                (n) =>
+                  (n.title ?? "").toLowerCase().includes(search.toLowerCase()) ||
+                  n.type.toLowerCase().includes(search.toLowerCase())
+              )
+              .map((n) => n.id)
+          )
+        : null;
+
+    fg.nodeColor((n: GraphNode) => {
+      if (hitIds) {
+        return hitIds.has(n.id)
+          ? (TYPE_COLORS[n.type] ?? TYPE_COLORS.unknown)
           : "rgba(80,80,80,0.15)";
       }
-      return TYPE_COLORS[node.type] ?? TYPE_COLORS.unknown;
-    },
-    [search]
-  );
+      return TYPE_COLORS[n.type] ?? TYPE_COLORS.unknown;
+    });
+  }, [search, nodes]);
 
-  const nodeLabel = useCallback(
-    (node: GraphNode) =>
-      `<div style="background:rgba(0,0,0,.85);padding:6px 10px;border-radius:6px;font-size:12px;max-width:280px">
-        <b style="color:${TYPE_COLORS[node.type] ?? "#ccc"}">${node.type.replace(/_/g, " ")}</b><br/>
-        ${(node.title ?? node.id).slice(0, 120)}
-      </div>`,
-    []
-  );
-
-  const handleNodeClick = useCallback(
-    (node: GraphNode) => router.push(`/memory/${node.id}`),
-    [router]
-  );
-
-  return (
-    <ForceGraph3D
-      graphData={graphData}
-      width={width}
-      height={height}
-      backgroundColor="#09090b"
-      nodeColor={nodeColor}
-      nodeLabel={nodeLabel}
-      nodeRelSize={4}
-      linkColor={(link: GraphLink) => link.color ?? "#444"}
-      linkOpacity={0.4}
-      linkWidth={(link: GraphLink) => Math.min(2, 0.5 + (link.weight ?? 1))}
-      onNodeClick={handleNodeClick}
-      enableNodeDrag
-    />
-  );
+  return <div ref={containerRef} className="w-full h-full" />;
 }
