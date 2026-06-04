@@ -60,6 +60,7 @@ interface AppsState {
   apps: App[];
   status: 'idle' | 'loading' | 'succeeded' | 'failed';
   error: string | null;
+  lastFetchedAt: number | null;
   filters: {
     searchQuery: string;
     isActive: 'all' | true | false;
@@ -97,6 +98,7 @@ const initialState: AppsState = {
   apps: [],
   status: 'idle',
   error: null,
+  lastFetchedAt: null,
   filters: {
     searchQuery: '',
     isActive: 'all',
@@ -126,6 +128,7 @@ const appsSlice = createSlice({
       state.status = 'succeeded';
       state.apps = action.payload;
       state.error = null;
+      state.lastFetchedAt = Date.now();
     },
     setAppsError: (state, action: PayloadAction<string>) => {
       state.status = 'failed';

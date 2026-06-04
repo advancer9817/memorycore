@@ -14,8 +14,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useRouter, useSearchParams } from "next/navigation";
-import { debounce } from "lodash";
-import { useEffect, useRef } from "react";
+import debounce from "lodash/debounce";
+import { useEffect, useRef, useMemo } from "react";
 import FilterComponent from "./FilterComponent";
 import { clearFilters } from "@/store/filtersSlice";
 
@@ -64,10 +64,13 @@ export function MemoryFilters() {
     }
   };
 
-  // add debounce
-  const handleSearch = debounce(async (query: string) => {
-    router.push(`/memories?search=${query}`);
-  }, 500);
+  // Stable debounced search — useMemo ensures the debounce timer isn't reset on re-renders
+  const handleSearch = useMemo(
+    () => debounce((query: string) => {
+      router.push(`/memories?search=${query}`);
+    }, 500),
+    [router]
+  );
 
   useEffect(() => {
     // if the url has a search param, set the input value to the search param

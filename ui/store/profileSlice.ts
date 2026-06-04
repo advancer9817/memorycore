@@ -7,6 +7,7 @@ interface ProfileState {
   status: 'idle' | 'loading' | 'succeeded' | 'failed';
   error: string | null;
   apps: any[];
+  lastFetchedAt: number | null;
 }
 
 const initialState: ProfileState = {
@@ -16,6 +17,7 @@ const initialState: ProfileState = {
   status: 'idle',
   error: null,
   apps: [],
+  lastFetchedAt: null,
 };
 
 const profileSlice = createSlice({
@@ -40,6 +42,7 @@ const profileSlice = createSlice({
     },
     setTotalMemories: (state, action: PayloadAction<number>) => {
       state.totalMemories = action.payload;
+      state.lastFetchedAt = Date.now();
     },
     setTotalApps: (state, action: PayloadAction<number>) => {
       state.totalApps = action.payload;

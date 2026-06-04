@@ -326,203 +326,133 @@ export const Install = () => {
         </Card>
       </div>
 
-      {/* Schedule bar — compact horizontal strip */}
-      <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900 px-5 py-3 flex flex-wrap items-center gap-x-8 gap-y-2 text-sm">
-        <span className="text-zinc-400 font-medium shrink-0">Curator Schedule</span>
-        <div className="flex items-center gap-2">
-          <span className="text-zinc-500">Timer</span>
-          <Badge variant="outline" className="border-emerald-700 bg-emerald-500/10 text-emerald-300 text-xs">
+      {/* Schedule bar + Operations — unified compact strip */}
+      <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm space-y-3">
+        {/* Row 1: schedule info + buttons */}
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <Badge variant="outline" className="border-emerald-700 bg-emerald-500/10 text-emerald-300 text-xs shrink-0">
             {status?.timer.ActiveState || "unknown"}
           </Badge>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-zinc-500">Last run</span>
-          <span className="text-zinc-200">{formatTime(lastRun)}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-zinc-500">Next run</span>
-          <span className="text-zinc-200">{formatTime(nextRun)}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-zinc-500">Result</span>
-          <span className="text-zinc-200">{lastResult}</span>
-        </div>
-      </div>
-
-      {/* Operations — full width */}
-      <Card className="bg-zinc-900 border-zinc-800 mt-4">
-        <CardHeader className="py-4 border-b border-zinc-800">
-          <CardTitle className="text-white text-base">Curator Operations</CardTitle>
-        </CardHeader>
-        <CardContent className="py-4 space-y-3">
-          {/* Stats row */}
-          <div className="grid grid-cols-4 gap-3 text-sm">
-            <div className="rounded-md bg-zinc-800 px-3 py-2">
-              <div className="text-zinc-500">Scanned</div>
-              <div className="text-lg font-semibold">{status?.curator.scanned ?? "-"}</div>
-            </div>
-            <div className="rounded-md bg-zinc-800 px-3 py-2">
-              <div className="text-zinc-500">Planned Actions</div>
-              <div className="text-lg font-semibold">{summary.planned_actions ?? 0}</div>
-            </div>
-            <div className="rounded-md bg-zinc-800 px-3 py-2">
-              <div className="text-zinc-500">Skill Promotions</div>
-              <div className="text-lg font-semibold">{summary.skill_promotions ?? 0}</div>
-            </div>
-            <div className="rounded-md bg-zinc-800 px-3 py-2">
-              <div className="text-zinc-500">Duplicates</div>
-              <div className="text-lg font-semibold">{summary.duplicates ?? 0}</div>
-            </div>
-          </div>
-
-          {/* Action buttons */}
-          <div className="flex gap-3">
+          <span className="text-zinc-500">
+            Last <span className="text-zinc-200">{formatTime(lastRun)}</span>
+          </span>
+          <span className="text-zinc-500">
+            Next <span className="text-zinc-200">{formatTime(nextRun)}</span>
+          </span>
+          <span className="text-zinc-500">
+            Result <span className="text-zinc-200">{lastResult}</span>
+          </span>
+          <span className="text-zinc-500 hidden sm:inline">
+            Scanned <span className="text-zinc-200">{status?.curator.scanned ?? "-"}</span>
+          </span>
+          <div className="ml-auto flex gap-2 shrink-0">
             <Button
-              className="flex-1 bg-primary hover:bg-primary/90"
+              size="sm"
+              className="bg-primary hover:bg-primary/90 h-7 px-3 text-xs"
               onClick={applyCurator}
               disabled={applying || llmRunning}
             >
-              <Play className="h-4 w-4 mr-2" />
-              {applying ? "Running curator..." : "Run Curator Now"}
+              <Play className="h-3 w-3 mr-1" />
+              {applying ? "Running..." : "Run Curator"}
             </Button>
             <Button
-              className="flex-1 bg-violet-700 hover:bg-violet-600 text-white"
+              size="sm"
+              className="bg-violet-700 hover:bg-violet-600 text-white h-7 px-3 text-xs"
               onClick={runLlmCurator}
               disabled={applying || llmRunning}
             >
-              <Brain className="h-4 w-4 mr-2" />
-              {llmRunning ? "LLM 分析中..." : "Run LLM Curator"}
+              <Brain className="h-3 w-3 mr-1" />
+              {llmRunning ? "分析中..." : "Run LLM"}
             </Button>
           </div>
+        </div>
 
-          {/* Manual run result */}
-          <div className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-zinc-400">Manual run</span>
+        {/* Manual run result — only when active */}
+        {runState.state !== "idle" && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-zinc-800 pt-2">
+            <span className="text-zinc-500">Manual run</span>
+            <Badge
+              variant="outline"
+              className={
+                runState.state === "succeeded"
+                  ? "border-emerald-700 bg-emerald-500/10 text-emerald-300 text-xs"
+                  : runState.state === "failed"
+                    ? "border-red-700 bg-red-500/10 text-red-300 text-xs"
+                    : "border-sky-700 bg-sky-500/10 text-sky-300 text-xs"
+              }
+            >
+              {runState.state}
+            </Badge>
+            {runState.startedAt && (
+              <span className="text-zinc-500">
+                {formatTime(runState.startedAt)}
+                {runState.elapsedMs !== undefined && (
+                  <span className="ml-2 text-zinc-400">{(runState.elapsedMs / 1000).toFixed(1)}s</span>
+                )}
+              </span>
+            )}
+            {runState.summary && (
+              <span className="text-zinc-500 ml-2">
+                Actions <span className="text-zinc-200">{runState.summary.actions ?? 0}</span>
+                {" · "}Promote <span className="text-zinc-200">{runState.summary.skill_promotions ?? 0}</span>
+                {" · "}Archive <span className="text-zinc-200">{runState.summary.archive ?? 0}</span>
+              </span>
+            )}
+            {runState.error && <span className="text-red-300 ml-2">{runState.error}</span>}
+          </div>
+        )}
+
+        {/* LLM Curator results */}
+        {llmRunState.state !== "idle" && (
+          <div className="border-t border-zinc-800 pt-2 text-sm space-y-2">
+            <div className="flex items-center gap-3">
+              <span className="text-zinc-500">LLM analysis</span>
               <Badge
                 variant="outline"
                 className={
-                  runState.state === "succeeded"
-                    ? "border-emerald-700 bg-emerald-500/10 text-emerald-300"
-                    : runState.state === "failed"
-                      ? "border-red-700 bg-red-500/10 text-red-300"
-                      : runState.state === "running"
-                        ? "border-sky-700 bg-sky-500/10 text-sky-300"
-                        : "border-zinc-700 bg-zinc-800 text-zinc-300"
+                  llmRunState.state === "succeeded"
+                    ? "border-violet-600 bg-violet-500/10 text-violet-300 text-xs"
+                    : llmRunState.state === "failed"
+                      ? "border-red-700 bg-red-500/10 text-red-300 text-xs"
+                      : "border-sky-700 bg-sky-500/10 text-sky-300 text-xs"
                 }
               >
-                {runState.state}
+                {llmRunState.state}
               </Badge>
+              {llmRunState.state === "running" && llmRunState.startedAt
+                ? <LlmElapsedTimer startedAt={llmRunState.startedAt} />
+                : llmRunState.elapsedMs !== undefined && (
+                  <span className="text-zinc-500 text-xs">{(llmRunState.elapsedMs / 1000).toFixed(1)}s</span>
+                )}
+              {llmRunState.summary && (
+                <span className="text-zinc-500 text-xs ml-1">
+                  重复 <span className="text-zinc-200">{llmRunState.summary.semantic_duplicates ?? 0}</span>
+                  {" · "}矛盾 <span className="text-zinc-200">{llmRunState.summary.contradictions ?? 0}</span>
+                  {" · "}重评 <span className="text-zinc-200">{llmRunState.summary.importance_reassessments ?? 0}</span>
+                  {" · "}拆分 <span className="text-zinc-200">{llmRunState.summary.split_candidates ?? 0}</span>
+                </span>
+              )}
             </div>
-            {runState.startedAt && (
-              <div className="mt-2 grid grid-cols-2 gap-2 text-zinc-400">
-                <div>
-                  <div className="text-zinc-500">Started</div>
-                  <div className="text-zinc-200">{formatTime(runState.startedAt)}</div>
-                </div>
-                <div>
-                  <div className="text-zinc-500">Elapsed</div>
-                  <div className="text-zinc-200">
-                    {runState.elapsedMs !== undefined ? `${(runState.elapsedMs / 1000).toFixed(1)}s` : "running"}
-                  </div>
-                </div>
-              </div>
-            )}
-            {runState.summary && (
-              <div className="mt-3 grid grid-cols-3 gap-2">
-                <div className="rounded bg-zinc-800 px-2 py-1">
-                  <div className="text-zinc-500">Actions</div>
-                  <div className="text-zinc-100 font-medium">{runState.summary.actions ?? 0}</div>
-                </div>
-                <div className="rounded bg-zinc-800 px-2 py-1">
-                  <div className="text-zinc-500">Promote</div>
-                  <div className="text-zinc-100 font-medium">{runState.summary.skill_promotions ?? 0}</div>
-                </div>
-                <div className="rounded bg-zinc-800 px-2 py-1">
-                  <div className="text-zinc-500">Archive</div>
-                  <div className="text-zinc-100 font-medium">{runState.summary.archive ?? 0}</div>
-                </div>
-              </div>
-            )}
-            {runState.actions && runState.actions.length > 0 && (
-              <div className="mt-3 space-y-2">
-                {runState.actions.slice(0, 3).map((action) => (
-                  <div key={`${action.id}-${action.action}`} className="rounded bg-zinc-800 px-2 py-1">
-                    <span className="text-primary">{action.action}</span>
-                    <span className="text-zinc-400"> · {action.title || action.id}</span>
+            {llmRunState.errors && llmRunState.errors.length > 0 && (
+              <div className="space-y-1">
+                {llmRunState.errors.map((e, i) => (
+                  <div key={i} className="rounded bg-amber-950/40 border border-amber-800/40 px-2 py-1 text-xs text-amber-300">
+                    ⚠ {e}
                   </div>
                 ))}
               </div>
             )}
-            {runState.error && <div className="mt-2 text-red-300">{runState.error}</div>}
-          </div>
-
-          {/* LLM Curator results */}
-          {llmRunState.state !== "idle" && (
-            <div className="rounded-md border border-violet-800 bg-zinc-950 px-3 py-3 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-zinc-400">LLM analysis</span>
-                <Badge
-                  variant="outline"
-                  className={
-                    llmRunState.state === "succeeded"
-                      ? "border-violet-600 bg-violet-500/10 text-violet-300"
-                      : llmRunState.state === "failed"
-                        ? "border-red-700 bg-red-500/10 text-red-300"
-                        : "border-sky-700 bg-sky-500/10 text-sky-300"
-                  }
-                >
-                  {llmRunState.state}
-                </Badge>
+            {llmRunState.findings && llmRunState.findings.length > 0 && (
+              <div className="space-y-1 max-h-96 overflow-y-auto pr-1">
+                {llmRunState.findings.map((f, i) => (
+                  <LlmFinding key={i} finding={f} />
+                ))}
               </div>
-              {llmRunState.state === "running" && llmRunState.startedAt
-                ? <LlmElapsedTimer startedAt={llmRunState.startedAt} />
-                : llmRunState.elapsedMs !== undefined && (
-                <div className="mt-1 text-zinc-500 text-xs">
-                  {(llmRunState.elapsedMs / 1000).toFixed(1)}s
-                </div>
-              )}
-              {llmRunState.summary && (
-                <div className="mt-2 grid grid-cols-4 gap-2">
-                  <div className="rounded bg-zinc-800 px-2 py-1">
-                    <div className="text-zinc-500 text-xs">重复</div>
-                    <div className="text-zinc-100 font-medium">{llmRunState.summary.semantic_duplicates ?? 0}</div>
-                  </div>
-                  <div className="rounded bg-zinc-800 px-2 py-1">
-                    <div className="text-zinc-500 text-xs">矛盾</div>
-                    <div className="text-zinc-100 font-medium">{llmRunState.summary.contradictions ?? 0}</div>
-                  </div>
-                  <div className="rounded bg-zinc-800 px-2 py-1">
-                    <div className="text-zinc-500 text-xs">重评</div>
-                    <div className="text-zinc-100 font-medium">{llmRunState.summary.importance_reassessments ?? 0}</div>
-                  </div>
-                  <div className="rounded bg-zinc-800 px-2 py-1">
-                    <div className="text-zinc-500 text-xs">拆分</div>
-                    <div className="text-zinc-100 font-medium">{llmRunState.summary.split_candidates ?? 0}</div>
-                  </div>
-                </div>
-              )}
-              {llmRunState.errors && llmRunState.errors.length > 0 && (
-                <div className="mt-2 space-y-1">
-                  {llmRunState.errors.map((e, i) => (
-                    <div key={i} className="rounded bg-amber-950/40 border border-amber-800/40 px-2 py-1 text-xs text-amber-300">
-                      ⚠ {e}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {llmRunState.findings && llmRunState.findings.length > 0 && (
-                <div className="mt-3 space-y-1 max-h-96 overflow-y-auto pr-1">
-                  {llmRunState.findings.map((f, i) => (
-                    <LlmFinding key={i} finding={f} />
-                  ))}
-                </div>
-              )}
-              {llmRunState.error && <div className="mt-2 text-red-300">{llmRunState.error}</div>}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            )}
+            {llmRunState.error && <div className="text-red-300">{llmRunState.error}</div>}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

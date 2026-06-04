@@ -17,6 +17,7 @@ interface MemoriesState {
   status: 'idle' | 'loading' | 'succeeded' | 'failed';
   error: string | null;
   selectedMemoryIds: string[];
+  lastFetchedAt: number | null;
 }
 
 const initialState: MemoriesState = {
@@ -27,6 +28,7 @@ const initialState: MemoriesState = {
   status: 'idle',
   error: null,
   selectedMemoryIds: [],
+  lastFetchedAt: null,
 };
 
 const memoriesSlice = createSlice({
@@ -48,6 +50,7 @@ const memoriesSlice = createSlice({
       state.status = 'succeeded';
       state.memories = action.payload;
       state.error = null;
+      state.lastFetchedAt = Date.now();
     },
     setMemoriesError: (state, action: PayloadAction<string>) => {
       state.status = 'failed';

@@ -68,6 +68,8 @@ export const useAppsApi = (): UseAppsApiReturn => {
   const [error, setError] = useState<string | null>(null);
   const dispatch = useDispatch<AppDispatch>();
   const user_id = useSelector((state: RootState) => state.profile.userId);
+  const lastFetchedAt = useSelector((state: RootState) => state.apps.lastFetchedAt);
+  const cachedApps = useSelector((state: RootState) => state.apps.apps);
 
   const fetchApps = useCallback(async (params: FetchAppsParams = {}): Promise<{ apps: App[], total: number }> => {
     const {
@@ -78,6 +80,11 @@ export const useAppsApi = (): UseAppsApiReturn => {
       page = 1,
       page_size = 10
     } = params;
+
+    // Skip fetch if cache is fresh and no search filters applied
+    if (!name && is_active === undefined && page === 1 && lastFetchedAt && Date.now() - lastFetchedAt < 30_000 && cachedApps.length > 0) {
+      return { apps: cachedApps, total: cachedApps.length };
+    }
 
     setIsLoading(true);
     dispatch(setAppsLoading());

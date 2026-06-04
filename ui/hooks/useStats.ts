@@ -6,6 +6,8 @@ import { setApps, setTotalApps } from '@/store/profileSlice';
 import { setTotalMemories } from '@/store/profileSlice';
 import { getApiBaseUrl } from '@/lib/api-url';
 
+const CACHE_TTL_MS = 30_000;
+
 // Define the new simplified memory type
 export interface SimpleMemory {
   id: string;
@@ -35,8 +37,13 @@ export const useStats = (): UseMemoriesApiReturn => {
   const [error, setError] = useState<string | null>(null);
   const dispatch = useDispatch<AppDispatch>();
   const user_id = useSelector((state: RootState) => state.profile.userId);
+  const lastFetchedAt = useSelector((state: RootState) => state.profile.lastFetchedAt);
+  const totalMemories = useSelector((state: RootState) => state.profile.totalMemories);
 
   const fetchStats = async () => {
+    if (lastFetchedAt && Date.now() - lastFetchedAt < CACHE_TTL_MS && totalMemories > 0) {
+      return;
+    }
     setIsLoading(true);
     setError(null);
     try {

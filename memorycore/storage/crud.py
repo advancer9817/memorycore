@@ -327,7 +327,16 @@ def timeline(query: str = "", scope: str = "", limit: int = 20) -> list[dict[str
     return sorted(rows, key=lambda r: r.get("created_at", ""))
 
 
+_stats_cache: dict[str, Any] = {}
+_stats_cache_ts: float = 0.0
+_STATS_TTL = 10.0  # seconds
+
+
 def get_memory_stats() -> dict[str, Any]:
+    import time as _time
+    global _stats_cache, _stats_cache_ts
+    if _stats_cache and (_time.monotonic() - _stats_cache_ts) < _STATS_TTL:
+        return _stats_cache
     with read_conn() as conn:
         type_dist = {r["type"]: r["cnt"] for r in conn.execute(
             "SELECT type, COUNT(*) as cnt FROM memories GROUP BY type"
@@ -346,7 +355,7 @@ def get_memory_stats() -> dict[str, Any]:
             "SELECT COUNT(*) FROM memories WHERE last_accessed_at IS NULL"
         ).fetchone()[0]
         link_count = conn.execute("SELECT COUNT(*) FROM memory_links").fetchone()[0]
-    return {
+    result = {
         "total": agg["total"],
         "by_type": type_dist,
         "by_status": status_dist,
@@ -357,3 +366,7 @@ def get_memory_stats() -> dict[str, Any]:
         "never_accessed_count": never_accessed,
         "link_count": link_count,
     }
+    import time as _time
+    _stats_cache = result
+    _stats_cache_ts = _time.monotonic()
+    return result

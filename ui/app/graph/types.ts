@@ -6,6 +6,7 @@ export interface GraphNode {
   importance: number;
   feedback_score: number;
   injected_count: number;
+  content: string;
 }
 
 export interface GraphEdge {

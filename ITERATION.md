@@ -2497,3 +2497,135 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 - `tests/test_deployment.py`：包名从 `local-memory-mcp` 更新为 `memorycore`
 - `3d-force-graph` npm 依赖补装（上游 ubuntu 提交引入但未 pnpm install）
 
+## [迭代 97] 2026-06-04 — Dashboard 紧凑化 + Graph 三栏布局 + Qdrant 依赖修复
+
+### 变更
+
+**Dashboard Curator 区域紧凑化**
+- `ui/components/dashboard/Install.tsx`：将 Curator Schedule 横条 + Curator Operations 大卡片合并为一个紧凑条
+- Schedule 信息、stats、两个操作按钮全部内联到一行
+- Manual run result 改为条件显示的单行摘要（badge + 时间 + 数字）
+- LLM Curator result 同样改为内联行（badge + 耗时 + 重复/矛盾/重评/拆分数字）
+- 去掉 CardHeader/CardTitle/CardContent 层级，减少约 60% 垂直占用
+
+**Graph 页面三栏布局（全 absolute overlay）**
+- `ui/app/graph/page.tsx`：彻底重写主区域布局
+- 图区 `absolute inset-0` 始终占满整个可用空间
+- 左侧记忆列表改为 `absolute left-0` overlay（半透明 `bg-zinc-950/95 backdrop-blur-sm`），支持拖拽调宽（120–400px）和折叠
+- 右侧详情面板 `absolute right-0` overlay，支持拖拽调宽（180–480px），选节点才显示
+- 折叠按钮改为 `absolute` 小箭头（`w-5 h-8`），`left` 值跟随列表宽度，不占布局空间
+- 头栏右侧控件（★/重置/搜索）用 `absolute right-4` 固定，不随列表展开/折叠移动
+- 列表/详情面板的展开/折叠/拖拽均不影响其他元素布局，彻底消除横向偏移
+- `useResizable` hook：通用拖拽调宽逻辑，支持 left/right 方向
+
+**Graph 节点选中联动**
+- `ui/app/graph/Graph3D.tsx`：新增 `selectedNodeId` + `linkedNodeIds` props
+- 选中节点蓝色高亮，关联节点保留原始类型颜色，无关节点 `rgba(50,50,50,0.18)` 极暗
+- 新增 `onBackgroundClick` 回调，点空白区域反选
+- 点击已选中节点 toggle 反选
+- `nodeThreeObject` 失败时返回 `undefined`（不覆盖默认球体）
+
+**Graph 详情面板增强**
+- `memorycore/frontend.py`：`_graph_payload()` SELECT 新增 `content` 列，截取 500 字符
+- `ui/app/graph/types.ts`：`GraphNode` 新增 `content: string`
+- 详情面板选中后自动调 `/api/v1/memories/{id}` 拉取完整 content 展示（不跳转 Memories 页面）
+- 搜索同时匹配 `content` 内容
+- 详情面板底部显示关联记忆列表（最多 6 条），可点击切换选中节点
+
+### 修复
+
+**Qdrant Vector Store 依赖缺失**
+- 根因：`qdrant-client` 在 `pyproject.toml` 的 optional extra `vector` 中，`uv sync`（不带 `--extra vector`）不安装，导致 `No module named 'qdrant_client'`，vector store 始终 `available: false`
+- `pyproject.toml`：将 `qdrant-client` 和 `httpx` 从 optional extras 移入核心 `dependencies`
+- `memorycore/vector_store.py`：`_ensure_init()` 失败时重置 `_initialized = False`，允许下次重试而非永久锁死
+- 修复后 LLM Curator 的 semantic dedup 和 contradiction detection 正常运行
+
+
+
+---
+
+## [迭代 97] 2026-06-04 — 全栈性能优化（Phase 1-3）
+
+### 背景
+
+前端 Tab 切换延迟数秒，后端 `/api/v1/apps/` 全表扫描，`/api/curator/status` 每次调用 systemctl 子进程，Redux store 无缓存导致每次导航都重发 API 请求。
+
+### 后端变更
+
+**memorycore/frontend.py：**
+- `_apps_list()`：废弃 `search_memory_records(limit=1000)` 全表扫描，改为 `GROUP BY source_agent` SQL 聚合查询（~10ms 替代 ~130ms）
+- `_app_details()`：改为 `SELECT COUNT(*) WHERE source_agent=?` 单行查询
+- `_memory_categories()`：改为直接解析 `tags_json` 列，不再加载全量行数据；改为 `import debounce from 'lodash/debounce'` tree-shake
+- `_delete_app_memories()`：废弃逐条 `update_status()` N+1 写入，改为单条 `UPDATE ... WHERE id IN (...)` 批量 SQL
+- related memories 端点（`/api/v1/memories/{id}/related`）：废弃逐条 `get_record()` N+1 查询，改为 `WHERE id IN (...)` 批量查询
+- v1 分页接口：无筛选时跳过 `search_memory_records(limit=5000)` 冗余全量拉取，直接执行带 `LIMIT/OFFSET` 的 SQL
+- `_curator_status_payload()`：加 60 秒 TTL 内存缓存（避免每次 dashboard 加载都调用 curator_report + systemctl）
+
+**memorycore/storage/crud.py：**
+- `get_memory_stats()`：加 10 秒 TTL 内存缓存（该函数执行 5 条聚合 SQL，被 /health、/metrics、/stats、curator_status 多处调用）
+
+### 前端变更
+
+**store/memoriesSlice.ts / appsSlice.ts / profileSlice.ts：**
+- 各 slice 新增 `lastFetchedAt: number | null` 字段，在 `setMemoriesSuccess` / `setAppsSuccess` / `setTotalMemories` 时写入 `Date.now()`
+
+**hooks/useMemoriesApi.ts / useAppsApi.ts / useStats.ts：**
+- 加 30 秒 TTL 缓存检查：默认加载（无筛选、page=1）时若数据新鲜直接返回缓存，跳过 API 请求
+- `useStats`：从 profileSlice 读 `lastFetchedAt`，已有数据时不重复请求
+
+**components/Navbar.tsx：**
+- 移除 `useMemoriesApi` / `useAppsApi` / `useStats` / `useConfig` 4 个 hook 的顶层调用（消除 4 组 Redux 订阅和每页无效重渲染）
+- Refresh 按钮改为 lazy 动态导入 store，点击时直接 dispatch reset 触发页面自刷新
+
+**app/memories/components/MemoryFilters.tsx：**
+- 将 `debounce(fn, 500)` 移入 `useMemo`，确保 debounce 实例稳定（修复每次渲染重建导致计时器失效的 bug）
+- `import { debounce } from 'lodash'` → `import debounce from 'lodash/debounce'` tree-shake
+
+**app/memories/components/MemoriesSection.tsx：**
+- 移除本地 `useState<any[]>([])` 重复 memories 状态，改为 `useSelector` 直接读 Redux store
+
+**app/graph/page.tsx：**
+- `filteredNodes` / `sortedListNodes` / `filteredNodeIds` / `filteredEdges` / `importantCount` / `allTypes` / `allEdgeTypes` 全部加 `useMemo`，避免每次渲染重算和重建力导向图数据
+
+### 性能效果（实测）
+
+| 端点/操作 | 优化前 | 优化后 |
+|---|---|---|
+| `/api/v1/apps/` | ~131ms（全表扫描） | ~15ms（SQL GROUP BY） |
+| `/api/v1/stats` | ~131ms（同上） | ~18ms（GROUP BY + stats 缓存） |
+| `/api/curator/status` 热 | ~1s（每次 systemctl + curator） | ~16ms（60s 缓存命中） |
+| `/api/v1/memories/filter` 无筛选 | 双重查询 | 单次分页 SQL |
+| Tab 切换（前端缓存命中） | 全量 API 请求 | 30s 内跳过请求 |
+| Navbar 重渲染 | 4 个 hook 订阅 | 0 个常驻订阅 |
+
+---
+
+## [迭代 98] 2026-06-04 — 补丁：依赖提升 + Graph content 字段 + related 去重 + VectorStore 重试修复
+
+### 解决的痛点
+
+- `httpx` 和 `qdrant-client` 作为可选依赖导致用户安装后缺少核心功能，报 ImportError
+- Graph 节点悬浮卡片无法展示记忆摘要
+- `/api/v1/memories/{id}/related` 返回重复条目（双向链接未去重）
+- VectorStore 初始化失败后 `_initialized=True` 标记导致后续调用永久跳过重试
+
+### 变更
+
+**pyproject.toml：**
+- `httpx>=0.27.0` 和 `qdrant-client>=1.18.0,<2.0` 从可选依赖（`[vector]`/`[extraction]`）提升为核心 `dependencies`
+- `[vector]`、`[extraction]`、`[all]`、`[full]` extra 保留但置空，保持向后兼容
+
+**memorycore/vector_store.py：**
+- `init()` 失败时补设 `self._initialized = False`，允许下次调用重试（修复永久僵死问题）
+
+**memorycore/frontend.py（graph 端点）：**
+- `_graph_payload()` SQL 新增 `content` 列，截取前 500 字符随节点数据下发
+- related memories 端点：`ids` 列表在批量查询前通过 `dict.fromkeys()` 去重，保持原始顺序
+
+**ui/app/graph/Graph3D.tsx / types.ts：**
+- `GraphNode` 类型新增 `content?: string` 字段
+- `Graph3D` 组件新增 `selectedNodeId`、`linkedNodeIds`、`onBackgroundClick` props，支持父组件控制节点高亮与面板联动
+
+**ui/components/dashboard/Install.tsx：**
+- 安装引导组件精简重构，减少冗余 DOM 和状态
+

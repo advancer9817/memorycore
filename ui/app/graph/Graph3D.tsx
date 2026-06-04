@@ -8,12 +8,15 @@ interface Props {
   links: GraphEdge[];
   search: string;
   highlightImportant: boolean;
+  selectedNodeId: string | null;
+  linkedNodeIds: Set<string> | null;
   width: number;
   height: number;
   onNodeClick: (node: GraphNode) => void;
+  onBackgroundClick: () => void;
 }
 
-export default function Graph3D({ nodes, links, search, highlightImportant, width, height, onNodeClick }: Props) {
+export default function Graph3D({ nodes, links, search, highlightImportant, selectedNodeId, linkedNodeIds, width, height, onNodeClick, onBackgroundClick }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<any>(null);
 
@@ -29,14 +32,13 @@ export default function Graph3D({ nodes, links, search, highlightImportant, widt
         .width(width)
         .height(height)
         .backgroundColor("#09090b")
-        // Node size: importance drives size (4–14), important nodes are larger
         .nodeRelSize(5)
         .nodeVal((n: GraphNode) => {
           const base = 1 + (n.importance ?? 0.5) * 3;
           return Math.max(1, base);
         })
         .nodeColor((n: GraphNode) => {
-          if (n.importance >= IMPORTANCE_THRESHOLD) return "#F59E0B"; // amber for important
+          if (n.importance >= IMPORTANCE_THRESHOLD) return "#F59E0B";
           return TYPE_COLORS[n.type] ?? TYPE_COLORS.unknown;
         })
         .nodeLabel((n: GraphNode) =>
@@ -47,17 +49,15 @@ export default function Graph3D({ nodes, links, search, highlightImportant, widt
             <br/><span style="color:#666;font-size:10px">importance ${(n.importance ?? 0).toFixed(2)} · injected ${n.injected_count ?? 0}×</span>
           </div>`
         )
-        // Node appearance: three-sphere material for glow on important nodes
         .nodeThreeObject((n: GraphNode) => {
           const THREE = (window as any).THREE;
-          if (!THREE) return null;
+          if (!THREE) return undefined;
           const isImportant = (n.importance ?? 0) >= IMPORTANCE_THRESHOLD;
           const color = isImportant ? 0xF59E0B : parseInt((TYPE_COLORS[n.type] ?? TYPE_COLORS.unknown).slice(1), 16);
           const size = 2 + (n.importance ?? 0.5) * 3;
 
           const group = new THREE.Group();
 
-          // Main sphere
           const geo = new THREE.SphereGeometry(size, 16, 16);
           const mat = new THREE.MeshLambertMaterial({
             color,
@@ -66,7 +66,6 @@ export default function Graph3D({ nodes, links, search, highlightImportant, widt
           });
           group.add(new THREE.Mesh(geo, mat));
 
-          // Glow ring for important nodes
           if (isImportant) {
             const ringGeo = new THREE.SphereGeometry(size * 1.5, 12, 12);
             const ringMat = new THREE.MeshLambertMaterial({
@@ -88,6 +87,7 @@ export default function Graph3D({ nodes, links, search, highlightImportant, widt
         )
         .linkDirectionalParticleSpeed(0.004)
         .onNodeClick((n: GraphNode) => onNodeClick(n))
+        .onBackgroundClick(() => onBackgroundClick())
         .graphData({
           nodes: nodes.map((n) => ({ ...n })),
           links: links.map((l) => ({ ...l })),
@@ -118,7 +118,7 @@ export default function Graph3D({ nodes, links, search, highlightImportant, widt
     graphRef.current?.width(width).height(height);
   }, [width, height]);
 
-  // Search highlight
+  // Node color: selected node bright blue, linked nodes keep normal color, others dim
   useEffect(() => {
     const fg = graphRef.current;
     if (!fg) return;
@@ -136,13 +136,22 @@ export default function Graph3D({ nodes, links, search, highlightImportant, widt
         : null;
 
     fg.nodeColor((n: GraphNode) => {
+      if (selectedNodeId) {
+        if (n.id === selectedNodeId) return "#60A5FA"; // selected: bright blue
+        if (linkedNodeIds?.has(n.id)) {
+          // connected: keep normal type color
+          if (highlightImportant && (n.importance ?? 0) >= IMPORTANCE_THRESHOLD) return "#F59E0B";
+          return TYPE_COLORS[n.type] ?? TYPE_COLORS.unknown;
+        }
+        return "rgba(50,50,50,0.18)"; // unrelated: very dim
+      }
       if (hitIds) {
         if (!hitIds.has(n.id)) return "rgba(60,60,60,0.12)";
       }
       if (highlightImportant && (n.importance ?? 0) >= IMPORTANCE_THRESHOLD) return "#F59E0B";
       return TYPE_COLORS[n.type] ?? TYPE_COLORS.unknown;
     });
-  }, [search, highlightImportant, nodes]);
+  }, [search, highlightImportant, selectedNodeId, linkedNodeIds, nodes]);
 
   return <div ref={containerRef} className="w-full h-full" />;
 }

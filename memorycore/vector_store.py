@@ -405,6 +405,7 @@ class VectorStore:
         except Exception as exc:
             logger.error("vector_store: init failed: %s", exc)
             self._client = None
+            self._initialized = False  # allow retry on next call
             return False
 
     @property

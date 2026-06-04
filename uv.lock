@@ -406,40 +406,26 @@ name = "memorycore"
 version = "0.25.0"
 source = { editable = "." }
 dependencies = [
+    { name = "httpx" },
     { name = "mcp" },
     { name = "pyyaml" },
+    { name = "qdrant-client" },
 ]
 
 [package.optional-dependencies]
-all = [
-    { name = "httpx" },
-    { name = "qdrant-client" },
-]
 dev = [
     { name = "pytest" },
     { name = "pytest-timeout" },
 ]
-extraction = [
-    { name = "httpx" },
-]
-full = [
-    { name = "httpx" },
-    { name = "qdrant-client" },
-]
-vector = [
-    { name = "qdrant-client" },
-]
 
 [package.metadata]
 requires-dist = [
-    { name = "httpx", marker = "extra == 'extraction'", specifier = ">=0.27.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
     { name = "mcp", specifier = ">=1.27.0,<2.0" },
-    { name = "memorycore", extras = ["vector", "extraction"], marker = "extra == 'all'" },
-    { name = "memorycore", extras = ["vector", "extraction"], marker = "extra == 'full'" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.0" },
     { name = "pytest-timeout", marker = "extra == 'dev'", specifier = ">=2.4.0" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "qdrant-client", marker = "extra == 'vector'", specifier = ">=1.18.0,<2.0" },
+    { name = "qdrant-client", specifier = ">=1.18.0,<2.0" },
 ]
 provides-extras = ["vector", "extraction", "embedding", "all", "full", "dev"]
 

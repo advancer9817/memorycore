@@ -6,6 +6,8 @@ import { AppDispatch, RootState } from '@/store/store';
 import { setAccessLogs, setMemoriesSuccess, setSelectedMemory, setRelatedMemories } from '@/store/memoriesSlice';
 import { getApiBaseUrl } from '@/lib/api-url';
 
+const CACHE_TTL_MS = 30_000;
+
 // Define the new simplified memory type
 export interface SimpleMemory {
   id: string;
@@ -104,6 +106,7 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
   const user_id = useSelector((state: RootState) => state.profile.userId);
   const memories = useSelector((state: RootState) => state.memories.memories);
   const selectedMemory = useSelector((state: RootState) => state.memories.selectedMemory);
+  const lastFetchedAt = useSelector((state: RootState) => state.memories.lastFetchedAt);
 
   const fetchMemories = useCallback(async (
     query?: string,
@@ -117,6 +120,11 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
       showArchived?: boolean;
     }
   ): Promise<{ memories: Memory[], total: number, pages: number }> => {
+    // Skip fetch if cached data is fresh and this is a plain first-page load
+    const isDefaultLoad = !query && page === 1 && !filters?.apps?.length && !filters?.categories?.length;
+    if (isDefaultLoad && lastFetchedAt && Date.now() - lastFetchedAt < CACHE_TTL_MS && memories.length > 0) {
+      return { memories, total: memories.length, pages: 1 };
+    }
     setIsLoading(true);
     setError(null);
     try {

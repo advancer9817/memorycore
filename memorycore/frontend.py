@@ -405,7 +405,7 @@ def _dispatch_v1_compat(
                 status=status,
                 limit=fetch_limit if has_filters else max(size * page, 50),
             )
-        else:
+        elif has_filters:
             rows = search_memory_records(
                 query="",
                 types=_list_q(query, "type") or _list_q(query, "types"),
@@ -413,8 +413,10 @@ def _dispatch_v1_compat(
                 project_path=_str_q(query, "project_path", ""),
                 tags=_list_q(query, "tag") or _list_q(query, "tags"),
                 status=status,
-                limit=fetch_limit if has_filters else 5000,
+                limit=fetch_limit,
             )
+        else:
+            rows = []  # no-filter path: use direct SQL below
         if app_ids:
             app_set = {str(item) for item in app_ids}
             rows = [row for row in rows if str(row.get("source_agent") or "manual") in app_set]
@@ -489,11 +491,19 @@ def _dispatch_v1_compat(
     if len(parts) == 3 and parts[0] == "memories" and parts[2] == "related" and method == "GET":
         links = query_links(parts[1], direction="both", limit=20)
         ids = [link["target_id"] for link in links.get("outgoing", [])] + [link["source_id"] for link in links.get("incoming", [])]
+        ids = list(dict.fromkeys(ids))  # deduplicate preserving order
         items = []
-        for memory_id in ids:
-            record = get_record(memory_id)
-            if record:
-                items.append(_memory_item(record))
+        if ids:
+            from memorycore.storage.db import read_conn as _rc2
+            from memorycore.models import row_to_dict as _rtd2
+            placeholders = ",".join("?" * len(ids))
+            with _rc2() as conn:
+                rows = conn.execute(
+                    f"SELECT * FROM memories WHERE id IN ({placeholders})",
+                    ids,
+                ).fetchall()
+            record_map = {row["id"]: _rtd2(row) for row in rows}
+            items = [_memory_item(record_map[mid]) for mid in ids if mid in record_map]
         return {"items": items, "total": len(items), "page": 1, "size": len(items) or 10, "pages": 1}
     if parts == ["memories", "actions", "pause"] and method == "POST":
         state = str(body.get("state") or "archived")
@@ -629,11 +639,24 @@ def _simple_memory(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _memory_categories() -> dict[str, Any]:
-    rows = search_memory_records(status="active", limit=1000)
-    names = sorted({str(tag) for row in rows for tag in row.get("tags", []) if str(tag)})
+    from memorycore.storage.db import read_conn as _rc
+    import json as _json
+    with _rc() as conn:
+        rows = conn.execute(
+            "SELECT tags_json FROM memories WHERE status='active' AND tags_json IS NOT NULL AND tags_json != '[]'"
+        ).fetchall()
+    names: set[str] = set()
+    for row in rows:
+        try:
+            tags = _json.loads(row[0])
+            if isinstance(tags, list):
+                names.update(str(t) for t in tags if t)
+        except Exception:
+            pass
+    sorted_names = sorted(names)
     categories = [
         {"id": name, "name": name, "description": f"{name} memories", "created_at": "", "updated_at": ""}
-        for name in names
+        for name in sorted_names
     ]
     return {"categories": categories, "total": len(categories)}
 
@@ -668,30 +691,39 @@ def _apps_list(
     sort_direction: str = "asc",
 ) -> dict[str, Any]:
     from datetime import datetime, timezone, timedelta
+    from memorycore.storage.db import read_conn as _rc
 
-    rows = search_memory_records(status="active", limit=1000)
+    with _rc() as conn:
+        agg_rows = conn.execute(
+            "SELECT source_agent, COUNT(*) as cnt, MAX(COALESCE(updated_at, created_at)) as last_at"
+            " FROM memories WHERE status='active' GROUP BY source_agent"
+        ).fetchall()
+
     apps_by_id: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        app = str(row.get("source_agent") or "manual")
-        if app not in _KNOWN_AGENTS:
+    for row in agg_rows:
+        agent_raw = str(row["source_agent"] or "manual")
+        if agent_raw not in _KNOWN_AGENTS:
             continue
-        app = _AGENT_DISPLAY_NAME.get(app, app)
+        app = _AGENT_DISPLAY_NAME.get(agent_raw, agent_raw)
         if name and name.lower() not in app.lower():
             continue
-        current = apps_by_id.setdefault(app, {
-            "id": app,
-            "name": app,
-            "total_memories_created": 0,
-            "total_memories_accessed": 0,
-            "is_active": False,
-            "status": "offline",
-            "last_activity_at": "",
-            "last_seen_at": "",
-        })
-        current["total_memories_created"] += 1
-        updated_at = str(row.get("updated_at") or row.get("created_at") or "")
-        if updated_at > str(current.get("last_activity_at") or ""):
-            current["last_activity_at"] = updated_at
+        existing = apps_by_id.get(app)
+        if existing is None:
+            apps_by_id[app] = {
+                "id": app,
+                "name": app,
+                "total_memories_created": int(row["cnt"]),
+                "total_memories_accessed": 0,
+                "is_active": False,
+                "status": "offline",
+                "last_activity_at": str(row["last_at"] or ""),
+                "last_seen_at": "",
+            }
+        else:
+            existing["total_memories_created"] += int(row["cnt"])
+            last = str(row["last_at"] or "")
+            if last > str(existing.get("last_activity_at") or ""):
+                existing["last_activity_at"] = last
 
     presence_by_id = {item["agent_id"]: item for item in list_agent_presence(limit=500)}
     now = datetime.now(timezone.utc)
@@ -740,8 +772,13 @@ def _apps_list(
 
 
 def _app_details(app_id: str) -> dict[str, Any]:
-    rows = search_memory_records(status="active", limit=1000)
-    total = sum(1 for row in rows if (row.get("source_agent") or "manual") == app_id)
+    from memorycore.storage.db import read_conn as _rc
+    with _rc() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM memories WHERE status='active' AND source_agent=?",
+            (app_id,),
+        ).fetchone()
+    total = int(row["cnt"]) if row else 0
     return {
         "is_active": True,
         "total_memories_created": total,
@@ -752,10 +789,24 @@ def _app_details(app_id: str) -> dict[str, Any]:
 
 
 def _delete_app_memories(app_id: str) -> dict[str, Any]:
-    rows = search_memory_records(status="active", limit=10000)
-    target_ids = [row["id"] for row in rows if (row.get("source_agent") or "manual") == app_id]
-    archived = [update_status(str(memory_id), "archived") for memory_id in target_ids]
-    return {"app_id": app_id, "archived_count": len(archived), "archived_ids": [item["id"] for item in archived]}
+    from memorycore.storage.db import read_conn as _rc, managed_conn as _mc
+    from memorycore.models import now as _now
+    with _rc() as conn:
+        rows = conn.execute(
+            "SELECT id FROM memories WHERE status='active' AND source_agent=?",
+            (app_id,),
+        ).fetchall()
+    target_ids = [str(row["id"]) for row in rows]
+    if not target_ids:
+        return {"app_id": app_id, "archived_count": 0, "archived_ids": []}
+    ts = _now()
+    placeholders = ",".join("?" * len(target_ids))
+    with _mc() as conn:
+        conn.execute(
+            f"UPDATE memories SET status='archived', updated_at=? WHERE id IN ({placeholders})",
+            [ts, *target_ids],
+        )
+    return {"app_id": app_id, "archived_count": len(target_ids), "archived_ids": target_ids}
 
 
 def _systemctl_user_show(unit: str, properties: list[str]) -> dict[str, str]:
@@ -779,7 +830,16 @@ def _systemctl_user_show(unit: str, properties: list[str]) -> dict[str, str]:
     return parsed
 
 
+_curator_status_cache: dict[str, Any] = {}
+_curator_status_cache_ts: float = 0.0
+_CURATOR_STATUS_TTL = 60.0  # seconds
+
+
 def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
+    import time as _time
+    global _curator_status_cache, _curator_status_cache_ts
+    if _curator_status_cache and (_time.monotonic() - _curator_status_cache_ts) < _CURATOR_STATUS_TTL:
+        return _curator_status_cache
     stats = get_memory_stats()
     report = curator_report(dry_run=True, limit=limit)
     timer = _systemctl_user_show("mcore-curator.timer", [
@@ -822,7 +882,7 @@ def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
         next_hour = (now_dt + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
         next_run_at = next_hour.isoformat()
 
-    return {
+    result = {
         "stats": stats,
         "curator": {
             "generated_at": report.get("generated_at"),
@@ -833,6 +893,10 @@ def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
         "timer": {**timer, "LastTriggerUSec": last_run_at, "NextElapseUSecRealtime": next_run_at},
         "service": service,
     }
+    import time as _time
+    _curator_status_cache = result
+    _curator_status_cache_ts = _time.monotonic()
+    return result
 
 
 async def _json_body(request: Request) -> dict[str, Any]:
@@ -889,7 +953,7 @@ def _graph_payload(limit: int = 500) -> dict[str, Any]:
 
     with read_conn() as conn:
         rows = conn.execute(
-            "SELECT id, title, type, status, importance, feedback_score, injected_count FROM memories WHERE status IN ('active','candidate') LIMIT ?",
+            "SELECT id, title, type, status, importance, feedback_score, injected_count, content FROM memories WHERE status IN ('active','candidate') LIMIT ?",
             (limit,),
         ).fetchall()
         for row in rows:
@@ -901,6 +965,7 @@ def _graph_payload(limit: int = 500) -> dict[str, Any]:
                 "importance": round(float(row[4] or 0.5), 2),
                 "feedback_score": round(float(row[5] or 0.0), 2),
                 "injected_count": int(row[6] or 0),
+                "content": (row[7] or "")[:500],
             })
 
         link_rows = conn.execute(

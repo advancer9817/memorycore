@@ -6,6 +6,8 @@ import { MemoryPagination } from "./MemoryPagination";
 import { CreateMemoryDialog } from "./CreateMemoryDialog";
 import { PageSizeSelector } from "./PageSizeSelector";
 import { useMemoriesApi } from "@/hooks/useMemoriesApi";
+import { useSelector } from "react-redux";
+import { RootState } from "@/store/store";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MemoryTableSkeleton } from "@/skeleton/MemoryTableSkeleton";
 
@@ -13,7 +15,7 @@ export function MemoriesSection() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { fetchMemories } = useMemoriesApi();
-  const [memories, setMemories] = useState<any[]>([]);
+  const memories = useSelector((state: RootState) => state.memories.memories);
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
@@ -38,17 +40,16 @@ export function MemoriesSection() {
           itemsPerPage,
           { sortColumn, sortDirection }
         );
-        setMemories(result.memories);
         setTotalItems(result.total);
         setTotalPages(result.pages);
       } catch (error) {
-        console.error("Failed to fetch memories:", error);
+        // silently handled
       }
       setIsLoading(false);
     };
 
     loadMemories();
-  }, [currentPage, itemsPerPage, sortColumn, sortDirection, fetchMemories, searchParams]);
+  }, [currentPage, itemsPerPage, sortColumn, sortDirection, fetchMemories]);
 
   const setCurrentPage = (page: number) => {
     const params = new URLSearchParams(searchParams.toString());

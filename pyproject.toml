@@ -12,14 +12,16 @@ requires-python = ">=3.11"
 dependencies = [
     "mcp>=1.27.0,<2.0",
     "pyyaml>=6.0",
+    "httpx>=0.27.0",
+    "qdrant-client>=1.18.0,<2.0",
 ]
 
 [project.optional-dependencies]
-vector = ["qdrant-client>=1.18.0,<2.0"]
-extraction = ["httpx>=0.27.0"]
+vector = []
+extraction = []
 embedding = []
-all = ["memorycore[vector,extraction]"]
-full = ["memorycore[vector,extraction]"]
+all = []
+full = []
 dev = [
     "pytest>=9.0.0",
     "pytest-timeout>=2.4.0",
