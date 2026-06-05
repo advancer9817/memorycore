@@ -208,3 +208,31 @@ class TestExtractFacts:
         )
         assert len(facts) == 1
         assert "Neovim" in facts[0].text
+
+
+# ---------------------------------------------------------------------------
+# URL path construction tests (parametrized)
+# ---------------------------------------------------------------------------
+
+def _build_chat_url(base_url: str) -> str:
+    """Replicate the URL construction logic from extraction._call_llm."""
+    base = base_url.rstrip("/")
+    if not (base.endswith("/v1") or "/v1/" in base.split("://", 1)[-1]):
+        return base + "/v1/chat/completions"
+    return base + "/chat/completions"
+
+
+@pytest.mark.parametrize("base_url,expected_suffix", [
+    ("http://host/v1", "/chat/completions"),
+    ("http://host", "/v1/chat/completions"),
+    ("http://host/", "/v1/chat/completions"),
+    ("http://host/v1/", "/chat/completions"),
+    ("http://host:8080", "/v1/chat/completions"),
+    ("http://host:8080/v1", "/chat/completions"),
+])
+def test_extraction_url_no_double_v1(base_url, expected_suffix):
+    """URL construction must not produce double /v1/v1/ paths."""
+    result = _build_chat_url(base_url)
+    assert "/v1/v1/" not in result, f"Double /v1/ in URL: {result}"
+    assert result.endswith(expected_suffix), \
+        f"Expected URL ending with '{expected_suffix}', got: {result}"

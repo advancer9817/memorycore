@@ -24,9 +24,23 @@ from __future__ import annotations
 
 import json
 import logging
+import time as _time
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Cooldown registry: id -> timestamp of last review
+_reviewed_memory_ids: dict[str, float] = {}
+_REVIEW_COOLDOWN_SECONDS = 7200   # 2 hours
+_REVIEWED_IDS_MAX_AGE_SECONDS = 86400  # 24 hours
+
+
+def _cleanup_reviewed_ids() -> None:
+    """Remove entries older than 24 hours from the cooldown registry."""
+    now = _time.time()
+    expired = [mid for mid, ts in _reviewed_memory_ids.items() if now - ts > _REVIEWED_IDS_MAX_AGE_SECONDS]
+    for mid in expired:
+        del _reviewed_memory_ids[mid]
 
 # Cosine similarity threshold for candidate pairs fed to the LLM
 _SIM_THRESHOLD = 0.60          # 降低：更多相似对送 LLM 判断
@@ -120,6 +134,14 @@ def _find_semantic_duplicate_candidates(
     sim_threshold: float,
 ) -> list[tuple[dict, dict, float]]:
     """Return (mem_a, mem_b, score) pairs above sim_threshold, deduplicated."""
+    if len(memories) > 500:
+        import random as _random
+        logger.warning("Large memory pool (%d), sampling 200 for dedup search", len(memories))
+        memories = _random.sample(memories, 200)
+
+    now = _time.time()
+    memories = [m for m in memories if now - _reviewed_memory_ids.get(m["id"], 0) >= _REVIEW_COOLDOWN_SECONDS]
+
     seen: set[frozenset[str]] = set()
     pairs: list[tuple[dict, dict, float]] = []
     by_id = {m["id"]: m for m in memories}
@@ -186,7 +208,9 @@ def _llm_judge_duplicates(
             "whether they are true semantic duplicates (same fact, same meaning). "
             "Return a JSON object with key 'results': a list where each element has "
             "'index' (int), 'is_duplicate' (bool), 'reason' (str, ≤30 words), "
-            "and 'keep_id' (the id of the memory to keep, or null if unsure)."
+            "'keep_id' (the id of the memory to keep, or null if unsure), and "
+            "'merge_info' (str, ≤40 words describing information from the discarded memory "
+            "that should be merged into the kept memory; empty string if nothing needs merging)."
         )
         prompt = f"Evaluate these memory pairs for semantic duplication:{items_text}"
         try:
@@ -203,14 +227,17 @@ def _llm_judge_duplicates(
                     if keep_id not in (a["id"], b["id"]):
                         keep_id = a["id"] if a.get("importance", 0) >= b.get("importance", 0) else b["id"]
                         drop_id = b["id"] if keep_id == a["id"] else a["id"]
+                    merge_info = item.get("merge_info", "")
+                    action = "archive_and_merge_duplicate" if merge_info else "archive_duplicate"
                     results.append({
-                        "action": "archive_duplicate",
+                        "action": action,
                         "keep_id": keep_id,
                         "drop_id": drop_id,
                         "score": score,
                         "reason": item.get("reason", "semantic duplicate"),
                         "keep_title": a["title"] if keep_id == a["id"] else b["title"],
                         "drop_title": b["title"] if drop_id == b["id"] else a["title"],
+                        "merge_info": merge_info,
                         "llm_thinking": thinking,
                         "llm_raw": raw,
                         "llm_prompt": prompt,
@@ -230,6 +257,11 @@ def _find_contradiction_candidates(
     sim_threshold: float,
 ) -> list[tuple[dict, dict, float]]:
     """Same as duplicate search but focused on same-type pairs for contradiction check."""
+    if len(memories) > 500:
+        import random as _random
+        logger.warning("Large memory pool (%d), sampling 200 for dedup search", len(memories))
+        memories = _random.sample(memories, 200)
+
     seen: set[frozenset[str]] = set()
     pairs: list[tuple[dict, dict, float]] = []
     by_id = {m["id"]: m for m in memories}
@@ -415,7 +447,8 @@ def _llm_detect_splittable(
             "For each splittable memory, propose 2-4 concise atomic sub-memories as plain text. "
             "Return JSON with key 'results': list of "
             "{'index': int, 'splittable': bool, 'reason': str ≤20 words, "
-            "'sub_memories': [{'title': str, 'content': str}]}. "
+            "'sub_memories': [{'title': str, 'content': str, 'importance': float}]}. "
+            "The 'importance' field (0.0-1.0) reflects the long-term value of each sub-memory independently. "
             "If a memory is already atomic or splitting would lose context, set splittable=false."
         )
         prompt = f"Analyse these memories for split opportunities:{items_text}"
@@ -472,6 +505,9 @@ def llm_curator_report(
         return {"errors": errors, "semantic_duplicates": [], "contradictions": [],
                 "importance_reassessments": []}
 
+    # Cleanup expired cooldown entries
+    _cleanup_reviewed_ids()
+
     # --- Semantic deduplication ---
     semantic_duplicates: list[dict] = []
     contradictions: list[dict] = []
@@ -500,7 +536,8 @@ def llm_curator_report(
     try:
         # Sample broadly: rotate through all memories so every memory gets reviewed over time
         import random as _random
-        all_candidates = list(memories)
+        now_ts = _time.time()
+        all_candidates = [m for m in memories if now_ts - _reviewed_memory_ids.get(m["id"], 0) >= _REVIEW_COOLDOWN_SECONDS]
         _random.shuffle(all_candidates)
         candidates = all_candidates[:_IMPORTANCE_LIMIT]
         if candidates:
@@ -521,6 +558,11 @@ def llm_curator_report(
     except Exception as exc:
         errors.append(f"Split detection failed: {exc}")
         logger.warning("split detection error: %s", exc)
+
+    # Register all processed memory ids in the cooldown registry
+    now_review = _time.time()
+    for m in memories:
+        _reviewed_memory_ids[m["id"]] = now_review
 
     return {
         "semantic_duplicates": semantic_duplicates,
@@ -618,6 +660,12 @@ def apply_llm_curator(report: dict[str, Any], dry_run: bool = True) -> dict[str,
                 sub_content = str(sub.get("content") or "").strip()
                 if not sub_title or not sub_content:
                     continue
+                # Use LLM-assigned importance if present; fall back to parent's importance
+                raw_imp = sub.get("importance")
+                if raw_imp is not None:
+                    sub_importance = float(max(0.0, min(1.0, raw_imp)))
+                else:
+                    sub_importance = float(orig.get("importance", 0.5))
                 sub_id = str(_uuid.uuid4())
                 conn.execute(
                     """INSERT INTO memories
@@ -631,7 +679,7 @@ def apply_llm_curator(report: dict[str, Any], dry_run: bool = True) -> dict[str,
                         orig.get("tags_json", "[]"), "llm_curator", "llm_curator",
                         orig.get("project_path", ""),
                         now_ts, now_ts,
-                        float(orig.get("confidence", 0.7)), float(orig.get("importance", 0.5)),
+                        float(orig.get("confidence", 0.7)), sub_importance,
                         "active", orig.get("decay_policy", "review"),
                         "[]",
                         '{"kind":"atomic_fact","parent_id":"' + orig_id + '"}',

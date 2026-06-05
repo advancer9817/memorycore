@@ -7,7 +7,7 @@ import re
 from typing import Any, Callable
 
 from memorycore.models import as_json, now, row_to_dict
-from memorycore.storage.db import managed_conn
+from memorycore.storage.db import managed_conn, read_conn
 from memorycore.storage.links import add_link
 
 ATOMIZER_VERSION = "mem0-inspired-v1"
@@ -116,7 +116,7 @@ def _existing_fact_hashes(parent_id: str, hashes: list[str]) -> set[str]:
     if not hashes:
         return set()
     placeholders = ",".join("?" for _ in hashes)
-    with managed_conn() as conn:
+    with read_conn() as conn:
         rows = conn.execute(
             f"""
             SELECT metadata_json FROM memories
@@ -142,9 +142,10 @@ def atomize_record(
     min_chars: int = 600,
     atomize: str | bool = "auto",
     add_memory_fn: AddMemoryFn | None = None,
+    conn=None,
 ) -> dict[str, Any]:
-    with managed_conn() as conn:
-        row = conn.execute("SELECT * FROM memories WHERE id=?", (record_id,)).fetchone()
+    with managed_conn() as _conn:
+        row = _conn.execute("SELECT * FROM memories WHERE id=?", (record_id,)).fetchone()
     if row is None:
         return {"record_id": record_id, "error": "memory_not_found", "planned": 0, "created": 0}
     record = row_to_dict(row)
@@ -197,17 +198,25 @@ def atomize_record(
         "atomizer_version": ATOMIZER_VERSION,
         "child_count": int(parent_metadata.get("child_count") or 0) + len(child_ids),
     })
-    with managed_conn() as conn:
+    if conn is not None:
+        # Caller manages the transaction; do not commit here
         conn.execute(
             "UPDATE memories SET metadata_json=?, updated_at=? WHERE id=?",
             (as_json(parent_metadata), now(), record_id),
         )
-        row = conn.execute("SELECT * FROM memories WHERE id=?", (record_id,)).fetchone()
-    if row is not None:
+        updated_row = conn.execute("SELECT * FROM memories WHERE id=?", (record_id,)).fetchone()
+    else:
+        with managed_conn() as _conn:
+            _conn.execute(
+                "UPDATE memories SET metadata_json=?, updated_at=? WHERE id=?",
+                (as_json(parent_metadata), now(), record_id),
+            )
+            updated_row = _conn.execute("SELECT * FROM memories WHERE id=?", (record_id,)).fetchone()
+    if updated_row is not None:
         try:
             from memorycore.storage.entities import sync_memory_entities
 
-            sync_memory_entities(row_to_dict(row))
+            sync_memory_entities(row_to_dict(updated_row))
         except Exception:
             pass
     result["created"] = len(child_ids)
@@ -239,7 +248,14 @@ def atomize_report(
                 (int(min_chars), cap),
             ).fetchall()
         ids = [row["id"] for row in rows]
-    records = [atomize_record(mid, dry_run=dry_run, min_chars=min_chars) for mid in ids]
+    if dry_run:
+        records = [atomize_record(mid, dry_run=dry_run, min_chars=min_chars) for mid in ids]
+    else:
+        with managed_conn() as shared_conn:
+            records = [
+                atomize_record(mid, dry_run=False, min_chars=min_chars, conn=shared_conn)
+                for mid in ids
+            ]
     return {
         "dry_run": dry_run,
         "limit": cap,

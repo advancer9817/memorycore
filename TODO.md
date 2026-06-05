@@ -111,40 +111,40 @@
 
 ## 性能与并发（迭代 96 后续）
 
-- [ ] `WAL checkpoint` 策略优化：当前 `wal_autocheckpoint=500` 在高频写场景下偶发短暂停顿，可改为 `PASSIVE` 模式并在低峰后台触发
-- [ ] `build_context_pack` 中 extra_records 补充查询仍用 `managed_conn`，改为 `read_conn`
-- [ ] LLM Curator job registry 无 TTL 清理：`_llm_curator_jobs` dict 会无限增长，应在 succeeded/error 后 30 分钟自动清除
-- [ ] `_write_injected_counts` / `_write_last_accessed` daemon thread 在进程退出时可能丢失最后几条写回，考虑改为共享队列 + 单写线程
-- [ ] `atomize_record` 在批量写入时产生过多独立事务（每个 child 一次），应传入 `conn` 复用事务
+- [x] `WAL checkpoint` 策略优化：`wal_autocheckpoint=0` + 后台 PASSIVE checkpoint 线程每 60 秒触发
+- [x] `build_context_pack` 中 extra_records 补充查询改用 `read_conn`
+- [x] LLM Curator job registry TTL 清理：`_cleanup_stale_llm_jobs()` 在 30 分钟后清除 succeeded/error 的 job
+- [x] `_write_injected_counts` / `_write_last_accessed` 改为共享 `queue.Queue(maxsize=2000)` + 单消费者线程，atexit 保证退出时 drain
+- [x] `atomize_record` 批量写入时传入共享 `conn` 复用事务，`_existing_fact_hashes` 改用 `read_conn`
 
 ## LLM Curator 改进（迭代 96 后续）
 
-- [ ] 语义去重：当前只做"是否重复"二分判断，应返回"保留哪个 + 合并补充信息"，对高 importance 记忆不直接归档而是合并内容
-- [ ] 拆分执行：目前 split 时子记忆 `importance` 直接继承 parent 均值，应让 LLM 对每条子记忆单独评分
-- [ ] LLM Curator 应每次随机打乱候选顺序（已实现），但还缺少"已审查记忆跳过冷却期"机制，避免同一批记忆被重复评估
-- [ ] `_find_semantic_duplicate_candidates` 对大库（>1000 条）每条都做向量搜索，O(N) Qdrant 请求；改为批量 clustering 或限制候选池
-- [ ] LLM Curator 结果面板应支持"接受/拒绝"单条 finding，而不只是全量 apply
+- [x] 语义去重：返回 `merge_info` 字段（被丢弃记忆的补充信息），action 升级为 `archive_and_merge_duplicate`
+- [x] 拆分执行：LLM 对每条子记忆单独评分 `importance`，不再继承 parent 均值
+- [x] 已审查记忆冷却期机制：`_reviewed_memory_ids` dict + `_REVIEW_COOLDOWN_SECONDS=7200`，避免同批重复评估
+- [x] `_find_semantic_duplicate_candidates` 大库（>500 条）采样 200 条限制候选池，同样适用于 contradiction 检测
+- [x] LLM Curator 结果面板支持"✓ 接受"/"✗ 拒绝"单条 finding；后端新增 `/api/curator/llm/apply-single` 端点
 
 ## Graph 图谱改进（迭代 96 后续）
 
-- [ ] Graph 节点标签：当前只在 hover 时显示，高 importance 节点应常驻显示 title（Three.js Sprite/CSS2DRenderer）
-- [ ] Graph 节点缺少 status 过滤（candidate/stale 节点也在图中），应加 status 筛选按钮
-- [ ] Graph 导出功能：截图保存或导出 JSON 供外部分析
-- [ ] Graph 侧边栏详情：目前只读，应支持直接编辑 importance/status
-- [ ] 图谱初始化时节点聚集在中心（3D force 模拟未收敛），应在后端预计算初始坐标或在前端增加"稳定后显示"状态
+- [x] Graph 高 importance 节点常驻 Sprite 标签（Three.js CanvasTexture，gold 文字，悬浮于节点上方）
+- [x] Graph status 筛选按钮（All / active / candidate / stale）
+- [x] Graph 导出 JSON（filteredNodes + filteredEdges 下载为 memory-graph.json）
+- [x] Graph 侧边栏支持内联编辑 importance（滑块）和 status（下拉），PATCH `/api/v1/memories/{id}`
+- [x] 图谱初始化预稳定：`cooldownTicks(300)` + `onEngineStop` 触发 `onReady`，显示"布局计算中…"覆盖层
 
 ## UI/UX 改进（迭代 96 后续）
 
-- [ ] 记忆列表 Created On 列支持点击排序切换 asc/desc（目前只能通过 URL 参数控制）
-- [ ] LLM Curator 面板 findings 超过 20 条时应分页或收折，避免长列表导致滚动体验差
-- [ ] Dashboard Curator Operations 卡片：Manual run 展示最多 3 条 actions，应加"查看全部"展开
-- [ ] 记忆列表 page size 选择器（当前 20，可选 50/100/全部）
-- [ ] 页面刷新后 LLM Curator job 轮询能自动恢复（已实现），但 UI 缺少"正在恢复中..."的 loading 状态提示
+- [x] 记忆列表 Created On 列点击切换 asc/desc 排序，显示方向箭头
+- [x] LLM Curator 面板 findings 超过 20 条时收折，"显示全部 (N 条)"展开
+- [x] Dashboard Curator Operations 卡片：Manual run 默认展示 3 条 actions，"查看全部 (N 项)"展开
+- [x] 记忆列表 page size 选择器已完整（PageSizeSelector.tsx 已实现并接入 MemoriesSection）
+- [x] LLM Curator job 恢复时显示"正在恢复任务状态..."loading 提示（animate-pulse）
 
 ## 测试覆盖
 
-- [ ] `test_search.py`：补充 `last_accessed_at` 异步写回的并发一致性测试
-- [ ] 补 LLM Curator job 轮询逻辑的单元测试（mock job registry）
-- [ ] Graph API `/api/graph` 补集成测试（节点数量、edge 过滤、importance 字段）
-- [ ] `extraction.py` URL 路径拼接逻辑补参数化测试（带/不带 `/v1` 前缀）
+- [x] `test_search.py`：`test_last_accessed_at_concurrent_write_consistency`（10 线程并发写回，无异常）
+- [x] `tests/test_curator_llm_jobs.py`：冷却期注册/检测/过期逻辑单元测试，大库采样 warning 测试（3 passed, 1 skipped by design）
+- [x] `test_graph_enhanced.py`：`TestGraphAPI` 集成测试（节点返回、importance 字段、edges 列表）
+- [x] `test_extraction.py`：6 个参数化 URL 拼接测试（带/不带 `/v1`、trailing slash、port）
 

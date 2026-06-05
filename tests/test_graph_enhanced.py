@@ -187,3 +187,59 @@ class TestWarningsForNewTypes:
         assert causes_warnings == [], (
             "causes with weight < min_weight should be filtered out"
         )
+
+
+# ---------------------------------------------------------------------------
+# Graph API integration tests
+# ---------------------------------------------------------------------------
+
+def _make_graph_client():
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+    from memorycore.frontend import configure_frontend, frontend_api
+
+    configure_frontend(host="127.0.0.1", port=8318, auth_token="", enabled=True)
+    app = Starlette(routes=[
+        Route("/api/{path:path}", frontend_api, methods=["GET", "POST", "PATCH", "PUT", "DELETE"]),
+    ])
+    return TestClient(app)
+
+
+class TestGraphAPI:
+    def test_graph_api_returns_nodes(self):
+        """GET /api/graph should return nodes for existing memories."""
+        lm.add_memory_record("feedback", "Graph test memory", "Testing graph endpoint content")
+
+        with _make_graph_client() as client:
+            graph_resp = client.get("/api/graph")
+
+        assert graph_resp.status_code == 200
+        data = graph_resp.json()
+        payload = data.get("data", data)
+        assert "nodes" in payload
+        assert len(payload["nodes"]) >= 1
+
+    def test_graph_api_nodes_have_importance(self):
+        """Each node in /api/graph must have an importance field."""
+        lm.add_memory_record("feedback", "Importance test", "Testing importance field in graph")
+
+        with _make_graph_client() as client:
+            graph_resp = client.get("/api/graph")
+
+        data = graph_resp.json()
+        payload = data.get("data", data)
+        nodes = payload.get("nodes", [])
+        assert len(nodes) > 0
+        for node in nodes:
+            assert "importance" in node, f"Node {node.get('id')} missing importance field"
+
+    def test_graph_api_edges_present(self):
+        """GET /api/graph should return an edges list."""
+        with _make_graph_client() as client:
+            graph_resp = client.get("/api/graph")
+
+        data = graph_resp.json()
+        payload = data.get("data", data)
+        assert "edges" in payload
+        assert isinstance(payload["edges"], list)

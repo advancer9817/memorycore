@@ -20,6 +20,36 @@ _thread_local = threading.local()
 _LOCK_RETRY_ATTEMPTS = 10
 _LOCK_RETRY_DELAY = 0.1
 _write_lock = threading.RLock()
+_checkpoint_thread_started = False
+_checkpoint_thread_lock = threading.Lock()
+
+
+def _run_checkpoint_loop() -> None:
+    """Background daemon: run PASSIVE WAL checkpoint every 60 seconds."""
+    while True:
+        time.sleep(60)
+        for key in list(_INITIALIZED_DB_PATHS):
+            try:
+                conn = sqlite3.connect(key, timeout=5, check_same_thread=False)
+                try:
+                    conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                finally:
+                    conn.close()
+            except Exception:
+                pass
+
+
+def _ensure_checkpoint_thread() -> None:
+    """Start the background checkpoint thread exactly once (lazy)."""
+    global _checkpoint_thread_started
+    if _checkpoint_thread_started:
+        return
+    with _checkpoint_thread_lock:
+        if _checkpoint_thread_started:
+            return
+        t = threading.Thread(target=_run_checkpoint_loop, daemon=True, name="wal-checkpoint")
+        t.start()
+        _checkpoint_thread_started = True
 
 
 def _get_thread_conn(path) -> sqlite3.Connection:
@@ -33,13 +63,14 @@ def _get_thread_conn(path) -> sqlite3.Connection:
         conn = sqlite3.connect(path, timeout=30, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA wal_autocheckpoint=500")
+        conn.execute("PRAGMA wal_autocheckpoint=0")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA busy_timeout=30000")
         if key not in _INITIALIZED_DB_PATHS:
             init_db(conn)
             _INITIALIZED_DB_PATHS.add(key)
         cache[key] = conn
+        _ensure_checkpoint_thread()
     return cache[key]
 
 

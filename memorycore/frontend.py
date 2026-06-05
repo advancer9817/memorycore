@@ -66,6 +66,20 @@ _llm_curator_jobs: dict[str, dict] = {}  # job_id -> {status, result, error}
 _llm_curator_lock = threading.Lock()
 _latest_llm_job_id: list[str] = []  # single-element list used as mutable container
 
+_LLM_JOB_TTL_SECONDS = 1800  # 30 minutes
+
+
+def _cleanup_stale_llm_jobs() -> None:
+    """Remove succeeded/error jobs older than _LLM_JOB_TTL_SECONDS."""
+    cutoff = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - _LLM_JOB_TTL_SECONDS))
+    stale = [
+        jid for jid, j in _llm_curator_jobs.items()
+        if j.get("status") in ("done", "succeeded", "error")
+        and j.get("updated_at", "9999") < cutoff
+    ]
+    for jid in stale:
+        _llm_curator_jobs.pop(jid, None)
+
 
 def _run_llm_curator_job(job_id: str, cfg: Any, limit: int, sim_threshold: float, apply: bool) -> None:
     """Runs in a daemon thread; updates _llm_curator_jobs on completion."""
@@ -83,11 +97,17 @@ def _run_llm_curator_job(job_id: str, cfg: Any, limit: int, sim_threshold: float
         except Exception as exc:
             report["rebuild_vectors_error"] = str(exc)
         with _llm_curator_lock:
-            _llm_curator_jobs[job_id] = {"status": "done", "result": report}
+            _llm_curator_jobs[job_id] = {
+                "status": "done", "result": report,
+                "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+            }
     except Exception as exc:
         logger.warning("[llm-curator job %s] failed: %s", job_id, exc)
         with _llm_curator_lock:
-            _llm_curator_jobs[job_id] = {"status": "error", "error": str(exc)}
+            _llm_curator_jobs[job_id] = {
+                "status": "error", "error": str(exc),
+                "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+            }
 
 
 @dataclass
@@ -273,6 +293,7 @@ async def _dispatch_api(request: Request, parts: list[str], query: dict[str, lis
         apply = not body.get("dry_run", True)
         job_id = str(uuid.uuid4())
         with _llm_curator_lock:
+            _cleanup_stale_llm_jobs()
             _llm_curator_jobs[job_id] = {"status": "running", "job_id": job_id}
             _latest_llm_job_id[:] = [job_id]
         t = threading.Thread(
@@ -283,6 +304,25 @@ async def _dispatch_api(request: Request, parts: list[str], query: dict[str, lis
         )
         t.start()
         return {"job_id": job_id, "status": "running"}
+    if parts == ["curator", "llm", "apply-single"] and method == "POST":
+        # Apply a single LLM curator finding by category and payload
+        from memorycore.storage.curator_llm import apply_llm_curator
+        category = body.get("category", "")
+        finding = body.get("finding", {})
+        if not category or not finding:
+            raise ValueError("'category' and 'finding' are required")
+        # Build a minimal report with just this single finding
+        single_report: dict = {
+            "semantic_duplicates": [],
+            "contradictions": [],
+            "importance_reassessments": [],
+            "split_candidates": [],
+        }
+        if category not in single_report:
+            raise ValueError(f"Unknown category: {category!r}")
+        single_report[category] = [finding]
+        result = apply_llm_curator(single_report, dry_run=False)
+        return result
     if parts == ["curator", "llm", "latest"] and method == "GET":
         with _llm_curator_lock:
             job_id = _latest_llm_job_id[0] if _latest_llm_job_id else None

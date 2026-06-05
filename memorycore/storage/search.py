@@ -1,8 +1,11 @@
 """FTS5 search, context pack, and active-warning helpers."""
 from __future__ import annotations
 
+import atexit
 import logging
+import queue
 import re
+import threading
 import uuid
 from typing import Any
 
@@ -16,6 +19,92 @@ from memorycore.storage.db import _managed_query, managed_conn, read_conn
 from memorycore.storage.entities import entity_search
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Shared write queue for deferred DB updates (injected_count, last_accessed_at)
+# ---------------------------------------------------------------------------
+_write_queue: queue.Queue = queue.Queue(maxsize=2000)
+_write_queue_started = False
+_write_queue_lock = threading.Lock()
+
+
+def _write_consumer() -> None:
+    """Single daemon consumer: drains _write_queue and batch-writes to DB."""
+    while True:
+        batch: list[tuple] = []
+        try:
+            item = _write_queue.get(timeout=1.0)
+            batch.append(item)
+        except queue.Empty:
+            continue
+        # Drain up to 49 more items without blocking
+        while len(batch) < 50:
+            try:
+                batch.append(_write_queue.get_nowait())
+            except queue.Empty:
+                break
+        _flush_write_batch(batch)
+
+
+def _flush_write_batch(batch: list[tuple]) -> None:
+    """Write a batch of (memory_id, field, value) tuples to DB."""
+    if not batch:
+        return
+    last_accessed: list[tuple[str, str]] = []
+    injected: list[tuple[str, str, str]] = []
+    for item in batch:
+        kind = item[0]
+        if kind == "last_accessed":
+            _, ts, mid = item
+            last_accessed.append((ts, mid))
+        elif kind == "injected":
+            _, ts, mid = item
+            injected.append((ts, ts, mid))
+    try:
+        if last_accessed or injected:
+            with managed_conn() as conn:
+                if last_accessed:
+                    conn.executemany(
+                        "UPDATE memories SET last_accessed_at=? WHERE id=?",
+                        last_accessed,
+                    )
+                if injected:
+                    conn.executemany(
+                        "UPDATE memories SET injected_count = injected_count + 1,"
+                        " last_injected_at = ?, last_accessed_at = ? WHERE id = ?",
+                        injected,
+                    )
+    except Exception:
+        pass
+
+
+def _drain_write_queue_on_exit() -> None:
+    """atexit handler: flush remaining items (wait up to 2 seconds)."""
+    import time
+    deadline = time.monotonic() + 2.0
+    batch: list[tuple] = []
+    while time.monotonic() < deadline:
+        try:
+            batch.append(_write_queue.get_nowait())
+        except queue.Empty:
+            break
+    _flush_write_batch(batch)
+
+
+def _ensure_write_consumer() -> None:
+    global _write_queue_started
+    if _write_queue_started:
+        return
+    with _write_queue_lock:
+        if _write_queue_started:
+            return
+        t = threading.Thread(target=_write_consumer, daemon=True, name="search-write-consumer")
+        t.start()
+        atexit.register(_drain_write_queue_on_exit)
+        _write_queue_started = True
+
+
+_ensure_write_consumer()
 
 _GREETINGS = {"hi", "hello", "hey", "你好", "嗯", "好", "ok", "okay", "yes", "no"}
 _VECTOR_SEARCH_THRESHOLD = 0.35
@@ -340,34 +429,25 @@ def search_memory_records(
     with read_conn() as conn:
         rows = [row_to_dict(r) for r in conn.execute(sql, params).fetchall()]
     if rows:
-        import threading
         ids = [(now(), r["id"]) for r in rows]
-        threading.Thread(
-            target=_write_last_accessed,
-            args=(ids,),
-            daemon=True,
-        ).start()
+        _write_last_accessed(ids)
     return rows
 
 
 def _write_last_accessed(ids: list[tuple[str, str]]) -> None:
-    try:
-        with managed_conn() as conn:
-            conn.executemany("UPDATE memories SET last_accessed_at=? WHERE id=?", ids)
-    except Exception:
-        pass
+    for ts, mid in ids:
+        try:
+            _write_queue.put_nowait(("last_accessed", ts, mid))
+        except queue.Full:
+            pass
 
 
 def _write_injected_counts(ids: list[str], ts: str) -> None:
-    try:
-        with managed_conn() as conn:
-            conn.executemany(
-                "UPDATE memories SET injected_count = injected_count + 1,"
-                " last_injected_at = ?, last_accessed_at = ? WHERE id = ?",
-                [(ts, ts, mid) for mid in ids],
-            )
-    except Exception:
-        pass
+    for mid in ids:
+        try:
+            _write_queue.put_nowait(("injected", ts, mid))
+        except queue.Full:
+            pass
 
 
 def get_active_warnings(
@@ -532,7 +612,7 @@ def build_context_pack(
     extra_ids = [mid for mid in vector_hits if mid not in seen_ids]
     extra_records: list[dict[str, Any]] = []
     if extra_ids:
-        with managed_conn() as conn:
+        with read_conn() as conn:
             placeholders = ",".join("?" for _ in extra_ids)
             extra_clauses = [
                 f"id IN ({placeholders})",
@@ -699,14 +779,9 @@ def build_context_pack(
         used_ids.extend(section_used_ids)
     text = "\n".join(lines).strip()
     if used_ids:
-        import threading
         ts = now()
         ids_snapshot = list(used_ids)
-        threading.Thread(
-            target=_write_injected_counts,
-            args=(ids_snapshot, ts),
-            daemon=True,
-        ).start()
+        _write_injected_counts(ids_snapshot, ts)
     active_count = sum(1 for r in records if r["status"] == "active")
     warnings = (get_active_warnings(used_ids) if used_ids else []) + injection_warnings
     hit_rate = round(len(used_ids) / max(len(records), 1), 3)

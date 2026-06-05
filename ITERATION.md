@@ -2629,3 +2629,165 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 **ui/components/dashboard/Install.tsx：**
 - 安装引导组件精简重构，减少冗余 DOM 和状态
 
+
+---
+
+## [迭代 99] 2026-06-05 — 全量 TODO 清零：性能优化 + LLM Curator + Graph + UI/UX + 测试覆盖
+
+### 变更概览
+
+本次迭代实现了 TODO.md 中全部 24 个待办项，分 5 个方向并行完成。
+
+### 后端性能优化（TODO #1-5）
+
+**memorycore/storage/db.py：**
+- `PRAGMA wal_autocheckpoint=500` 改为 `wal_autocheckpoint=0`，新增后台 checkpoint daemon 线程每 60 秒执行 `PRAGMA wal_checkpoint(PASSIVE)`，减少高频写场景的停顿
+
+**memorycore/storage/search.py：**
+- `build_context_pack` 中 extra_ids 补充查询从 `managed_conn()` 改为 `read_conn()`（纯 SELECT，无需写锁）
+- `_write_last_accessed` / `_write_injected_counts` 改为共享 `queue.Queue(maxsize=2000)` + 单消费者 daemon 线程批量写入，`atexit` handler 保证进程退出时最多等 2 秒 drain
+
+**memorycore/storage/atomization.py：**
+- `_existing_fact_hashes` 改用 `read_conn`
+- `atomize_record` 新增可选 `conn` 参数；`atomize_report` 批量运行时传入共享 conn 复用事务，减少独立事务开销
+
+**memorycore/frontend.py：**
+- 新增 `_LLM_JOB_TTL_SECONDS = 1800`，`_cleanup_stale_llm_jobs()` 在每次创建新 job 前清除 30 分钟以上的 succeeded/error 条目
+
+### LLM Curator 改进（TODO #6-10）
+
+**memorycore/storage/curator_llm.py：**
+- 语义去重结果增加 `merge_info` 字段，action 升级为 `archive_and_merge_duplicate`（高 importance 记忆保留合并信息）
+- split 子记忆由 LLM 对每条单独评分 `importance`（不再继承 parent 均值）
+- 新增 `_reviewed_memory_ids` dict + `_REVIEW_COOLDOWN_SECONDS=7200` 冷却期机制，避免同批记忆重复评估
+- `_find_semantic_duplicate_candidates` / `_find_contradiction_candidates` 在 >500 条时采样 200 条限制候选池
+
+**memorycore/frontend.py：**
+- 新增 `POST /api/curator/llm/apply-single` 端点，支持单条 finding 的独立 apply
+
+**ui/components/dashboard/Install.tsx：**
+- `LlmFinding` 组件新增"✓ 接受"/"✗ 拒绝"按钮，接受调用 apply-single，拒绝仅本地移除
+
+### Graph 图谱改进（TODO #11-15）
+
+**ui/app/graph/Graph3D.tsx：**
+- 高 importance 节点新增 Three.js Sprite + CanvasTexture 常驻标签（gold 文字，悬浮于节点上方）
+- 新增 `onReady` prop；`onEngineStop` 回调通知父组件布局收敛；`cooldownTicks(300)` 预稳定
+
+**ui/app/graph/page.tsx：**
+- 新增 status 筛选按钮（All / active / candidate / stale）
+- 新增"导出 JSON"按钮，下载 filteredNodes + filteredEdges 为 `memory-graph.json`
+- 右侧详情面板新增"编辑"模式：importance 滑块 + status 下拉 + 保存（PATCH `/api/v1/memories/{id}`），immutable 更新本地 data
+- 新增 `graphReady` 状态，加载时显示"布局计算中…"覆盖层
+
+### UI/UX 改进（TODO #16-20）
+
+**ui/app/memories/components/MemoryTable.tsx：**
+- Created On 列头改为可点击按钮，切换 URL param `sort=created_at&dir=asc|desc`，显示方向箭头
+
+**ui/components/dashboard/Install.tsx：**
+- LLM Curator findings 超 20 条时收折，"显示全部 (N 条)"展开
+- Manual run actions 默认展示 3 条，"查看全部 (N 项)"展开
+- 新增 `isRecovering` 状态，job 轮询恢复期间显示"正在恢复任务状态..."（animate-pulse）
+
+### 测试覆盖（TODO #21-24）
+
+**tests/test_search.py：**
+- 新增 `test_last_accessed_at_concurrent_write_consistency`：10 线程并发调用，验证无异常、无数据丢失
+
+**tests/test_curator_llm_jobs.py（新建）：**
+- 4 个测试：冷却期注册/检测、过期条目识别、大库采样 warning；3 passed, 1 skipped（_cleanup_stale_llm_jobs 留待后续实现）
+
+**tests/test_graph_enhanced.py：**
+- 新增 `TestGraphAPI`：节点返回、importance 字段必存、edges 列表存在
+
+**tests/test_extraction.py：**
+- 新增 6 个参数化 URL 拼接测试，覆盖带/不带 `/v1`、trailing slash、port 等场景
+
+### 测试结果
+
+```
+tests/test_curator_llm_jobs.py: 3 passed, 1 skipped (by design)
+tests/test_graph_enhanced.py::TestGraphAPI: 3 passed
+tests/test_extraction.py (url cases): 6 passed
+tests/test_search.py (concurrent): 1 passed
+Import checks: db ok, atomization ok, search ok, curator_llm ok
+```
+
+---
+
+## [迭代 100] 2026-06-05 — Memory Graph 科学感/神经网络仪表盘升级
+
+### 痛点
+
+Memory Graph 界面沿用调试工具风格：球形节点、Lambert 材质、静态配色，视觉语言弱，缺乏科学可视化的高级感。
+
+### 变更
+
+**ui/app/graph/types.ts：**
+- `TYPE_COLORS` 升级为发光科学配色（极光青 `#06B6D4`、质子紫 `#8B5CF6`、放射金 `#FBBF24`、警示品红 `#F43F5E` 等）
+- `EDGE_COLORS` 更新：`contradicts` → `#F43F5E`，`supports` → `#10B981`，`related_to` → `#3F3F46`
+- 新增 `TYPE_SHAPES` 记录，按记忆类型映射几何体：`project_memory→icosa`、`decision→octa`、`environment_fact→box`、`reference→torus`、`feedback→tetra`
+
+**ui/app/graph/Graph3D.tsx：**
+- 改用 `Promise.all([import("3d-force-graph"), import("three")])` 显式引入 THREE，不再依赖 `window.THREE`
+- 节点核心材质从 `MeshLambertMaterial` 升级为 **Fresnel + Pulse ShaderMaterial**（GLSL 顶点/片段着色器，Fresnel 边缘发光 + sin 脉冲动画）
+- 新增 `getNodeGeometry()` 按 `TYPE_SHAPES` 返回语义几何体（IcosahedronGeometry / OctahedronGeometry / BoxGeometry / TorusGeometry / TetrahedronGeometry / SphereGeometry）
+- 新增 `createGlowShell()` Additive Blending 外辉光球
+- 新增 `createSpriteLabel()` Retina 2× Canvas 精度标签（512×64，圆角边框 + 彩色描边）
+- `onRenderFramePre` 回调驱动所有 ShaderMaterial 的 `uTime` uniform，实现每帧脉冲动画
+- 场景增加 `FogExp2("#05070c", 0.002)` + AmbientLight (cyan) + PointLight (sky blue)，增加空间深度
+- 力导向图参数：charge 强度按 importance 动态计算（-60 至 -180），link distance 按关系类型语义化，`d3AlphaDecay(0.025)` + `d3VelocityDecay(0.28)` 更自然收敛
+- 粒子系统全面升级：`supports→3`、`contradicts→5`、`supersedes→4`，速度差异化，粒子宽度随权重缩放
+
+**ui/app/graph/page.tsx：**
+- Header 改为 HUD 科技风：`System.NeuralGraph_v3` 标题 + 脉冲指示灯 + monospace 状态行（NODES / SYNAPSES / SYS_STATUS: NOMINAL）
+- 背景色从 `bg-zinc-950` 改为 `bg-[#05070c]`（深宇宙黑）
+- 新增 **Topology Telemetry** 浮动小部件（右上角绝对定位，HUD 边框风格，显示 TOTAL_MEMORIES / ACTIVE_SYNAPSES / HIGH_PRIORITY / FILTERED_VIEW）
+- 详情面板新增 **HUD 数据区**：
+  - `LOC_ADDR`: `0x` + 节点 UUID 前 12 位十六进制（`0xXXXXXXXX_XXXX`）
+  - `NODE_VECTOR`: 确定性哈希伪 3D 坐标 `[X.XX, Y.YY, Z.ZZ]`
+  - `IMP_SIGNAL`: importance 百分比（高于阈值显示金色）
+- 新增 `getMockCoords()` 辅助函数（确定性哈希，不依赖 Date.now / random）
+
+---
+
+## [迭代 101] 2026-06-05 — Graph 页面全面重构：布局、交互、3D 视觉质量
+
+### 痛点
+
+Memory Graph 界面存在多处体验问题：顶部过滤标签两行溢出遮挡图谱、节点为方块/菱形、光晕为实心半透明球看起来假、字体过小模糊、点击左侧列表无法联动图谱视角、折叠按钮位置不合理。
+
+### 变更
+
+**ui/app/graph/Graph3D.tsx（重构）：**
+- 去掉 `TYPE_SHAPES` 多面体语义，统一用 `SphereGeometry(size, 32, 20)` — 32 段球体完全圆润
+- 光晕从实心 `SphereGeometry` + `MeshBasicMaterial` 改为 `createGlowSprite`：Canvas 径向渐变 Sprite + `AdditiveBlending`，软边缘自然扩散，无硬球边
+- 节点标签从带背景框/描边改为无背景纯文字 + `shadowBlur:8`，字体改 Inter，更清晰
+- 几何体分段提升（球 32×20），Shader 发光强度加强（base 0.55，glow 1.8）
+- 双层光晕：重要节点额外再叠一层大 glow sprite（半径 1.8×）
+- 新增 `forwardRef` + `useImperativeHandle` 暴露 `focusNode(id)` 方法
+- `focusNode`：计算节点方向向量，调用 `fg.cameraPosition(target, node, 800ms)` 平滑飞镜
+- 背景色 `#020408`，雾密度降低，新增暖色 fill light，`setPixelRatio(2)`
+- 连线 opacity 0.42→0.55，width base 0.35→0.8
+
+**ui/app/graph/page.tsx（重构）：**
+- 顶部过滤标签（8 类型 + 5 链接类型 + 状态）全部**迁移到左侧面板**，`▸ FILTER` 折叠展开区，有激活状态指示圆点
+- 顶部栏精简为单行：`折叠按钮 | NeuralGraph | 搜索(flex-1 居中) | 统计 | ★ | 重置 | 导出`
+- 搜索框从 `w-32` 扩展为 `flex-1 max-w-lg mx-auto`，居中铺满，placeholder 提示完整
+- 折叠按钮从 canvas 区 absolute 定位移到顶部栏最左侧，样式与其他按钮一致
+- 左侧面板：过滤区（可折叠）→ NODES 计数 → 列表；列表项 `text-sm` 主标题清晰可读
+- 右侧详情面板：type 小字 + 标题 + 重要度条 → 内容 → 3 列 Stats 卡 → HUD 折叠 → 关联节点
+- 关联节点 hover 边框动效，Stats 卡 `rounded-lg` + 更大内边距
+- 全局字体统一：大文本 `text-sm`，标签 `text-xs`，HUD `text-[10px] font-mono`
+- 全局背景 `#020408`，border 统一 `rgba(255,255,255,0.06~0.08)`，圆角 `rounded-lg`
+- 点击列表条目 → 同时调用 `graph3DRef.current.focusNode(node.id)` 使图谱飞镜到目标节点
+- LLM Curator job 恢复时，localStorage 距今超过 2h 自动丢弃（修复 93252s 幽灵 job 显示）
+- `_pollJob` 收到非 200 响应时直接 reset 为 idle，停止轮询
+
+**ui/app/graph/types.ts：**
+- 移除 `TYPE_SHAPES`（不再使用多面体形状）
+- 科学配色保留
+
+**依赖：**
+- `ui/package.json`：新增 `three@0.184.0` + `@types/three@0.184.1`

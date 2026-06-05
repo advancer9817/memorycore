@@ -5,6 +5,8 @@ import {
   Pause,
   Archive,
   Play,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,7 +40,7 @@ import { HiMiniRectangleStack } from "react-icons/hi2";
 import { PiSwatches } from "react-icons/pi";
 import { GoPackage } from "react-icons/go";
 import { CiCalendar } from "react-icons/ci";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Categories from "@/components/shared/categories";
 import { useUI } from "@/hooks/useUI";
 import {
@@ -52,7 +54,23 @@ import { formatDate } from "@/lib/helpers";
 export function MemoryTable() {
   const { toast } = useToast();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const dispatch = useDispatch();
+
+  const currentSort = searchParams.get("sort") || "created_at";
+  const currentDir = (searchParams.get("dir") || "desc") as "asc" | "desc";
+
+  const handleSortByCreatedAt = () => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("sort", "created_at");
+    if (currentSort === "created_at") {
+      params.set("dir", currentDir === "asc" ? "desc" : "asc");
+    } else {
+      params.set("dir", "desc");
+    }
+    params.set("page", "1");
+    router.push(`?${params.toString()}`);
+  };
   const selectedMemoryIds = useSelector(
     (state: RootState) => state.memories.selectedMemoryIds
   );
@@ -144,10 +162,22 @@ export function MemoryTable() {
               </div>
             </TableHead>
             <TableHead className="w-[140px] border-zinc-700">
-              <div className="flex items-center w-full justify-center">
+              <button
+                onClick={handleSortByCreatedAt}
+                className="flex items-center w-full justify-center gap-1 hover:text-white transition-colors cursor-pointer"
+              >
                 <CiCalendar className="mr-1" size={16} />
                 Created On
-              </div>
+                {currentSort === "created_at" ? (
+                  currentDir === "asc" ? (
+                    <ArrowUp className="h-3 w-3 text-primary" />
+                  ) : (
+                    <ArrowDown className="h-3 w-3 text-primary" />
+                  )
+                ) : (
+                  <ArrowDown className="h-3 w-3 text-zinc-600" />
+                )}
+              </button>
             </TableHead>
             <TableHead className="text-right border-zinc-700 flex justify-center">
               <div className="flex items-center justify-end">

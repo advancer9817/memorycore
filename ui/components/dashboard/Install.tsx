@@ -52,6 +52,7 @@ export const Install = () => {
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState(false);
   const [runState, setRunState] = useState<CuratorRunState>({ state: "idle" });
+  const [runActionsShowAll, setRunActionsShowAll] = useState(false);
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -118,9 +119,14 @@ export const Install = () => {
       llm_thinking?: string;
       llm_raw?: string;
       llm_prompt?: string;
+      _category?: string;
+      _raw?: Record<string, unknown>;
     }>;
   }>({ state: "idle" });
   const [llmRunning, setLlmRunning] = useState(false);
+  const [llmFindingsShowAll, setLlmFindingsShowAll] = useState(false);
+  const [llmDismissedIndices, setLlmDismissedIndices] = useState<Set<number>>(new Set());
+  const [isRecovering, setIsRecovering] = useState(false);
   const llmPollRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const LLM_JOB_KEY = "mcore_llm_curator_job";
@@ -136,6 +142,8 @@ export const Install = () => {
         llm_thinking: d.llm_thinking,
         llm_raw: d.llm_raw,
         llm_prompt: d.llm_prompt,
+        _category: "semantic_duplicates",
+        _raw: d,
       })),
       ...(data.contradictions || []).map((c: any) => ({
         action: "mark contradicted",
@@ -144,6 +152,8 @@ export const Install = () => {
         llm_thinking: c.llm_thinking,
         llm_raw: c.llm_raw,
         llm_prompt: c.llm_prompt,
+        _category: "contradictions",
+        _raw: c,
       })),
       ...(data.importance_reassessments || [])
         .filter((r: any) => r.action !== "keep")
@@ -154,6 +164,8 @@ export const Install = () => {
           llm_thinking: r.llm_thinking,
           llm_raw: r.llm_raw,
           llm_prompt: r.llm_prompt,
+          _category: "importance_reassessments",
+          _raw: r,
         })),
       ...(data.split_candidates || []).map((s: any) => ({
         action: "split",
@@ -162,6 +174,8 @@ export const Install = () => {
         llm_thinking: s.llm_thinking,
         llm_raw: s.llm_raw,
         llm_prompt: s.llm_prompt,
+        _category: "split_candidates",
+        _raw: s,
       })),
     ],
   });
@@ -169,6 +183,14 @@ export const Install = () => {
   const _pollJob = React.useCallback(async (jobId: string, startedAt: number) => {
     try {
       const res = await fetch(`${getApiBaseUrl()}/api/curator/llm/${jobId}`);
+      setIsRecovering(false);
+      // Job not found (service restarted) — treat as stale, stop polling
+      if (!res.ok) {
+        setLlmRunState({ state: "idle" });
+        setLlmRunning(false);
+        localStorage.removeItem(LLM_JOB_KEY);
+        return;
+      }
       const payload = await res.json();
       const pollData = payload.data || payload;
       if (pollData.status === "done") {
@@ -199,6 +221,7 @@ export const Install = () => {
         llmPollRef.current = setTimeout(() => _pollJob(jobId, startedAt), 2000);
       }
     } catch {
+      setIsRecovering(false);
       llmPollRef.current = setTimeout(() => _pollJob(jobId, startedAt), 3000);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -216,6 +239,7 @@ export const Install = () => {
           if (d.status === "running" && d.job_id) {
             const startedAt = Date.now();
             setLlmRunning(true);
+            setIsRecovering(true);
             setLlmRunState({ state: "running", jobId: d.job_id, startedAt });
             localStorage.setItem(LLM_JOB_KEY, JSON.stringify({ jobId: d.job_id, startedAt }));
             llmPollRef.current = setTimeout(() => _pollJob(d.job_id, startedAt), 2000);
@@ -226,7 +250,14 @@ export const Install = () => {
     }
     try {
       const { jobId, startedAt } = JSON.parse(saved);
+      // If the saved job is older than 2 hours, the server has likely restarted
+      // and the job no longer exists — discard it instead of showing stale state
+      if (!jobId || Date.now() - startedAt > 2 * 60 * 60 * 1000) {
+        localStorage.removeItem(LLM_JOB_KEY);
+        return;
+      }
       setLlmRunning(true);
+      setIsRecovering(true);
       setLlmRunState({ state: "running", jobId, startedAt });
       llmPollRef.current = setTimeout(() => _pollJob(jobId, startedAt), 500);
     } catch {
@@ -242,6 +273,7 @@ export const Install = () => {
     if (llmRunning) return;
     const startedAt = Date.now();
     setLlmRunning(true);
+    setLlmDismissedIndices(new Set());
     setLlmRunState({ state: "running", startedAt });
     try {
       const response = await fetch(`${getApiBaseUrl()}/api/curator/llm`, {
@@ -401,10 +433,34 @@ export const Install = () => {
             {runState.error && <span className="text-red-300 ml-2">{runState.error}</span>}
           </div>
         )}
+        {runState.actions && runState.actions.length > 0 && (
+          <div className="flex flex-col gap-1 border-t border-zinc-800 pt-2">
+            {(runActionsShowAll ? runState.actions : runState.actions.slice(0, 3)).map((action, i) => (
+              <div key={action.id ?? i} className="rounded bg-zinc-800 px-2 py-1.5 text-xs flex items-start gap-2">
+                <span className="text-emerald-300 font-medium shrink-0">{action.action}</span>
+                {action.title && <span className="text-zinc-400">· {action.title}</span>}
+                {action.reason && <span className="text-zinc-500 ml-auto">{action.reason}</span>}
+              </div>
+            ))}
+            {!runActionsShowAll && runState.actions.length > 3 && (
+              <button
+                onClick={() => setRunActionsShowAll(true)}
+                className="w-full text-center text-xs text-zinc-400 hover:text-zinc-200 py-1.5 rounded bg-zinc-800/50 hover:bg-zinc-800 transition-colors"
+              >
+                查看全部 ({runState.actions.length} 项)
+              </button>
+            )}
+          </div>
+        )}
 
         {/* LLM Curator results */}
         {llmRunState.state !== "idle" && (
           <div className="border-t border-zinc-800 pt-2 text-sm space-y-2">
+            {isRecovering && (
+              <div className="flex items-center gap-2 text-sky-400 text-xs animate-pulse">
+                <span>正在恢复任务状态...</span>
+              </div>
+            )}
             <div className="flex items-center gap-3">
               <span className="text-zinc-500">LLM analysis</span>
               <Badge
@@ -442,13 +498,47 @@ export const Install = () => {
                 ))}
               </div>
             )}
-            {llmRunState.findings && llmRunState.findings.length > 0 && (
-              <div className="space-y-1 max-h-96 overflow-y-auto pr-1">
-                {llmRunState.findings.map((f, i) => (
-                  <LlmFinding key={i} finding={f} />
-                ))}
-              </div>
-            )}
+            {llmRunState.findings && llmRunState.findings.length > 0 && (() => {
+              const visibleFindings = llmRunState.findings.filter((_, i) => !llmDismissedIndices.has(i));
+              const displayFindings = llmFindingsShowAll ? visibleFindings : visibleFindings.slice(0, 20);
+              return (
+                <div className="space-y-1 max-h-96 overflow-y-auto pr-1">
+                  {displayFindings.map((f, displayIdx) => {
+                    const globalIdx = llmRunState.findings!.indexOf(f);
+                    return (
+                      <LlmFinding
+                        key={globalIdx}
+                        finding={f}
+                        onAccept={async () => {
+                          if (!f._category || !f._raw) return;
+                          try {
+                            await fetch(`${getApiBaseUrl()}/api/curator/llm/apply-single`, {
+                              method: "POST",
+                              headers: { "content-type": "application/json" },
+                              body: JSON.stringify({ category: f._category, finding: f._raw }),
+                            });
+                            setLlmDismissedIndices((prev) => new Set([...prev, globalIdx]));
+                          } catch {
+                            // silently ignore apply errors
+                          }
+                        }}
+                        onDismiss={() => {
+                          setLlmDismissedIndices((prev) => new Set([...prev, globalIdx]));
+                        }}
+                      />
+                    );
+                  })}
+                  {!llmFindingsShowAll && visibleFindings.length > 20 && (
+                    <button
+                      onClick={() => setLlmFindingsShowAll(true)}
+                      className="w-full text-center text-xs text-zinc-400 hover:text-zinc-200 py-1.5 rounded bg-zinc-800/50 hover:bg-zinc-800 transition-colors"
+                    >
+                      显示全部 ({visibleFindings.length} 条)
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
             {llmRunState.error && <div className="text-red-300">{llmRunState.error}</div>}
           </div>
         )}
@@ -472,7 +562,7 @@ function LlmElapsedTimer({ startedAt }: { startedAt: number }) {
   );
 }
 
-function LlmFinding({ finding }: {
+function LlmFinding({ finding, onAccept, onDismiss }: {
   finding: {
     action: string;
     reason: string;
@@ -480,10 +570,25 @@ function LlmFinding({ finding }: {
     llm_thinking?: string;
     llm_raw?: string;
     llm_prompt?: string;
-  }
+    _category?: string;
+    _raw?: Record<string, unknown>;
+  };
+  onAccept?: () => Promise<void>;
+  onDismiss?: () => void;
 }) {
   const [expanded, setExpanded] = React.useState<null | "thinking" | "raw" | "prompt">(null);
+  const [accepting, setAccepting] = React.useState(false);
   const hasDetail = finding.llm_thinking || finding.llm_raw || finding.llm_prompt;
+
+  const handleAccept = async () => {
+    if (!onAccept) return;
+    setAccepting(true);
+    try {
+      await onAccept();
+    } finally {
+      setAccepting(false);
+    }
+  };
 
   return (
     <div className="rounded bg-zinc-800 px-2 py-2 text-xs">
@@ -493,34 +598,55 @@ function LlmFinding({ finding }: {
           {finding.title && <span className="text-zinc-400"> · {finding.title}</span>}
           {finding.reason && <div className="text-zinc-500 mt-0.5">{finding.reason}</div>}
         </div>
-        {hasDetail && (
-          <div className="flex gap-1 shrink-0 mt-0.5">
-            {finding.llm_thinking && (
-              <button
-                onClick={() => setExpanded(expanded === "thinking" ? null : "thinking")}
-                className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${expanded === "thinking" ? "bg-sky-700 text-sky-100" : "bg-zinc-700 text-zinc-400 hover:text-zinc-200"}`}
-              >
-                思考
-              </button>
-            )}
-            {finding.llm_raw && (
-              <button
-                onClick={() => setExpanded(expanded === "raw" ? null : "raw")}
-                className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${expanded === "raw" ? "bg-violet-700 text-violet-100" : "bg-zinc-700 text-zinc-400 hover:text-zinc-200"}`}
-              >
-                原话
-              </button>
-            )}
-            {finding.llm_prompt && (
-              <button
-                onClick={() => setExpanded(expanded === "prompt" ? null : "prompt")}
-                className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${expanded === "prompt" ? "bg-zinc-500 text-zinc-100" : "bg-zinc-700 text-zinc-400 hover:text-zinc-200"}`}
-              >
-                Prompt
-              </button>
-            )}
-          </div>
-        )}
+        <div className="flex gap-1 shrink-0 mt-0.5 items-center">
+          {onAccept && (
+            <button
+              onClick={handleAccept}
+              disabled={accepting}
+              className="rounded px-1.5 py-0.5 text-[10px] transition-colors bg-emerald-800/60 text-emerald-300 hover:bg-emerald-700 disabled:opacity-50"
+              title="Accept and apply this finding"
+            >
+              {accepting ? "..." : "✓ 接受"}
+            </button>
+          )}
+          {onDismiss && (
+            <button
+              onClick={onDismiss}
+              className="rounded px-1.5 py-0.5 text-[10px] transition-colors bg-zinc-700 text-zinc-400 hover:bg-red-900/60 hover:text-red-300"
+              title="Dismiss this finding"
+            >
+              ✗ 拒绝
+            </button>
+          )}
+          {hasDetail && (
+            <>
+              {finding.llm_thinking && (
+                <button
+                  onClick={() => setExpanded(expanded === "thinking" ? null : "thinking")}
+                  className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${expanded === "thinking" ? "bg-sky-700 text-sky-100" : "bg-zinc-700 text-zinc-400 hover:text-zinc-200"}`}
+                >
+                  思考
+                </button>
+              )}
+              {finding.llm_raw && (
+                <button
+                  onClick={() => setExpanded(expanded === "raw" ? null : "raw")}
+                  className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${expanded === "raw" ? "bg-violet-700 text-violet-100" : "bg-zinc-700 text-zinc-400 hover:text-zinc-200"}`}
+                >
+                  原话
+                </button>
+              )}
+              {finding.llm_prompt && (
+                <button
+                  onClick={() => setExpanded(expanded === "prompt" ? null : "prompt")}
+                  className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${expanded === "prompt" ? "bg-zinc-500 text-zinc-100" : "bg-zinc-700 text-zinc-400 hover:text-zinc-200"}`}
+                >
+                  Prompt
+                </button>
+              )}
+            </>
+          )}
+        </div>
       </div>
       {expanded && (
         <pre className={`mt-2 max-h-64 overflow-auto rounded p-2 text-[10px] leading-relaxed whitespace-pre-wrap break-words ${

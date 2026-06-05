@@ -3,7 +3,6 @@
 import dynamic from "next/dynamic";
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getApiBaseUrl } from "@/lib/api-url";
 import {
@@ -13,6 +12,7 @@ import {
   EDGE_COLORS,
   IMPORTANCE_THRESHOLD,
 } from "./types";
+import type { Graph3DHandle } from "./Graph3D";
 
 function useResizable(initial: number, min: number, max: number, direction: "right" | "left") {
   const [size, setSize] = useState(initial);
@@ -25,12 +25,9 @@ function useResizable(initial: number, min: number, max: number, direction: "rig
     dragging.current = true;
     startX.current = e.clientX;
     startSize.current = size;
-
     const onMove = (ev: MouseEvent) => {
       if (!dragging.current) return;
-      const delta = direction === "right"
-        ? ev.clientX - startX.current
-        : startX.current - ev.clientX;
+      const delta = direction === "right" ? ev.clientX - startX.current : startX.current - ev.clientX;
       setSize(Math.min(max, Math.max(min, startSize.current + delta)));
     };
     const onUp = () => {
@@ -47,10 +44,7 @@ function useResizable(initial: number, min: number, max: number, direction: "rig
 
 const Graph3D = dynamic(() => import("./Graph3D"), { ssr: false });
 
-interface GraphData {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-}
+interface GraphData { nodes: GraphNode[]; edges: GraphEdge[]; }
 
 export default function GraphPage() {
   const [data, setData] = useState<GraphData | null>(null);
@@ -59,16 +53,25 @@ export default function GraphPage() {
   const [search, setSearch] = useState("");
   const [activeTypes, setActiveTypes] = useState<Set<string>>(new Set());
   const [activeEdgeTypes, setActiveEdgeTypes] = useState<Set<string>>(new Set());
+  const [activeStatus, setActiveStatus] = useState<string>("all");
   const [highlightImportant, setHighlightImportant] = useState(false);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [fullContent, setFullContent] = useState<string | null>(null);
   const [listCollapsed, setListCollapsed] = useState(false);
+  const [graphReady, setGraphReady] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editImportance, setEditImportance] = useState(0.5);
+  const [editStatus, setEditStatus] = useState("active");
+  const [showHud, setShowHud] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ w: 900, h: 600 });
   const listItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  const listPanel = useResizable(220, 120, 400, "right");
-  const detailPanel = useResizable(280, 180, 480, "left");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const listPanel = useResizable(260, 160, 420, "right");
+  const detailPanel = useResizable(320, 220, 500, "left");
+  const graph3DRef = useRef<Graph3DHandle>(null);
 
   useEffect(() => {
     fetch(`${getApiBaseUrl()}/api/graph`)
@@ -76,12 +79,9 @@ export default function GraphPage() {
       .then((p) => {
         const raw = p.data ?? p;
         const nodeIds = new Set(raw.nodes.map((n: GraphNode) => n.id));
-        const safeEdges = raw.edges.filter(
-          (e: GraphEdge) => nodeIds.has(e.source) && nodeIds.has(e.target)
-        );
-        const nodes: GraphNode[] = raw.nodes;
-        setData({ nodes, edges: safeEdges });
-        setActiveTypes(new Set(nodes.map((n) => n.type)));
+        const safeEdges = raw.edges.filter((e: GraphEdge) => nodeIds.has(e.source) && nodeIds.has(e.target));
+        setData({ nodes: raw.nodes, edges: safeEdges });
+        setActiveTypes(new Set(raw.nodes.map((n: GraphNode) => n.type)));
         setActiveEdgeTypes(new Set(safeEdges.map((e: GraphEdge) => e.relation_type)));
       })
       .catch((e) => setError(String(e)))
@@ -91,9 +91,7 @@ export default function GraphPage() {
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() =>
-      setDims({ w: el.clientWidth, h: el.clientHeight })
-    );
+    const ro = new ResizeObserver(() => setDims({ w: el.clientWidth, h: el.clientHeight }));
     ro.observe(el);
     setDims({ w: el.clientWidth, h: el.clientHeight });
     return () => ro.disconnect();
@@ -102,13 +100,15 @@ export default function GraphPage() {
   useEffect(() => {
     if (!selectedNode) { setFullContent(null); return; }
     setFullContent(null);
+    setIsEditing(false);
     fetch(`${getApiBaseUrl()}/api/v1/memories/${selectedNode.id}`)
       .then((r) => r.json())
-      .then((p) => {
-        const rec = p.data ?? p;
-        setFullContent(rec.content ?? rec.text ?? selectedNode.content);
-      })
+      .then((p) => { const rec = p.data ?? p; setFullContent(rec.content ?? rec.text ?? selectedNode.content); })
       .catch(() => setFullContent(selectedNode.content));
+  }, [selectedNode?.id]);
+
+  useEffect(() => {
+    if (selectedNode) { setEditImportance(selectedNode.importance); setEditStatus(selectedNode.status ?? "active"); }
   }, [selectedNode?.id]);
 
   const connectedIds = useCallback((): Set<string> | null => {
@@ -122,343 +122,434 @@ export default function GraphPage() {
     return ids;
   }, [selectedNode, data]);
 
-  const toggleType = useCallback((t: string) => {
-    setActiveTypes((prev) => {
-      const next = new Set(prev);
-      if (next.has(t)) next.delete(t); else next.add(t);
-      return next;
-    });
-  }, []);
-
-  const toggleEdgeType = useCallback((t: string) => {
-    setActiveEdgeTypes((prev) => {
-      const next = new Set(prev);
-      if (next.has(t)) next.delete(t); else next.add(t);
-      return next;
-    });
-  }, []);
+  const toggleType = useCallback((t: string) => setActiveTypes(prev => { const n = new Set(prev); n.has(t) ? n.delete(t) : n.add(t); return n; }), []);
+  const toggleEdgeType = useCallback((t: string) => setActiveEdgeTypes(prev => { const n = new Set(prev); n.has(t) ? n.delete(t) : n.add(t); return n; }), []);
 
   const handleNodeSelect = useCallback((node: GraphNode) => {
-    setSelectedNode((prev) => {
+    setSelectedNode(prev => {
       if (prev?.id === node.id) return null;
       setTimeout(() => {
         listItemRefs.current[node.id]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        graph3DRef.current?.focusNode(node.id);
       }, 50);
       return node;
     });
   }, []);
 
-  const allTypes = useMemo(
-    () => (data ? Array.from(new Set(data.nodes.map((n) => n.type))).sort() : []),
-    [data]
-  );
-  const allEdgeTypes = useMemo(
-    () => (data ? Array.from(new Set(data.edges.map((e) => e.relation_type))).sort() : []),
-    [data]
-  );
+  const resetAll = useCallback(() => {
+    if (data) { setActiveTypes(new Set(data.nodes.map(n => n.type))); setActiveEdgeTypes(new Set(data.edges.map(e => e.relation_type))); }
+    setSearch(""); setHighlightImportant(false); setSelectedNode(null); setActiveStatus("all");
+  }, [data]);
 
-  const filteredNodes = useMemo(
-    () =>
-      data
-        ? data.nodes.filter((n) => {
-            if (!activeTypes.has(n.type)) return false;
-            if (highlightImportant && n.importance < IMPORTANCE_THRESHOLD) return false;
-            if (search.length > 1) {
-              const q = search.toLowerCase();
-              return n.title.toLowerCase().includes(q) || n.type.toLowerCase().includes(q) || n.content.toLowerCase().includes(q);
-            }
-            return true;
-          })
-        : [],
-    [data, activeTypes, highlightImportant, search]
-  );
+  const allTypes = useMemo(() => data ? Array.from(new Set(data.nodes.map(n => n.type))).sort() : [], [data]);
+  const allEdgeTypes = useMemo(() => data ? Array.from(new Set(data.edges.map(e => e.relation_type))).sort() : [], [data]);
 
-  const sortedListNodes = useMemo(
-    () => [...filteredNodes].sort((a, b) => b.importance - a.importance),
-    [filteredNodes]
-  );
+  const filteredNodes = useMemo(() => data ? data.nodes.filter(n => {
+    if (!activeTypes.has(n.type)) return false;
+    if (activeStatus !== "all" && n.status !== activeStatus) return false;
+    if (highlightImportant && n.importance < IMPORTANCE_THRESHOLD) return false;
+    if (search.length > 1) { const q = search.toLowerCase(); return n.title.toLowerCase().includes(q) || n.type.toLowerCase().includes(q) || n.content.toLowerCase().includes(q); }
+    return true;
+  }) : [], [data, activeTypes, activeStatus, highlightImportant, search]);
 
-  const filteredNodeIds = useMemo(
-    () => new Set(filteredNodes.map((n) => n.id)),
-    [filteredNodes]
-  );
-  const filteredEdges = useMemo(
-    () =>
-      data
-        ? data.edges.filter(
-            (e) =>
-              activeEdgeTypes.has(e.relation_type) &&
-              filteredNodeIds.has(e.source) &&
-              filteredNodeIds.has(e.target)
-          )
-        : [],
-    [data, activeEdgeTypes, filteredNodeIds]
-  );
+  const sortedListNodes = useMemo(() => [...filteredNodes].sort((a, b) => b.importance - a.importance), [filteredNodes]);
+  const filteredNodeIds = useMemo(() => new Set(filteredNodes.map(n => n.id)), [filteredNodes]);
+  const filteredEdges = useMemo(() => data ? data.edges.filter(e => activeEdgeTypes.has(e.relation_type) && filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target)) : [], [data, activeEdgeTypes, filteredNodeIds]);
+  const importantCount = useMemo(() => data ? data.nodes.filter(n => n.importance >= IMPORTANCE_THRESHOLD).length : 0, [data]);
 
-  const importantCount = useMemo(
-    () => (data ? data.nodes.filter((n) => n.importance >= IMPORTANCE_THRESHOLD).length : 0),
-    [data]
-  );
+  const handleExportJson = useCallback(() => {
+    if (!data) return;
+    const blob = new Blob([JSON.stringify({ nodes: filteredNodes, edges: filteredEdges }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "memory-graph.json"; a.click();
+    URL.revokeObjectURL(url);
+  }, [data, filteredNodes, filteredEdges]);
+
   const linked = connectedIds();
 
   return (
-    <div className="flex flex-col h-[calc(100vh-56px)]">
-      {/* Header */}
-      <div className="relative flex items-center gap-3 px-4 py-2 border-b border-zinc-800 bg-zinc-950 shrink-0">
-        <h1 className="text-sm font-semibold text-white whitespace-nowrap">Memory Graph</h1>
-        {data && (
-          <p className="text-xs text-zinc-500 whitespace-nowrap">
-            {filteredNodes.length}/{data.nodes.length} · {filteredEdges.length} links
-          </p>
-        )}
-        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
-          <Button
-            size="sm"
-            variant={highlightImportant ? "default" : "outline"}
-            className={highlightImportant
-              ? "bg-amber-500 hover:bg-amber-600 text-black border-0 text-xs h-7 px-2"
-              : "border-zinc-700 text-zinc-300 hover:text-white text-xs h-7 px-2"}
-            onClick={() => setHighlightImportant((v) => !v)}
-          >
-            ★ {importantCount > 0 && `(${importantCount})`}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="border-zinc-700 text-zinc-300 hover:text-white text-xs h-7 px-2"
-            onClick={() => {
-              if (data) {
-                setActiveTypes(new Set(data.nodes.map((n) => n.type)));
-                setActiveEdgeTypes(new Set(data.edges.map((e) => e.relation_type)));
-              }
-              setSearch("");
-              setHighlightImportant(false);
-              setSelectedNode(null);
+    <div className="flex flex-col h-[calc(100vh-56px)] bg-[#020408]">
+
+      {/* ══ Topbar: brand · search(center) · actions ══ */}
+      <div className="flex items-center gap-3 px-4 h-12 shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", background: "#05070c" }}>
+
+        {/* List collapse toggle — in topbar, left of brand */}
+        <button
+          onClick={() => setListCollapsed(v => !v)}
+          className="shrink-0 w-7 h-7 flex items-center justify-center rounded-md transition-all hover:bg-white/5"
+          style={{ border: "1px solid rgba(255,255,255,0.07)", color: "#52525b", fontSize: 12 }}
+          title={listCollapsed ? "展开列表" : "折叠列表"}
+        >{listCollapsed ? "›" : "‹"}</button>
+
+        {/* Brand */}
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse" />
+          <span className="font-mono text-xs font-bold uppercase tracking-[0.15em] text-cyan-500/70 select-none">
+            NeuralGraph
+          </span>
+        </div>
+
+        {/* Divider */}
+        <span className="w-px h-4 bg-white/8 shrink-0" />
+
+        {/* Search — takes remaining space, centered feel */}
+        <div className="flex-1 max-w-lg mx-auto">
+          <Input
+            className="w-full h-8 rounded-lg text-sm text-zinc-200 placeholder:text-zinc-600"
+            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+            placeholder="搜索记忆标题、内容、类型…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+
+        {/* Divider */}
+        <span className="w-px h-4 bg-white/8 shrink-0" />
+
+        {/* Action buttons */}
+        <div className="flex items-center gap-1 shrink-0">
+          {data && (
+            <span className="font-mono text-xs text-zinc-600 mr-2 select-none whitespace-nowrap">
+              <span className="text-zinc-400">{filteredNodes.length}</span>
+              <span className="text-zinc-700">/{data.nodes.length}</span>
+              <span className="mx-1.5 text-zinc-800">·</span>
+              <span className="text-zinc-400">{filteredEdges.length}</span>
+              <span className="text-zinc-700"> links</span>
+            </span>
+          )}
+
+          <button
+            onClick={() => setHighlightImportant(v => !v)}
+            className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md transition-all"
+            style={{
+              color: highlightImportant ? "#FBBF24" : "#52525b",
+              background: highlightImportant ? "rgba(251,191,36,0.08)" : "transparent",
+              border: `1px solid ${highlightImportant ? "rgba(251,191,36,0.2)" : "rgba(255,255,255,0.06)"}`,
             }}
           >
-            重置
-          </Button>
-          <Input
-            className="w-36 bg-zinc-900 border-zinc-700 text-zinc-100 placeholder:text-zinc-500 h-7 text-xs"
-            placeholder="搜索…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+            <span>★</span>
+            <span className="font-mono tabular-nums">{importantCount}</span>
+          </button>
+
+          <button
+            onClick={resetAll}
+            className="text-xs text-zinc-500 hover:text-zinc-200 px-2.5 py-1.5 rounded-md hover:bg-white/5 transition-all"
+            style={{ border: "1px solid rgba(255,255,255,0.06)" }}
+          >重置</button>
+
+          <button
+            onClick={handleExportJson}
+            className="text-xs text-zinc-500 hover:text-zinc-200 px-2.5 py-1.5 rounded-md hover:bg-white/5 transition-all"
+            style={{ border: "1px solid rgba(255,255,255,0.06)" }}
+          >导出</button>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-x-2 gap-y-1 px-4 py-1.5 border-b border-zinc-800 bg-zinc-950/80 shrink-0 items-center">
-        <span className="text-xs text-zinc-500 shrink-0">类型:</span>
-        {allTypes.map((t) => {
-          const active = activeTypes.has(t);
-          const color = TYPE_COLORS[t] ?? "#A0A09A";
-          return (
-            <button
-              key={t}
-              onClick={() => toggleType(t)}
-              className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium transition-all border"
-              style={{
-                borderColor: active ? color : "#333",
-                color: active ? color : "#555",
-                background: active ? `${color}18` : "transparent",
-              }}
-            >
-              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: active ? color : "#444" }} />
-              {t.replace(/_/g, " ")}
-            </button>
-          );
-        })}
-        <span className="ml-2 text-xs text-zinc-500 shrink-0">链接:</span>
-        {allEdgeTypes.map((e) => {
-          const active = activeEdgeTypes.has(e);
-          const color = EDGE_COLORS[e] ?? "#888";
-          return (
-            <button
-              key={e}
-              onClick={() => toggleEdgeType(e)}
-              className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium transition-all border"
-              style={{
-                borderColor: active ? color : "#333",
-                color: active ? color : "#555",
-                background: active ? `${color}18` : "transparent",
-              }}
-            >
-              {e.replace(/_/g, " ")}
-            </button>
-          );
-        })}
-      </div>
+      {/* ══ Main area ══ */}
+      <div className="flex-1 relative overflow-hidden">
 
-      {/* Main area — relative container, everything inside is absolute overlay */}
-      <div className="flex-1 relative overflow-hidden bg-zinc-950">
-        {/* 3D Graph — fills entire area */}
+        {/* 3D canvas */}
         <div ref={containerRef} className="absolute inset-0">
           {loading && (
-            <div className="absolute inset-0 flex items-center justify-center text-zinc-400 z-10">
-              加载图谱…
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="font-mono text-xs text-zinc-700 tracking-widest">LOADING…</span>
             </div>
           )}
           {error && (
-            <div className="absolute inset-0 flex items-center justify-center text-red-400 z-10">
-              {error}
-            </div>
+            <div className="absolute inset-0 flex items-center justify-center text-red-500 text-sm">{error}</div>
           )}
           {data && (
-            <Graph3D
-              nodes={filteredNodes}
-              links={filteredEdges}
-              search={search}
-              highlightImportant={highlightImportant}
-              selectedNodeId={selectedNode?.id ?? null}
-              linkedNodeIds={linked}
-              width={dims.w}
-              height={dims.h}
-              onNodeClick={handleNodeSelect}
-              onBackgroundClick={() => setSelectedNode(null)}
-            />
+            <>
+              {!graphReady && (
+                <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: "rgba(2,4,8,0.7)" }}>
+                  <div className="flex items-center gap-2 font-mono text-xs text-cyan-700">
+                    <span className="w-1 h-1 rounded-full bg-cyan-500 animate-pulse" />
+                    COMPUTING LAYOUT…
+                  </div>
+                </div>
+              )}
+              <Graph3D
+                ref={graph3DRef}
+                nodes={filteredNodes}
+                links={filteredEdges}
+                search={search}
+                highlightImportant={highlightImportant}
+                selectedNodeId={selectedNode?.id ?? null}
+                linkedNodeIds={linked}
+                width={dims.w}
+                height={dims.h}
+                onNodeClick={handleNodeSelect}
+                onBackgroundClick={() => setSelectedNode(null)}
+                onReady={() => setGraphReady(true)}
+              />
+            </>
           )}
         </div>
 
-        {/* Left list panel — absolute overlay */}
+        {/* ══ Left panel: filters + list ══ */}
         {!listCollapsed && (
           <div
-            className="absolute left-0 top-0 bottom-0 z-20 bg-zinc-950/95 backdrop-blur-sm border-r border-zinc-800 flex flex-col overflow-hidden"
-            style={{ width: listPanel.size }}
+            className="absolute left-0 top-0 bottom-0 z-20 flex flex-col overflow-hidden"
+            style={{
+              width: listPanel.size,
+              background: "rgba(3,5,10,0.94)",
+              backdropFilter: "blur(16px)",
+              borderRight: "1px solid rgba(255,255,255,0.06)",
+            }}
           >
-            <div className="px-3 py-2 border-b border-zinc-800 shrink-0">
-              <span className="text-xs text-zinc-400 font-medium">
-                记忆列表 <span className="text-zinc-600">({sortedListNodes.length})</span>
+            {/* ── Filter section (collapsible) ── */}
+            <div className="shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+              <button
+                onClick={() => setFiltersOpen(v => !v)}
+                className="w-full flex items-center justify-between px-3 py-2 text-xs font-mono uppercase tracking-widest transition-colors hover:bg-white/3"
+                style={{ color: filtersOpen ? "#06B6D4" : "#52525b" }}
+              >
+                <span className="flex items-center gap-1.5">
+                  <span style={{ fontSize: 9 }}>{filtersOpen ? "▾" : "▸"}</span>
+                  FILTER
+                  {/* Active filter badge */}
+                  {(activeTypes.size < allTypes.length || activeEdgeTypes.size < allEdgeTypes.length || activeStatus !== "all") && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-500" />
+                  )}
+                </span>
+              </button>
+
+              {filtersOpen && (
+                <div className="px-3 pb-3 space-y-3">
+                  {/* Type filters */}
+                  <div>
+                    <p className="text-[10px] font-mono text-zinc-700 uppercase tracking-widest mb-1.5">节点类型</p>
+                    <div className="flex flex-wrap gap-1">
+                      {allTypes.map(t => {
+                        const active = activeTypes.has(t);
+                        const color = TYPE_COLORS[t] ?? "#64748B";
+                        return (
+                          <button key={t} onClick={() => toggleType(t)}
+                            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs transition-all"
+                            style={{ color: active ? color : "#52525b", background: active ? `${color}15` : "rgba(255,255,255,0.03)", border: `1px solid ${active ? `${color}30` : "rgba(255,255,255,0.06)"}` }}
+                          >
+                            <span className="w-1 h-1 rounded-full shrink-0" style={{ background: active ? color : "#3f3f46" }} />
+                            {t.replace(/_/g, " ")}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Edge type filters */}
+                  <div>
+                    <p className="text-[10px] font-mono text-zinc-700 uppercase tracking-widest mb-1.5">连接类型</p>
+                    <div className="flex flex-wrap gap-1">
+                      {allEdgeTypes.map(e => {
+                        const active = activeEdgeTypes.has(e);
+                        const color = EDGE_COLORS[e] ?? "#52525b";
+                        return (
+                          <button key={e} onClick={() => toggleEdgeType(e)}
+                            className="rounded px-1.5 py-0.5 text-xs transition-all"
+                            style={{ color: active ? color : "#52525b", background: active ? `${color}15` : "rgba(255,255,255,0.03)", border: `1px solid ${active ? `${color}30` : "rgba(255,255,255,0.06)"}` }}
+                          >
+                            {e.replace(/_/g, " ")}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Status filter */}
+                  <div>
+                    <p className="text-[10px] font-mono text-zinc-700 uppercase tracking-widest mb-1.5">状态</p>
+                    <div className="flex gap-1">
+                      {(["all", "active", "candidate", "stale"] as const).map(s => (
+                        <button key={s} onClick={() => setActiveStatus(s)}
+                          className="rounded px-2 py-0.5 text-xs transition-all"
+                          style={{
+                            color: activeStatus === s ? "#60A5FA" : "#52525b",
+                            background: activeStatus === s ? "rgba(96,165,250,0.1)" : "rgba(255,255,255,0.03)",
+                            border: `1px solid ${activeStatus === s ? "rgba(96,165,250,0.25)" : "rgba(255,255,255,0.06)"}`,
+                          }}
+                        >{s}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── Node list ── */}
+            <div className="px-3 py-2 shrink-0 flex items-center" style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+              <span className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest">
+                NODES <span className="text-zinc-400">{sortedListNodes.length}</span>
               </span>
             </div>
+
             <div className="flex-1 overflow-y-auto">
-              {sortedListNodes.map((node) => {
-                const color = TYPE_COLORS[node.type] ?? "#A0A09A";
+              {sortedListNodes.map(node => {
+                const color = TYPE_COLORS[node.type] ?? "#64748B";
                 const isSelected = selectedNode?.id === node.id;
                 const isLinked = linked && !isSelected && linked.has(node.id);
                 return (
                   <div
                     key={node.id}
-                    ref={(el) => { listItemRefs.current[node.id] = el; }}
+                    ref={el => { listItemRefs.current[node.id] = el; }}
                     onClick={() => handleNodeSelect(node)}
-                    className={`px-3 py-2 cursor-pointer border-b border-zinc-900/50 hover:bg-zinc-800/60 transition-colors ${
-                      isSelected ? "bg-zinc-800 border-l-2" : isLinked ? "bg-zinc-800/30" : ""
-                    }`}
-                    style={isSelected ? { borderLeftColor: "#60A5FA" } : {}}
+                    className="px-3 py-2.5 cursor-pointer transition-all"
+                    style={{
+                      borderBottom: "1px solid rgba(255,255,255,0.03)",
+                      borderLeft: isSelected ? `2px solid ${color}` : "2px solid transparent",
+                      background: isSelected ? `${color}10` : isLinked ? "rgba(255,255,255,0.02)" : "transparent",
+                    }}
                   >
-                    <div className="flex items-center gap-1.5 mb-0.5">
-                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: color }} />
-                      <span className="text-xs text-zinc-500 truncate">{node.type.replace(/_/g, " ")}</span>
-                      {node.importance >= IMPORTANCE_THRESHOLD && (
-                        <span className="text-amber-400 text-xs ml-auto shrink-0">★</span>
-                      )}
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-2 h-2 rounded-full shrink-0 flex-none" style={{ background: color }} />
+                      <p className="text-sm text-zinc-200 leading-tight truncate flex-1 min-w-0">{node.title}</p>
+                      {node.importance >= IMPORTANCE_THRESHOLD && <span className="text-amber-400 text-xs shrink-0">★</span>}
+                      <span className="text-xs text-zinc-500 shrink-0 font-mono tabular-nums">{node.importance.toFixed(2)}</span>
                     </div>
-                    <p className="text-xs text-zinc-200 leading-snug line-clamp-2">{node.title}</p>
-                    <div className="mt-0.5 text-xs text-zinc-600">{node.importance.toFixed(2)}</div>
+                    <div className="ml-4 mt-0.5 text-xs text-zinc-700">{node.type.replace(/_/g, " ")}</div>
                   </div>
                 );
               })}
             </div>
+
             {/* Resize handle */}
-            <div
-              onMouseDown={listPanel.onMouseDown}
-              className="absolute top-0 right-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/50 active:bg-blue-500/70 transition-colors"
-            />
+            <div onMouseDown={listPanel.onMouseDown} className="absolute top-0 right-0 bottom-0 w-1 cursor-col-resize hover:bg-cyan-500/20 transition-colors" />
           </div>
         )}
 
-        {/* List collapse toggle — absolute, hugs list edge */}
-        <button
-          onClick={() => setListCollapsed((v) => !v)}
-          className="absolute top-3 z-30 w-5 h-8 rounded-r-md bg-zinc-800/90 hover:bg-zinc-700 border border-l-0 border-zinc-700 flex items-center justify-center text-zinc-400 hover:text-zinc-100 transition-colors text-xs backdrop-blur-sm"
-          style={{ left: listCollapsed ? 0 : listPanel.size }}
-          title={listCollapsed ? "展开列表" : "折叠列表"}
-        >
-          {listCollapsed ? "›" : "‹"}
-        </button>
-
-        {/* Right detail panel — absolute overlay */}
+        {/* ══ Right detail panel ══ */}
         {selectedNode && (
-          <div
-            className="absolute right-0 top-0 bottom-0 z-20 flex"
-            style={{ width: detailPanel.size }}
-          >
-            {/* Resize handle */}
-            <div
-              onMouseDown={detailPanel.onMouseDown}
-              className="shrink-0 w-1 cursor-col-resize hover:bg-blue-500/50 active:bg-blue-500/70 transition-colors"
-            />
-            <div className="flex-1 bg-zinc-950/95 backdrop-blur-sm border-l border-zinc-800 flex flex-col overflow-hidden shadow-2xl">
-              <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800 shrink-0">
-                <span className="text-xs font-semibold text-zinc-200 truncate mr-2">{selectedNode.title}</span>
-                <button
-                  onClick={() => setSelectedNode(null)}
-                  className="shrink-0 text-zinc-500 hover:text-zinc-200 text-base leading-none"
-                >
-                  ×
-                </button>
+          <div className="absolute right-0 top-0 bottom-0 z-20 flex" style={{ width: detailPanel.size }}>
+            <div onMouseDown={detailPanel.onMouseDown} className="shrink-0 w-1 cursor-col-resize hover:bg-cyan-500/20 transition-colors" />
+
+            <div className="flex-1 flex flex-col overflow-hidden" style={{ background: "rgba(3,5,10,0.95)", backdropFilter: "blur(16px)", borderLeft: "1px solid rgba(255,255,255,0.06)" }}>
+
+              {/* Detail header */}
+              <div className="px-4 py-4 shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-mono uppercase tracking-[0.12em] mb-1" style={{ color: TYPE_COLORS[selectedNode.type] ?? "#64748B" }}>
+                      {selectedNode.type.replace(/_/g, " ")}
+                    </p>
+                    <h2 className="text-sm font-semibold text-zinc-100 leading-snug">{selectedNode.title}</h2>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0 mt-0.5">
+                    {!isEditing && (
+                      <button onClick={() => setIsEditing(true)}
+                        className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 rounded transition-all"
+                        style={{ border: "1px solid rgba(255,255,255,0.07)" }}>
+                        编辑
+                      </button>
+                    )}
+                    <button onClick={() => setSelectedNode(null)}
+                      className="text-zinc-600 hover:text-zinc-200 w-7 h-7 flex items-center justify-center rounded text-base transition-all hover:bg-white/5">×</button>
+                  </div>
+                </div>
+
+                {/* Importance bar */}
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+                    <div className="h-full rounded-full transition-all" style={{ width: `${selectedNode.importance * 100}%`, background: selectedNode.importance >= IMPORTANCE_THRESHOLD ? "#FBBF24" : TYPE_COLORS[selectedNode.type] ?? "#06B6D4" }} />
+                  </div>
+                  <span className="font-mono text-xs text-zinc-500 tabular-nums shrink-0 w-9 text-right">{(selectedNode.importance * 100).toFixed(0)}%</span>
+                </div>
               </div>
-              <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
-                <Badge
-                  variant="outline"
-                  className="text-xs"
-                  style={{ color: TYPE_COLORS[selectedNode.type] ?? "#aaa", borderColor: TYPE_COLORS[selectedNode.type] ?? "#555" }}
-                >
-                  {selectedNode.type.replace(/_/g, " ")}
-                </Badge>
 
-                <div className="rounded-md bg-zinc-900/80 px-3 py-2">
-                  <div className="text-xs text-zinc-500 mb-1">内容</div>
-                  <p className="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">
-                    {fullContent ?? selectedNode.content ?? "加载中…"}
-                  </p>
-                </div>
-
-                <div>
-                  <div className="flex justify-between text-xs text-zinc-500 mb-1">
-                    <span>重要性</span>
-                    <span>{(selectedNode.importance * 100).toFixed(0)}%</span>
-                  </div>
-                  <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all"
-                      style={{
-                        width: `${selectedNode.importance * 100}%`,
-                        background: selectedNode.importance >= IMPORTANCE_THRESHOLD ? "#F59E0B" : TYPE_COLORS[selectedNode.type] ?? "#6B9E78",
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <Stat label="反馈分" value={selectedNode.feedback_score >= 0 ? `+${selectedNode.feedback_score.toFixed(1)}` : selectedNode.feedback_score.toFixed(1)} />
-                  <Stat label="注入次数" value={String(selectedNode.injected_count)} />
-                  <Stat label="状态" value={selectedNode.status} />
-                  <Stat label="重要性" value={selectedNode.importance.toFixed(2)} highlight={selectedNode.importance >= IMPORTANCE_THRESHOLD} />
-                </div>
-
-                {linked && linked.size > 1 && (
-                  <div>
-                    <div className="text-xs text-zinc-500 mb-1">关联记忆 ({linked.size - 1})</div>
-                    <div className="space-y-1">
-                      {filteredNodes
-                        .filter((n) => linked.has(n.id) && n.id !== selectedNode.id)
-                        .slice(0, 6)
-                        .map((n) => (
-                          <button
-                            key={n.id}
-                            onClick={() => handleNodeSelect(n)}
-                            className="w-full text-left rounded bg-zinc-900/80 px-2 py-1 hover:bg-zinc-800 transition-colors"
-                          >
-                            <div className="flex items-center gap-1 mb-0.5">
-                              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: TYPE_COLORS[n.type] ?? "#A0A09A" }} />
-                              <span className="text-xs text-zinc-500 truncate">{n.type.replace(/_/g, " ")}</span>
-                            </div>
-                            <p className="text-xs text-zinc-300 line-clamp-1">{n.title}</p>
-                          </button>
-                        ))}
+              {/* Detail body */}
+              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5">
+                {isEditing ? (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-[10px] text-zinc-600 block mb-2 font-mono uppercase tracking-widest">重要性 {editImportance.toFixed(1)}</label>
+                      <input type="range" min="0" max="1" step="0.1" value={editImportance} onChange={e => setEditImportance(parseFloat(e.target.value))} className="w-full accent-cyan-500" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-zinc-600 block mb-2 font-mono uppercase tracking-widest">状态</label>
+                      <select value={editStatus} onChange={e => setEditStatus(e.target.value)}
+                        className="w-full text-sm rounded-lg px-3 py-2"
+                        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", color: "#d4d4d8" }}>
+                        {["active", "candidate", "stale", "archived"].map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" className="flex-1 h-8 text-xs bg-cyan-600 hover:bg-cyan-700 text-white border-0"
+                        onClick={() => {
+                          fetch(`${getApiBaseUrl()}/api/v1/memories/${selectedNode.id}`, {
+                            method: "PATCH",
+                            body: JSON.stringify({ importance: editImportance, status: editStatus }),
+                            headers: { "Content-Type": "application/json" },
+                          }).then(() => {
+                            setData(prev => prev ? { ...prev, nodes: prev.nodes.map(n => n.id === selectedNode.id ? { ...n, importance: editImportance, status: editStatus } : n) } : prev);
+                            setSelectedNode(prev => prev ? { ...prev, importance: editImportance, status: editStatus } : prev);
+                            setIsEditing(false);
+                          }).catch(() => {});
+                        }}>保存</Button>
+                      <Button size="sm" variant="outline" className="flex-1 h-8 text-xs border-white/10 text-zinc-400" onClick={() => setIsEditing(false)}>取消</Button>
                     </div>
                   </div>
+                ) : (
+                  <>
+                    {/* Content */}
+                    <div>
+                      <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-700 mb-2">内容</p>
+                      <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">
+                        {fullContent ?? selectedNode.content ?? "加载中…"}
+                      </p>
+                    </div>
+
+                    {/* Stats */}
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        ["反馈", selectedNode.feedback_score >= 0 ? `+${selectedNode.feedback_score.toFixed(1)}` : selectedNode.feedback_score.toFixed(1)],
+                        ["注入", `${selectedNode.injected_count}×`],
+                        ["状态", selectedNode.status],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-lg px-3 py-2.5" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                          <div className="text-[10px] text-zinc-600 font-mono uppercase tracking-wider">{label}</div>
+                          <div className="text-sm text-zinc-200 font-medium mt-1">{value}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* HUD — collapsed by default */}
+                    <div>
+                      <button onClick={() => setShowHud(v => !v)}
+                        className="flex items-center gap-1.5 text-[10px] font-mono text-zinc-700 hover:text-zinc-500 uppercase tracking-widest transition-colors">
+                        <span style={{ fontSize: 8 }}>{showHud ? "▾" : "▸"}</span> HUD DATA
+                      </button>
+                      {showHud && (
+                        <div className="mt-2 rounded-lg font-mono text-xs" style={{ padding: "8px 10px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                          <div className="flex justify-between py-0.5">
+                            <span className="text-zinc-700">LOC_ADDR</span>
+                            <span className="text-cyan-500">0x{selectedNode.id.replace(/-/g, "").slice(0, 8).toUpperCase()}</span>
+                          </div>
+                          <div className="flex justify-between py-0.5">
+                            <span className="text-zinc-700">NODE_VEC</span>
+                            <span className="text-zinc-500">{getMockCoords(selectedNode.id)}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Related nodes */}
+                    {linked && linked.size > 1 && (
+                      <div>
+                        <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-700 mb-2">关联 ({linked.size - 1})</p>
+                        <div className="space-y-0.5">
+                          {filteredNodes.filter(n => linked.has(n.id) && n.id !== selectedNode.id).slice(0, 8).map(n => (
+                            <button key={n.id} onClick={() => handleNodeSelect(n)}
+                              className="w-full text-left px-2 py-2 rounded-lg flex items-center gap-2 transition-colors hover:bg-white/4"
+                              style={{ border: "1px solid transparent" }}
+                              onMouseEnter={e => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)")}
+                              onMouseLeave={e => (e.currentTarget.style.borderColor = "transparent")}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: TYPE_COLORS[n.type] ?? "#64748B" }} />
+                              <span className="text-xs text-zinc-400 truncate">{n.title}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -469,13 +560,8 @@ export default function GraphPage() {
   );
 }
 
-function Stat({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
-  return (
-    <div className="bg-zinc-900/80 rounded-md px-2 py-1.5">
-      <div className="text-xs text-zinc-500">{label}</div>
-      <div className={`text-xs font-semibold mt-0.5 ${highlight ? "text-amber-400" : "text-zinc-200"}`}>
-        {value}
-      </div>
-    </div>
-  );
+function getMockCoords(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = id.charCodeAt(i) + ((h << 5) - h);
+  return `[${((h & 0xFF) / 10).toFixed(1)}, ${(((h >> 8) & 0xFF) / 10).toFixed(1)}, ${(((h >> 16) & 0xFF) / 10).toFixed(1)}]`;
 }
