@@ -41,17 +41,3 @@ export const EDGE_COLORS: Record<string, string> = {
 };
 
 export const IMPORTANCE_THRESHOLD = 0.7;
-
-// Semantic geometry shapes per memory type
-export const TYPE_SHAPES: Record<string, "sphere" | "box" | "octa" | "tetra" | "torus" | "icosa"> = {
-  project_memory:   "icosa",  // icosahedron — knowledge core
-  feedback:         "tetra",  // tetrahedron — signal input
-  user_profile:     "sphere", // sphere      — human presence
-  decision:         "octa",   // octahedron  — decision crystal
-  environment_fact: "box",    // cube        — stable fact
-  reference:        "torus",  // torus       — external anchor ring
-  episodic_memory:  "sphere", // sphere      — event memory
-  skill_candidate:  "tetra",  // tetrahedron — skill pointer
-  timeline_event:   "octa",   // octahedron  — temporal node
-  unknown:          "sphere",
-};

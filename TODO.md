@@ -148,3 +148,29 @@
 - [x] `test_graph_enhanced.py`：`TestGraphAPI` 集成测试（节点返回、importance 字段、edges 列表）
 - [x] `test_extraction.py`：6 个参数化 URL 拼接测试（带/不带 `/v1`、trailing slash、port）
 
+
+---
+
+## Bug 审计剩余项 — 2026-06-05
+
+### 🟠 High — 后端并发/性能（大改）
+
+- [x] **[backend] search.py** — `build_context_pack` 内用同步 `ThreadPoolExecutor + .result()` 阻塞事件循环；已通过 `_dispatch_api_sync` + `asyncio.to_thread` 整体迁移到线程池，事件循环不再阻塞
+- [x] **[backend] frontend.py** — 所有 API handler 在 `async def frontend_api` 中直接调同步 SQLite 函数，阻塞事件循环；`_dispatch_api` 改为 async 包装层，所有同步工作在 `asyncio.to_thread` 中运行
+- [x] **[backend] atomization.py:147** — `atomize_record` 加模块级 `_atomize_lock`，函数串行化消除 TOCTOU 窗口
+
+### 🟡 Medium — 性能
+
+- [x] **[perf-backend] vector_store.py:382** — Qdrant 连接加 30 秒冷却期，失败后静默跳过，消除高频 ERROR 日志
+- [x] **[perf-backend] vector_store.py:434** — 新增 `upsert_batch` 方法，批量写场景单次 HTTP 请求
+- [x] **[perf-frontend] Graph3D.tsx:288** — 搜索输入拆分为即时 `searchInput` + 300ms debounced `search`，keystroke 不再触发 3D 图重建
+- [x] **[perf-frontend] page.tsx:386** — 左侧节点列表接入 `@tanstack/react-virtual`，虚拟滚动仅渲染可见条目
+
+### 🔵 Low — 其他
+
+- [x] **[backend] db.py:83** — `_LOCK_RETRY_ATTEMPTS` 从 10 改为 3，最长持锁从 4.5s 降至 0.6s
+- [x] **[ui-ux] page.tsx** — Graph 移动端：虚拟滚动 + 面板约束降低小屏溢出影响（完整三栏响应式留后续）
+- [x] **[test] dedup.py** — 新增 `TestIngestIdConsistency`：验证 update/add 分支 Qdrant id 与 SQLite memory_id 一致
+- [x] **[test] curator_llm.py** — 新建 `tests/test_curator_apply.py`：smoke test `apply_llm_curator(dry_run=False)` split 分支
+- [x] **[test] transfer.py** — `tests/test_sync.py` 追加 `null confidence` 和 `invalid_status` malformed import 边界测试
+- [x] **[mcore] branding** — MCP server 命名空间归一，工具前缀变更为 `mcp__mcore__`，清理旧版 local-memory-mcp 垃圾和配置文件

@@ -4,7 +4,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
 from typing import Any, Callable
+
+_atomize_lock = threading.Lock()
 
 from memorycore.models import as_json, now, row_to_dict
 from memorycore.storage.db import managed_conn, read_conn
@@ -41,6 +44,14 @@ def is_atomic_fact(record: dict[str, Any]) -> bool:
 
 
 def should_atomize(record: dict[str, Any], atomize: str | bool = "auto", min_chars: int = 600) -> bool:
+    """Return True if the record should be split into atomic facts (rule-based path).
+
+    Note on thresholds: this function uses min_chars=600 as its default for the
+    rule-based splitting path.  The LLM-driven splitting path in curator_llm.py
+    uses _SPLIT_CONTENT_THRESHOLD=400.  The two paths are intentionally separate:
+    the LLM path is more aggressive because it can judge content quality; this
+    rule-based path requires a higher character count to reduce false positives.
+    """
     if atomize is False or str(atomize).lower() in {"false", "0", "no", "off"}:
         return False
     if is_atomic_fact(record):
@@ -137,6 +148,25 @@ def _existing_fact_hashes(parent_id: str, hashes: list[str]) -> set[str]:
 
 
 def atomize_record(
+    record_id: str,
+    dry_run: bool = True,
+    min_chars: int = 600,
+    atomize: str | bool = "auto",
+    add_memory_fn: AddMemoryFn | None = None,
+    conn=None,
+) -> dict[str, Any]:
+    with _atomize_lock:
+        return _atomize_record_impl(
+            record_id=record_id,
+            dry_run=dry_run,
+            min_chars=min_chars,
+            atomize=atomize,
+            add_memory_fn=add_memory_fn,
+            conn=conn,
+        )
+
+
+def _atomize_record_impl(
     record_id: str,
     dry_run: bool = True,
     min_chars: int = 600,

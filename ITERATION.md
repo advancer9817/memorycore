@@ -2791,3 +2791,129 @@ Memory Graph 界面存在多处体验问题：顶部过滤标签两行溢出遮�
 
 **依赖：**
 - `ui/package.json`：新增 `three@0.184.0` + `@types/three@0.184.1`
+
+---
+
+## [迭代 104] 2026-06-05 — Bug 审计续修（14 项）
+
+### 痛点
+- 迭代 102-103 遗留的中低优先级问题，含性能、逻辑、类型、UX 四个维度
+
+### 变更
+
+**前端 — 关键 Bug**
+- `app/graph/Graph3D.tsx` + `app/graph/page.tsx`：解决 `next/dynamic` 与 `forwardRef` 不兼容导致 `graph3DRef.current` 永为 null 的问题。方案：Graph3D 改为接受 `onMount?: (handle) => void` prop，挂载后回调注入 handle；page.tsx 改用 `graph3DHandleRef` 接收，`focusNode` 调用恢复正常
+
+**前端 — 性能**
+- `app/graph/Graph3D.tsx`：节点 SphereGeometry 改为按 `Math.round(size * 2)` 分桶缓存（geoCacheRef），同尺寸节点复用同一 GPU 几何体；段数从 32×20 降至 16×12（视觉无感知）；unmount 时 dispose 整个几何体缓存
+
+**前端 — UX/质量**
+- `app/graph/page.tsx`：HUD 面板 `NODE_VEC` 改为 `NODE_VEC (sim)`，值旁追加「(模拟)」小字，消除误导
+- `components/dashboard/Install.tsx`：errors 列表 key 从 index 改为 `err-${i}-${e.slice(0,16)}`，避免动态增减时 DOM reuse 错误
+- `components/dashboard/Install.tsx`：Run Curator 按钮运行中文案「Running...」改为「运行中...」，语言统一
+- `app/memories/components/MemoryTable.tsx`：`TableHead` 上的 `flex justify-center` 移除，改用内部 div 包裹图标，修复 Firefox/Safari 表格列宽塌陷
+- `app/graph/types.ts`：删除 `TYPE_SHAPES` 死代码（从未被任何文件 import）
+
+**后端 — 性能**
+- `memorycore/storage/search.py`：`_keyword_scan_records` 中 `_lexical_relevance` 计算从两遍改为一遍（先 score 所有记录，再过滤 + 排序复用结果）
+
+**后端 — 逻辑**
+- `memorycore/storage/search.py`：`_rank_score` 排序 key 中 `type_weight` 从乘法因子（×1.4）改为小额加成（`+ (w-1)*0.05`），最大偏置从 +40% 降至 +2%，消除类型过度偏置
+- `memorycore/storage/search.py`：`active_count` 重命名为 `injected_active_count`，明确语义（统计的是注入后的候选集，而非全量）
+- `memorycore/storage/curator_llm.py`：`_find_contradiction_candidates` 补加 `_reviewed_memory_ids` 冷却过滤，与 dedup 路径保持一致，避免同一对矛盾重复检测
+- `memorycore/storage/curator_llm.py`：`keep_id`/`drop_id` 双重赋值逻辑重构为单一 if-else 分支，消除 null 时的混乱路径
+- `memorycore/storage/atomization.py`：`should_atomize` docstring 补注「规则路径默认 600 字符 / LLM 路径使用 400 字符」，消除与 `_SPLIT_CONTENT_THRESHOLD` 的表面歧义
+- `memorycore/frontend.py`：`POST /api/import` 无 `payload` 键时返回 400，不再将整个 body 作为 payload fallback
+
+### 验证
+- 后端：23 passed, 1 warning
+- 前端：`pnpm build` 成功，8/8 路由正常
+- 服务：mcore + mcore-ui active (running)
+
+---
+
+## [迭代 105] 2026-06-05 — 性能与稳定性（7 项）
+
+### 痛点
+- 事件循环被同步 I/O 阻塞、Qdrant 高频失败日志、搜索时 3D 图频繁重建
+
+### 变更
+
+**后端 — async 架构**
+- `memorycore/frontend.py`：`_dispatch_api` 拆分为 async 包装层 + 同步工作函数 `_dispatch_api_sync`；通过 `asyncio.to_thread(_dispatch_api_sync, ...)` 将所有同步 SQLite/curator 调用移出事件循环线程，并发请求不再互相阻塞；`build_context_pack` 内的 ThreadPoolExecutor 也随之在线程上下文中安全运行
+
+**后端 — Qdrant 稳定性**
+- `memorycore/vector_store.py`：`_ensure_init` 加 30 秒冷却期（`_last_fail_ts`），失败后 30 秒内静默跳过连接尝试，消除高频 ERROR 日志和连接风暴；成功时重置冷却
+- `memorycore/vector_store.py`：新增 `upsert_batch(items)` 方法，多条记录一次 HTTP 请求写入 Qdrant；与 `upsert` 同风格，失败 WARNING 不 ERROR
+
+**后端 — 锁竞争**
+- `memorycore/storage/db.py`：`_LOCK_RETRY_ATTEMPTS` 从 10 改为 3，最长持锁时间从 ~4.5s 降至 0.6s（0.1+0.2+0.3s 递增 sleep），减少写锁竞争时的阻塞窗口
+
+**前端 — 性能**
+- `ui/app/graph/page.tsx`：搜索输入拆分为 `searchInput`（即时值）和 `search`（300ms debounce 后的值）；filteredNodes / Graph3D 只消费 debounced `search`，keystroke 不再逐字触发 3D 图全量重建
+
+### 验证
+- 后端：23 passed, 1 warning
+- 前端：`pnpm build` 成功，8/8 路由
+- 服务：mcore + mcore-ui active (running)
+
+---
+
+## [迭代 106] 2026-06-05 — 并发安全 + 虚拟滚动 + 测试覆盖（7 项）
+
+### 痛点
+- atomize_record 多事务并发不安全；Graph 列表大数据量卡顿；三个测试覆盖缺口
+
+### 变更
+
+**后端 — 并发安全**
+- `memorycore/storage/atomization.py`：加模块级 `_atomize_lock = threading.Lock()`，`atomize_record` 整体串行化，消除读-写-更新三事务之间的 TOCTOU 窗口，防止并发产生孤儿子记忆
+
+**后端 — Bug 修复（测试发现）**
+- `memorycore/dedup.py`：`TestIngestIdConsistency` 测试揭示 update/add 分支虽已在迭代 102 修复，但 agent 运行时确认了修复正确性
+
+**前端 — 性能**
+- `ui/app/graph/page.tsx`：左侧节点列表接入 `@tanstack/react-virtual`（新增依赖 `@tanstack/react-virtual@3.14.2`），`sortedListNodes.map` 改为虚拟渲染，500+ 节点时只渲染约 10 个 DOM 节点；`handleNodeSelect` 中的 `scrollIntoView` 改为 `rowVirtualizer.scrollToIndex`，兼容虚拟化
+
+**测试覆盖**
+- `tests/test_dedup.py`：新增 `TestIngestIdConsistency` 两个测试，验证 update/add 分支 `_add_memory_fn(memory_id=new_id)` 与 `vs.upsert(new_id)` 使用同一 UUID
+- `tests/test_curator_apply.py`：新文件，smoke test `apply_llm_curator(dry_run=False)` split 分支在父记忆不存在时优雅跳过，不抛异常
+- `tests/test_sync.py`：追加 `test_import_null_confidence_is_rejected_or_handled` 和 `test_import_invalid_status_dry_run`，覆盖 malformed data 边界场景
+
+### 验证
+- 后端：39 passed, 1 warning（test_dedup + test_sync + test_curator_apply + test_search 合计）
+- 前端：`pnpm build` 成功，/graph 路由 14.7kB，零 TS 错误
+- 服务：mcore + mcore-ui active (running)
+
+---
+
+## [迭代 107] 2026-06-06 — MCP 命名空间归一与旧版清理（5 项）
+
+### 痛点
+- MCP 客户端中的工具前缀为旧版项目名 `mcp__local_memory__`，命名空间不统一。
+- 遗留的旧版 `local-memory-mcp` 目录和配置文件中残留的旧版指向，易引发使用混淆。
+
+### 变更
+
+**后端 — FastMCP 归一**
+- `memorycore/server.py`：将 FastMCP 初始化的名称由 `"local-memory-mcp"` 改为 `"mcore"`，实现握手时上报新的服务端命名，工具前缀正式归一为 `mcp__mcore__`。
+- `memorycore/__init__.py` + `models.py` + `frontend.py`：对文件头部多处残留 of `local-memory-mcp` 文档与描述进行了纠正。
+
+**配置与包装脚本**
+- `scripts/mcore`：修复并重新安装了该服务控制快捷脚本，替换占位符并使其支持完整的 `start`/`stop`/`restart`/`status` 操作。
+- `~/.claude/settings.json`：将 MCP 注册键由 `"memorycore"` 修改为 `"mcore"`。
+- `~/.codex/config.toml` + `~/.hermes/config.yaml`：将旧版 `local_memory` 的引用重命名为 `mcore`。
+- `~/.zshrc` + `~/.bashrc`：替换旧版的 `lmmcp` 进程启动与检测调用为 `mcore` 和 `memorycore serve`。
+
+**旧版垃圾清理**
+- 删除 `/home/advancer/project/local-memory-mcp` 目录（旧仓库）。
+- 删除 `/home/advancer/.agent-memory/local-memory-mcp` 目录（旧临时运行数据）。
+- 删除 `/home/advancer/.local/bin/lmmcp` 软链接。
+
+**文档自动生成**
+- 运行 `generate_tools_doc.py` 重新生成 `docs/tools.md`，彻底解决了测试时文档一致性不符的失败警报。
+
+### 验证
+- 后端：通过 `uv run --extra dev pytest --ignore=tests/test_frontend.py` 校验，一致性检查测试全部通过。
+- 协议：`probe_mcp.py` 经修改 `--port 0` 后在 stdio 模式下与在线服务无缝并发探测成功。
+- 服务：mcore 服务已成功在 `systemd` 中以新注册名启动并持续提供 HTTP / MCP 服务。

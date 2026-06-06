@@ -288,3 +288,92 @@ class TestIngest:
 
         assert result.elapsed_s >= 0
         assert result.extraction_elapsed_s == 0.1
+
+
+# ---------------------------------------------------------------------------
+# TestIngestIdConsistency — verify Qdrant upsert id matches SQLite memory_id
+# ---------------------------------------------------------------------------
+
+class TestIngestIdConsistency:
+    """Verify that the id passed to vs.upsert matches the id passed to _add_memory_fn
+    in both the update and add branches of ingest()."""
+
+    def _make_mock_vs(self, search_results):
+        vs = MagicMock()
+        vs.available = True
+        vs.search.return_value = search_results
+        vs.upsert.return_value = True
+        return vs
+
+    def test_update_branch_qdrant_id_matches_sqlite_id(self):
+        """update branch: vs.upsert(id) must equal _add_memory_fn(memory_id=id)."""
+        from unittest.mock import patch
+        from memorycore.extraction import ExtractedFact
+
+        captured_add_ids = []
+        captured_upsert_ids = []
+
+        def mock_add(**kwargs):
+            captured_add_ids.append(kwargs.get("memory_id"))
+
+        class MockVS:
+            available = True
+            def search(self, text, **kwargs):
+                # Return a medium-score hit to trigger update branch
+                return [SearchResult(id="existing-id", score=(UPDATE_THRESHOLD + SKIP_THRESHOLD) / 2, text="existing text")]
+            def upsert(self, uid, text, payload):
+                captured_upsert_ids.append(uid)
+
+        with patch("memorycore.dedup.extract_facts",
+                   return_value=([ExtractedFact(text="new text", importance=0.5)], 0.0)):
+            result = ingest(
+                [{"role": "user", "content": "new text"}],
+                agent_id="test",
+                user_id="u1",
+                _add_memory_fn=mock_add,
+                _update_memory_fn=lambda **kw: None,
+                _vector_store=MockVS(),
+            )
+
+        assert result.updated == 1
+        assert len(captured_add_ids) == 1
+        assert len(captured_upsert_ids) == 1
+        assert captured_add_ids[0] == captured_upsert_ids[0], (
+            f"memory_id={captured_add_ids[0]} != upsert id={captured_upsert_ids[0]}"
+        )
+
+    def test_add_branch_qdrant_id_matches_sqlite_id(self):
+        """add branch: vs.upsert(id) must equal _add_memory_fn(memory_id=id)."""
+        from unittest.mock import patch
+        from memorycore.extraction import ExtractedFact
+
+        captured_add_ids = []
+        captured_upsert_ids = []
+
+        def mock_add(**kwargs):
+            captured_add_ids.append(kwargs.get("memory_id"))
+
+        class MockVS:
+            available = True
+            def search(self, text, **kwargs):
+                return []
+            def upsert(self, uid, text, payload):
+                captured_upsert_ids.append(uid)
+
+        with patch("memorycore.dedup.extract_facts",
+                   return_value=([ExtractedFact(text="brand new fact", importance=0.5)], 0.0)):
+            result = ingest(
+                [{"role": "user", "content": "brand new fact"}],
+                agent_id="test",
+                user_id="u1",
+                _add_memory_fn=mock_add,
+                _update_memory_fn=lambda **kw: None,
+                _vector_store=MockVS(),
+            )
+
+        assert result.added == 1
+        assert len(captured_add_ids) == 1
+        assert len(captured_upsert_ids) == 1
+        assert captured_add_ids[0] == captured_upsert_ids[0], (
+            f"memory_id={captured_add_ids[0]} != upsert id={captured_upsert_ids[0]}"
+        )

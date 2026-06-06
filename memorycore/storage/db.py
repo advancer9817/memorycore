@@ -17,7 +17,7 @@ from memorycore.models import (
 
 logger = logging.getLogger(__name__)
 _thread_local = threading.local()
-_LOCK_RETRY_ATTEMPTS = 10
+_LOCK_RETRY_ATTEMPTS = 3
 _LOCK_RETRY_DELAY = 0.1
 _write_lock = threading.RLock()
 _checkpoint_thread_started = False

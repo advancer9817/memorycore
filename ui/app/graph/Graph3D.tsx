@@ -1,7 +1,11 @@
 "use client";
 
-import { useRef, useEffect, useImperativeHandle, forwardRef } from "react";
+import { useRef, useEffect } from "react";
 import { type GraphNode, type GraphEdge, TYPE_COLORS, EDGE_COLORS, IMPORTANCE_THRESHOLD } from "./types";
+
+export interface Graph3DHandle {
+  focusNode: (id: string) => void;
+}
 
 interface Props {
   nodes: GraphNode[];
@@ -15,10 +19,7 @@ interface Props {
   onNodeClick: (node: GraphNode) => void;
   onBackgroundClick: () => void;
   onReady?: () => void;
-}
-
-export interface Graph3DHandle {
-  focusNode: (id: string) => void;
+  onMount?: (handle: Graph3DHandle) => void;
 }
 
 // Fresnel glow shader — all nodes are spheres for best visual quality
@@ -104,47 +105,33 @@ function createSpriteLabel(THREE: any, text: string, color: string, size: number
   return sprite;
 }
 
-const Graph3DInner = forwardRef<Graph3DHandle, Props>(function Graph3D({
+function Graph3DInner({
   nodes, links, search, highlightImportant,
   selectedNodeId, linkedNodeIds, width, height,
-  onNodeClick, onBackgroundClick, onReady,
-}, ref) {
+  onNodeClick, onBackgroundClick, onReady, onMount,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<any>(null);
   // Track animated shader materials for per-frame uTime update
   const animatedMatsRef = useRef<Set<any>>(new Set());
-
-  // Expose focusNode to parent
-  useImperativeHandle(ref, () => ({
-    focusNode(id: string) {
-      const fg = graphRef.current;
-      if (!fg) return;
-      const graphData = fg.graphData();
-      const node = graphData.nodes.find((n: any) => n.id === id);
-      if (!node || node.x == null) return;
-      const distance = 120;
-      const mag = Math.hypot(node.x, node.y, node.z) || 1;
-      const distRatio = 1 + distance / mag;
-      fg.cameraPosition(
-        { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
-        node,
-        800
-      );
-    },
-  }), []);
+  // Geometry cache: keyed by Math.round(size * 2) to bucket by size
+  const geoCacheRef = useRef<Map<number, any>>(new Map());
 
   useEffect(() => {
     if (!containerRef.current) return;
     let fg: any;
     let rafId = 0;
+    let cancelled = false;
 
     Promise.all([
       import("3d-force-graph"),
       import("three"),
     ]).then(([mod, THREE_mod]) => {
+      if (cancelled) return;
       const ForceGraph3D = mod.default;
       const THREE = THREE_mod as any;
       const animatedMats = animatedMatsRef.current;
+      const geoCache = geoCacheRef.current;
 
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
@@ -179,7 +166,12 @@ const Graph3DInner = forwardRef<Graph3DHandle, Props>(function Graph3D({
           const group = new THREE.Group();
 
           // Core sphere with Fresnel shader (always sphere — best visual quality)
-          const geo = new THREE.SphereGeometry(size, 32, 20);
+          // Geometry cache: bucket by size to avoid creating a new geometry per node
+          const geoKey = Math.round(size * 2);
+          if (!geoCache.has(geoKey)) {
+            geoCache.set(geoKey, new THREE.SphereGeometry(size, 16, 12));
+          }
+          const geo = geoCache.get(geoKey);
           const coreMat = createCoreMaterial(THREE, hexColor, n.importance ?? 0.5);
           const core = new THREE.Mesh(geo, coreMat);
           core.userData.coreMaterial = coreMat;
@@ -264,6 +256,25 @@ const Graph3DInner = forwardRef<Graph3DHandle, Props>(function Graph3D({
 
       graphRef.current = fg;
 
+      // Expose focusNode handle to parent via onMount prop
+      onMount?.({
+        focusNode(id: string) {
+          const fgCurrent = graphRef.current;
+          if (!fgCurrent) return;
+          const graphData = fgCurrent.graphData();
+          const node = graphData.nodes.find((n: any) => n.id === id);
+          if (!node || node.x == null) return;
+          const distance = 120;
+          const mag = Math.hypot(node.x, node.y, node.z) || 1;
+          const distRatio = 1 + distance / mag;
+          fgCurrent.cameraPosition(
+            { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
+            node,
+            800
+          );
+        },
+      });
+
       // Drive ShaderMaterial uTime via rAF (onRenderFramePre not available in this version)
       const tick = () => {
         const t = performance.now() * 0.001;
@@ -276,8 +287,17 @@ const Graph3DInner = forwardRef<Graph3DHandle, Props>(function Graph3D({
     });
 
     return () => {
+      cancelled = true;
       cancelAnimationFrame(rafId);
+      // Dispose all THREE.js GPU resources to prevent WebGL memory leaks
+      for (const mat of animatedMatsRef.current) {
+        mat.dispose?.();
+      }
       animatedMatsRef.current.clear();
+      for (const geo of geoCacheRef.current.values()) {
+        geo.dispose?.();
+      }
+      geoCacheRef.current.clear();
       fg?._destructor?.();
       if (containerRef.current) containerRef.current.innerHTML = "";
     };
@@ -288,6 +308,11 @@ const Graph3DInner = forwardRef<Graph3DHandle, Props>(function Graph3D({
   useEffect(() => {
     const fg = graphRef.current;
     if (!fg) return;
+    // Dispose old shader materials before rebuilding node objects
+    for (const mat of animatedMatsRef.current) {
+      mat.dispose?.();
+    }
+    animatedMatsRef.current.clear();
     fg.graphData({
       nodes: nodes.map((n) => ({ ...n })),
       links: links.map((l) => ({ ...l })),
@@ -334,6 +359,6 @@ const Graph3DInner = forwardRef<Graph3DHandle, Props>(function Graph3D({
   }, [search, highlightImportant, selectedNodeId, linkedNodeIds, nodes]);
 
   return <div ref={containerRef} className="w-full h-full" />;
-});
+}
 
 export default Graph3DInner;

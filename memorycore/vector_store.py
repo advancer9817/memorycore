@@ -363,6 +363,7 @@ class VectorStore:
         self.config = config or VectorStoreConfig()
         self._client = None
         self._initialized = False
+        self._last_fail_ts: float = 0.0
         atexit.register(self.close)
 
     # ------------------------------------------------------------------
@@ -372,6 +373,8 @@ class VectorStore:
     def _ensure_init(self) -> bool:
         if self._initialized:
             return self._client is not None
+        if time.time() - self._last_fail_ts < 30.0:
+            return False  # cooldown active, skip silently
         self._initialized = True
         try:
             from qdrant_client import QdrantClient
@@ -401,11 +404,13 @@ class VectorStore:
             else:
                 logger.info("vector_store: opened collection '%s'",
                             self.config.collection)
+            self._last_fail_ts = 0.0
             return True
         except Exception as exc:
             logger.error("vector_store: init failed: %s", exc)
             self._client = None
             self._initialized = False  # allow retry on next call
+            self._last_fail_ts = time.time()
             return False
 
     @property
@@ -438,6 +443,30 @@ class VectorStore:
             return True
         except Exception as exc:
             logger.error("vector_store: upsert failed for id=%s: %s", id, exc)
+            return False
+
+    def upsert_batch(self, items: list[tuple[str, str, dict]]) -> bool:
+        """Batch upsert multiple points in a single Qdrant request."""
+        if not self.available or not items:
+            return False
+        try:
+            from qdrant_client.models import PointStruct
+            points = [
+                PointStruct(
+                    id=str(item_id),
+                    vector=embed_text(text, self.config.embed),
+                    payload={"text": text, **payload},
+                )
+                for item_id, text, payload in items
+            ]
+            self._client.upsert(
+                collection_name=self.config.collection,
+                points=points,
+                wait=True,
+            )
+            return True
+        except Exception as exc:
+            logger.warning("VectorStore.upsert_batch failed: %s", exc)
             return False
 
     def search(

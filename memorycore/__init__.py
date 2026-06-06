@@ -1,4 +1,4 @@
-"""local-memory-mcp — Structured agent memory with SQLite/FTS5 + Qdrant.
+"""memorycore — Structured agent memory with SQLite/FTS5 + Qdrant.
 
 Re-exports all public symbols for backward compatibility with existing
 code that does ``import memorycore as lm``.

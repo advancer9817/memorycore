@@ -179,8 +179,8 @@ export function MemoryTable() {
                 )}
               </button>
             </TableHead>
-            <TableHead className="text-right border-zinc-700 flex justify-center">
-              <div className="flex items-center justify-end">
+            <TableHead className="text-right border-zinc-700">
+              <div className="flex justify-center">
                 <MoreHorizontal className="h-4 w-4 mr-2" />
               </div>
             </TableHead>

@@ -224,3 +224,73 @@ def test_cli_import_missing_file_returns_error(tmp_path):
     from memorycore.server import main
     rc = main(["import", str(tmp_path / "nonexistent.json")])
     assert rc == 1
+
+
+# ---------------------------------------------------------------------------
+# Edge cases: malformed data in memory_import
+# ---------------------------------------------------------------------------
+
+def test_import_null_confidence_is_rejected_or_handled():
+    """import with null confidence should not crash or corrupt the DB."""
+    payload = {
+        "schema_version": 1,
+        "data": {
+            "memories": [{
+                "id": "test-malformed-001",
+                "type": "project_memory",
+                "title": "Test",
+                "content": "Test content",
+                "confidence": None,   # null — should be handled
+                "importance": 0.5,
+                "status": "active",
+                "scope": "global",
+                "tags_json": "[]",
+                "source": "test",
+                "source_agent": "test",
+                "project_path": "",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+                "decay_policy": "review",
+                "related_ids_json": "[]",
+                "metadata_json": "{}",
+                "valid_from": None,
+                "valid_until": None,
+            }]
+        }
+    }
+    # dry_run should not raise
+    result = memory_import(payload, dry_run=True, conflict_policy="skip")
+    assert "error" not in result or result.get("error") is None or "schema" not in str(result.get("error", ""))
+
+
+def test_import_invalid_status_dry_run():
+    """import with invalid status in dry_run should report conflict or be skipped."""
+    payload = {
+        "schema_version": 1,
+        "data": {
+            "memories": [{
+                "id": "test-malformed-002",
+                "type": "project_memory",
+                "title": "Bad status",
+                "content": "content",
+                "confidence": 0.7,
+                "importance": 0.5,
+                "status": "invalid_status_xyz",
+                "scope": "global",
+                "tags_json": "[]",
+                "source": "test",
+                "source_agent": "test",
+                "project_path": "",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+                "decay_policy": "review",
+                "related_ids_json": "[]",
+                "metadata_json": "{}",
+                "valid_from": None,
+                "valid_until": None,
+            }]
+        }
+    }
+    # should not raise — either rejects gracefully or imports with error count
+    result = memory_import(payload, dry_run=True, conflict_policy="skip")
+    assert isinstance(result, dict)

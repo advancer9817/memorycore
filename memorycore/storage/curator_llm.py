@@ -222,9 +222,12 @@ def _llm_judge_duplicates(
                     continue
                 a, b, score = batch[idx]
                 if item.get("is_duplicate"):
-                    keep_id = item.get("keep_id")
-                    drop_id = b["id"] if keep_id == a["id"] else a["id"]
-                    if keep_id not in (a["id"], b["id"]):
+                    llm_keep_id = item.get("keep_id")
+                    if llm_keep_id in (a["id"], b["id"]):
+                        keep_id = llm_keep_id
+                        drop_id = b["id"] if keep_id == a["id"] else a["id"]
+                    else:
+                        # LLM returned null or an unrecognised id — fall back to importance
                         keep_id = a["id"] if a.get("importance", 0) >= b.get("importance", 0) else b["id"]
                         drop_id = b["id"] if keep_id == a["id"] else a["id"]
                     merge_info = item.get("merge_info", "")
@@ -261,6 +264,9 @@ def _find_contradiction_candidates(
         import random as _random
         logger.warning("Large memory pool (%d), sampling 200 for dedup search", len(memories))
         memories = _random.sample(memories, 200)
+
+    now = _time.time()
+    memories = [m for m in memories if now - _reviewed_memory_ids.get(m["id"], 0) >= _REVIEW_COOLDOWN_SECONDS]
 
     seen: set[frozenset[str]] = set()
     pairs: list[tuple[dict, dict, float]] = []

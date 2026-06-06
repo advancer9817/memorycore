@@ -1,6 +1,7 @@
-"""Same-port frontend control service routes for local-memory-mcp."""
+"""Same-port frontend control service routes for memorycore."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import subprocess
@@ -215,7 +216,10 @@ async def frontend_api(request: Request) -> Response:
 async def _dispatch_api(request: Request, parts: list[str], query: dict[str, list[str]]) -> Any:
     method = request.method.upper()
     body = await _json_body(request) if method in _MUTATING_METHODS else {}
+    return await asyncio.to_thread(_dispatch_api_sync, method, parts, query, body)
 
+
+def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]], body: dict[str, Any]) -> Any:
     if parts == ["dashboard"] and method == "GET":
         return dashboard_payload(_int_q(query, "limit", 1000))
     if parts == ["schema", "enums"] and method == "GET":

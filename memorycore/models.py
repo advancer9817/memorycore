@@ -1,4 +1,4 @@
-"""Models, constants, and helpers for local-memory-mcp.
+"""Models, constants, and helpers for memorycore.
 
 Extracted from the original memorycore.py monolith into a dedicated
 module with no MCP or I/O dependencies so both storage.py and external

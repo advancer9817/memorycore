@@ -41,7 +41,7 @@ async def main() -> None:
         db = str(Path(cleanup_dir.name) / 'memory.sqlite3')
 
     env = {**os.environ, 'LOCAL_MEMORY_DB': db}
-    params = StdioServerParameters(command=PY, args=[SERVER, 'serve'], env=env)
+    params = StdioServerParameters(command=PY, args=[SERVER, 'serve', '--port', '0'], env=env)
     try:
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:

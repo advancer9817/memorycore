@@ -75,7 +75,7 @@ __all__ = ["mcp", "main"]
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
-    "local-memory-mcp",
+    "mcore",
 )
 
 
@@ -833,7 +833,7 @@ def _start_observability_server(host: str, obs_port: int) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="local-memory-mcp server and CLI")
+    parser = argparse.ArgumentParser(description="memorycore server and CLI")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init")
     p_add = sub.add_parser("add")

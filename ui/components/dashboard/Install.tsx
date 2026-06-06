@@ -385,7 +385,7 @@ export const Install = () => {
               disabled={applying || llmRunning}
             >
               <Play className="h-3 w-3 mr-1" />
-              {applying ? "Running..." : "Run Curator"}
+              {applying ? "运行中..." : "Run Curator"}
             </Button>
             <Button
               size="sm"
@@ -492,7 +492,7 @@ export const Install = () => {
             {llmRunState.errors && llmRunState.errors.length > 0 && (
               <div className="space-y-1">
                 {llmRunState.errors.map((e, i) => (
-                  <div key={i} className="rounded bg-amber-950/40 border border-amber-800/40 px-2 py-1 text-xs text-amber-300">
+                  <div key={`err-${i}-${e.slice(0,16)}`} className="rounded bg-amber-950/40 border border-amber-800/40 px-2 py-1 text-xs text-amber-300">
                     ⚠ {e}
                   </div>
                 ))}

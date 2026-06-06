@@ -253,6 +253,7 @@ def ingest(
                 # Write new candidate that supersedes the existing one
                 new_id = str(uuid.uuid4())
                 _add_memory_fn(
+                    memory_id=new_id,
                     memory_type="episodic_memory",
                     title=fact.text[:80],
                     content=fact.text,
@@ -281,6 +282,7 @@ def ingest(
             else:  # add
                 new_id = str(uuid.uuid4())
                 _add_memory_fn(
+                    memory_id=new_id,
                     memory_type="episodic_memory",
                     title=fact.text[:80],
                     content=fact.text,

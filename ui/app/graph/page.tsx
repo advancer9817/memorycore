@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { getApiBaseUrl } from "@/lib/api-url";
@@ -50,6 +51,7 @@ export default function GraphPage() {
   const [data, setData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [activeTypes, setActiveTypes] = useState<Set<string>>(new Set());
   const [activeEdgeTypes, setActiveEdgeTypes] = useState<Set<string>>(new Set());
@@ -66,12 +68,19 @@ export default function GraphPage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ w: 900, h: 600 });
   const listItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const listScrollRef = useRef<HTMLDivElement>(null);
 
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   const listPanel = useResizable(260, 160, 420, "right");
   const detailPanel = useResizable(320, 220, 500, "left");
-  const graph3DRef = useRef<Graph3DHandle>(null);
+  // onMount prop pattern: avoids forwardRef + next/dynamic HOC ref-transparency issue
+  const graph3DHandleRef = useRef<Graph3DHandle | null>(null);
+
+  useEffect(() => {
+    const id = setTimeout(() => setSearch(searchInput), 300);
+    return () => clearTimeout(id);
+  }, [searchInput]);
 
   useEffect(() => {
     fetch(`${getApiBaseUrl()}/api/graph`)
@@ -125,20 +134,9 @@ export default function GraphPage() {
   const toggleType = useCallback((t: string) => setActiveTypes(prev => { const n = new Set(prev); n.has(t) ? n.delete(t) : n.add(t); return n; }), []);
   const toggleEdgeType = useCallback((t: string) => setActiveEdgeTypes(prev => { const n = new Set(prev); n.has(t) ? n.delete(t) : n.add(t); return n; }), []);
 
-  const handleNodeSelect = useCallback((node: GraphNode) => {
-    setSelectedNode(prev => {
-      if (prev?.id === node.id) return null;
-      setTimeout(() => {
-        listItemRefs.current[node.id]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-        graph3DRef.current?.focusNode(node.id);
-      }, 50);
-      return node;
-    });
-  }, []);
-
   const resetAll = useCallback(() => {
     if (data) { setActiveTypes(new Set(data.nodes.map(n => n.type))); setActiveEdgeTypes(new Set(data.edges.map(e => e.relation_type))); }
-    setSearch(""); setHighlightImportant(false); setSelectedNode(null); setActiveStatus("all");
+    setSearch(""); setSearchInput(""); setHighlightImportant(false); setSelectedNode(null); setActiveStatus("all");
   }, [data]);
 
   const allTypes = useMemo(() => data ? Array.from(new Set(data.nodes.map(n => n.type))).sort() : [], [data]);
@@ -156,6 +154,25 @@ export default function GraphPage() {
   const filteredNodeIds = useMemo(() => new Set(filteredNodes.map(n => n.id)), [filteredNodes]);
   const filteredEdges = useMemo(() => data ? data.edges.filter(e => activeEdgeTypes.has(e.relation_type) && filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target)) : [], [data, activeEdgeTypes, filteredNodeIds]);
   const importantCount = useMemo(() => data ? data.nodes.filter(n => n.importance >= IMPORTANCE_THRESHOLD).length : 0, [data]);
+
+  const rowVirtualizer = useVirtualizer({
+    count: sortedListNodes.length,
+    getScrollElement: () => listScrollRef.current,
+    estimateSize: () => 52,
+    overscan: 5,
+  });
+
+  const handleNodeSelect = useCallback((node: GraphNode) => {
+    setSelectedNode(prev => {
+      if (prev?.id === node.id) return null;
+      setTimeout(() => {
+        const idx = sortedListNodes.findIndex(n => n.id === node.id);
+        if (idx >= 0) rowVirtualizer.scrollToIndex(idx, { align: "auto" });
+        graph3DHandleRef.current?.focusNode(node.id);
+      }, 50);
+      return node;
+    });
+  }, [sortedListNodes, rowVirtualizer]);
 
   const handleExportJson = useCallback(() => {
     if (!data) return;
@@ -198,8 +215,8 @@ export default function GraphPage() {
             className="w-full h-8 rounded-lg text-sm text-zinc-200 placeholder:text-zinc-600"
             style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
             placeholder="搜索记忆标题、内容、类型…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
+            value={searchInput}
+            onChange={e => setSearchInput(e.target.value)}
           />
         </div>
 
@@ -269,7 +286,7 @@ export default function GraphPage() {
                 </div>
               )}
               <Graph3D
-                ref={graph3DRef}
+                onMount={(h) => { graph3DHandleRef.current = h; }}
                 nodes={filteredNodes}
                 links={filteredEdges}
                 search={search}
@@ -382,33 +399,49 @@ export default function GraphPage() {
               </span>
             </div>
 
-            <div className="flex-1 overflow-y-auto">
-              {sortedListNodes.map(node => {
-                const color = TYPE_COLORS[node.type] ?? "#64748B";
-                const isSelected = selectedNode?.id === node.id;
-                const isLinked = linked && !isSelected && linked.has(node.id);
-                return (
-                  <div
-                    key={node.id}
-                    ref={el => { listItemRefs.current[node.id] = el; }}
-                    onClick={() => handleNodeSelect(node)}
-                    className="px-3 py-2.5 cursor-pointer transition-all"
-                    style={{
-                      borderBottom: "1px solid rgba(255,255,255,0.03)",
-                      borderLeft: isSelected ? `2px solid ${color}` : "2px solid transparent",
-                      background: isSelected ? `${color}10` : isLinked ? "rgba(255,255,255,0.02)" : "transparent",
-                    }}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="w-2 h-2 rounded-full shrink-0 flex-none" style={{ background: color }} />
-                      <p className="text-sm text-zinc-200 leading-tight truncate flex-1 min-w-0">{node.title}</p>
-                      {node.importance >= IMPORTANCE_THRESHOLD && <span className="text-amber-400 text-xs shrink-0">★</span>}
-                      <span className="text-xs text-zinc-500 shrink-0 font-mono tabular-nums">{node.importance.toFixed(2)}</span>
+            <div ref={listScrollRef} className="flex-1 overflow-y-auto">
+              {sortedListNodes.length === 0 && (
+                <div className="px-3 py-8 text-center text-xs text-zinc-700 font-mono">
+                  无匹配节点<br />
+                  <span className="text-zinc-800">尝试调整筛选条件</span>
+                </div>
+              )}
+              <div
+                style={{
+                  height: `${rowVirtualizer.getTotalSize()}px`,
+                  width: "100%",
+                  position: "relative",
+                }}
+              >
+                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                  const node = sortedListNodes[virtualRow.index];
+                  const color = TYPE_COLORS[node.type] ?? "#64748B";
+                  const isSelected = selectedNode?.id === node.id;
+                  const isLinked = linked && !isSelected && linked.has(node.id);
+                  return (
+                    <div
+                      key={node.id}
+                      ref={el => { listItemRefs.current[node.id] = el; }}
+                      onClick={() => handleNodeSelect(node)}
+                      className="px-3 py-2.5 cursor-pointer transition-all absolute top-0 left-0 right-0"
+                      style={{
+                        transform: `translateY(${virtualRow.start}px)`,
+                        borderBottom: "1px solid rgba(255,255,255,0.03)",
+                        borderLeft: isSelected ? `2px solid ${color}` : "2px solid transparent",
+                        background: isSelected ? `${color}10` : isLinked ? "rgba(255,255,255,0.02)" : "transparent",
+                      }}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="w-2 h-2 rounded-full shrink-0 flex-none" style={{ background: color }} />
+                        <p className="text-sm text-zinc-200 leading-tight truncate flex-1 min-w-0">{node.title}</p>
+                        {node.importance >= IMPORTANCE_THRESHOLD && <span className="text-amber-400 text-xs shrink-0">★</span>}
+                        <span className="text-xs text-zinc-500 shrink-0 font-mono tabular-nums">{node.importance.toFixed(2)}</span>
+                      </div>
+                      <div className="ml-4 mt-0.5 text-xs text-zinc-700">{node.type.replace(/_/g, " ")}</div>
                     </div>
-                    <div className="ml-4 mt-0.5 text-xs text-zinc-700">{node.type.replace(/_/g, " ")}</div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
 
             {/* Resize handle */}
@@ -523,8 +556,8 @@ export default function GraphPage() {
                             <span className="text-cyan-500">0x{selectedNode.id.replace(/-/g, "").slice(0, 8).toUpperCase()}</span>
                           </div>
                           <div className="flex justify-between py-0.5">
-                            <span className="text-zinc-700">NODE_VEC</span>
-                            <span className="text-zinc-500">{getMockCoords(selectedNode.id)}</span>
+                            <span className="text-zinc-700">NODE_VEC (sim)</span>
+                            <span className="text-zinc-500">{getMockCoords(selectedNode.id)}<span className="text-zinc-700 text-[9px] ml-1">(模拟)</span></span>
                           </div>
                         </div>
                       )}
