@@ -56,7 +56,7 @@ export const Install = () => {
 
   const fetchStatus = async () => {
     setLoading(true);
-    const response = await fetch(`${getApiBaseUrl()}/api/curator/status?limit=200`);
+    const response = await fetch(`${getApiBaseUrl()}/api/curator/status`);
     const payload = await response.json();
     setStatus(payload.data);
     setLoading(false);
@@ -126,6 +126,7 @@ export const Install = () => {
   const [llmRunning, setLlmRunning] = useState(false);
   const [llmFindingsShowAll, setLlmFindingsShowAll] = useState(false);
   const [llmDismissedIndices, setLlmDismissedIndices] = useState<Set<number>>(new Set());
+  const [acceptingAll, setAcceptingAll] = useState(false);
   const [isRecovering, setIsRecovering] = useState(false);
   const llmPollRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -279,7 +280,7 @@ export const Install = () => {
       const response = await fetch(`${getApiBaseUrl()}/api/curator/llm`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ dry_run: false, limit: 200 }),
+        body: JSON.stringify({ dry_run: false }),
       });
       const payload = await response.json();
       if (!response.ok || payload.ok === false) {
@@ -301,6 +302,37 @@ export const Install = () => {
       setLlmRunning(false);
       localStorage.removeItem(LLM_JOB_KEY);
     }
+  };
+
+  const acceptAllFindings = async () => {
+    const findings = llmRunState.findings ?? [];
+    const visible = findings.filter((_, i) => !llmDismissedIndices.has(i));
+    setAcceptingAll(true);
+    const results = await Promise.allSettled(
+      visible.map(async (f) => {
+        if (!f._category || !f._raw) return undefined;
+        const globalIdx = findings.indexOf(f);
+        await fetch(`${getApiBaseUrl()}/api/curator/llm/apply-single`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ category: f._category, finding: f._raw }),
+        });
+        return globalIdx;
+      })
+    );
+    const accepted = new Set<number>(
+      results
+        .filter((r): r is PromiseFulfilledResult<number> => r.status === "fulfilled" && r.value !== undefined)
+        .map((r) => r.value)
+    );
+    setLlmDismissedIndices((prev) => new Set([...prev, ...accepted]));
+    setAcceptingAll(false);
+    fetchStatus();
+  };
+
+  const dismissAllFindings = () => {
+    const findings = llmRunState.findings ?? [];
+    setLlmDismissedIndices(new Set(findings.map((_, i) => i)));
   };
 
   const summary = status?.curator.summary || {};
@@ -503,6 +535,22 @@ export const Install = () => {
               const displayFindings = llmFindingsShowAll ? visibleFindings : visibleFindings.slice(0, 20);
               return (
                 <div className="space-y-1 max-h-96 overflow-y-auto pr-1">
+                  <div className="flex gap-2 pb-1 sticky top-0 bg-zinc-900/95 z-10">
+                    <button
+                      onClick={acceptAllFindings}
+                      disabled={acceptingAll || visibleFindings.length === 0}
+                      className="rounded px-2 py-1 text-xs bg-emerald-800/60 text-emerald-300 hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                    >
+                      {acceptingAll ? "处理中..." : `✓ 全部接受 (${visibleFindings.length})`}
+                    </button>
+                    <button
+                      onClick={dismissAllFindings}
+                      disabled={visibleFindings.length === 0}
+                      className="rounded px-2 py-1 text-xs bg-zinc-700 text-zinc-400 hover:bg-red-900/60 hover:text-red-300 disabled:opacity-50 transition-colors"
+                    >
+                      ✗ 全部拒绝 ({visibleFindings.length})
+                    </button>
+                  </div>
                   {displayFindings.map((f, displayIdx) => {
                     const globalIdx = llmRunState.findings!.indexOf(f);
                     return (

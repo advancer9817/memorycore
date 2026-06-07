@@ -22,6 +22,7 @@ _LOCK_RETRY_DELAY = 0.1
 _write_lock = threading.RLock()
 _checkpoint_thread_started = False
 _checkpoint_thread_lock = threading.Lock()
+_init_lock = threading.Lock()
 
 
 def _run_checkpoint_loop() -> None:
@@ -60,17 +61,21 @@ def _get_thread_conn(path) -> sqlite3.Connection:
         _thread_local.conns = {}
         cache = _thread_local.conns
     if key not in cache:
-        conn = sqlite3.connect(path, timeout=30, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA wal_autocheckpoint=0")
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA busy_timeout=30000")
-        if key not in _INITIALIZED_DB_PATHS:
-            init_db(conn)
-            _INITIALIZED_DB_PATHS.add(key)
-        cache[key] = conn
-        _ensure_checkpoint_thread()
+        with _init_lock:
+            conn = sqlite3.connect(path, timeout=30, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            if key not in _INITIALIZED_DB_PATHS:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA wal_autocheckpoint=0")
+                conn.execute("PRAGMA foreign_keys=ON")
+                conn.execute("PRAGMA busy_timeout=30000")
+                init_db(conn)
+                _INITIALIZED_DB_PATHS.add(key)
+            else:
+                conn.execute("PRAGMA foreign_keys=ON")
+                conn.execute("PRAGMA busy_timeout=30000")
+            cache[key] = conn
+            _ensure_checkpoint_thread()
     return cache[key]
 
 

@@ -121,7 +121,14 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
     }
   ): Promise<{ memories: Memory[], total: number, pages: number }> => {
     // Skip fetch if cached data is fresh and this is a plain first-page load
-    const isDefaultLoad = !query && page === 1 && !filters?.apps?.length && !filters?.categories?.length;
+    const isDefaultLoad =
+      !query &&
+      page === 1 &&
+      !filters?.apps?.length &&
+      !filters?.categories?.length &&
+      !filters?.sortColumn &&
+      !filters?.sortDirection &&
+      filters?.showArchived === undefined;
     if (isDefaultLoad && lastFetchedAt && Date.now() - lastFetchedAt < CACHE_TTL_MS && memories.length > 0) {
       return { memories, total: memories.length, pages: 1 };
     }

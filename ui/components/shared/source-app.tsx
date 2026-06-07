@@ -1,3 +1,5 @@
+"use client";
+
 import React from "react";
 import { BiEdit } from "react-icons/bi";
 import Image from "next/image";

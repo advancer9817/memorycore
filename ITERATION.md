@@ -2917,3 +2917,50 @@ Memory Graph 界面存在多处体验问题：顶部过滤标签两行溢出遮�
 - 后端：通过 `uv run --extra dev pytest --ignore=tests/test_frontend.py` 校验，一致性检查测试全部通过。
 - 协议：`probe_mcp.py` 经修改 `--port 0` 后在 stdio 模式下与在线服务无缝并发探测成功。
 - 服务：mcore 服务已成功在 `systemd` 中以新注册名启动并持续提供 HTTP / MCP 服务。
+
+---
+
+## [迭代 108] 2026-06-08 — 记忆智能中心、运行稳定性与 i18n 待办沉淀
+
+### 痛点
+- Dashboard 缺少一屏式记忆治理态势入口，curator/LLM curator 的运行结果不够直观。
+- UI 与后端测试在本机/CI 环境中存在路径、配置和临时目录隔离差异，容易导致验证不稳定。
+- mcore UI 尚未支持全局中英文切换，需要先沉淀轻量 i18n 方案与拆分待办，避免半成品直接接入运行路径。
+
+### 变更
+
+**后端与配置**
+- `config.yaml`：调整本地运行配置，使当前环境的 extraction/vector/frontend 配置与 mcore 命名空间迁移后的路径保持一致。
+- `memorycore/extraction.py`：微调 extraction 默认 endpoint 拼接逻辑，配合测试覆盖 OpenAI-compatible/Ollama base URL 组合。
+- `memorycore/frontend.py`：补强前端 API 调度中的兼容路径，保持 UI 与后端 REST 包装层一致。
+- `memorycore/storage/db.py`：调整测试/运行时数据库连接辅助逻辑，降低临时库和生产库路径混用风险。
+- `memorycore/storage/entities.py`：收敛 entity 处理的小差异，保证 entity/alias 路径与当前 schema 一致。
+- `memorycore/storage/curator_llm.py`：调整 LLM curator job/finding 处理逻辑，配合前端“接受/拒绝/恢复任务”体验。
+
+**测试**
+- `tests/conftest.py`：新增/调整测试夹具，统一临时目录、配置和隔离数据库初始化。
+- `tests/test_deployment.py`、`tests/test_extraction.py`、`tests/test_frontend.py`、`tests/test_vector_store.py`：同步更新断言，覆盖当前配置、前端入口、extraction URL 与 vector store 行为。
+
+**前端**
+- `ui/components/dashboard/MemoryIntelligenceCenter.tsx`：新增记忆智能中心组件，汇总 curator 状态、统计、近期记忆、关注项与治理入口。
+- `ui/components/dashboard/Install.tsx`：增强 curator operations 面板，展示 manual run / LLM curator 运行状态、结果、finding 操作和恢复提示。
+- `ui/app/page.tsx`：接入新的 Memory Intelligence Center，并简化 Dashboard 页面结构。
+- `ui/components/shared/source-app.tsx`：补充默认 source app 展示兜底，避免未知 app 图标/名称显示异常。
+- `ui/hooks/useMemoriesApi.ts`：调整记忆 API hook 的状态更新与缓存细节，配合列表刷新和归档/暂停操作。
+- `ui/MEMORY_INTELLIGENCE_CENTER_DESIGN.md`：新增记忆智能中心设计说明。
+
+**i18n 规划**
+- `ui/lib/i18n/dictionaries/en.ts`、`ui/lib/i18n/types.ts`：新增未接入运行路径的 typed dictionary 基础骨架，为后续全局中英文切换做准备。
+- `TODO.md`：新增“UI i18n 全局中英文切换”章节，拆分 `zh.ts`、`I18nProvider`、`useI18n`、`LanguageSwitcher`、主要页面迁移、相对时间、多语言 E2E 与验证待办。
+
+### 验证
+- 本轮按用户要求直接提交全部当前改动，未重新运行完整测试。
+- 已确认当前新增 i18n 文件尚未接入 app provider 或组件运行路径，不会改变现有 UI 运行行为。
+- 提交后需在后续迭代补跑：后端焦点测试、`ui/pnpm build`、必要时 Playwright smoke/i18n 测试。
+
+### 已知问题
+- UI i18n 功能尚未完成，剩余实现已记录在 `TODO.md`。
+- `ui/tsconfig.tsbuildinfo` 为构建缓存文件，本轮随用户要求“所有改动直接提交”一并纳入；后续可评估是否从版本控制移除。
+
+### 回滚
+- `git revert <本次提交>`

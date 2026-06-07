@@ -145,7 +145,7 @@ def extraction_config_from_dict(cfg: dict[str, Any]) -> ExtractionConfig:
         base_url=extraction.get("base_url", "https://api.deepseek.com/v1"),
         model=extraction.get("model", "deepseek-v4-flash"),
         temperature=extraction.get("temperature", 0.1),
-        max_tokens=extraction.get("max_tokens", 2000),
+        max_tokens=extraction.get("max_tokens", 16000),
         timeout=extraction.get("timeout", 60),
         custom_instructions=extraction.get("custom_instructions", ""),
     )

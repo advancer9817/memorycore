@@ -43,8 +43,8 @@ def test_default_all_extra_stays_runtime_sized():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     optional = pyproject["project"]["optional-dependencies"]
 
-    assert optional["all"] == ["memorycore[vector,extraction]"]
-    assert optional["full"] == ["memorycore[vector,extraction]"]
+    assert optional["all"] == []
+    assert optional["full"] == []
     assert optional["embedding"] == []
 
 
@@ -56,8 +56,6 @@ def test_start_script_installs_runtime_extras_by_default():
     assert 'pip install -q -e ".[all]"' in text
     assert 'pip install -q -e ".[extraction]"' not in text
     assert "pip install -e .[all]" in readme
-    assert "pip install -e .[embedding]" in readme
-    assert "pip install -e .[full]" in readme
     assert 'pip install -e ".[all]"' in deploy
 
 
@@ -138,7 +136,7 @@ def test_hook_setup_registers_prompt_context_injection():
     assert 'payload = {"context": context}' in context_hook
     assert 'hook_event_name = "BeforeAgent" if event == "BeforeAgent" else "UserPromptSubmit"' in context_hook
     assert 'if isinstance(used_ids, list) and not used_ids:' in context_hook
-    assert "Codex 不注册读前 context hook" in readme
+    assert "Codex 只保留 `SessionStart`" in readme
 
 
 def test_session_start_hook_registers_presence_and_capabilities():
@@ -172,7 +170,7 @@ def test_gemini_hooks_register_context_and_write_after_ingest():
     ingest_hook = (ROOT / "scripts" / "hooks" / "mcore-ingest.py").read_text(encoding="utf-8")
 
     assert 'GEMINI_SETTINGS="${GEMINI_SETTINGS:-$HOME/.gemini/settings.json}"' in setup
-    assert 'gemini_servers["local_memory"] = {"httpUrl": endpoint, "timeout": 60000}' in setup
+    assert 'gemini_servers["memorycore"] = {"httpUrl": endpoint, "timeout": 60000}' in setup
     assert 'add_hook(gemini_hooks, "BeforeAgent", f"MCORE_AGENT_ID=gemini bash {mcore_context}", 5000)' in setup
     assert 'add_hook(gemini_hooks, "AfterAgent", f"python3 {mcore_ingest} --agent gemini --background", 30000)' in setup
     assert 'add_hook(gemini_hooks, "SessionEnd", f"python3 {mcore_ingest} --agent gemini --background", 30000)' in setup

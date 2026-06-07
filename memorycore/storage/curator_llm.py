@@ -46,7 +46,7 @@ def _cleanup_reviewed_ids() -> None:
 _SIM_THRESHOLD = 0.60          # 降低：更多相似对送 LLM 判断
 _BATCH_SIZE = 10
 # Max memories evaluated for importance re-assessment per run
-_IMPORTANCE_LIMIT = 100        # 从 50 提升到 100
+_IMPORTANCE_LIMIT = 1000       # 全库评估
 # Long-content threshold: memories with content > this many chars are candidates for splitting
 _SPLIT_CONTENT_THRESHOLD = 400
 
@@ -134,11 +134,6 @@ def _find_semantic_duplicate_candidates(
     sim_threshold: float,
 ) -> list[tuple[dict, dict, float]]:
     """Return (mem_a, mem_b, score) pairs above sim_threshold, deduplicated."""
-    if len(memories) > 500:
-        import random as _random
-        logger.warning("Large memory pool (%d), sampling 200 for dedup search", len(memories))
-        memories = _random.sample(memories, 200)
-
     now = _time.time()
     memories = [m for m in memories if now - _reviewed_memory_ids.get(m["id"], 0) >= _REVIEW_COOLDOWN_SECONDS]
 
@@ -199,8 +194,8 @@ def _llm_judge_duplicates(
         for idx, (a, b, score) in enumerate(batch):
             items_text += (
                 f"\n[{idx}]\n"
-                f"A: title={a.get('title')!r} content={a.get('content', '')[:200]!r}\n"
-                f"B: title={b.get('title')!r} content={b.get('content', '')[:200]!r}\n"
+                f"A: title={a.get('title')!r} content={a.get('content', '')[:800]!r}\n"
+                f"B: title={b.get('title')!r} content={b.get('content', '')[:800]!r}\n"
                 f"vector_similarity={score:.3f}\n"
             )
         system = (
@@ -260,11 +255,6 @@ def _find_contradiction_candidates(
     sim_threshold: float,
 ) -> list[tuple[dict, dict, float]]:
     """Same as duplicate search but focused on same-type pairs for contradiction check."""
-    if len(memories) > 500:
-        import random as _random
-        logger.warning("Large memory pool (%d), sampling 200 for dedup search", len(memories))
-        memories = _random.sample(memories, 200)
-
     now = _time.time()
     memories = [m for m in memories if now - _reviewed_memory_ids.get(m["id"], 0) >= _REVIEW_COOLDOWN_SECONDS]
 
@@ -326,8 +316,8 @@ def _llm_judge_contradictions(
         for idx, (a, b, score) in enumerate(batch):
             items_text += (
                 f"\n[{idx}]\n"
-                f"A (id={a['id'][:8]}): {a.get('title')!r} — {a.get('content', '')[:200]!r}\n"
-                f"B (id={b['id'][:8]}): {b.get('title')!r} — {b.get('content', '')[:200]!r}\n"
+                f"A (id={a['id'][:8]}): {a.get('title')!r} — {a.get('content', '')[:800]!r}\n"
+                f"B (id={b['id'][:8]}): {b.get('title')!r} — {b.get('content', '')[:800]!r}\n"
             )
         system = (
             "You are a memory curator. Check each memory pair for semantic contradiction "
@@ -386,7 +376,7 @@ def _llm_reassess_importance(
                 f"injected={m.get('injected_count', 0)} "
                 f"feedback={m.get('feedback_score', 0):.1f}\n"
                 f"  title: {m.get('title')!r}\n"
-                f"  content: {m.get('content', '')[:150]!r}\n"
+                f"  content: {m.get('content', '')[:600]!r}\n"
             )
         system = (
             "You are a memory curator scoring long-term value of stored memories. "
@@ -484,7 +474,7 @@ def _llm_detect_splittable(
 
 def llm_curator_report(
     config: dict[str, Any] | None = None,
-    limit: int = 200,
+    limit: int = 10000,
     sim_threshold: float = _SIM_THRESHOLD,
 ) -> dict[str, Any]:
     """Run LLM-enhanced curation analysis. Returns structured report (no writes)."""
@@ -522,7 +512,7 @@ def llm_curator_report(
         try:
             dup_pairs = _find_semantic_duplicate_candidates(vs, memories, sim_threshold)
             if dup_pairs:
-                semantic_duplicates = _llm_judge_duplicates(dup_pairs[:40], llm_config)
+                semantic_duplicates = _llm_judge_duplicates(dup_pairs[:200], llm_config)
         except Exception as exc:
             errors.append(f"Semantic dedup failed: {exc}")
             logger.warning("semantic dedup error: %s", exc)
@@ -530,7 +520,7 @@ def llm_curator_report(
         try:
             contra_pairs = _find_contradiction_candidates(vs, memories, sim_threshold)
             if contra_pairs:
-                contradictions = _llm_judge_contradictions(contra_pairs[:40], llm_config)
+                contradictions = _llm_judge_contradictions(contra_pairs[:200], llm_config)
         except Exception as exc:
             errors.append(f"Contradiction detection failed: {exc}")
             logger.warning("contradiction detection error: %s", exc)
@@ -558,7 +548,7 @@ def llm_curator_report(
         long_memories = [
             m for m in memories
             if len(m.get("content", "")) > _SPLIT_CONTENT_THRESHOLD
-        ][:20]  # up to 20 long memories per run
+        ][:100]  # up to 100 long memories per run
         if long_memories:
             split_candidates = _llm_detect_splittable(long_memories, llm_config)
     except Exception as exc:

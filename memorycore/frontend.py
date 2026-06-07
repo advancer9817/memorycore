@@ -284,7 +284,7 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
             allow_actions=_list_q(query, "allow_actions"), deny_actions=_list_q(query, "deny_actions"),
         )
     if parts == ["curator", "status"] and method == "GET":
-        return _curator_status_payload(limit=_int_q(query, "limit", 200))
+        return _curator_status_payload(limit=_int_q(query, "limit", 10000))
     if parts == ["curator", "apply"] and method == "POST":
         return curator_report(
             dry_run=False, limit=int(body.get("limit", 500)),
@@ -292,7 +292,6 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
             allow_actions=body.get("allow_actions"), deny_actions=body.get("deny_actions"),
         )
     if parts == ["curator", "llm"] and method == "POST":
-        from memorycore.models import load_config
         cfg = load_config()
         apply = not body.get("dry_run", True)
         job_id = str(uuid.uuid4())
@@ -302,7 +301,7 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
             _latest_llm_job_id[:] = [job_id]
         t = threading.Thread(
             target=_run_llm_curator_job,
-            args=(job_id, cfg, int(body.get("limit", 200)), float(body.get("sim_threshold", 0.72)), apply),
+            args=(job_id, cfg, int(body.get("limit", 10000)), float(body.get("sim_threshold", 0.72)), apply),
             daemon=True,
             name=f"llm-curator-{job_id[:8]}",
         )
@@ -714,6 +713,7 @@ _KNOWN_AGENTS = {
     "gpt-5.5", "gpt-5.5-router",
     "memory-rollup",
     "default-router",
+    "memorycore-ui",
 }
 
 _AGENT_DISPLAY_NAME: dict[str, str] = {

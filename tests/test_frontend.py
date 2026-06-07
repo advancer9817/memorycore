@@ -77,7 +77,7 @@ def test_frontend_v1_memory_compat_routes():
         created = client.post("/api/v1/memories", json={
             "type": "project_memory",
             "title": "OpenMemory compat",
-            "content": "lmmcp compat API content",
+            "content": "mcore lmmcp compat API content",
             "atomize": False,
         })
         memory_id = created.json()["id"]
@@ -103,7 +103,7 @@ def test_frontend_v1_memory_compat_routes():
     assert entities.status_code == 200
     assert any(hit["memory_id"] == memory_id for hit in entities.json())
     assert stats.json()["total_memories"] >= 1
-    app = next(row for row in apps.json()["apps"] if row["id"] == "openmemory-ui")
+    app = next(row for row in apps.json()["apps"] if row["id"] == "memorycore-ui")
     assert app["total_memories_created"] >= 1
     assert "last_activity_at" in app
     assert "status" in app

@@ -1,8 +1,7 @@
 "use client";
 
 import { Install } from "@/components/dashboard/Install";
-import { MemoryFilters } from "@/app/memories/components/MemoryFilters";
-import { MemoriesSection } from "@/app/memories/components/MemoriesSection";
+import { MemoryIntelligenceCenter } from "@/components/dashboard/MemoryIntelligenceCenter";
 import "@/styles/animation.css";
 
 export default function DashboardPage() {
@@ -16,13 +15,8 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div>
-            <div className="animate-fade-slide-down delay-2">
-              <MemoryFilters />
-            </div>
-            <div className="animate-fade-slide-down delay-3">
-              <MemoriesSection />
-            </div>
+          <div className="animate-fade-slide-down delay-2">
+            <MemoryIntelligenceCenter />
           </div>
         </div>
       </div>

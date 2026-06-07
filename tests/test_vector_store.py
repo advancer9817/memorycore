@@ -160,7 +160,7 @@ class TestEmbedText:
                 return {"data": [{"embedding": [3.0, 4.0]}]}
 
         class FakeClient:
-            def __init__(self, timeout):
+            def __init__(self, timeout=None, **kwargs):
                 self.timeout = timeout
 
             def __enter__(self):
