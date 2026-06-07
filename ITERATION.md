@@ -2936,6 +2936,7 @@ Memory Graph 界面存在多处体验问题：顶部过滤标签两行溢出遮�
 - `memorycore/storage/db.py`：调整测试/运行时数据库连接辅助逻辑，降低临时库和生产库路径混用风险。
 - `memorycore/storage/entities.py`：收敛 entity 处理的小差异，保证 entity/alias 路径与当前 schema 一致。
 - `memorycore/storage/curator_llm.py`：调整 LLM curator job/finding 处理逻辑，配合前端“接受/拒绝/恢复任务”体验。
+- `memorycore/storage/transfer.py`：让 `--memories-only` 导出的 `exported_at` 使用数据高水位时间而不是当前时间，避免 pre-push hook 在记忆内容未变时仅因时间戳变化无限生成 memory-sync 提交。
 
 **测试**
 - `tests/conftest.py`：新增/调整测试夹具，统一临时目录、配置和隔离数据库初始化。

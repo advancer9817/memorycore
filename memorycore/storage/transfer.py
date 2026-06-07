@@ -36,10 +36,22 @@ _TABLE_PK = {
 }
 
 _CONFLICT_POLICIES = {"skip", "replace", "newer"}
+_SYNC_TIMESTAMP_FIELDS = ("updated_at", "created_at", "accessed_at")
 
 
 def _table_columns(conn, table: str) -> list[str]:
     return [row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+
+
+def _exported_at_for_tables(data: dict[str, list[dict[str, Any]]], tables: list[str]) -> str:
+    latest = ""
+    for table in tables:
+        for row in data.get(table, []):
+            for field in _SYNC_TIMESTAMP_FIELDS:
+                value = str(row.get(field) or "").strip()
+                if value > latest:
+                    latest = value
+    return latest or now()
 
 
 def _table_rows(conn, table: str) -> list[dict[str, Any]]:
@@ -72,7 +84,7 @@ def memory_export(
             data[table] = _table_rows(conn, table)
     return {
         "schema_version": schema_version,
-        "exported_at": now(),
+        "exported_at": _exported_at_for_tables(data, tables) if memories_only else now(),
         "memories_only": memories_only,
         "tables": tables,
         "counts": {table: len(rows) for table, rows in data.items()},
