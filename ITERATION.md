@@ -3287,3 +3287,44 @@ Graph 左侧连接类型筛选里 `part of` 与 `related to` 使用灰色/暗 sl
 - 回滚 `scripts/mcore`、`scripts/install_services.sh` 与本条 `ITERATION.md` 记录。
 
 ---
+
+## [迭代 117] 2026-06-09 — Dashboard 审查流程与 Categories 筛选弹窗可用性优化
+
+### 痛点
+
+- Dashboard 的审查队列只是把风险项列出来，缺少明确的逐项审查流程、处理入口和验证步骤。
+- Memories Filter 的 Categories 标签页在分类很多时会把弹窗撑成长列表，影响选择和应用筛选。
+
+### 变更
+
+**Dashboard 审查流程：**
+- 将 Review Queue 改为 Review Workflow 工作台。
+- 支持选择具体队列项，展示范围、严重度、操作提示和 4 步审查流程。
+- 提供三个操作入口：打开候选队列、跳转 Memory Operations、导出治理报告。
+- 将原本无效的 `state=` 链接改为 Memories 页面当前支持的 `search/page/size/sort/dir` 查询参数，避免点击后没有筛选效果。
+- 给 Memory Operations 区块增加 `#memory-operations` 锚点，方便审查流程跳转。
+
+**Categories 筛选弹窗：**
+- Categories 标签页新增搜索框。
+- 分类列表改为固定高度滚动区域，避免无限拉长弹窗。
+- 新增显示 `shown/total` 和 selected 计数。
+- Select All 改为 Select visible，只对当前搜索结果批量选择/取消。
+- Checkbox DOM id 改用稳定的 category id，避免 raw category name 造成无效或重复 id。
+- 搜索输入补充 `aria-label`，队列选择按钮补充 `aria-pressed`。
+
+### 验证
+
+- `cd ui && pnpm exec tsc --noEmit`：通过。
+- `cd ui && pnpm build`：通过。
+- `git diff --check`：通过。
+- code-review 首轮发现的阻塞项（`state=` 链接无效）和非阻塞 a11y/id 问题已修复。
+
+### 已知限制 / 后续
+
+- 当前 Memories 页面仍主要基于 search 参数过滤；后续可继续补真正的 state/category URL 参数解析，让审查队列能按后端状态精确过滤。
+
+### 回滚
+
+- 回滚 `ui/components/dashboard/MemoryIntelligenceCenter.tsx`、`ui/components/dashboard/Install.tsx`、`ui/app/memories/components/FilterComponent.tsx`、i18n 字典与本条 `ITERATION.md` 记录。
+
+---

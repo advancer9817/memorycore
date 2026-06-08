@@ -10,7 +10,9 @@ import {
   ArrowRight,
   BrainCircuit,
   CheckCircle2,
+  CheckSquare,
   Clock3,
+  FileSearch,
   GitBranch,
   Network,
   RadioTower,
@@ -127,6 +129,8 @@ interface RecommendationItem {
 interface ReviewQueueItem extends AttentionItem {
   href: string;
   actionLabel: string;
+  workflow: string[];
+  operationHint: string;
 }
 
 interface TrendPoint {
@@ -346,15 +350,63 @@ function buildRecommendations({
   return items.slice(0, 4);
 }
 
+function getReviewWorkflow(item: AttentionItem, t: ReturnType<typeof useI18n>["messages"]["dashboard"]): string[] {
+  if (item.label === t.attentionContradictions) {
+    return [
+      t.reviewWorkflowOpenCandidates,
+      t.reviewWorkflowCompareConflict,
+      t.reviewWorkflowArchiveOrRewrite,
+      t.reviewWorkflowVerifyContext,
+    ];
+  }
+
+  if (item.label === t.attentionMergeOpportunities) {
+    return [
+      t.reviewWorkflowOpenOperations,
+      t.reviewWorkflowRunLlmReview,
+      t.reviewWorkflowAcceptSafeMerges,
+      t.reviewWorkflowVerifyDuplicates,
+    ];
+  }
+
+  if (item.label === t.attentionAgingKnowledge) {
+    return [
+      t.reviewWorkflowOpenCandidates,
+      t.reviewWorkflowCheckStaleness,
+      t.reviewWorkflowArchiveSmallBatch,
+      t.reviewWorkflowVerifyHealth,
+    ];
+  }
+
+  return [
+    t.reviewWorkflowOpenCandidates,
+    t.reviewWorkflowInspectSample,
+    t.reviewWorkflowApplyAction,
+    t.reviewWorkflowVerifyHealth,
+  ];
+}
+
+function getReviewOperationHint(item: AttentionItem, t: ReturnType<typeof useI18n>["messages"]["dashboard"]): string {
+  if (item.label === t.attentionMergeOpportunities || item.label === t.attentionSplitCandidates || item.label === t.attentionImportanceReviews) {
+    return t.reviewOperationHintLlm;
+  }
+
+  if (item.label === t.attentionPlannedActions || item.label === t.attentionAgingKnowledge) {
+    return t.reviewOperationHintRule;
+  }
+
+  return t.reviewOperationHintManual;
+}
+
 function buildReviewQueue(attentionItems: AttentionItem[], t: ReturnType<typeof useI18n>["messages"]["dashboard"]): ReviewQueueItem[] {
   const hrefByLabel: Record<string, string> = {
-    [t.attentionContradictions]: "/memories?state=contradicted",
-    [t.attentionMergeOpportunities]: "/memories?search=duplicate",
-    [t.attentionAgingKnowledge]: "/memories?state=stale",
-    [t.attentionPendingReview]: "/memories?state=candidate",
-    [t.attentionPlannedActions]: "/memories?state=candidate",
-    [t.attentionImportanceReviews]: "/memories?search=importance",
-    [t.attentionSplitCandidates]: "/memories?search=split",
+    [t.attentionContradictions]: "/memories?search=contradict&page=1&size=20&sort=created_at&dir=desc",
+    [t.attentionMergeOpportunities]: "/memories?search=duplicate&page=1&size=20&sort=created_at&dir=desc",
+    [t.attentionAgingKnowledge]: "/memories?search=stale&page=1&size=20&sort=created_at&dir=desc",
+    [t.attentionPendingReview]: "/memories?search=candidate&page=1&size=20&sort=created_at&dir=desc",
+    [t.attentionPlannedActions]: "/memories?search=candidate&page=1&size=20&sort=created_at&dir=desc",
+    [t.attentionImportanceReviews]: "/memories?search=importance&page=1&size=20&sort=created_at&dir=desc",
+    [t.attentionSplitCandidates]: "/memories?search=split&page=1&size=20&sort=created_at&dir=desc",
   };
 
   return attentionItems
@@ -364,6 +416,8 @@ function buildReviewQueue(attentionItems: AttentionItem[], t: ReturnType<typeof 
       ...item,
       href: hrefByLabel[item.label] ?? "/memories",
       actionLabel: item.severity === "high" ? t.reviewNow : t.inspect,
+      workflow: getReviewWorkflow(item, t),
+      operationHint: getReviewOperationHint(item, t),
     }));
 }
 
@@ -384,6 +438,7 @@ export function MemoryIntelligenceCenter() {
   const { messages } = useI18n();
   const t = messages.dashboard;
   const [state, setState] = useState<IntelligenceState>(INITIAL_STATE);
+  const [selectedReviewLabel, setSelectedReviewLabel] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -495,6 +550,7 @@ export function MemoryIntelligenceCenter() {
     llmStatus,
   });
   const reviewQueue = buildReviewQueue(attentionItems, t);
+  const selectedReviewItem = reviewQueue.find((item) => item.label === selectedReviewLabel) ?? reviewQueue[0];
   const trendPoints: TrendPoint[] = [
     { label: t.trendHealth, value: qualityScore, detail: t.trendHealthDetail(connectedCoverage), tone: qualityScore >= 70 ? "good" : "warn" },
     { label: t.trendDuplicates, value: duplicateCount, detail: t.trendDuplicatesDetail(duplicateCount), tone: duplicateCount > 0 ? "warn" : "good" },
@@ -661,20 +717,84 @@ export function MemoryIntelligenceCenter() {
         <Card className="border-zinc-800 bg-zinc-900 xl:col-span-2">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center justify-between text-sm font-medium text-zinc-300">
-              {t.reviewQueue}
-              <AlertTriangle className="h-4 w-4 text-amber-400" />
+              {t.reviewFlow}
+              <FileSearch className="h-4 w-4 text-amber-400" />
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
-            {reviewQueue.length > 0 ? reviewQueue.map((item) => (
-              <Link key={item.label} href={item.href} className={`block rounded-lg border px-3 py-2.5 transition hover:brightness-110 ${severityClassName[item.severity]}`}>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-medium">{item.label}</span>
-                  <span className="text-xs text-current/75">{item.actionLabel} →</span>
+          <CardContent className="space-y-3">
+            {selectedReviewItem ? (
+              <>
+                <p className="text-xs leading-relaxed text-zinc-500">{t.reviewFlowDescription}</p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {reviewQueue.map((item) => {
+                    const isSelected = selectedReviewItem.label === item.label;
+                    return (
+                      <button
+                        key={item.label}
+                        type="button"
+                        aria-pressed={isSelected}
+                        onClick={() => setSelectedReviewLabel(item.label)}
+                        className={`rounded-lg border px-3 py-2.5 text-left transition hover:brightness-110 ${
+                          isSelected ? "ring-1 ring-primary/70" : ""
+                        } ${severityClassName[item.severity]}`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-sm font-medium">{item.label}</span>
+                          <Badge variant="outline" className="border-current/30 bg-black/20 text-current">
+                            {item.count}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 line-clamp-2 text-xs text-current/75">{item.detail}</p>
+                      </button>
+                    );
+                  })}
                 </div>
-                <p className="mt-1 text-xs text-current/75">{t.reviewQueueItemDetail(item.count, item.detail)}</p>
-              </Link>
-            )) : (
+                <div className={`rounded-xl border p-3 ${severityClassName[selectedReviewItem.severity]}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold">{selectedReviewItem.label}</p>
+                      <p className="mt-1 text-xs text-current/75">
+                        {t.reviewQueueItemDetail(selectedReviewItem.count, selectedReviewItem.detail)}
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="border-current/30 bg-black/20 text-current">
+                      {t.reviewSeverity}: {selectedReviewItem.severity}
+                    </Badge>
+                  </div>
+                  <div className="mt-3 rounded-lg border border-current/20 bg-black/15 px-3 py-2 text-xs leading-relaxed text-current/80">
+                    {selectedReviewItem.operationHint}
+                  </div>
+                  <ol className="mt-3 space-y-2">
+                    {selectedReviewItem.workflow.map((step, index) => (
+                      <li key={step} className="flex gap-2 text-xs leading-relaxed text-current/80">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-current/30 bg-black/20 text-[10px] font-semibold">
+                          {index + 1}
+                        </span>
+                        <span>{step}</span>
+                      </li>
+                    ))}
+                  </ol>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button asChild size="sm" variant="outline" className="h-8 border-current/30 bg-black/20 text-current hover:bg-black/35">
+                      <Link href={selectedReviewItem.href}>
+                        <CheckSquare className="h-3.5 w-3.5" />
+                        {t.reviewOpenQueue}
+                      </Link>
+                    </Button>
+                    <Button asChild size="sm" variant="outline" className="h-8 border-current/30 bg-black/20 text-current hover:bg-black/35">
+                      <Link href="#memory-operations">
+                        <Workflow className="h-3.5 w-3.5" />
+                        {t.reviewOpenOperations}
+                      </Link>
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-8 border-current/30 bg-black/20 text-current hover:bg-black/35" onClick={() => downloadGovernanceReport(governanceReport)}>
+                      <ArrowDownToLine className="h-3.5 w-3.5" />
+                      {t.reviewExportReport}
+                    </Button>
+                  </div>
+                </div>
+              </>
+            ) : (
               <div className="rounded-lg border border-emerald-800/70 bg-emerald-950/25 px-3 py-3 text-sm text-emerald-200">{t.noActiveReviewQueue}</div>
             )}
           </CardContent>

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Filter, X, ChevronDown, SortAsc, SortDesc } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, Filter, Search, SortAsc, SortDesc } from "lucide-react";
 import { useDispatch, useSelector } from "react-redux";
 
 import {
@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -61,12 +62,23 @@ export default function FilterComponent() {
     string[]
   >([]);
   const [showArchived, setShowArchived] = useState(false);
+  const [categoryQuery, setCategoryQuery] = useState("");
 
   const apps = useSelector((state: RootState) => state.apps.apps);
   const categories = useSelector(
     (state: RootState) => state.filters.categories.items
   );
   const filters = useSelector((state: RootState) => state.filters.apps);
+  const normalizedCategoryQuery = categoryQuery.trim().toLowerCase();
+  const filteredCategories = useMemo(
+    () =>
+      normalizedCategoryQuery
+        ? categories.filter((category) =>
+            category.name.toLowerCase().includes(normalizedCategoryQuery)
+          )
+        : categories,
+    [categories, normalizedCategoryQuery]
+  );
 
   useEffect(() => {
     fetchApps();
@@ -104,8 +116,15 @@ export default function FilterComponent() {
     setTempSelectedApps(checked ? apps.map((app) => app.id) : []);
   };
 
-  const toggleAllCategories = (checked: boolean) => {
-    setTempSelectedCategories(checked ? categories.map((cat) => cat.name) : []);
+  const toggleVisibleCategories = (checked: boolean) => {
+    const visibleNames = filteredCategories.map((category) => category.name);
+    setTempSelectedCategories((current) => {
+      if (!checked) {
+        return current.filter((category) => !visibleNames.includes(category));
+      }
+
+      return Array.from(new Set([...current, ...visibleNames]));
+    });
   };
 
   const handleClearFilters = async () => {
@@ -285,46 +304,72 @@ export default function FilterComponent() {
             </TabsContent>
             <TabsContent value="categories" className="mt-4">
               <div className="space-y-3">
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="select-all-categories"
-                    checked={
-                      categories.length > 0 &&
-                      tempSelectedCategories.length === categories.length
-                    }
-                    onCheckedChange={(checked) =>
-                      toggleAllCategories(checked as boolean)
-                    }
-                    className="border-zinc-600 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                  <Input
+                    value={categoryQuery}
+                    onChange={(event) => setCategoryQuery(event.target.value)}
+                    placeholder="Search categories..."
+                    aria-label="Search categories"
+                    className="h-9 border-zinc-700 bg-zinc-950 pl-9 text-sm text-zinc-100 placeholder:text-zinc-500"
                   />
-                  <Label
-                    htmlFor="select-all-categories"
-                    className="text-sm font-normal text-zinc-300 cursor-pointer"
-                  >
-                    Select All
-                  </Label>
                 </div>
-                {categories.map((category) => (
-                  <div
-                    key={category.name}
-                    className="flex items-center space-x-2"
-                  >
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-950/55 px-3 py-2">
+                  <div className="flex items-center space-x-2">
                     <Checkbox
-                      id={`category-${category.name}`}
-                      checked={tempSelectedCategories.includes(category.name)}
-                      onCheckedChange={() =>
-                        toggleCategoryFilter(category.name)
+                      id="select-visible-categories"
+                      checked={
+                        filteredCategories.length > 0 &&
+                        filteredCategories.every((category) =>
+                          tempSelectedCategories.includes(category.name)
+                        )
+                      }
+                      onCheckedChange={(checked) =>
+                        toggleVisibleCategories(checked as boolean)
                       }
                       className="border-zinc-600 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
                     />
                     <Label
-                      htmlFor={`category-${category.name}`}
-                      className="text-sm font-normal text-zinc-300 cursor-pointer"
+                      htmlFor="select-visible-categories"
+                      className="cursor-pointer text-sm font-normal text-zinc-300"
                     >
-                      {category.name}
+                      Select visible
                     </Label>
                   </div>
-                ))}
+                  <span className="text-xs text-zinc-500">
+                    {filteredCategories.length}/{categories.length} shown · {tempSelectedCategories.length} selected
+                  </span>
+                </div>
+                <div className="max-h-72 space-y-2 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950/35 p-2 pr-3">
+                  {filteredCategories.length > 0 ? (
+                    filteredCategories.map((category) => (
+                      <div
+                        key={category.name}
+                        className="flex items-center space-x-2 rounded-md px-1 py-1.5 hover:bg-zinc-800/60"
+                      >
+                        <Checkbox
+                          id={`category-${category.id}`}
+                          checked={tempSelectedCategories.includes(category.name)}
+                          onCheckedChange={() =>
+                            toggleCategoryFilter(category.name)
+                          }
+                          className="border-zinc-600 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                        />
+                        <Label
+                          htmlFor={`category-${category.id}`}
+                          className="min-w-0 flex-1 cursor-pointer truncate text-sm font-normal text-zinc-300"
+                          title={category.name}
+                        >
+                          {category.name}
+                        </Label>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="px-2 py-8 text-center text-sm text-zinc-500">
+                      No categories match this search.
+                    </div>
+                  )}
+                </div>
               </div>
             </TabsContent>
             <TabsContent value="archived" className="mt-4">

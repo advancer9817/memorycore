@@ -419,7 +419,7 @@ export const Install = () => {
   const llmLastResult = status?.llm_curator?.last_result || "unknown";
 
   return (
-    <div>
+    <div id="memory-operations">
       <div className="mb-6">
         <h2 className="text-base font-medium text-zinc-400">Memory Operations</h2>
       </div>
