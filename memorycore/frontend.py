@@ -397,8 +397,9 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
     if parts == ["graph"] and method == "GET":
         status = _str_q(query, "status", "active,candidate") or "active,candidate"
         default_limit = 2000 if status == "all" else 500
+        requested_limit = _int_q(query, "limit", default_limit)
         return _graph_payload(
-            limit=_int_q(query, "limit", default_limit),
+            limit=max(1, min(requested_limit, 10000)),
             status=status,
         )
     raise LookupError(f"route not found: /api/{'/'.join(parts)}")
@@ -1041,25 +1042,34 @@ def _check_origin(request: Request) -> Response | None:
 def _graph_payload(limit: int = 500, status: str = "active,candidate") -> dict[str, Any]:
     from memorycore.storage.db import read_conn
 
-    nodes: list[dict[str, Any]] = []
-    edges: list[dict[str, Any]] = []
     status_values = [item.strip() for item in status.split(",") if item.strip()]
     include_all_statuses = not status_values or "all" in status_values
+
+    # Prioritize nodes with higher utility: importance DESC, then feedback_score DESC,
+    # then injected_count DESC — deterministic ordering that surfaces useful nodes first.
+    order_clause = (
+        "ORDER BY COALESCE(importance, 0.5) DESC, "
+        "COALESCE(feedback_score, 0.0) DESC, "
+        "COALESCE(injected_count, 0) DESC"
+    )
 
     with read_conn() as conn:
         if include_all_statuses:
             rows = conn.execute(
-                "SELECT id, title, type, status, importance, feedback_score, injected_count, content FROM memories LIMIT ?",
+                f"SELECT id, title, type, status, importance, feedback_score, injected_count, content"
+                f" FROM memories {order_clause} LIMIT ?",
                 (limit,),
             ).fetchall()
         else:
             placeholders = ",".join("?" * len(status_values))
             rows = conn.execute(
-                f"SELECT id, title, type, status, importance, feedback_score, injected_count, content FROM memories WHERE status IN ({placeholders}) LIMIT ?",
+                f"SELECT id, title, type, status, importance, feedback_score, injected_count, content"
+                f" FROM memories WHERE status IN ({placeholders}) {order_clause} LIMIT ?",
                 (*status_values, limit),
             ).fetchall()
-        for row in rows:
-            nodes.append({
+
+        nodes: list[dict[str, Any]] = [
+            {
                 "id": row[0],
                 "title": (row[1] or "")[:80],
                 "type": row[2] or "unknown",
@@ -1068,30 +1078,52 @@ def _graph_payload(limit: int = 500, status: str = "active,candidate") -> dict[s
                 "feedback_score": round(float(row[5] or 0.0), 2),
                 "injected_count": int(row[6] or 0),
                 "content": (row[7] or "")[:500],
-            })
+            }
+            for row in rows
+        ]
 
-        link_rows = conn.execute(
-            "SELECT source_id, target_id, relation_type, weight FROM memory_links LIMIT 2000"
-        ).fetchall()
         node_ids = {n["id"] for n in nodes}
-        dropped_edges = 0
-        for lrow in link_rows:
-            if lrow[0] in node_ids and lrow[1] in node_ids:
-                edges.append({
+
+        # Fetch links connected to the selected node set. Chunk ids to avoid SQLite
+        # parameter-limit issues when the UI requests a high graph limit, then keep
+        # only links whose endpoints are both present in the returned node set.
+        edges: list[dict[str, Any]] = []
+        if node_ids:
+            link_rows = []
+            seen_links = set()
+            id_list = list(node_ids)
+            chunk_size = 400
+            for start in range(0, len(id_list), chunk_size):
+                chunk = id_list[start:start + chunk_size]
+                placeholders_n = ",".join("?" * len(chunk))
+                rows_for_chunk = conn.execute(
+                    f"SELECT source_id, target_id, relation_type, weight"
+                    f" FROM memory_links"
+                    f" WHERE source_id IN ({placeholders_n}) OR target_id IN ({placeholders_n})",
+                    (*chunk, *chunk),
+                ).fetchall()
+                for lrow in rows_for_chunk:
+                    link_key = (lrow[0], lrow[1], lrow[2])
+                    if link_key not in seen_links:
+                        seen_links.add(link_key)
+                        link_rows.append(lrow)
+            edges = [
+                {
                     "source": lrow[0],
                     "target": lrow[1],
                     "relation_type": lrow[2] or "related_to",
                     "weight": lrow[3] if lrow[3] is not None else 1.0,
-                })
-            else:
-                dropped_edges += 1
+                }
+                for lrow in link_rows
+                if lrow[0] in node_ids and lrow[1] in node_ids
+            ]
 
     return {
         "nodes": nodes,
         "edges": edges,
         "meta": {
             "status": "all" if include_all_statuses else ",".join(status_values),
-            "dropped_edges": dropped_edges,
+            "dropped_edges": 0,
         },
     }
 

@@ -45,6 +45,8 @@ function useResizable(initial: number, min: number, max: number, direction: "rig
 }
 
 const Graph3D = dynamic(() => import("./Graph3D"), { ssr: false });
+const GRAPH_LIMIT_OPTIONS = [500, 1000, 2000, 5000, 10000] as const;
+const GRAPH_HIGH_LIMIT_WARNING = 5000;
 
 interface GraphData { nodes: GraphNode[]; edges: GraphEdge[]; }
 
@@ -68,10 +70,11 @@ export default function GraphPage() {
   const [showHud, setShowHud] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ w: 900, h: 600 });
-  const listItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const listScrollRef = useRef<HTMLDivElement>(null);
+  const sortedListNodesRef = useRef<GraphNode[]>([]);
 
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [limit, setLimit] = useState(2000);
 
   const listPanel = useResizable(260, 160, 420, "right");
   const detailPanel = useResizable(320, 220, 500, "left");
@@ -84,7 +87,12 @@ export default function GraphPage() {
   }, [searchInput]);
 
   useEffect(() => {
-    fetch(`${getApiBaseUrl()}/api/graph?status=all&limit=2000`)
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+    setGraphReady(false);
+
+    fetch(`${getApiBaseUrl()}/api/graph?status=all&limit=${limit}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((p) => {
         const raw = p.data ?? p;
@@ -95,9 +103,16 @@ export default function GraphPage() {
         setActiveTypes(new Set(raw.nodes.map((n: GraphNode) => n.type)));
         setActiveEdgeTypes(edgeTypes);
       })
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false));
-  }, []);
+      .catch((e) => {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        setError(String(e));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [limit]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -122,7 +137,7 @@ export default function GraphPage() {
     if (selectedNode) { setEditImportance(selectedNode.importance); setEditStatus(selectedNode.status ?? "active"); }
   }, [selectedNode?.id]);
 
-  const connectedIds = useCallback((): Set<string> | null => {
+  const connectedIds = useMemo(() => {
     if (!selectedNode || !data) return null;
     const ids = new Set<string>();
     ids.add(selectedNode.id);
@@ -159,6 +174,9 @@ export default function GraphPage() {
   }) : [], [data, activeTypes, activeStatus, highlightImportant, search]);
 
   const sortedListNodes = useMemo(() => [...filteredNodes].sort((a, b) => b.importance - a.importance), [filteredNodes]);
+  useEffect(() => {
+    sortedListNodesRef.current = sortedListNodes;
+  }, [sortedListNodes]);
   const filteredNodeIds = useMemo(() => new Set(filteredNodes.map(n => n.id)), [filteredNodes]);
   const filteredEdges = useMemo(() => data ? data.edges.filter(e => activeEdgeTypes.has(e.relation_type) && filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target)) : [], [data, activeEdgeTypes, filteredNodeIds]);
   const importantCount = useMemo(() => data ? data.nodes.filter(n => n.importance >= IMPORTANCE_THRESHOLD).length : 0, [data]);
@@ -174,13 +192,14 @@ export default function GraphPage() {
     setSelectedNode(prev => {
       if (prev?.id === node.id) return null;
       setTimeout(() => {
-        const idx = sortedListNodes.findIndex(n => n.id === node.id);
+        const currentSortedListNodes = sortedListNodesRef.current;
+        const idx = currentSortedListNodes.findIndex(n => n.id === node.id);
         if (idx >= 0) rowVirtualizer.scrollToIndex(idx, { align: "auto" });
         graph3DHandleRef.current?.focusNode(node.id);
       }, 50);
       return node;
     });
-  }, [sortedListNodes, rowVirtualizer]);
+  }, [rowVirtualizer]);
 
   const handleExportJson = useCallback(() => {
     if (!data) return;
@@ -190,7 +209,7 @@ export default function GraphPage() {
     URL.revokeObjectURL(url);
   }, [data, filteredNodes, filteredEdges]);
 
-  const linked = connectedIds();
+  const linked = connectedIds;
 
   return (
     <div className="flex flex-col h-[calc(100vh-56px)] bg-[#020408]">
@@ -261,6 +280,27 @@ export default function GraphPage() {
             className="text-xs text-zinc-500 hover:text-zinc-200 px-2.5 py-1.5 rounded-md hover:bg-white/5 transition-all"
             style={{ border: "1px solid rgba(255,255,255,0.06)" }}
           >重置</button>
+
+          <select
+            value={limit}
+            onChange={(e) => setLimit(Number(e.target.value))}
+            className="text-xs text-zinc-400 px-2 py-1.5 rounded-md transition-all"
+            style={{
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              color: "#a1a1aa",
+              outline: "none",
+            }}
+            title="加载节点数量上限"
+          >
+            {GRAPH_LIMIT_OPTIONS.map((n) => (
+              <option key={n} value={n}>{n}{n >= GRAPH_HIGH_LIMIT_WARNING ? " · 慢" : ""}</option>
+            ))}
+          </select>
+
+          {limit >= GRAPH_HIGH_LIMIT_WARNING && (
+            <span className="hidden sm:inline text-[10px] text-amber-500/70 font-mono">大图较慢</span>
+          )}
 
           <button
             onClick={handleExportJson}
@@ -429,7 +469,6 @@ export default function GraphPage() {
                   return (
                     <div
                       key={node.id}
-                      ref={el => { listItemRefs.current[node.id] = el; }}
                       onClick={() => handleNodeSelect(node)}
                       className="px-3 py-2.5 cursor-pointer transition-all absolute top-0 left-0 right-0"
                       style={{

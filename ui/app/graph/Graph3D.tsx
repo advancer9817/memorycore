@@ -22,7 +22,11 @@ interface Props {
   onMount?: (handle: Graph3DHandle) => void;
 }
 
-// Fresnel glow shader — all nodes are spheres for best visual quality
+// Above this node count the graph is considered "large" and cost-reduction paths kick in.
+const LARGE_GRAPH_THRESHOLD = 200;
+
+// Fresnel glow shader — all nodes are spheres for best visual quality.
+// On large graphs, pulse animation is skipped for non-important nodes (uTime stays 0).
 function createCoreMaterial(THREE: any, color: number, importance: number): any {
   return new THREE.ShaderMaterial({
     transparent: true,
@@ -59,25 +63,49 @@ function createCoreMaterial(THREE: any, color: number, importance: number): any 
   });
 }
 
-// Soft radial glow using Sprite + canvas radial gradient — no hard sphere edge
-function createGlowSprite(THREE: any, color: number, radius: number): any {
-  const size = 256;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
+// Cache key: hex color string — glow appearance depends only on color, not radius.
+// Radius is applied via Sprite.scale at the call site so a single texture covers all sizes.
+type GlowCache = Map<string, { texture: any; material: any }>;
+
+// Soft radial glow using Sprite + canvas radial gradient — no hard sphere edge.
+// CanvasTexture and SpriteMaterial are cached by hex color to avoid redundant GPU uploads.
+// Each call creates a new Sprite (cheap) that shares the cached texture+material.
+function createGlowSprite(
+  THREE: any,
+  color: number,
+  radius: number,
+  glowCache: GlowCache,
+): any {
   const c = new THREE.Color(color);
   const hex = `#${c.getHexString()}`;
-  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  grad.addColorStop(0,    hex + "55");  // bright center
-  grad.addColorStop(0.35, hex + "33");
-  grad.addColorStop(0.7,  hex + "11");
-  grad.addColorStop(1,    hex + "00");  // transparent edge
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, size, size);
-  const tex = new THREE.CanvasTexture(canvas);
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
-  const sprite = new THREE.Sprite(mat);
+
+  let cached = glowCache.get(hex);
+  if (!cached) {
+    const size = 256;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d")!;
+    const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    grad.addColorStop(0,    hex + "55");  // bright center
+    grad.addColorStop(0.35, hex + "33");
+    grad.addColorStop(0.7,  hex + "11");
+    grad.addColorStop(1,    hex + "00");  // transparent edge
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    cached = { texture, material };
+    glowCache.set(hex, cached);
+  }
+
+  // Each Sprite is a distinct scene object; sharing the material is safe for THREE.js.
+  const sprite = new THREE.Sprite(cached.material);
   const scale = radius * 5;
   sprite.scale.set(scale, scale, 1);
   return sprite;
@@ -112,10 +140,26 @@ function Graph3DInner({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<any>(null);
-  // Track animated shader materials for per-frame uTime update
+  // Keep latest callbacks in refs so the mount-time graph handlers do not go stale.
+  const onNodeClickRef = useRef(onNodeClick);
+  const onBackgroundClickRef = useRef(onBackgroundClick);
+  const onReadyRef = useRef(onReady);
+  const onMountRef = useRef(onMount);
+  // Shader materials that need per-frame uTime updates (important nodes only on large graphs)
   const animatedMatsRef = useRef<Set<any>>(new Set());
   // Geometry cache: keyed by Math.round(size * 2) to bucket by size
   const geoCacheRef = useRef<Map<number, any>>(new Map());
+  // Glow sprite cache: keyed by hex color — CanvasTexture + SpriteMaterial shared across nodes
+  const glowCacheRef = useRef<GlowCache>(new Map());
+  // Keep large-graph mode aligned with the latest graphData rebuild.
+  const isLargeGraphRef = useRef(false);
+
+  useEffect(() => {
+    onNodeClickRef.current = onNodeClick;
+    onBackgroundClickRef.current = onBackgroundClick;
+    onReadyRef.current = onReady;
+    onMountRef.current = onMount;
+  }, [onNodeClick, onBackgroundClick, onReady, onMount]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -132,6 +176,8 @@ function Graph3DInner({
       const THREE = THREE_mod as any;
       const animatedMats = animatedMatsRef.current;
       const geoCache = geoCacheRef.current;
+      const glowCache = glowCacheRef.current;
+      isLargeGraphRef.current = nodes.length >= LARGE_GRAPH_THRESHOLD;
 
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
@@ -169,7 +215,7 @@ function Graph3DInner({
           // Geometry cache: bucket by size to avoid creating a new geometry per node
           const geoKey = Math.round(size * 2);
           if (!geoCache.has(geoKey)) {
-            geoCache.set(geoKey, new THREE.SphereGeometry(size, 16, 12));
+            geoCache.set(geoKey, new THREE.SphereGeometry(size, 32, 24));
           }
           const geo = geoCache.get(geoKey);
           const coreMat = createCoreMaterial(THREE, hexColor, n.importance ?? 0.5);
@@ -178,14 +224,19 @@ function Graph3DInner({
           group.add(core);
           group.userData.core = core;
           group.userData.nodeId = n.id;
-          animatedMats.add(coreMat);
 
-          // Soft radial glow Sprite (no hard sphere edge)
-          group.add(createGlowSprite(THREE, hexColor, size));
+          // On large graphs only animate important nodes; regular nodes use a frozen pulse.
+          // On small graphs animate all nodes as before.
+          if (!isLargeGraphRef.current || isImportant) {
+            animatedMats.add(coreMat);
+          }
+
+          // Soft radial glow Sprite — texture/material cached by hex color
+          group.add(createGlowSprite(THREE, hexColor, size, glowCache));
 
           // Important nodes: extra outer halo Sprite + floating label
           if (isImportant) {
-            const haloSprite = createGlowSprite(THREE, hexColor, size * 1.8);
+            const haloSprite = createGlowSprite(THREE, hexColor, size * 1.8, glowCache);
             group.add(haloSprite);
             group.add(createSpriteLabel(THREE, n.title ?? n.id, typeColor, size));
           }
@@ -193,11 +244,13 @@ function Graph3DInner({
           return group;
         })
         .nodeThreeObjectExtend(false)
-        // Edge: color + per-type particle flow
+        // Edge: color + per-type particle flow; reduced on large graphs
         .linkColor((l: GraphEdge) => EDGE_COLORS[l.relation_type] ?? "#3F3F46")
         .linkOpacity((l: GraphEdge) => l.relation_type === "related_to" ? 0.25 : 0.55)
         .linkWidth((l: GraphEdge) => Math.min(4, 0.8 + (l.weight ?? 1) * 1.2))
         .linkDirectionalParticles((l: GraphEdge) => {
+          // Disable particles entirely on large graphs to avoid per-link rAF cost
+          if (isLargeGraphRef.current) return 0;
           if (l.relation_type === "contradicts") return 5;
           if (l.relation_type === "supersedes") return 4;
           if (l.relation_type === "supports") return 3;
@@ -212,9 +265,9 @@ function Graph3DInner({
           return 0.0045;
         })
         .linkDirectionalParticleColor((l: GraphEdge) => EDGE_COLORS[l.relation_type] ?? "#9ca3af")
-        .onNodeClick((n: GraphNode) => onNodeClick(n))
-        .onBackgroundClick(() => onBackgroundClick())
-        .onEngineStop(() => { onReady?.(); })
+        .onNodeClick((n: GraphNode) => onNodeClickRef.current(n))
+        .onBackgroundClick(() => onBackgroundClickRef.current())
+        .onEngineStop(() => { onReadyRef.current?.(); })
         .graphData({
           nodes: nodes.map((n) => ({ ...n })),
           links: links.map((l) => ({ ...l })),
@@ -257,7 +310,7 @@ function Graph3DInner({
       graphRef.current = fg;
 
       // Expose focusNode handle to parent via onMount prop
-      onMount?.({
+      onMountRef.current?.({
         focusNode(id: string) {
           const fgCurrent = graphRef.current;
           if (!fgCurrent) return;
@@ -298,6 +351,12 @@ function Graph3DInner({
         geo.dispose?.();
       }
       geoCacheRef.current.clear();
+      // Dispose cached glow textures and materials (shared across nodes)
+      for (const { texture, material } of glowCacheRef.current.values()) {
+        texture.dispose?.();
+        material.dispose?.();
+      }
+      glowCacheRef.current.clear();
       fg?._destructor?.();
       if (containerRef.current) containerRef.current.innerHTML = "";
     };
@@ -313,6 +372,17 @@ function Graph3DInner({
       mat.dispose?.();
     }
     animatedMatsRef.current.clear();
+    for (const geo of geoCacheRef.current.values()) {
+      geo.dispose?.();
+    }
+    geoCacheRef.current.clear();
+    // Dispose and clear glow cache so new node colors get fresh textures
+    for (const { texture, material } of glowCacheRef.current.values()) {
+      texture.dispose?.();
+      material.dispose?.();
+    }
+    glowCacheRef.current.clear();
+    isLargeGraphRef.current = nodes.length >= LARGE_GRAPH_THRESHOLD;
     fg.graphData({
       nodes: nodes.map((n) => ({ ...n })),
       links: links.map((l) => ({ ...l })),

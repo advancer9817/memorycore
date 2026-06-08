@@ -19,7 +19,7 @@ extraction:
   api_key: nk
   base_url: http://127.0.0.1:8317
   max_tokens: 32000
-  model: claude-sonnet-4-6
+  model: gpt-5.5
   temperature: 1
   timeout: 600
 qdrant:

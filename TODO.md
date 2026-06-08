@@ -132,6 +132,7 @@
 - [x] Graph 导出 JSON（filteredNodes + filteredEdges 下载为 memory-graph.json）
 - [x] Graph 侧边栏支持内联编辑 importance（滑块）和 status（下拉），PATCH `/api/v1/memories/{id}`
 - [x] 图谱初始化预稳定：`cooldownTicks(300)` + `onEngineStop` 触发 `onReady`，显示"布局计算中…"覆盖层
+- [x] Graph 全状态性能优化：页面可控制节点加载上限；后端按高价值节点排序并只返回当前节点集合内的边；大图渲染缓存 glow 纹理/材质、减少 shader 动画与边粒子开销
 
 ## UI/UX 改进（迭代 96 后续）
 

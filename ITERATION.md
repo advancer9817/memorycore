@@ -3042,3 +3042,38 @@ Graph 页面默认只加载 active/candidate 节点，导致绝大多数连接 a
 - 本地 API smoke：默认 `/api/graph` 返回 `193 nodes / 0 edges / dropped_edges=324`；`/api/graph?status=all` 返回 `1713 nodes / 324 edges`，关系类型包含 `part_of`。
 
 ---
+
+## [迭代 111] 2026-06-08 — Graph 全状态加载性能优化
+
+### 痛点
+
+Graph 页面切换或默认使用 `status=all` 时会一次加载大量节点和边，前端 3D 图谱需要重建所有 Three.js 节点对象、glow 纹理、shader 材质和边粒子，导致首次加载与状态筛选操作明显卡顿。
+
+### 变更
+
+**memorycore/frontend.py：**
+- `/api/graph` 节点查询改为按 `importance`、`feedback_score`、`injected_count` 降序排序，优先返回更有价值的节点。
+- 边查询从无序扫描 `memory_links LIMIT 2000` 改为只查询当前节点集合相关的 link，并用 400 个 id 一组分块查询，避免高上限请求触发 SQLite 参数数量限制。
+- 保持 `status=all`、`limit` 参数与 `nodes/edges/meta` 响应结构兼容。
+
+**ui/app/graph/page.tsx：**
+- Graph 顶部操作区新增节点加载上限选择器，支持 500 / 1000 / 2000 / 5000 / 10000。
+- `/api/graph?status=all&limit=...` 改为由页面选择器驱动；切换上限会重新拉取图谱数据并显示 loading 状态。
+
+**ui/app/graph/Graph3D.tsx：**
+- 保留 SphereGeometry 节点，并将球体细分恢复到 32/24，满足圆形节点视觉要求。
+- glow/halo 继续使用 Sprite + Canvas radial gradient + AdditiveBlending，并按颜色缓存 CanvasTexture 与 SpriteMaterial，减少大图重复 canvas 绘制和 GPU 上传。
+- 大图模式（>=200 节点）只对重要节点更新 shader `uTime`，普通节点冻结脉冲；大图禁用 link directional particles，降低每帧渲染开销。
+- 图数据重建时同步更新大图模式，并清理旧 shader 材质与 glow 缓存，避免 WebGL 资源泄漏。
+
+**TODO.md：**
+- 将 Graph 全状态性能优化记录为已完成项。
+
+### 验证
+
+- `uv run python -m py_compile memorycore/frontend.py`：通过。
+- `uv run pytest tests/test_graph_enhanced.py`：22/22 passed。
+- `cd ui && pnpm build`：通过，Graph 路由构建成功。
+- `git diff --check -- memorycore/frontend.py ui/app/graph/Graph3D.tsx ui/app/graph/page.tsx`：通过。
+
+---
