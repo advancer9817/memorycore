@@ -21,8 +21,22 @@ type CuratorStatus = {
     summary: Record<string, number>;
     planned_actions: Array<{ id: string; title?: string; action: string; reason?: string }>;
   };
+  llm_curator?: {
+    last_run_at?: string;
+    last_result?: string;
+    summary?: Record<string, number>;
+    errors?: string[];
+    latest_job?: {
+      status?: string;
+      job_id?: string | null;
+    };
+  };
   timer: Record<string, string>;
   service: Record<string, string>;
+  schedules?: {
+    rule_curator?: Record<string, string>;
+    llm_curator?: Record<string, string>;
+  };
 };
 
 type CuratorRunState = {
@@ -338,8 +352,10 @@ export const Install = () => {
   const summary = status?.curator.summary || {};
   const byStatus = status?.stats.by_status || {};
   const nextRun = status?.timer.NextElapseUSecRealtime;
-  const lastRun = status?.service.ExecMainExitTimestamp || status?.timer.LastTriggerUSec;
+  const lastRun = status?.schedules?.rule_curator?.last_run_at || status?.service.ExecMainExitTimestamp || status?.timer.LastTriggerUSec;
+  const llmLastRun = status?.llm_curator?.last_run_at || status?.schedules?.llm_curator?.last_run_at;
   const lastResult = status?.service.Result || "unknown";
+  const llmLastResult = status?.llm_curator?.last_result || "unknown";
 
   return (
     <div>
@@ -395,16 +411,21 @@ export const Install = () => {
         {/* Row 1: schedule info + buttons */}
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <Badge variant="outline" className="border-emerald-700 bg-emerald-500/10 text-emerald-300 text-xs shrink-0">
-            {status?.timer.ActiveState || "unknown"}
+            Scheduled · {status?.timer.ActiveState || "unknown"}
           </Badge>
           <span className="text-zinc-500">
-            Last <span className="text-zinc-200">{formatTime(lastRun)}</span>
+            Rule last <span className="text-zinc-200">{formatTime(lastRun)}</span>
+          </span>
+          <span className="text-zinc-500">
+            LLM last <span className="text-zinc-200">{formatTime(llmLastRun)}</span>
           </span>
           <span className="text-zinc-500">
             Next <span className="text-zinc-200">{formatTime(nextRun)}</span>
           </span>
           <span className="text-zinc-500">
             Result <span className="text-zinc-200">{lastResult}</span>
+            <span className="text-zinc-600"> / </span>
+            <span className="text-violet-300">LLM {llmLastResult}</span>
           </span>
           <span className="text-zinc-500 hidden sm:inline">
             Scanned <span className="text-zinc-200">{status?.curator.scanned ?? "-"}</span>

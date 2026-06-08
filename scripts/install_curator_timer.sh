@@ -4,15 +4,30 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
+CONFIG="${LOCAL_MEMORY_CONFIG:-$ROOT/config.yaml}"
+DB="${LOCAL_MEMORY_DB:-$ROOT/memory.sqlite3}"
+ENV_FILE="$ROOT/.env"
 
 # --- systemd path ---
 install_systemd() {
     mkdir -p "$SYSTEMD_USER_DIR"
-    cp "$ROOT/scripts/mcore-curator.service" "$SYSTEMD_USER_DIR/mcore-curator.service"
-    cp "$ROOT/scripts/mcore-curator.timer"   "$SYSTEMD_USER_DIR/mcore-curator.timer"
-
-    # Patch WorkingDirectory and ExecStart with actual HOME path
-    sed -i "s|%h|$HOME|g" "$SYSTEMD_USER_DIR/mcore-curator.service"
+    sed \
+      -e "s|__ROOT__|$ROOT|g" \
+      -e "s|__MCORE_SERVICE__|mcore.service|g" \
+      -e "s|__ENV_FILE__|$ENV_FILE|g" \
+      -e "s|__CONFIG__|$CONFIG|g" \
+      -e "s|__DB__|$DB|g" \
+      -e "s|__CURATOR_APPLY__|${LOCAL_MEMORY_CURATOR_APPLY:-1}|g" \
+      -e "s|__CURATOR_LIMIT__|${LOCAL_MEMORY_CURATOR_LIMIT:-500}|g" \
+      -e "s|__STALE_AFTER_DAYS__|${LOCAL_MEMORY_STALE_AFTER_DAYS:-60}|g" \
+      -e "s|__ARCHIVE_AFTER_DAYS__|${LOCAL_MEMORY_ARCHIVE_AFTER_DAYS:-120}|g" \
+      -e "s|__LLM_CURATOR_ENABLED__|${LOCAL_MEMORY_LLM_CURATOR_ENABLED:-1}|g" \
+      -e "s|__LLM_CURATOR_APPLY__|${LOCAL_MEMORY_LLM_CURATOR_APPLY:-${LOCAL_MEMORY_CURATOR_APPLY:-1}}|g" \
+      -e "s|__LLM_CURATOR_LIMIT__|${LOCAL_MEMORY_LLM_CURATOR_LIMIT:-200}|g" \
+      -e "s|__LLM_CURATOR_SIM_THRESHOLD__|${LOCAL_MEMORY_LLM_CURATOR_SIM_THRESHOLD:-0.72}|g" \
+      "$ROOT/scripts/mcore-curator.service" \
+      > "$SYSTEMD_USER_DIR/mcore-curator.service"
+    cp "$ROOT/scripts/mcore-curator.timer" "$SYSTEMD_USER_DIR/mcore-curator.timer"
 
     systemctl --user daemon-reload
     systemctl --user enable --now mcore-curator.timer

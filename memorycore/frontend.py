@@ -84,24 +84,16 @@ def _cleanup_stale_llm_jobs() -> None:
 
 def _run_llm_curator_job(job_id: str, cfg: Any, limit: int, sim_threshold: float, apply: bool) -> None:
     """Runs in a daemon thread; updates _llm_curator_jobs on completion."""
-    from memorycore.storage.curator_llm import llm_curator_report, apply_llm_curator
-    from memorycore.storage import memory_rebuild_vectors
+    from memorycore.storage.curator_llm import run_llm_curator
+
     try:
-        report = llm_curator_report(config=cfg, limit=limit, sim_threshold=sim_threshold)
-        if apply:
-            applied = apply_llm_curator(report, dry_run=False)
-            report["applied"] = applied
-        # Rebuild vector index after curation
-        try:
-            rebuild_result = memory_rebuild_vectors()
-            report["rebuild_vectors"] = rebuild_result
-        except Exception as exc:
-            report["rebuild_vectors_error"] = str(exc)
+        report = run_llm_curator(config=cfg, limit=limit, sim_threshold=sim_threshold, apply=apply)
         with _llm_curator_lock:
             _llm_curator_jobs[job_id] = {
                 "status": "done", "result": report,
                 "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
             }
+        _clear_curator_status_cache()
     except Exception as exc:
         logger.warning("[llm-curator job %s] failed: %s", job_id, exc)
         with _llm_curator_lock:
@@ -109,6 +101,7 @@ def _run_llm_curator_job(job_id: str, cfg: Any, limit: int, sim_threshold: float
                 "status": "error", "error": str(exc),
                 "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
             }
+        _clear_curator_status_cache()
 
 
 @dataclass
@@ -286,11 +279,13 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
     if parts == ["curator", "status"] and method == "GET":
         return _curator_status_payload(limit=_int_q(query, "limit", 10000))
     if parts == ["curator", "apply"] and method == "POST":
-        return curator_report(
+        result = curator_report(
             dry_run=False, limit=int(body.get("limit", 500)),
             stale_after_days=int(body.get("stale_after_days", 60)), archive_after_days=int(body.get("archive_after_days", 120)),
             allow_actions=body.get("allow_actions"), deny_actions=body.get("deny_actions"),
         )
+        _clear_curator_status_cache()
+        return result
     if parts == ["curator", "llm"] and method == "POST":
         cfg = load_config()
         apply = not body.get("dry_run", True)
@@ -879,6 +874,27 @@ _curator_status_cache_ts: float = 0.0
 _CURATOR_STATUS_TTL = 60.0  # seconds
 
 
+def _clear_curator_status_cache() -> None:
+    global _curator_status_cache, _curator_status_cache_ts
+    _curator_status_cache = {}
+    _curator_status_cache_ts = 0.0
+
+
+def _latest_audit_event(event_type: str) -> dict[str, Any]:
+    try:
+        rows = get_audit_log(event_type=event_type, limit=1)
+    except Exception:
+        return {}
+    if not rows:
+        return {}
+    row = rows[0]
+    try:
+        detail = json.loads(row.get("detail_json") or "{}")
+    except Exception:
+        detail = {}
+    return {**row, "detail": detail}
+
+
 def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
     import time as _time
     global _curator_status_cache, _curator_status_cache_ts
@@ -926,6 +942,23 @@ def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
         next_hour = (now_dt + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
         next_run_at = next_hour.isoformat()
 
+    llm_run = _latest_audit_event("llm_curator_run")
+    llm_detail = llm_run.get("detail", {})
+    llm_last_run_at = llm_run.get("created_at", "")
+    llm_errors = llm_detail.get("errors", []) if isinstance(llm_detail, dict) else []
+    llm_last_result = "failed" if llm_errors else ("success" if llm_last_run_at else "unknown")
+    with _llm_curator_lock:
+        latest_job_id = _latest_llm_job_id[0] if _latest_llm_job_id else None
+        latest_job = dict(_llm_curator_jobs.get(latest_job_id, {})) if latest_job_id else {}
+
+    schedule = {
+        "timer": "mcore-curator.timer",
+        "service": "mcore-curator.service",
+        "active_state": timer.get("ActiveState", "unknown"),
+        "last_run_at": last_run_at,
+        "next_run_at": next_run_at,
+        "result": service.get("Result", "unknown"),
+    }
     result = {
         "stats": stats,
         "curator": {
@@ -934,8 +967,19 @@ def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
             "summary": report.get("summary", {}),
             "planned_actions": report.get("action_plan", [])[:10],
         },
+        "llm_curator": {
+            "last_run_at": llm_last_run_at,
+            "last_result": llm_last_result,
+            "summary": llm_detail.get("summary", {}) if isinstance(llm_detail, dict) else {},
+            "errors": llm_errors if isinstance(llm_errors, list) else [],
+            "latest_job": {**latest_job, "job_id": latest_job_id} if latest_job_id else {"status": "idle", "job_id": None},
+        },
         "timer": {**timer, "LastTriggerUSec": last_run_at, "NextElapseUSecRealtime": next_run_at},
         "service": service,
+        "schedules": {
+            "rule_curator": schedule,
+            "llm_curator": {**schedule, "last_run_at": llm_last_run_at, "result": llm_last_result},
+        },
     }
     import time as _time
     _curator_status_cache = result

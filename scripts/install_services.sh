@@ -90,6 +90,10 @@ install_systemd() {
     -e "s|__CURATOR_LIMIT__|500|g" \
     -e "s|__STALE_AFTER_DAYS__|60|g" \
     -e "s|__ARCHIVE_AFTER_DAYS__|120|g" \
+    -e "s|__LLM_CURATOR_ENABLED__|1|g" \
+    -e "s|__LLM_CURATOR_APPLY__|1|g" \
+    -e "s|__LLM_CURATOR_LIMIT__|200|g" \
+    -e "s|__LLM_CURATOR_SIM_THRESHOLD__|0.72|g" \
     "$ROOT/scripts/mcore-curator.service" \
     > "$SYSTEMD_USER_DIR/mcore-curator.service"
 

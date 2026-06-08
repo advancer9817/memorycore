@@ -36,6 +36,10 @@ Options:
   --qdrant-storage PATH    Qdrant storage dir. Default: ~/.agent-memory/qdrant_storage
   --curator-apply VALUE    Whether curator applies low-risk lifecycle changes. Default: 1
   --curator-limit N        Curator scan limit. Default: 500
+  --llm-curator-enabled VALUE  Whether scheduled LLM curator runs. Default: 1
+  --llm-curator-apply VALUE    Whether scheduled LLM curator applies findings. Default: curator apply value
+  --llm-curator-limit N        Scheduled LLM curator scan limit. Default: 200
+  --llm-curator-sim-threshold N  Scheduled LLM curator similarity threshold. Default: 0.72
   --stale-after-days N     Active stale threshold. Default: 60
   --archive-after-days N   Stale archive threshold. Default: 120
   --python PATH            Python executable for venv creation. Default: python3.11/python3
@@ -190,6 +194,10 @@ QDRANT_GRPC_PORT="${QDRANT_GRPC_PORT:-6334}"
 QDRANT_STORAGE="${QDRANT_STORAGE:-$HOME/.agent-memory/qdrant_storage}"
 CURATOR_APPLY="${LOCAL_MEMORY_CURATOR_APPLY:-1}"
 CURATOR_LIMIT="${LOCAL_MEMORY_CURATOR_LIMIT:-500}"
+LLM_CURATOR_ENABLED="${LOCAL_MEMORY_LLM_CURATOR_ENABLED:-1}"
+LLM_CURATOR_APPLY="${LOCAL_MEMORY_LLM_CURATOR_APPLY:-$CURATOR_APPLY}"
+LLM_CURATOR_LIMIT="${LOCAL_MEMORY_LLM_CURATOR_LIMIT:-200}"
+LLM_CURATOR_SIM_THRESHOLD="${LOCAL_MEMORY_LLM_CURATOR_SIM_THRESHOLD:-0.72}"
 STALE_AFTER_DAYS="${LOCAL_MEMORY_STALE_AFTER_DAYS:-60}"
 ARCHIVE_AFTER_DAYS="${LOCAL_MEMORY_ARCHIVE_AFTER_DAYS:-120}"
 PYTHON_BIN="${PYTHON_BIN:-}"
@@ -237,6 +245,10 @@ while [ "$#" -gt 0 ]; do
     --qdrant-storage) QDRANT_STORAGE="${2:?--qdrant-storage requires a path}"; shift 2 ;;
     --curator-apply) CURATOR_APPLY="${2:?--curator-apply requires a value}"; shift 2 ;;
     --curator-limit) CURATOR_LIMIT="${2:?--curator-limit requires a value}"; shift 2 ;;
+    --llm-curator-enabled) LLM_CURATOR_ENABLED="${2:?--llm-curator-enabled requires a value}"; shift 2 ;;
+    --llm-curator-apply) LLM_CURATOR_APPLY="${2:?--llm-curator-apply requires a value}"; shift 2 ;;
+    --llm-curator-limit) LLM_CURATOR_LIMIT="${2:?--llm-curator-limit requires a value}"; shift 2 ;;
+    --llm-curator-sim-threshold) LLM_CURATOR_SIM_THRESHOLD="${2:?--llm-curator-sim-threshold requires a value}"; shift 2 ;;
     --stale-after-days) STALE_AFTER_DAYS="${2:?--stale-after-days requires a value}"; shift 2 ;;
     --archive-after-days) ARCHIVE_AFTER_DAYS="${2:?--archive-after-days requires a value}"; shift 2 ;;
     --python) PYTHON_BIN="${2:?--python requires a path}"; shift 2 ;;
@@ -270,6 +282,7 @@ cat <<PLAN
   pull images:     $PULL_IMAGES
   ollama:          $WITH_OLLAMA (model=${LOCAL_MEMORY_EMBEDDING_MODEL:-nomic-embed-text}, pull_models=$PULL_MODELS)
   curator apply:   $CURATOR_APPLY
+  llm curator:     enabled=$LLM_CURATOR_ENABLED apply=$LLM_CURATOR_APPLY limit=$LLM_CURATOR_LIMIT sim=$LLM_CURATOR_SIM_THRESHOLD
 PLAN
 [ "$DRY_RUN" -eq 1 ] && exit 0
 
@@ -406,6 +419,10 @@ if [ "$INSTALL_SYSTEMD" -eq 1 ]; then
   replace_token "$SYSTEMD_USER_DIR/mcore-curator.service" __CURATOR_LIMIT__ "$CURATOR_LIMIT"
   replace_token "$SYSTEMD_USER_DIR/mcore-curator.service" __STALE_AFTER_DAYS__ "$STALE_AFTER_DAYS"
   replace_token "$SYSTEMD_USER_DIR/mcore-curator.service" __ARCHIVE_AFTER_DAYS__ "$ARCHIVE_AFTER_DAYS"
+  replace_token "$SYSTEMD_USER_DIR/mcore-curator.service" __LLM_CURATOR_ENABLED__ "$LLM_CURATOR_ENABLED"
+  replace_token "$SYSTEMD_USER_DIR/mcore-curator.service" __LLM_CURATOR_APPLY__ "$LLM_CURATOR_APPLY"
+  replace_token "$SYSTEMD_USER_DIR/mcore-curator.service" __LLM_CURATOR_LIMIT__ "$LLM_CURATOR_LIMIT"
+  replace_token "$SYSTEMD_USER_DIR/mcore-curator.service" __LLM_CURATOR_SIM_THRESHOLD__ "$LLM_CURATOR_SIM_THRESHOLD"
   replace_token "$SYSTEMD_USER_DIR/mcore-curator.service" __MCORE_SERVICE__ "mcore.service"
 
   systemctl --user daemon-reload

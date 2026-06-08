@@ -575,6 +575,48 @@ def llm_curator_report(
     }
 
 
+def run_llm_curator(
+    config: dict[str, Any] | None = None,
+    limit: int = 200,
+    sim_threshold: float = _SIM_THRESHOLD,
+    apply: bool = False,
+    rebuild_vectors: bool = True,
+) -> dict[str, Any]:
+    """Run LLM curation, optionally apply findings, and record run metadata."""
+    report = llm_curator_report(config=config, limit=limit, sim_threshold=sim_threshold)
+    applied: dict[str, Any] | None = None
+    if apply:
+        applied = apply_llm_curator(report, dry_run=False)
+        report = {**report, "applied": applied}
+
+    if rebuild_vectors:
+        try:
+            from memorycore.storage import memory_rebuild_vectors
+
+            report = {**report, "rebuild_vectors": memory_rebuild_vectors()}
+        except Exception as exc:
+            report = {**report, "rebuild_vectors_error": str(exc)}
+
+    try:
+        from memorycore.storage.audit import log_audit_event
+
+        log_audit_event(
+            "llm_curator_run",
+            agent="llm_curator",
+            detail={
+                "dry_run": not apply,
+                "summary": report.get("summary", {}),
+                "errors": report.get("errors", []),
+                "applied": applied,
+                "rebuild_vectors_error": report.get("rebuild_vectors_error"),
+            },
+        )
+    except Exception:
+        logger.debug("failed to log llm_curator_run audit event", exc_info=True)
+
+    return report
+
+
 def apply_llm_curator(report: dict[str, Any], dry_run: bool = True) -> dict[str, Any]:
     """Apply the actions from llm_curator_report to the database."""
     if dry_run:

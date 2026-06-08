@@ -861,6 +861,11 @@ def main(argv: list[str] | None = None) -> int:
     p_curator.add_argument("--stale-after-days", type=int, default=60)
     p_curator.add_argument("--archive-after-days", type=int, default=120)
     p_curator.add_argument("--summary-only", action="store_true")
+    p_llm_curator = sub.add_parser("llm-curator")
+    p_llm_curator.add_argument("--apply", action="store_true", help="apply LLM curator findings")
+    p_llm_curator.add_argument("--limit", type=int, default=200)
+    p_llm_curator.add_argument("--sim-threshold", type=float, default=0.72)
+    p_llm_curator.add_argument("--summary-only", action="store_true")
     p_rollup = sub.add_parser("rollup")
     p_rollup.add_argument("--apply", action="store_true", help="create durable memories and archive source episodic records")
     p_rollup.add_argument("--limit", type=int, default=250)
@@ -952,6 +957,18 @@ def main(argv: list[str] | None = None) -> int:
             archive_after_days=args.archive_after_days,
         )
         payload = report["summary"] if args.summary_only else report
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    elif args.cmd == "llm-curator":
+        from memorycore.storage.curator_llm import run_llm_curator
+
+        report = run_llm_curator(
+            config=load_config(),
+            limit=args.limit,
+            sim_threshold=args.sim_threshold,
+            apply=args.apply,
+            rebuild_vectors=True,
+        )
+        payload = report.get("summary", report) if args.summary_only else report
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     elif args.cmd == "rollup":
         report = rollup_report(

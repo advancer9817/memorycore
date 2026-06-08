@@ -55,6 +55,20 @@ def test_frontend_dashboard_payload_contains_ops_keys():
     assert "context_quality" in data
 
 
+def test_curator_status_includes_llm_schedule_fields():
+    with _client() as client:
+        response = client.get("/api/curator/status?limit=5")
+
+    data = response.json()["data"]
+    assert response.status_code == 200
+    assert "curator" in data
+    assert "llm_curator" in data
+    assert "timer" in data
+    assert "schedules" in data
+    assert "rule_curator" in data["schedules"]
+    assert "llm_curator" in data["schedules"]
+
+
 def test_frontend_memory_create_get_and_patch():
     with _client() as client:
         created = client.post("/api/memories", json={
@@ -77,14 +91,14 @@ def test_frontend_v1_memory_compat_routes():
         created = client.post("/api/v1/memories", json={
             "type": "project_memory",
             "title": "OpenMemory compat",
-            "content": "mcore lmmcp compat API content",
+            "content": "lmmcp mcore local_memory compat API content",
             "atomize": False,
         })
         memory_id = created.json()["id"]
         listed = client.get("/api/v1/memories?query=lmmcp")
         filtered = client.post("/api/v1/memories/filter", json={"search_query": "mcore", "page": 1, "size": 5})
         detail = client.get(f"/api/v1/memories/{memory_id}")
-        updated = client.put(f"/api/v1/memories/{memory_id}", json={"memory_content": "updated lmmcp compat API content"})
+        updated = client.put(f"/api/v1/memories/{memory_id}", json={"memory_content": "updated lmmcp mcore local_memory compat API content"})
         categories = client.get("/api/v1/memories/categories?user_id=test")
         entities = client.get("/api/v1/entities?query=local_memory")
         stats = client.get("/api/v1/stats")
@@ -110,7 +124,9 @@ def test_frontend_v1_memory_compat_routes():
     assert curator_status.status_code == 200
     assert "stats" in curator_status.json()["data"]
     assert "curator" in curator_status.json()["data"]
+    assert "llm_curator" in curator_status.json()["data"]
     assert "timer" in curator_status.json()["data"]
+    assert "schedules" in curator_status.json()["data"]
     assert deleted.json()["status"] == "archived"
 
 

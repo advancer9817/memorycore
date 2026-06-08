@@ -148,7 +148,6 @@
 - [x] `test_graph_enhanced.py`：`TestGraphAPI` 集成测试（节点返回、importance 字段、edges 列表）
 - [x] `test_extraction.py`：6 个参数化 URL 拼接测试（带/不带 `/v1`、trailing slash、port）
 
-
 ---
 
 ## Bug 审计剩余项 — 2026-06-05
@@ -195,3 +194,7 @@
 - [ ] 增加 Playwright i18n 覆盖：默认 `html[lang="en"]`；切到中文后 Navbar 可见中文且 `html[lang="zh-CN"]`；刷新后 localStorage 保持中文；切回英文不破坏现有 smoke selectors
 - [ ] 验证：在 `ui/` 下运行 `pnpm build`；如本地后端可用，再运行 `pnpm test:e2e` 或至少新增 i18n 专项 Playwright 用例
 - [ ] 完成后在 `ITERATION.md` 追加实际完成记录；TODO 只保留未完成项或打勾
+
+## 已发现待修复问题
+
+- [ ] 修复 UI TypeScript 全量 typecheck 的 `react-icons` JSX 兼容问题：`pnpm exec tsc --noEmit` 当前在多个 `react-icons` 组件（如 `BiEdit`、`GoPlus`、`FiTrash2`、`HiMiniRectangleStack` 等）报 `return type 'ReactNode' is not a valid JSX element`，需要统一处理 React 19 / react-icons 类型兼容，避免阻塞后续 UI 类型检查。

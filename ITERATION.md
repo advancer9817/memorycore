@@ -2965,3 +2965,49 @@ Memory Graph 界面存在多处体验问题：顶部过滤标签两行溢出遮�
 
 ### 回滚
 - `git revert <本次提交>`
+
+---
+
+## [迭代 109] 2026-06-08 — Curator 定时任务覆盖规则与 LLM 双通道
+
+### 痛点
+
+Dashboard 的 Memory Operations 区域同时提供 `Run Curator` 与 `Run LLM` 手动按钮，但原定时任务只明确运行规则型 curator；LLM Curator 只有前端手动触发的后台 job，缺少 CLI/systemd 复用入口和定时状态展示。
+
+### 变更
+
+**memorycore/storage/curator_llm.py：**
+- 新增 `run_llm_curator()` 同步执行入口，封装 `llm_curator_report()`、可选 `apply_llm_curator()`、向量重建与运行审计。
+- 新增 `llm_curator_run` audit 事件，记录 dry-run/apply、summary、errors 与 rebuild 错误，便于 dashboard 展示最近 LLM 定时运行状态。
+
+**memorycore/server.py：**
+- 新增 CLI 子命令 `llm-curator`，支持 `--apply`、`--limit`、`--sim-threshold`、`--summary-only`，让 systemd/cron 可不依赖前端 HTTP API 直接调用 LLM Curator。
+
+**memorycore/frontend.py：**
+- 前端手动 LLM job 改为复用 `run_llm_curator()`，避免手动与定时路径分叉。
+- `/api/curator/status` 保留原 `timer`/`service` 字段，并新增 `llm_curator` 与 `schedules.rule_curator` / `schedules.llm_curator`，展示规则与 LLM 最近运行、结果和共享定时器信息。
+- 手动 `curator/apply` 与 LLM job 完成/失败后清理 curator status cache，避免首页短时间显示旧状态。
+
+**run_curator.sh / scripts：**
+- `run_curator.sh` 在规则 curator 后默认继续执行 `llm-curator`，分别输出 `reports/curator-*.json` 与 `reports/llm-curator-*.json`。
+- 新增环境开关：`LOCAL_MEMORY_LLM_CURATOR_ENABLED`、`LOCAL_MEMORY_LLM_CURATOR_APPLY`、`LOCAL_MEMORY_LLM_CURATOR_LIMIT`、`LOCAL_MEMORY_LLM_CURATOR_SIM_THRESHOLD`。
+- `scripts/mcore-curator.service`、`scripts/install_services.sh`、`scripts/install_curator_timer.sh`、`scripts/deploy.sh` 已补齐 LLM Curator 环境变量替换，保证安装/部署后的 `mcore-curator.timer` 同时覆盖两个 curator 通道。
+
+**ui/components/dashboard/Install.tsx：**
+- Memory Operations 定时条改为显示 `Scheduled`，并分别展示 `Rule last`、`LLM last`、`Next` 与 `Result / LLM result`。
+- `CuratorStatus` 类型新增 `llm_curator` 与 `schedules` 字段，保留原兼容字段。
+
+**tests：**
+- `tests/test_frontend.py` 新增 `/api/curator/status` 包含 LLM schedule 字段的回归测试。
+- `tests/test_curator_llm_jobs.py` 新增 `run_llm_curator()` apply/rebuild 复用测试，以及 `llm-curator --summary-only` CLI 测试。
+
+### 验证
+
+- `git diff --cached --check`：通过。
+- `.venv/bin/python -m py_compile memorycore/frontend.py memorycore/server.py memorycore/storage/curator_llm.py`：通过。
+- `bash -n run_curator.sh scripts/install_services.sh scripts/install_curator_timer.sh scripts/deploy.sh`：通过。
+- `.venv/bin/python -m pytest tests/test_frontend.py::test_curator_status_includes_llm_schedule_fields tests/test_frontend.py::test_frontend_v1_memory_compat_routes tests/test_curator_llm_jobs.py::test_run_llm_curator_applies_and_rebuilds_vectors tests/test_curator_llm_jobs.py::test_llm_curator_cli_summary_only -q --tb=short`：4 passed。
+- `cd ui && pnpm build`：通过，8 个路由构建成功。
+- 服务验证：`mcore.service` / `mcore-ui.service` 均为 active；`/health` 返回 ok；`memorycore` MCP 连接为 Connected。
+
+---

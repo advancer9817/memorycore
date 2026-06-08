@@ -77,3 +77,44 @@ def test_large_pool_sampling_limit():
         warning_calls = [str(c) for c in mock_log.warning.call_args_list]
         assert any("ample" in w or "arge" in w or "200" in w for w in warning_calls), \
             f"Expected sampling warning, got: {warning_calls}"
+
+
+def test_run_llm_curator_applies_and_rebuilds_vectors(monkeypatch):
+    """Scheduled and manual LLM curator paths should share one synchronous runner."""
+    import memorycore.storage.curator_llm as clm
+
+    report = {"summary": {"semantic_duplicates": 1}, "errors": []}
+    applied = {"dry_run": False, "applied": {"archived": 1}}
+    monkeypatch.setattr(clm, "llm_curator_report", lambda **_: report)
+    monkeypatch.setattr(clm, "apply_llm_curator", lambda report, dry_run: applied)
+
+    rebuild_calls = []
+    monkeypatch.setattr(
+        "memorycore.storage.memory_rebuild_vectors",
+        lambda: rebuild_calls.append(True) or {"rebuilt": 1},
+    )
+    monkeypatch.setattr(
+        "memorycore.storage.audit.log_audit_event",
+        lambda *args, **kwargs: None,
+    )
+
+    result = clm.run_llm_curator(config={}, limit=10, sim_threshold=0.7, apply=True)
+
+    assert result["summary"] == {"semantic_duplicates": 1}
+    assert result["applied"] == applied
+    assert result["rebuild_vectors"] == {"rebuilt": 1}
+    assert rebuild_calls == [True]
+
+
+def test_llm_curator_cli_summary_only(monkeypatch, capsys):
+    """The scheduler script can call the LLM curator through the CLI."""
+    import memorycore.server as server
+
+    monkeypatch.setattr(server, "load_config", lambda: {})
+    monkeypatch.setattr(
+        "memorycore.storage.curator_llm.run_llm_curator",
+        lambda **_: {"summary": {"split_candidates": 2}, "errors": []},
+    )
+
+    assert server.main(["llm-curator", "--limit", "5", "--summary-only"]) == 0
+    assert '"split_candidates": 2' in capsys.readouterr().out
