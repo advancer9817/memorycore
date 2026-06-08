@@ -40,4 +40,6 @@ export const EDGE_COLORS: Record<string, string> = {
   failure_pattern: "#EF4444", // red-500    — failure marker
 };
 
+export const KNOWN_EDGE_TYPES = Object.keys(EDGE_COLORS);
+
 export const IMPORTANCE_THRESHOLD = 0.7;

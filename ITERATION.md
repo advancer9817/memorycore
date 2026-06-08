@@ -3011,3 +3011,34 @@ Dashboard 的 Memory Operations 区域同时提供 `Run Curator` 与 `Run LLM` �
 - 服务验证：`mcore.service` / `mcore-ui.service` 均为 active；`/health` 返回 ok；`memorycore` MCP 连接为 Connected。
 
 ---
+
+## [迭代 110] 2026-06-08 — Graph 全状态链路与 part_of 筛选修复
+
+### 痛点
+
+Graph 页面默认只加载 active/candidate 节点，导致绝大多数连接 archived/stale/contradicted 记忆的 `memory_links` 被后端丢弃；当前库 324 条 link 中只剩极少边可见，`part_of` 关系也因此在连接类型筛选中表现为不可用。
+
+### 变更
+
+**memorycore/frontend.py：**
+- `/api/graph` 支持 `status` 与 `limit` 查询参数，默认保持 active/candidate 兼容行为。
+- `status=all` 默认提升到 `limit=2000`，当前库可返回 1713 nodes / 324 edges，并包含 `part_of`、`supports`、`related_to`、`contradicts`。
+- `_graph_payload()` 返回 `meta.status` 与 `meta.dropped_edges`，便于判断边被节点集合截断的情况。
+
+**ui/app/graph/page.tsx / types.ts：**
+- Graph 页面改为请求 `/api/graph?status=all&limit=2000`，让全状态关系链进入前端。
+- 状态筛选扩展为 `all / active / candidate / stale / archived / contradicted`。
+- 连接类型筛选使用稳定的 `KNOWN_EDGE_TYPES` 与服务端边类型并集，确保 `part_of` 不依赖当前可见边数量，且可与 `supports` 独立切换。
+- 筛选按钮补充 `type="button"`，避免未来表单上下文中的默认提交行为影响点击。
+
+**tests/test_graph_enhanced.py：**
+- 新增 `status=all` 回归测试，验证 archived 端点的 `part_of` 边只在全状态图中保留，默认 active/candidate 图仍保持过滤行为。
+
+### 验证
+
+- `uv run pytest tests/test_graph_enhanced.py::TestGraphAPI -q`：4 passed。
+- `uv run python -m py_compile memorycore/frontend.py`：通过。
+- `cd ui && pnpm build`：通过，Graph 路由 14.8 kB。
+- 本地 API smoke：默认 `/api/graph` 返回 `193 nodes / 0 edges / dropped_edges=324`；`/api/graph?status=all` 返回 `1713 nodes / 324 edges`，关系类型包含 `part_of`。
+
+---

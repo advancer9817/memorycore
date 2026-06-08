@@ -11,6 +11,7 @@ import {
   type GraphEdge,
   TYPE_COLORS,
   EDGE_COLORS,
+  KNOWN_EDGE_TYPES,
   IMPORTANCE_THRESHOLD,
 } from "./types";
 import type { Graph3DHandle } from "./Graph3D";
@@ -83,15 +84,16 @@ export default function GraphPage() {
   }, [searchInput]);
 
   useEffect(() => {
-    fetch(`${getApiBaseUrl()}/api/graph`)
+    fetch(`${getApiBaseUrl()}/api/graph?status=all&limit=2000`)
       .then((r) => r.json())
       .then((p) => {
         const raw = p.data ?? p;
         const nodeIds = new Set(raw.nodes.map((n: GraphNode) => n.id));
         const safeEdges = raw.edges.filter((e: GraphEdge) => nodeIds.has(e.source) && nodeIds.has(e.target));
+        const edgeTypes = new Set([...KNOWN_EDGE_TYPES, ...safeEdges.map((e: GraphEdge) => e.relation_type)]);
         setData({ nodes: raw.nodes, edges: safeEdges });
         setActiveTypes(new Set(raw.nodes.map((n: GraphNode) => n.type)));
-        setActiveEdgeTypes(new Set(safeEdges.map((e: GraphEdge) => e.relation_type)));
+        setActiveEdgeTypes(edgeTypes);
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
@@ -135,12 +137,18 @@ export default function GraphPage() {
   const toggleEdgeType = useCallback((t: string) => setActiveEdgeTypes(prev => { const n = new Set(prev); n.has(t) ? n.delete(t) : n.add(t); return n; }), []);
 
   const resetAll = useCallback(() => {
-    if (data) { setActiveTypes(new Set(data.nodes.map(n => n.type))); setActiveEdgeTypes(new Set(data.edges.map(e => e.relation_type))); }
+    if (data) {
+      setActiveTypes(new Set(data.nodes.map(n => n.type)));
+      setActiveEdgeTypes(new Set([...KNOWN_EDGE_TYPES, ...data.edges.map(e => e.relation_type)]));
+    }
     setSearch(""); setSearchInput(""); setHighlightImportant(false); setSelectedNode(null); setActiveStatus("all");
   }, [data]);
 
   const allTypes = useMemo(() => data ? Array.from(new Set(data.nodes.map(n => n.type))).sort() : [], [data]);
-  const allEdgeTypes = useMemo(() => data ? Array.from(new Set(data.edges.map(e => e.relation_type))).sort() : [], [data]);
+  const allEdgeTypes = useMemo(() => {
+    if (!data) return KNOWN_EDGE_TYPES;
+    return Array.from(new Set([...KNOWN_EDGE_TYPES, ...data.edges.map(e => e.relation_type)])).sort();
+  }, [data]);
 
   const filteredNodes = useMemo(() => data ? data.nodes.filter(n => {
     if (!activeTypes.has(n.type)) return false;
@@ -341,7 +349,7 @@ export default function GraphPage() {
                         const active = activeTypes.has(t);
                         const color = TYPE_COLORS[t] ?? "#64748B";
                         return (
-                          <button key={t} onClick={() => toggleType(t)}
+                          <button key={t} type="button" onClick={() => toggleType(t)}
                             className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs transition-all"
                             style={{ color: active ? color : "#52525b", background: active ? `${color}15` : "rgba(255,255,255,0.03)", border: `1px solid ${active ? `${color}30` : "rgba(255,255,255,0.06)"}` }}
                           >
@@ -361,7 +369,7 @@ export default function GraphPage() {
                         const active = activeEdgeTypes.has(e);
                         const color = EDGE_COLORS[e] ?? "#52525b";
                         return (
-                          <button key={e} onClick={() => toggleEdgeType(e)}
+                          <button key={e} type="button" onClick={() => toggleEdgeType(e)}
                             className="rounded px-1.5 py-0.5 text-xs transition-all"
                             style={{ color: active ? color : "#52525b", background: active ? `${color}15` : "rgba(255,255,255,0.03)", border: `1px solid ${active ? `${color}30` : "rgba(255,255,255,0.06)"}` }}
                           >
@@ -376,8 +384,8 @@ export default function GraphPage() {
                   <div>
                     <p className="text-[10px] font-mono text-zinc-700 uppercase tracking-widest mb-1.5">状态</p>
                     <div className="flex gap-1">
-                      {(["all", "active", "candidate", "stale"] as const).map(s => (
-                        <button key={s} onClick={() => setActiveStatus(s)}
+                      {(["all", "active", "candidate", "stale", "archived", "contradicted"] as const).map(s => (
+                        <button key={s} type="button" onClick={() => setActiveStatus(s)}
                           className="rounded px-2 py-0.5 text-xs transition-all"
                           style={{
                             color: activeStatus === s ? "#60A5FA" : "#52525b",

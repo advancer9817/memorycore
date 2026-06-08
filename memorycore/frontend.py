@@ -395,7 +395,12 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
         return entity_search(_str_q(query, "query", _str_q(query, "q", "")) or "", _int_q(query, "limit", 20))
 
     if parts == ["graph"] and method == "GET":
-        return _graph_payload()
+        status = _str_q(query, "status", "active,candidate") or "active,candidate"
+        default_limit = 2000 if status == "all" else 500
+        return _graph_payload(
+            limit=_int_q(query, "limit", default_limit),
+            status=status,
+        )
     raise LookupError(f"route not found: /api/{'/'.join(parts)}")
 
 
@@ -1033,17 +1038,26 @@ def _check_origin(request: Request) -> Response | None:
     return None
 
 
-def _graph_payload(limit: int = 500) -> dict[str, Any]:
+def _graph_payload(limit: int = 500, status: str = "active,candidate") -> dict[str, Any]:
     from memorycore.storage.db import read_conn
 
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
+    status_values = [item.strip() for item in status.split(",") if item.strip()]
+    include_all_statuses = not status_values or "all" in status_values
 
     with read_conn() as conn:
-        rows = conn.execute(
-            "SELECT id, title, type, status, importance, feedback_score, injected_count, content FROM memories WHERE status IN ('active','candidate') LIMIT ?",
-            (limit,),
-        ).fetchall()
+        if include_all_statuses:
+            rows = conn.execute(
+                "SELECT id, title, type, status, importance, feedback_score, injected_count, content FROM memories LIMIT ?",
+                (limit,),
+            ).fetchall()
+        else:
+            placeholders = ",".join("?" * len(status_values))
+            rows = conn.execute(
+                f"SELECT id, title, type, status, importance, feedback_score, injected_count, content FROM memories WHERE status IN ({placeholders}) LIMIT ?",
+                (*status_values, limit),
+            ).fetchall()
         for row in rows:
             nodes.append({
                 "id": row[0],
@@ -1060,6 +1074,7 @@ def _graph_payload(limit: int = 500) -> dict[str, Any]:
             "SELECT source_id, target_id, relation_type, weight FROM memory_links LIMIT 2000"
         ).fetchall()
         node_ids = {n["id"] for n in nodes}
+        dropped_edges = 0
         for lrow in link_rows:
             if lrow[0] in node_ids and lrow[1] in node_ids:
                 edges.append({
@@ -1068,8 +1083,17 @@ def _graph_payload(limit: int = 500) -> dict[str, Any]:
                     "relation_type": lrow[2] or "related_to",
                     "weight": lrow[3] if lrow[3] is not None else 1.0,
                 })
+            else:
+                dropped_edges += 1
 
-    return {"nodes": nodes, "edges": edges}
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "meta": {
+            "status": "all" if include_all_statuses else ",".join(status_values),
+            "dropped_edges": dropped_edges,
+        },
+    }
 
 
 def _json_ok(data: Any) -> JSONResponse:

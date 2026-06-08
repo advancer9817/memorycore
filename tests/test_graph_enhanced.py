@@ -243,3 +243,41 @@ class TestGraphAPI:
         payload = data.get("data", data)
         assert "edges" in payload
         assert isinstance(payload["edges"], list)
+
+    def test_graph_api_status_all_includes_archived_part_of_edges(self):
+        """status=all should keep links whose endpoints are not both active."""
+        parent_id = _add("Archived graph parent")
+        child_id = _add("Archived graph child")
+        lm.update_status(parent_id, "archived")
+        _link(child_id, parent_id, "part_of")
+
+        with _make_graph_client() as client:
+            default_resp = client.get("/api/graph")
+            all_resp = client.get("/api/graph?status=all")
+            limited_all_resp = client.get("/api/graph?status=all&limit=1")
+
+        default_payload = default_resp.json().get("data", default_resp.json())
+        all_payload = all_resp.json().get("data", all_resp.json())
+        limited_all_payload = limited_all_resp.json().get("data", limited_all_resp.json())
+
+        default_edges = [
+            edge for edge in default_payload["edges"]
+            if edge["source"] == child_id and edge["target"] == parent_id
+        ]
+        all_edges = [
+            edge for edge in all_payload["edges"]
+            if edge["source"] == child_id and edge["target"] == parent_id
+        ]
+        limited_edges = [
+            edge for edge in limited_all_payload["edges"]
+            if edge["source"] == child_id and edge["target"] == parent_id
+        ]
+
+        assert default_edges == []
+        assert limited_edges == []
+        assert all_edges == [{
+            "source": child_id,
+            "target": parent_id,
+            "relation_type": "part_of",
+            "weight": 0.9,
+        }]
