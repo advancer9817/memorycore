@@ -72,4 +72,20 @@ test.describe("MemoryCore UI smoke", () => {
     expect(detail.ok()).toBeTruthy();
     expect((await detail.json()).state).toBe("archived");
   });
+
+  test("switches UI language and persists the selected locale", async ({ page }) => {
+    await page.goto("/");
+    await page.getByLabel("Language").click();
+    await page.getByRole("option", { name: "中文" }).click();
+
+    await expect(page.getByRole("button", { name: "刷新" })).toBeVisible();
+    await expect(page.getByRole("link", { name: /记忆/ }).first()).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => window.localStorage.getItem("memorycore.locale")))
+      .toBe("zh");
+
+    await page.getByLabel("语言").click();
+    await page.getByRole("option", { name: "English" }).click();
+    await expect(page.getByRole("button", { name: "Refresh" })).toBeVisible();
+  });
 });

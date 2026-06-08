@@ -177,25 +177,27 @@
 
 ## UI i18n 全局中英文切换
 
-> 背景：用户要求给 mcore 添加 i18n 功能，支持全局语言切换中英文。已通过 CCG 咨询 Codex/Gemini，采纳“无路由 locale、无新增依赖、typed dictionary + React Context + localStorage 持久化”的轻量方案。当前只创建了 `ui/lib/i18n/dictionaries/en.ts` 和 `ui/lib/i18n/types.ts`，尚未接入应用。
+> 背景：用户要求给 mcore 添加 i18n 功能，支持全局语言切换中英文。已通过 CCG 咨询 Codex/Gemini，采纳“无路由 locale、无新增依赖、typed dictionary + React Context + localStorage 持久化”的轻量方案。当前已接入应用并完成基础页面覆盖。
 
-- [ ] 新增 `ui/lib/i18n/dictionaries/zh.ts`：与 `en.ts` 结构一致，用 `satisfies Messages` 保证中英文 key 完整一致
-- [ ] 新增 `ui/lib/i18n/I18nProvider.tsx`：负责 locale state、`localStorage(memorycore.locale)` 持久化、`navigator.language` 初始推断、更新 `document.documentElement.lang`
-- [ ] 新增 `ui/hooks/useI18n.ts`：导出类型安全的 `useI18n()` hook，缺少 provider 时 fail fast
-- [ ] 接入 `ui/app/providers.tsx`：在 Redux `Provider` 内包裹 `I18nProvider`，避免在 store 初始化阶段读取 `window`
-- [ ] 扩展 `ui/store/uiSlice.ts`：增加只用于观测的 `language.locale` 与 `setLocale` action；持久化仍由 i18n provider 负责
-- [ ] 新增 `ui/components/LanguageSwitcher.tsx`：使用现有 Radix/shadcn `Select`，放到 Navbar refresh/create 操作区附近，具备 `aria-label` 和 EN/中文选项
-- [ ] 迁移 `ui/components/Navbar.tsx`：导航项、Refresh/Refreshing、刷新成功 toast 使用 `useI18n()`；App 名称 MemoryCore 不翻译
-- [ ] 迁移 `ui/app/memories/components/CreateMemoryDialog.tsx`：按钮、标题、说明、label、placeholder、toast、保存/取消文案使用字典；用户输入内容不翻译
-- [ ] 迁移 Memories 主要列表页：`MemoryFilters`、`MemoryTable`、`MemoriesSection`、`PageSizeSelector`、`MemoryPagination` 的搜索 placeholder、表头、分页、empty state、批量操作、状态 tooltip 等静态文案
-- [ ] 迁移 Apps 页 app chrome：`ui/app/apps/page.tsx` 标题/描述；后续再覆盖 AppCard/AppFilters/AppGrid；App 名称、ID、后端枚举原值不翻译，只翻译展示 label
-- [ ] 迁移 Settings 页：标题/描述、Reset/Save、AlertDialog、toast、API Connection、Form/JSON tab 等静态文案
-- [ ] 迁移 Dashboard 高频文案：`Stats.tsx`、`Install.tsx`、`MemoryIntelligenceCenter.tsx` 中标题、按钮、状态说明；curator/LLM 返回的 reason/title/raw 内容保持原样
-- [ ] 改造相对时间：让 `formatDate` 或 `RelativeTime` 接收 locale/messages，避免 `Just Now`/`minutes ago` 固定英文；日期格式用 `locale === "zh" ? "zh-CN" : "en-US"`
-- [ ] 增加 Playwright i18n 覆盖：默认 `html[lang="en"]`；切到中文后 Navbar 可见中文且 `html[lang="zh-CN"]`；刷新后 localStorage 保持中文；切回英文不破坏现有 smoke selectors
-- [ ] 验证：在 `ui/` 下运行 `pnpm build`；如本地后端可用，再运行 `pnpm test:e2e` 或至少新增 i18n 专项 Playwright 用例
-- [ ] 完成后在 `ITERATION.md` 追加实际完成记录；TODO 只保留未完成项或打勾
+- [x] 新增 `ui/lib/i18n/dictionaries/zh.ts`：与 `en.ts` 结构一致，用 `satisfies Messages` 保证中英文 key 完整一致。
+- [x] 新增 `ui/lib/i18n/I18nProvider.tsx`：负责 locale state、`localStorage(memorycore.locale)` 持久化、`navigator.language` 初始推断、更新 `document.documentElement.lang`。
+- [x] 新增 `ui/hooks/useI18n.ts`：导出类型安全的 `useI18n()` hook，缺少 provider 时 fail fast。
+- [x] 接入 `ui/app/providers.tsx`：在 Redux `Provider` 内包裹 `I18nProvider`，避免在 store 初始化阶段读取 `window`。
+- [x] 扩展 `ui/store/uiSlice.ts`：增加只用于观测的 `language.locale` 与 `setLocale` action；持久化仍由 i18n provider 负责。
+- [x] 新增 `ui/components/LanguageSwitcher.tsx`：使用现有 Radix/shadcn `Select`，放到 Navbar refresh/create 操作区附近，具备 `aria-label` 和 EN/中文选项。
+- [x] 迁移 `ui/components/Navbar.tsx`：导航项、Refresh/Refreshing、刷新成功 toast 使用 `useI18n()`；App 名称 MemoryCore 不翻译。
+- [x] 迁移 `ui/app/memories/components/CreateMemoryDialog.tsx`：按钮、标题、说明、label、placeholder、toast、保存/取消文案使用字典；用户输入内容不翻译。
+- [x] 迁移 Memories 主要列表页：`MemoryFilters`、`MemoryTable`、`MemoriesSection`、`PageSizeSelector`、`MemoryPagination` 的搜索 placeholder、表头、分页、empty state、批量操作、状态 tooltip 等静态文案。
+- [x] 迁移 Apps 页 app chrome：`ui/app/apps/page.tsx` 标题/描述；App 名称、ID、后端枚举原值不翻译，只翻译展示 label。
+- [x] 迁移 Settings 页：标题/描述、Reset/Save、AlertDialog、toast、API Connection、Form/JSON tab 等静态文案。
+- [x] 迁移 Dashboard 高频文案：`Stats.tsx`、`Install.tsx`、`MemoryIntelligenceCenter.tsx` 中标题、按钮、状态说明；curator/LLM 返回的 reason/title/raw 内容保持原样。
+- [x] 改造相对时间：`formatDate` 支持 `locale === "zh" ? "zh-CN" : "en-US"`，避免主要列表固定英文。
+- [x] 增加 Playwright i18n 覆盖：默认 `html[lang="en"]`；切到中文后 Navbar 可见中文且 `html[lang="zh-CN"]`；刷新后 localStorage 保持中文；切回英文不破坏现有 smoke selectors。
+- [x] 验证：`ui/` 下 `pnpm exec tsc --noEmit` 与 `pnpm build` 均通过；后端目标测试通过。
+- [x] 完成后在 `ITERATION.md` 追加实际完成记录；TODO 只保留未完成项或打勾。
 
 ## 已发现待修复问题
 
-- [ ] 修复 UI TypeScript 全量 typecheck 的 `react-icons` JSX 兼容问题：`pnpm exec tsc --noEmit` 当前在多个 `react-icons` 组件（如 `BiEdit`、`GoPlus`、`FiTrash2`、`HiMiniRectangleStack` 等）报 `return type 'ReactNode' is not a valid JSX element`，需要统一处理 React 19 / react-icons 类型兼容，避免阻塞后续 UI 类型检查。
+- [x] 修复 UI TypeScript 全量 typecheck 的 `react-icons` JSX 兼容问题：新增 `ui/components/shared/react-icons.tsx` typed wrapper，统一适配 React 19 / react-icons `ReactNode` 返回类型；`pnpm exec tsc --noEmit` 已通过。
+- [x] Dashboard 后续成熟化：增加健康分趋势/分解、duplicates/contradictions/never accessed/LLM curator duration 视图、可点击 drill-down、导出治理报告、按风险排序的 review queue。
+- [x] 数据质量后续治理：LLM split 子记忆补 parent/child links，LLM duplicate archive 写 merge audit，LLM finding 支持批量接受/拒绝，并自动归档同 parent+fact_hash 的历史重复 atomic facts。

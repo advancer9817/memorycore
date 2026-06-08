@@ -36,10 +36,7 @@ import {
   clearSelection,
 } from "@/store/memoriesSlice";
 import SourceApp from "@/components/shared/source-app";
-import { HiMiniRectangleStack } from "react-icons/hi2";
-import { PiSwatches } from "react-icons/pi";
-import { GoPackage } from "react-icons/go";
-import { CiCalendar } from "react-icons/ci";
+import { CiCalendarIcon as CiCalendar, GoPackageIcon as GoPackage, HiMiniRectangleStackIcon as HiMiniRectangleStack, PiSwatchesIcon as PiSwatches } from "@/components/shared/react-icons";
 import { useRouter, useSearchParams } from "next/navigation";
 import Categories from "@/components/shared/categories";
 import { useUI } from "@/hooks/useUI";
@@ -50,9 +47,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { formatDate } from "@/lib/helpers";
+import { useI18n } from "@/hooks/useI18n";
 
 export function MemoryTable() {
   const { toast } = useToast();
+  const { messages, locale } = useI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
   const dispatch = useDispatch();
@@ -108,8 +107,8 @@ export function MemoryTable() {
       await updateMemoryState([id], newState);
     } catch (error) {
       toast({
-        title: "Error",
-        description: "Failed to update memory state",
+        title: messages.common.error,
+        description: messages.memories.updateStateFailure,
         variant: "destructive",
       });
     }
@@ -146,19 +145,19 @@ export function MemoryTable() {
             <TableHead className="border-zinc-700">
               <div className="flex items-center min-w-[600px]">
                 <HiMiniRectangleStack className="mr-1" />
-                Memory
+                {messages.memories.memory}
               </div>
             </TableHead>
             <TableHead className="border-zinc-700">
               <div className="flex items-center">
                 <PiSwatches className="mr-1" size={15} />
-                Categories
+                {messages.memories.categories}
               </div>
             </TableHead>
             <TableHead className="w-[140px] border-zinc-700">
               <div className="flex items-center">
                 <GoPackage className="mr-1" />
-                Source App
+                {messages.memories.sourceApp}
               </div>
             </TableHead>
             <TableHead className="w-[140px] border-zinc-700">
@@ -167,7 +166,7 @@ export function MemoryTable() {
                 className="flex items-center w-full justify-center gap-1 hover:text-white transition-colors cursor-pointer"
               >
                 <CiCalendar className="mr-1" size={16} />
-                Created On
+                {messages.memories.createdOn}
                 {currentSort === "created_at" ? (
                   currentDir === "asc" ? (
                     <ArrowUp className="h-3 w-3 text-primary" />
@@ -224,11 +223,7 @@ export function MemoryTable() {
                       </TooltipTrigger>
                       <TooltipContent>
                         <p>
-                          This memory is{" "}
-                          <span className="font-bold">
-                            {memory.state === "paused" ? "paused" : "archived"}
-                          </span>{" "}
-                          and <span className="font-bold">disabled</span>.
+                          {messages.memories.disabledMemory(memory.state === "paused" ? messages.memories.pausedState : messages.memories.archivedState)}
                         </p>
                       </TooltipContent>
                     </Tooltip>
@@ -257,7 +252,7 @@ export function MemoryTable() {
                 <SourceApp source={memory.app_name} />
               </TableCell>
               <TableCell className="w-[140px] text-center">
-                {formatDate(memory.created_at)}
+                {formatDate(memory.created_at, locale)}
               </TableCell>
               <TableCell className="text-right flex justify-center">
                 <DropdownMenu>
@@ -281,12 +276,12 @@ export function MemoryTable() {
                       {memory?.state === "active" ? (
                         <>
                           <Pause className="mr-2 h-4 w-4" />
-                          Pause
+                          {messages.memories.pause}
                         </>
                       ) : (
                         <>
                           <Play className="mr-2 h-4 w-4" />
-                          Resume
+                          {messages.memories.resume}
                         </>
                       )}
                     </DropdownMenuItem>
@@ -300,9 +295,9 @@ export function MemoryTable() {
                     >
                       <Archive className="mr-2 h-4 w-4" />
                       {memory?.state !== "archived" ? (
-                        <>Archive</>
+                        <>{messages.memories.archive}</>
                       ) : (
-                        <>Unarchive</>
+                        <>{messages.memories.unarchive}</>
                       )}
                     </DropdownMenuItem>
                     <DropdownMenuItem
@@ -310,7 +305,7 @@ export function MemoryTable() {
                       onClick={() => handleEditMemory(memory.id, memory.memory)}
                     >
                       <Edit className="mr-2 h-4 w-4" />
-                      Edit
+                      {messages.memories.edit}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
@@ -318,7 +313,7 @@ export function MemoryTable() {
                       onClick={() => handleDeleteMemory(memory.id)}
                     >
                       <Trash2 className="mr-2 h-4 w-4" />
-                      Delete
+                      {messages.memories.delete}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>

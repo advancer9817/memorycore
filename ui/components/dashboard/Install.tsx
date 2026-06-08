@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Activity, Archive, Brain, Database, Play, Sparkles } from "lucide-react";
+import { useI18n } from "@/hooks/useI18n";
 import { getApiBaseUrl } from "@/lib/api-url";
 
 type CuratorStatus = {
@@ -39,6 +40,60 @@ type CuratorStatus = {
   };
 };
 
+type ApiEnvelope<T> = {
+  ok?: boolean;
+  data?: T;
+  error?: { message?: string } | string;
+};
+
+type LlmFindingCategory = "semantic_duplicates" | "contradictions" | "importance_reassessments" | "split_candidates";
+
+type RawFinding = Record<string, unknown>;
+
+type LlmFindingView = {
+  action: string;
+  reason: string;
+  title?: string;
+  llm_thinking?: string;
+  llm_raw?: string;
+  llm_prompt?: string;
+  _category?: LlmFindingCategory;
+  _raw?: RawFinding;
+};
+
+type LlmResultPayload = {
+  summary?: Record<string, number>;
+  errors?: string[];
+  semantic_duplicates?: RawFinding[];
+  contradictions?: RawFinding[];
+  importance_reassessments?: RawFinding[];
+  split_candidates?: RawFinding[];
+};
+
+type ApplyFindingState = {
+  state: "idle" | "succeeded" | "failed";
+  message?: string;
+};
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  return fallback;
+}
+
+function getPayloadErrorMessage(payload: unknown, fallback: string): string {
+  if (payload && typeof payload === "object" && "error" in payload) {
+    const error = (payload as { error?: { message?: unknown } | string }).error;
+    if (typeof error === "string") return error;
+    if (error?.message && typeof error.message === "string") return error.message;
+  }
+  return fallback;
+}
+
+function getString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
 type CuratorRunState = {
   state: "idle" | "running" | "succeeded" | "failed";
   startedAt?: string;
@@ -62,6 +117,7 @@ function formatTime(value?: string) {
 }
 
 export const Install = () => {
+  const { messages: t } = useI18n();
   const [status, setStatus] = useState<CuratorStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState(false);
@@ -104,14 +160,14 @@ export const Install = () => {
         actions: payload.data?.actions || [],
       });
       await fetchStatus();
-    } catch (error: any) {
+    } catch (error: unknown) {
       const finished = new Date();
       setRunState({
         state: "failed",
         startedAt: started.toISOString(),
         finishedAt: finished.toISOString(),
         elapsedMs: finished.getTime() - started.getTime(),
-        error: error?.message || "Curator failed",
+        error: getErrorMessage(error, "Curator failed"),
       });
     } finally {
       setApplying(false);
@@ -126,70 +182,62 @@ export const Install = () => {
     summary?: Record<string, number>;
     errors?: string[];
     error?: string;
-    findings?: Array<{
-      action: string;
-      reason: string;
-      title?: string;
-      llm_thinking?: string;
-      llm_raw?: string;
-      llm_prompt?: string;
-      _category?: string;
-      _raw?: Record<string, unknown>;
-    }>;
+    findings?: LlmFindingView[];
   }>({ state: "idle" });
   const [llmRunning, setLlmRunning] = useState(false);
   const [llmFindingsShowAll, setLlmFindingsShowAll] = useState(false);
   const [llmDismissedIndices, setLlmDismissedIndices] = useState<Set<number>>(new Set());
   const [acceptingAll, setAcceptingAll] = useState(false);
+  const [applyFindingStates, setApplyFindingStates] = useState<Record<number, ApplyFindingState>>({});
   const [isRecovering, setIsRecovering] = useState(false);
   const llmPollRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const LLM_JOB_KEY = "mcore_llm_curator_job";
 
-  const _parseLlmResult = (data: any) => ({
+  const _parseLlmResult = (data: LlmResultPayload) => ({
     summary: data.summary || {},
     errors: data.errors || [],
     findings: [
-      ...(data.semantic_duplicates || []).map((d: any) => ({
+      ...(data.semantic_duplicates || []).map((d) => ({
         action: "archive duplicate",
-        title: d.drop_title,
-        reason: d.reason,
-        llm_thinking: d.llm_thinking,
-        llm_raw: d.llm_raw,
-        llm_prompt: d.llm_prompt,
-        _category: "semantic_duplicates",
+        title: getString(d.drop_title),
+        reason: getString(d.reason) ?? "",
+        llm_thinking: getString(d.llm_thinking),
+        llm_raw: getString(d.llm_raw),
+        llm_prompt: getString(d.llm_prompt),
+        _category: "semantic_duplicates" as const,
         _raw: d,
       })),
-      ...(data.contradictions || []).map((c: any) => ({
+      ...(data.contradictions || []).map((c) => ({
         action: "mark contradicted",
-        title: c.older_title,
-        reason: c.reason,
-        llm_thinking: c.llm_thinking,
-        llm_raw: c.llm_raw,
-        llm_prompt: c.llm_prompt,
-        _category: "contradictions",
+        title: getString(c.older_title),
+        reason: getString(c.reason) ?? "",
+        llm_thinking: getString(c.llm_thinking),
+        llm_raw: getString(c.llm_raw),
+        llm_prompt: getString(c.llm_prompt),
+        _category: "contradictions" as const,
         _raw: c,
       })),
       ...(data.importance_reassessments || [])
-        .filter((r: any) => r.action !== "keep")
-        .map((r: any) => ({
-          action: r.action,
-          title: r.title,
-          reason: r.reason,
-          llm_thinking: r.llm_thinking,
-          llm_raw: r.llm_raw,
-          llm_prompt: r.llm_prompt,
-          _category: "importance_reassessments",
+        .filter((r) => r.action !== "keep")
+        .map((r) => ({
+          action: getString(r.action) ?? "reassess",
+          title: getString(r.title),
+          reason: getString(r.reason) ?? "",
+          llm_thinking: getString(r.llm_thinking),
+          llm_raw: getString(r.llm_raw),
+          llm_prompt: getString(r.llm_prompt),
+          _category: "importance_reassessments" as const,
           _raw: r,
         })),
-      ...(data.split_candidates || []).map((s: any) => ({
+      ...(data.split_candidates || []).map((s) => ({
         action: "split",
-        title: s.title,
-        reason: s.reason,
-        llm_thinking: s.llm_thinking,
-        llm_raw: s.llm_raw,
-        llm_prompt: s.llm_prompt,
-        _category: "split_candidates",
+        title: getString(s.title),
+        reason: getString(s.reason) ?? "",
+        llm_thinking: getString(s.llm_thinking),
+        llm_raw: getString(s.llm_raw),
+        llm_prompt: getString(s.llm_prompt),
+        _category: "split_candidates" as const,
         _raw: s,
       })),
     ],
@@ -306,12 +354,12 @@ export const Install = () => {
       localStorage.setItem(LLM_JOB_KEY, JSON.stringify({ jobId, startedAt }));
       setLlmRunState({ state: "running", jobId, startedAt });
       llmPollRef.current = setTimeout(() => _pollJob(jobId, startedAt), 2000);
-    } catch (error: any) {
+    } catch (error: unknown) {
       setLlmRunState({
         state: "failed",
         startedAt,
         elapsedMs: Date.now() - startedAt,
-        error: error?.message || "LLM Curator failed",
+        error: getErrorMessage(error, "LLM Curator failed"),
       });
       setLlmRunning(false);
       localStorage.removeItem(LLM_JOB_KEY);
@@ -326,19 +374,32 @@ export const Install = () => {
       visible.map(async (f) => {
         if (!f._category || !f._raw) return undefined;
         const globalIdx = findings.indexOf(f);
-        await fetch(`${getApiBaseUrl()}/api/curator/llm/apply-single`, {
+        const response = await fetch(`${getApiBaseUrl()}/api/curator/llm/apply-single`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ category: f._category, finding: f._raw }),
         });
+        const payload: ApiEnvelope<unknown> = await response.json();
+        if (!response.ok || payload.ok === false) {
+          throw new Error(getPayloadErrorMessage(payload, `${t.dashboard.applyError}: ${response.status}`));
+        }
         return globalIdx;
       })
     );
-    const accepted = new Set<number>(
-      results
-        .filter((r): r is PromiseFulfilledResult<number> => r.status === "fulfilled" && r.value !== undefined)
-        .map((r) => r.value)
-    );
+    const accepted = new Set<number>();
+    const failedStates: Record<number, ApplyFindingState> = {};
+    results.forEach((result, index) => {
+      const globalIdx = findings.indexOf(visible[index]);
+      if (result.status === "fulfilled" && result.value !== undefined) {
+        accepted.add(result.value);
+        return;
+      }
+      failedStates[globalIdx] = {
+        state: "failed",
+        message: result.status === "rejected" ? getErrorMessage(result.reason, t.dashboard.applyError) : t.dashboard.applyError,
+      };
+    });
+    setApplyFindingStates((prev) => ({ ...prev, ...failedStates }));
     setLlmDismissedIndices((prev) => new Set([...prev, ...accepted]));
     setAcceptingAll(false);
     fetchStatus();
@@ -411,24 +472,24 @@ export const Install = () => {
         {/* Row 1: schedule info + buttons */}
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <Badge variant="outline" className="border-emerald-700 bg-emerald-500/10 text-emerald-300 text-xs shrink-0">
-            Scheduled · {status?.timer.ActiveState || "unknown"}
+            {t.dashboard.scheduled} · {status?.timer.ActiveState || t.dashboard.unknown}
           </Badge>
           <span className="text-zinc-500">
-            Rule last <span className="text-zinc-200">{formatTime(lastRun)}</span>
+            {t.dashboard.ruleLast} <span className="text-zinc-200">{formatTime(lastRun)}</span>
           </span>
           <span className="text-zinc-500">
-            LLM last <span className="text-zinc-200">{formatTime(llmLastRun)}</span>
+            {t.dashboard.llmLast} <span className="text-zinc-200">{formatTime(llmLastRun)}</span>
           </span>
           <span className="text-zinc-500">
-            Next <span className="text-zinc-200">{formatTime(nextRun)}</span>
+            {t.dashboard.next} <span className="text-zinc-200">{formatTime(nextRun)}</span>
           </span>
           <span className="text-zinc-500">
-            Result <span className="text-zinc-200">{lastResult}</span>
+            {t.dashboard.result} <span className="text-zinc-200">{lastResult}</span>
             <span className="text-zinc-600"> / </span>
             <span className="text-violet-300">LLM {llmLastResult}</span>
           </span>
           <span className="text-zinc-500 hidden sm:inline">
-            Scanned <span className="text-zinc-200">{status?.curator.scanned ?? "-"}</span>
+            {t.dashboard.scanned} <span className="text-zinc-200">{status?.curator.scanned ?? "-"}</span>
           </span>
           <div className="ml-auto flex gap-2 shrink-0">
             <Button
@@ -438,7 +499,7 @@ export const Install = () => {
               disabled={applying || llmRunning}
             >
               <Play className="h-3 w-3 mr-1" />
-              {applying ? "运行中..." : "Run Curator"}
+              {applying ? t.dashboard.running : t.dashboard.runCurator}
             </Button>
             <Button
               size="sm"
@@ -447,7 +508,7 @@ export const Install = () => {
               disabled={applying || llmRunning}
             >
               <Brain className="h-3 w-3 mr-1" />
-              {llmRunning ? "分析中..." : "Run LLM"}
+              {llmRunning ? t.dashboard.analyzing : t.dashboard.runLlm}
             </Button>
           </div>
         </div>
@@ -455,7 +516,7 @@ export const Install = () => {
         {/* Manual run result — only when active */}
         {runState.state !== "idle" && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-zinc-800 pt-2">
-            <span className="text-zinc-500">Manual run</span>
+            <span className="text-zinc-500">{t.dashboard.manualRun}</span>
             <Badge
               variant="outline"
               className={
@@ -478,9 +539,9 @@ export const Install = () => {
             )}
             {runState.summary && (
               <span className="text-zinc-500 ml-2">
-                Actions <span className="text-zinc-200">{runState.summary.actions ?? 0}</span>
-                {" · "}Promote <span className="text-zinc-200">{runState.summary.skill_promotions ?? 0}</span>
-                {" · "}Archive <span className="text-zinc-200">{runState.summary.archive ?? 0}</span>
+                {t.dashboard.actions} <span className="text-zinc-200">{runState.summary.actions ?? 0}</span>
+                {" · "}{t.dashboard.promote} <span className="text-zinc-200">{runState.summary.skill_promotions ?? 0}</span>
+                {" · "}{t.dashboard.archive} <span className="text-zinc-200">{runState.summary.archive ?? 0}</span>
               </span>
             )}
             {runState.error && <span className="text-red-300 ml-2">{runState.error}</span>}
@@ -500,7 +561,7 @@ export const Install = () => {
                 onClick={() => setRunActionsShowAll(true)}
                 className="w-full text-center text-xs text-zinc-400 hover:text-zinc-200 py-1.5 rounded bg-zinc-800/50 hover:bg-zinc-800 transition-colors"
               >
-                查看全部 ({runState.actions.length} 项)
+                {t.dashboard.showAll(runState.actions.length)}
               </button>
             )}
           </div>
@@ -511,11 +572,11 @@ export const Install = () => {
           <div className="border-t border-zinc-800 pt-2 text-sm space-y-2">
             {isRecovering && (
               <div className="flex items-center gap-2 text-sky-400 text-xs animate-pulse">
-                <span>正在恢复任务状态...</span>
+                <span>{t.dashboard.recoveringJob}</span>
               </div>
             )}
             <div className="flex items-center gap-3">
-              <span className="text-zinc-500">LLM analysis</span>
+              <span className="text-zinc-500">{t.dashboard.llmAnalysis}</span>
               <Badge
                 variant="outline"
                 className={
@@ -535,10 +596,10 @@ export const Install = () => {
                 )}
               {llmRunState.summary && (
                 <span className="text-zinc-500 text-xs ml-1">
-                  重复 <span className="text-zinc-200">{llmRunState.summary.semantic_duplicates ?? 0}</span>
-                  {" · "}矛盾 <span className="text-zinc-200">{llmRunState.summary.contradictions ?? 0}</span>
-                  {" · "}重评 <span className="text-zinc-200">{llmRunState.summary.importance_reassessments ?? 0}</span>
-                  {" · "}拆分 <span className="text-zinc-200">{llmRunState.summary.split_candidates ?? 0}</span>
+                  {t.dashboard.duplicates} <span className="text-zinc-200">{llmRunState.summary.semantic_duplicates ?? 0}</span>
+                  {" · "}{t.dashboard.contradictions} <span className="text-zinc-200">{llmRunState.summary.contradictions ?? 0}</span>
+                  {" · "}{t.dashboard.reassessments} <span className="text-zinc-200">{llmRunState.summary.importance_reassessments ?? 0}</span>
+                  {" · "}{t.dashboard.splits} <span className="text-zinc-200">{llmRunState.summary.split_candidates ?? 0}</span>
                 </span>
               )}
             </div>
@@ -562,14 +623,14 @@ export const Install = () => {
                       disabled={acceptingAll || visibleFindings.length === 0}
                       className="rounded px-2 py-1 text-xs bg-emerald-800/60 text-emerald-300 hover:bg-emerald-700 disabled:opacity-50 transition-colors"
                     >
-                      {acceptingAll ? "处理中..." : `✓ 全部接受 (${visibleFindings.length})`}
+                      {acceptingAll ? t.dashboard.processing : t.dashboard.acceptAll(visibleFindings.length)}
                     </button>
                     <button
                       onClick={dismissAllFindings}
                       disabled={visibleFindings.length === 0}
                       className="rounded px-2 py-1 text-xs bg-zinc-700 text-zinc-400 hover:bg-red-900/60 hover:text-red-300 disabled:opacity-50 transition-colors"
                     >
-                      ✗ 全部拒绝 ({visibleFindings.length})
+                      {t.dashboard.rejectAll(visibleFindings.length)}
                     </button>
                   </div>
                   {displayFindings.map((f, displayIdx) => {
@@ -578,18 +639,21 @@ export const Install = () => {
                       <LlmFinding
                         key={globalIdx}
                         finding={f}
+                        applyState={applyFindingStates[globalIdx]}
+                        labels={{ accept: t.dashboard.accept, reject: t.dashboard.reject, thinking: t.dashboard.thinking, raw: t.dashboard.raw, prompt: t.dashboard.prompt, applyError: t.dashboard.applyError }}
                         onAccept={async () => {
                           if (!f._category || !f._raw) return;
-                          try {
-                            await fetch(`${getApiBaseUrl()}/api/curator/llm/apply-single`, {
-                              method: "POST",
-                              headers: { "content-type": "application/json" },
-                              body: JSON.stringify({ category: f._category, finding: f._raw }),
-                            });
-                            setLlmDismissedIndices((prev) => new Set([...prev, globalIdx]));
-                          } catch {
-                            // silently ignore apply errors
+                          const response = await fetch(`${getApiBaseUrl()}/api/curator/llm/apply-single`, {
+                            method: "POST",
+                            headers: { "content-type": "application/json" },
+                            body: JSON.stringify({ category: f._category, finding: f._raw }),
+                          });
+                          const payload: ApiEnvelope<unknown> = await response.json();
+                          if (!response.ok || payload.ok === false) {
+                            throw new Error(getPayloadErrorMessage(payload, `${t.dashboard.applyError}: ${response.status}`));
                           }
+                          setApplyFindingStates((prev) => ({ ...prev, [globalIdx]: { state: "succeeded", message: t.dashboard.applySuccess } }));
+                          setLlmDismissedIndices((prev) => new Set([...prev, globalIdx]));
                         }}
                         onDismiss={() => {
                           setLlmDismissedIndices((prev) => new Set([...prev, globalIdx]));
@@ -602,7 +666,7 @@ export const Install = () => {
                       onClick={() => setLlmFindingsShowAll(true)}
                       className="w-full text-center text-xs text-zinc-400 hover:text-zinc-200 py-1.5 rounded bg-zinc-800/50 hover:bg-zinc-800 transition-colors"
                     >
-                      显示全部 ({visibleFindings.length} 条)
+                      {t.dashboard.showAll(visibleFindings.length)}
                     </button>
                   )}
                 </div>
@@ -631,22 +695,16 @@ function LlmElapsedTimer({ startedAt }: { startedAt: number }) {
   );
 }
 
-function LlmFinding({ finding, onAccept, onDismiss }: {
-  finding: {
-    action: string;
-    reason: string;
-    title?: string;
-    llm_thinking?: string;
-    llm_raw?: string;
-    llm_prompt?: string;
-    _category?: string;
-    _raw?: Record<string, unknown>;
-  };
+function LlmFinding({ finding, applyState, labels, onAccept, onDismiss }: {
+  finding: LlmFindingView;
+  applyState?: ApplyFindingState;
+  labels: { accept: string; reject: string; thinking: string; raw: string; prompt: string; applyError: string };
   onAccept?: () => Promise<void>;
   onDismiss?: () => void;
 }) {
   const [expanded, setExpanded] = React.useState<null | "thinking" | "raw" | "prompt">(null);
   const [accepting, setAccepting] = React.useState(false);
+  const [localApplyState, setLocalApplyState] = React.useState<ApplyFindingState>({ state: "idle" });
   const hasDetail = finding.llm_thinking || finding.llm_raw || finding.llm_prompt;
 
   const handleAccept = async () => {
@@ -654,6 +712,9 @@ function LlmFinding({ finding, onAccept, onDismiss }: {
     setAccepting(true);
     try {
       await onAccept();
+      setLocalApplyState({ state: "succeeded" });
+    } catch (error: unknown) {
+      setLocalApplyState({ state: "failed", message: getErrorMessage(error, labels.applyError) });
     } finally {
       setAccepting(false);
     }
@@ -675,7 +736,7 @@ function LlmFinding({ finding, onAccept, onDismiss }: {
               className="rounded px-1.5 py-0.5 text-[10px] transition-colors bg-emerald-800/60 text-emerald-300 hover:bg-emerald-700 disabled:opacity-50"
               title="Accept and apply this finding"
             >
-              {accepting ? "..." : "✓ 接受"}
+              {accepting ? "..." : labels.accept}
             </button>
           )}
           {onDismiss && (
@@ -684,7 +745,7 @@ function LlmFinding({ finding, onAccept, onDismiss }: {
               className="rounded px-1.5 py-0.5 text-[10px] transition-colors bg-zinc-700 text-zinc-400 hover:bg-red-900/60 hover:text-red-300"
               title="Dismiss this finding"
             >
-              ✗ 拒绝
+              {labels.reject}
             </button>
           )}
           {hasDetail && (
@@ -694,7 +755,7 @@ function LlmFinding({ finding, onAccept, onDismiss }: {
                   onClick={() => setExpanded(expanded === "thinking" ? null : "thinking")}
                   className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${expanded === "thinking" ? "bg-sky-700 text-sky-100" : "bg-zinc-700 text-zinc-400 hover:text-zinc-200"}`}
                 >
-                  思考
+                  {labels.thinking}
                 </button>
               )}
               {finding.llm_raw && (
@@ -702,7 +763,7 @@ function LlmFinding({ finding, onAccept, onDismiss }: {
                   onClick={() => setExpanded(expanded === "raw" ? null : "raw")}
                   className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${expanded === "raw" ? "bg-violet-700 text-violet-100" : "bg-zinc-700 text-zinc-400 hover:text-zinc-200"}`}
                 >
-                  原话
+                  {labels.raw}
                 </button>
               )}
               {finding.llm_prompt && (
@@ -717,6 +778,11 @@ function LlmFinding({ finding, onAccept, onDismiss }: {
           )}
         </div>
       </div>
+      {(applyState?.state === "failed" || localApplyState.state === "failed") && (
+        <div className="mt-2 rounded border border-red-800/50 bg-red-950/40 px-2 py-1 text-[10px] text-red-300">
+          {applyState?.message || localApplyState.message || labels.applyError}
+        </div>
+      )}
       {expanded && (
         <pre className={`mt-2 max-h-64 overflow-auto rounded p-2 text-[10px] leading-relaxed whitespace-pre-wrap break-words ${
           expanded === "thinking" ? "bg-sky-950/50 text-sky-200 border border-sky-800/40" :

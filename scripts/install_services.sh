@@ -64,9 +64,9 @@ install_systemd() {
   # --- mcore-ui.service ---
   if [[ -z "$NODE_BIN" ]]; then
     _log "WARNING: node not found — skipping mcore-ui.service install"
-  elif [[ ! -f "$ROOT/ui/.next/standalone/server.js" ]]; then
-    _log "WARNING: UI not built ($ROOT/ui/.next/standalone/server.js missing) — skipping mcore-ui.service install"
-    _log "  Run: cd $ROOT/ui && pnpm build"
+  elif [[ ! -f "$ROOT/ui/node_modules/next/dist/bin/next" ]]; then
+    _log "WARNING: Next.js binary missing ($ROOT/ui/node_modules/next/dist/bin/next) — skipping mcore-ui.service install"
+    _log "  Run: cd $ROOT/ui && pnpm install"
   else
     sed \
       -e "s|__ROOT__|$ROOT|g" \
@@ -128,13 +128,18 @@ install_systemd() {
 # ── mcore CLI install ─────────────────────────────────────────────────────────
 install_mcore_cmd() {
   local bin_dir="$HOME/.local/bin"
+  local target="$bin_dir/mcore"
+  local tmp
   mkdir -p "$bin_dir"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/mcore.XXXXXX")"
   sed \
+    -e "s|__ROOT__|$ROOT|g" \
     -e "s|__PYTHON__|$PYTHON_BIN|g" \
     "$ROOT/scripts/mcore" \
-    > "$bin_dir/mcore"
-  chmod +x "$bin_dir/mcore"
-  _log "mcore command installed at $bin_dir/mcore"
+    > "$tmp"
+  chmod +x "$tmp"
+  mv -f "$tmp" "$target"
+  _log "mcore command installed at $target"
   if [[ ":$PATH:" != *":$bin_dir:"* ]]; then
     _log "  NOTE: $bin_dir is not in PATH. Add it to your shell profile."
   fi
@@ -155,5 +160,6 @@ if systemctl --user status >/dev/null 2>&1; then
   install_systemd
 else
   _log "systemd user session not available — falling back to cron."
+  install_mcore_cmd
   install_cron
 fi

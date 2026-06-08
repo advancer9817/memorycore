@@ -15,16 +15,16 @@ import {
   PersonStandingIcon,
 } from "lucide-react";
 import {
-  FaLaptopCode,
-  FaPaintBrush,
-  FaBusinessTime,
-  FaRegHeart,
-  FaRegSmile,
-  FaUserTie,
-  FaMoneyBillWave,
-  FaBriefcase,
-  FaPlaneDeparture,
-} from "react-icons/fa";
+  FaBriefcaseIcon as FaBriefcase,
+  FaBusinessTimeIcon as FaBusinessTime,
+  FaLaptopCodeIcon as FaLaptopCode,
+  FaMoneyBillWaveIcon as FaMoneyBillWave,
+  FaPaintBrushIcon as FaPaintBrush,
+  FaPlaneDepartureIcon as FaPlaneDeparture,
+  FaRegHeartIcon as FaRegHeart,
+  FaRegSmileIcon as FaRegSmile,
+  FaUserTieIcon as FaUserTie,
+} from "@/components/shared/react-icons";
 import {
   Popover,
   PopoverContent,

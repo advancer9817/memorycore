@@ -1,33 +1,53 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { HiHome, HiMiniRectangleStack } from "react-icons/hi2";
-import { RiApps2AddFill } from "react-icons/ri";
-import { FiRefreshCcw } from "react-icons/fi";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CreateMemoryDialog } from "@/app/memories/components/CreateMemoryDialog";
+import { ReactNode, useCallback, useState } from "react";
 import { Settings } from "lucide-react";
-import { useState, useCallback } from "react";
+import { CreateMemoryDialog } from "@/app/memories/components/CreateMemoryDialog";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { Button } from "@/components/ui/button";
+import {
+  FiRefreshCcwIcon as FiRefreshCcw,
+  HiHomeIcon as HiHome,
+  HiMiniRectangleStackIcon as HiMiniRectangleStack,
+  RiApps2AddFillIcon as RiApps2AddFill,
+} from "@/components/shared/react-icons";
+import { useI18n } from "@/hooks/useI18n";
 import { useToast } from "@/hooks/use-toast";
 
-// Lazy refresh: only import API hooks when the refresh button is clicked.
-// This avoids 4 unnecessary Redux subscriptions on every page render.
+interface NavItem {
+  href: string;
+  label: string;
+  icon: ReactNode;
+}
+
 async function refreshForPath(pathname: string): Promise<void> {
-  const { useMemoriesApi: _m, useAppsApi: _a, useStats: _s, useConfig: _c } = await Promise.resolve({
-    useMemoriesApi: null, useAppsApi: null, useStats: null, useConfig: null,
-  });
-  // The actual fetch is triggered by the page's own useEffect after navigation.
-  // For refresh we dynamically call the correct endpoint.
   const { getApiBaseUrl } = await import("@/lib/api-url");
   const base = getApiBaseUrl();
   const fetches: Promise<unknown>[] = [];
 
   if (pathname === "/") {
-    fetches.push(fetch(`${base}/api/v1/stats`), fetch(`${base}/api/v1/memories/filter`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ page: 1, size: 20 }) }));
+    fetches.push(
+      fetch(`${base}/api/v1/stats`),
+      fetch(`${base}/api/v1/memories/filter`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ page: 1, size: 20 }),
+      })
+    );
   } else if (pathname.startsWith("/memories")) {
     const sp = new URLSearchParams(window.location.search);
-    fetches.push(fetch(`${base}/api/v1/memories/filter`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ page: Number(sp.get("page") || 1), size: Number(sp.get("size") || 20) }) }));
+    fetches.push(
+      fetch(`${base}/api/v1/memories/filter`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          page: Number(sp.get("page") || 1),
+          size: Number(sp.get("size") || 20),
+        }),
+      })
+    );
   } else if (pathname.startsWith("/apps")) {
     fetches.push(fetch(`${base}/api/v1/apps/`));
   } else if (pathname.startsWith("/settings")) {
@@ -35,21 +55,21 @@ async function refreshForPath(pathname: string): Promise<void> {
   } else if (pathname.startsWith("/graph")) {
     fetches.push(fetch(`${base}/api/graph`));
   }
+
   await Promise.allSettled(fetches);
 }
 
 export function Navbar() {
   const pathname = usePathname();
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const { messages } = useI18n();
   const { toast } = useToast();
 
   const handleRefresh = useCallback(async () => {
     if (isRefreshing) return;
     setIsRefreshing(true);
     try {
-      // Invalidate cache by dispatching a reset action, then reload the page data
       await refreshForPath(pathname);
-      // Force page re-fetch by dispatching invalidation
       const { store } = await import("@/store/store");
       const { resetMemoriesState } = await import("@/store/memoriesSlice");
       const { resetAppsState } = await import("@/store/appsSlice");
@@ -57,90 +77,56 @@ export function Navbar() {
       store.dispatch(resetMemoriesState());
       store.dispatch(resetAppsState());
       store.dispatch(resetProfileState());
-      toast({ description: "Refreshed successfully" });
+      toast({ description: messages.nav.refreshed });
     } finally {
       setIsRefreshing(false);
     }
-  }, [isRefreshing, pathname, toast]);
+  }, [isRefreshing, messages.nav.refreshed, pathname, toast]);
 
-  const isActive = (href: string) => {
+  const isActive = (href: string): boolean => {
     if (href === "/") return pathname === href;
-    return pathname.startsWith(href.substring(0, 5));
+    return pathname.startsWith(href);
   };
+
+  const navItems: NavItem[] = [
+    { href: "/", label: messages.nav.dashboard, icon: <HiHome /> },
+    { href: "/memories", label: messages.nav.memories, icon: <HiMiniRectangleStack /> },
+    { href: "/apps", label: messages.nav.apps, icon: <RiApps2AddFill /> },
+    { href: "/graph", label: messages.nav.graph, icon: null },
+    { href: "/settings", label: messages.nav.settings, icon: <Settings className="h-4 w-4" /> },
+  ];
 
   const activeClass = "bg-zinc-800 text-white border-zinc-600";
   const inactiveClass = "text-zinc-300";
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-zinc-800 bg-zinc-950/95 backdrop-blur supports-[backdrop-filter]:bg-zinc-950/60">
-      <div className="container flex h-14 items-center justify-between">
-        <Link href="/" className="flex items-center gap-2">
+      <div className="container flex h-14 items-center justify-between gap-4">
+        <Link href="/" className="flex shrink-0 items-center gap-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.svg" alt="MemoryCore" width={26} height={26} />
           <span className="text-xl font-medium">MemoryCore</span>
         </Link>
-        <div className="flex items-center gap-2">
-          <Link href="/">
-            <Button
-              variant="outline"
-              size="sm"
-              className={`flex items-center gap-2 border-none ${
-                isActive("/") ? activeClass : inactiveClass
-              }`}
-            >
-              <HiHome />
-              Dashboard
-            </Button>
-          </Link>
-          <Link href="/memories">
-            <Button
-              variant="outline"
-              size="sm"
-              className={`flex items-center gap-2 border-none ${
-                isActive("/memories") ? activeClass : inactiveClass
-              }`}
-            >
-              <HiMiniRectangleStack />
-              Memories
-            </Button>
-          </Link>
-          <Link href="/apps">
-            <Button
-              variant="outline"
-              size="sm"
-              className={`flex items-center gap-2 border-none ${
-                isActive("/apps") ? activeClass : inactiveClass
-              }`}
-            >
-              <RiApps2AddFill />
-              Apps
-            </Button>
-          </Link>
-          <Link href="/graph">
-            <Button
-              variant="outline"
-              size="sm"
-              className={`flex items-center gap-2 border-none ${
-                isActive("/graph") ? activeClass : inactiveClass
-              }`}
-            >
-              Graph
-            </Button>
-          </Link>
-          <Link href="/settings">
-            <Button
-              variant="outline"
-              size="sm"
-              className={`flex items-center gap-2 border-none ${
-                isActive("/settings") ? activeClass : inactiveClass
-              }`}
-            >
-              <Settings />
-              Settings
-            </Button>
-          </Link>
-        </div>
-        <div className="flex items-center gap-4">
+
+        <nav className="hidden items-center gap-2 md:flex" aria-label="Primary">
+          {navItems.map((item) => (
+            <Link key={item.href} href={item.href}>
+              <Button
+                variant="outline"
+                size="sm"
+                className={`flex items-center gap-2 border-none ${
+                  isActive(item.href) ? activeClass : inactiveClass
+                }`}
+              >
+                {item.icon}
+                {item.label}
+              </Button>
+            </Link>
+          ))}
+        </nav>
+
+        <div className="flex shrink-0 items-center gap-3">
+          <LanguageSwitcher />
           <Button
             onClick={handleRefresh}
             disabled={isRefreshing}
@@ -149,7 +135,7 @@ export function Navbar() {
             className="border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-60"
           >
             <FiRefreshCcw className={`transition-transform duration-500 ${isRefreshing ? "animate-spin" : ""}`} />
-            {isRefreshing ? "Refreshing..." : "Refresh"}
+            {isRefreshing ? messages.nav.refreshing : messages.nav.refresh}
           </Button>
           <CreateMemoryDialog />
         </div>

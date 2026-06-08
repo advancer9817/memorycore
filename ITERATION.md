@@ -3077,3 +3077,213 @@ Graph 页面切换或默认使用 `status=all` 时会一次加载大量节点和
 - `git diff --check -- memorycore/frontend.py ui/app/graph/Graph3D.tsx ui/app/graph/page.tsx`：通过。
 
 ---
+
+## [迭代 112] 2026-06-08 — Graph 连接类型筛选高亮增强
+
+### 痛点
+
+Graph 左侧连接类型筛选里 `part of` 与 `related to` 使用灰色/暗 slate 色，选中态和未选中态差异太弱，视觉上像“选了跟没选一样”。
+
+### 变更
+
+**ui/app/graph/types.ts：**
+- `related_to` 颜色从暗灰改为 sky-400 蓝色。
+- `part_of` 颜色从暗 slate 改为 violet-400 紫色，避免和未选中灰色混在一起。
+
+**ui/app/graph/page.tsx：**
+- 连接类型筛选按钮新增彩色圆点，与节点类型筛选保持一致。
+- 增强选中态背景、边框透明度与 glow/inset shadow，让 active/inactive 状态在暗色侧栏中明显区分。
+
+### 验证
+
+- `git diff --check -- ui/app/graph/page.tsx ui/app/graph/types.ts ITERATION.md`：通过。
+- `cd ui && pnpm build`：通过，Graph 路由构建成功。
+- `/code-review low` diff 审查：`(none)`，未发现 hunk 内运行时正确性问题。
+- Playwright 浏览器验证：当前环境缺少 chrome executable，无法截图；以构建与服务 HTTP smoke 兜底。
+
+### 回滚
+
+- 恢复 `ui/app/graph/types.ts` 中 `related_to` / `part_of` 的旧颜色，并还原 `ui/app/graph/page.tsx` 的连接类型按钮样式。
+
+---
+
+## [迭代 113] 2026-06-08 — Dashboard 治理成熟化、LLM split 幂等与 typecheck 修复
+
+### 痛点
+
+主页 Dashboard 只显示单一 `Quality Score`，对健康分偏低的原因解释不足；LLM Curator 成功运行后仍可能重复写入同一 parent 下的 atomic facts，推高 duplicate 数量；同时全量 `tsc --noEmit` 被 `react-icons` / React 19 JSX 类型兼容问题阻塞，后续 UI 质量门禁无法可靠执行。
+
+### 变更
+
+**ui/components/dashboard/MemoryIntelligenceCenter.tsx：**
+- 将单一质量分升级为 `Governance Score`，按 risk control、reuse coverage、linked coverage、non-archived ratio、LLM governance 加权计算。
+- 新增健康信号分解条，让低分原因可解释：冲突/重复、never used、links、非归档比例、LLM curator 状态。
+- 新增 `Recommended Next Actions` 卡片，按 contradictions、duplicates、never accessed、link coverage、LLM 状态生成治理建议。
+- Knowledge Graph Snapshot 增加 active / archived 比例 mini metric，提升主页概览密度。
+
+**memorycore/storage/curator_llm.py：**
+- LLM split 子记忆新增 `fact_hash`、`atomizer_version=llm-curator-v1`、`source_type=llm_split` metadata。
+- `apply_llm_curator()` 在同一 `parent_id + fact_hash` 已存在时跳过插入，避免定时/手动 LLM Curator 重复运行制造重复 atomic facts。
+- split apply 结果新增 `split_children_created` / `split_children_skipped`，提升可观测性。
+- `_find_semantic_duplicate_candidates()` 对 >500 条候选池输出 warning，满足大库治理可观测性测试。
+
+**ui/components/shared/react-icons.tsx 与调用方：**
+- 新增本地 typed wrapper，将 `react-icons` 的 `ReactNode` 返回类型适配为 React 19 可接受的 JSX 组件类型。
+- 迁移 Navbar、Memories、Apps、shared categories/source-app、Skeleton 中的直接 `react-icons` import，解决全量 typecheck 阻塞。
+
+**tests/test_curator_apply.py：**
+- 新增 LLM split 幂等测试：同一 parent 的相同 sub-memory 重复 apply 时只写入一次，第二次计入 skipped。
+
+**TODO.md：**
+- 将 react-icons typecheck 问题标记完成。
+- 保留并强调 UI i18n 全局中英文切换规划项。
+- 新增 Dashboard 后续成熟化与数据质量后续治理待办。
+
+### 数据治理现场动作
+
+- 规则 Curator 小批量 apply 成功：`planned_actions` 从 1 降到 0。
+- LLM Curator 已从 `running/unknown` 恢复为 `success`，最近结果包含 semantic duplicates、contradictions、importance reassessments 和 split candidates。
+
+### 验证
+
+- `pnpm --dir ui exec tsc --noEmit`：通过。
+- `pnpm --dir ui build`：通过。
+- `.venv/bin/python -m py_compile memorycore/storage/curator_llm.py`：通过。
+- `.venv/bin/python -m pytest tests/test_curator_apply.py tests/test_curator_llm_jobs.py -q`：6 passed, 1 skipped。
+- `git diff --check`：通过。
+- 执行中遇到的报错均已处理：`uv run pytest` 缺 pytest、相对测试路径错误、react-icons JSX 类型错误、curator large-pool warning 测试失败均已定位并修复或改用正确命令。
+
+### 已知限制 / 后续
+
+- Playwright 浏览器截图仍受当前环境缺少 chrome executable 限制；未自动安装浏览器，避免未经确认修改系统/下载依赖。
+- i18n 语言切换已列入 TODO，后续按 typed dictionary + provider + LanguageSwitcher 方案落地。
+- 历史已重复写入的同 parent atomic facts 暂未批量清理；已在 TODO 记录为后续数据治理项，先防止新增重复。
+
+### 回滚
+
+- 回滚本迭代涉及的 `MemoryIntelligenceCenter.tsx`、`curator_llm.py`、`react-icons.tsx` 及各 import 替换；数据库现场 apply 动作为正常 curator 状态变更，可通过 audit/rollback 信息单独恢复。
+
+---
+
+
+## [迭代 114] 2026-06-08 — i18n 全局切换、Dashboard 治理报告与 LLM Curator 数据质量闭环
+
+### 变更
+
+**UI i18n：**
+- 新增 `ui/lib/i18n/dictionaries/zh.ts`、`ui/lib/i18n/I18nProvider.tsx`、`ui/hooks/useI18n.ts`、`ui/components/LanguageSwitcher.tsx`，支持 EN/中文全局切换、`localStorage(memorycore.locale)` 持久化、`html[lang]` 同步和 Redux 观测态。
+- Navbar、Create Memory、Memories 主列表/分页/筛选、Apps chrome、Settings、Dashboard 高频文案接入 typed dictionary；MemoryCore 名称、用户输入、curator/LLM 原始 reason/raw/prompt 保持原文。
+- `formatDate` 支持中英文相对时间与 locale 日期格式，Memories Created On 不再固定英文。
+- Playwright smoke 增加语言切换覆盖：默认英文、切换中文、刷新后保持中文、切回英文。
+
+**Dashboard 成熟化：**
+- `MemoryIntelligenceCenter` 新增可解释治理健康分、健康信号分解、推荐治理动作、风险排序 review queue。
+- 新增治理报告 JSON 导出，包含 health score、attention items、recommendations、review queue、curator/LLM 摘要和采样来源。
+- Dashboard 增强 drill-down：从 Intelligence Center 可跳转 Memories，并展示 Graph/active/archived/类型/来源分布和 curator audit activity。
+
+**数据质量治理：**
+- LLM split 子记忆写入 parent/child links：`child -> parent` 为 `part_of`，`parent -> child` 为 `supports`；重复 apply 时会补齐缺失 links 并跳过重复 child。
+- LLM duplicate archive 写入 merge audit 详情，保留 `keep_id/drop_id/merge_info/reason`。
+- 增加同 `parent_id + fact_hash` 重复 atomic facts 自动归档，审计记录保留 keep/archived ids。
+- `tests/test_curator_apply.py` 覆盖 split links、merge audit、重复 atomic fact cleanup。
+
+**文档/TODO：**
+- `TODO.md` 中 UI i18n、Dashboard 成熟化、数据质量治理剩余项已全部打勾。
+
+### 验证
+
+- `cd ui && pnpm exec tsc --noEmit`：通过。
+- `cd ui && pnpm build`：通过。
+- `.venv/bin/python -m pytest tests/test_curator_apply.py tests/test_dashboard_ops.py tests/test_frontend.py -q`：15 passed, 1 warning。
+- `.venv/bin/python -m pytest tests/test_curator_apply.py -q`：3 passed。
+- `git diff --check`：通过。
+
+### 已知限制
+
+- 未自动安装 Playwright 浏览器；当前只新增 e2e 覆盖并通过 build/typecheck/后端 API 测试门禁。
+
+### 回滚
+
+- 回滚本迭代涉及的 UI i18n/Dashboard 文件、`memorycore/storage/curator_llm.py`、`tests/test_curator_apply.py`、`TODO.md` 与本条 `ITERATION.md` 记录。
+
+---
+
+
+## [迭代 115] 2026-06-09 — Dashboard 运维面板 polish、健康趋势洞察与治理测试收敛
+
+### 变更
+
+**Dashboard Operations polish：**
+- `ui/components/dashboard/Install.tsx` 收敛 LLM curator 解析与错误处理类型，减少 `any`，通过 `unknown` narrowing 和 typed payload helper 处理返回体。
+- 单条 finding apply 失败不再静默吞掉；失败会保留在列表中并显示 per-finding 错误信息。
+- Accept-all 只 dismiss 成功应用的 finding，失败项保留并记录错误，避免批量操作误判为全部成功。
+- 运维面板高频文案接入中英文 i18n dictionary，同时保留 LLM raw/thinking/prompt 原文展示。
+
+**Health insights polish：**
+- `MemoryIntelligenceCenter` 新增紧凑 Health Trend Snapshot，展示治理分、风险、复用覆盖、图谱链接、LLM 状态等趋势/质量信号。
+- review queue 文案与 action label 本地化，提升中英文切换后的可读性。
+- 将 dormant/never-injected 指标转为比例展示，避免原始计数在不同规模数据集下误导健康判断。
+
+**Data-quality governance：**
+- `apply_llm_curator()` 对同 `parent_id + fact_hash` 的重复 atomic facts 归档顺序改为 deterministic ordering，重复运行保持相同 keep/archived 结果。
+- `tests/test_curator_apply.py` 强化断言：验证 exact keep/archived mapping，而不是仅验证 status 集合。
+
+### 验证
+
+- `cd ui && pnpm exec tsc --noEmit`：通过。
+- `cd ui && pnpm build`：通过。
+- `.venv/bin/python -m pytest tests/test_curator_apply.py tests/test_dashboard_ops.py tests/test_frontend.py -q`：通过（15 passed, 1 warning）。
+- `git diff --check`：通过。
+- `TODO.md`：无未完成 `- [ ]` 项。
+
+### 已知限制
+
+- 未执行浏览器驱动截图/完整 e2e；当前环境此前缺 Playwright browser executable，本轮为控制成本未安装浏览器依赖。
+
+### 回滚
+
+- 回滚本迭代涉及的 `Install.tsx`、`MemoryIntelligenceCenter.tsx`、i18n dictionaries、`curator_llm.py`、`tests/test_curator_apply.py` 与本条 `ITERATION.md` 记录。
+
+---
+
+## [迭代 116] 2026-06-09 — 修复 mcore 服务管理命令失效与前后端统一控制
+
+### 痛点
+
+- `mcore restart`、`mcore stop`、`mcore status` 执行后无输出且无法控制服务，导致后端 `mcore.service` 与前端 `mcore-ui.service` 仍继续运行。
+- 根因是 `~/.local/bin/mcore` 指向的 `scripts/mcore` 为空文件，服务管理入口在安装脚本中没有可靠生成。
+
+### 变更
+
+**服务控制脚本：**
+- `scripts/mcore` 从空文件恢复为完整管理入口。
+- 支持 `start|stop|restart|status [all|server|ui]`，默认同时控制 backend 与 UI。
+- systemd user session 可用时委托 `mcore.service` / `mcore-ui.service`；不可用时提供 backend daemon 与 Next.js UI fallback。
+- 其他参数继续透传给 `python -m memorycore`，保留 export/import 等 CLI 兼容性。
+- fallback UI 启动时显式切换到 `ui/` 目录，避免从调用者当前目录启动 Next.js。
+
+**安装脚本：**
+- `scripts/install_services.sh` 安装 `mcore` 时同时替换 `__ROOT__` 与 `__PYTHON__`，避免安装到 `~/.local/bin` 后路径误判为 `~/.local`。
+- `mcore-ui.service` 安装检查改为匹配当前 `next dev` 启动方式，检查 `ui/node_modules/next/dist/bin/next`。
+- 非 systemd fallback 分支也安装 `mcore` 快捷命令，保证初始化脚本内完成服务管理入口配置。
+
+### 验证
+
+- `bash -n scripts/mcore scripts/install_services.sh`：通过。
+- `mcore restart`：返回 0，backend 与 UI 均重新拉起。
+- `mcore stop`：返回 0，`mcore.service` 与 `mcore-ui.service` 均变为 inactive。
+- `mcore start`：返回 0，`mcore.service` 与 `mcore-ui.service` 均 active running。
+- `http://127.0.0.1:8318/health`：HTTP 200。
+- `http://127.0.0.1:18318/`：HTTP 200。
+- `git diff --check -- scripts/mcore scripts/install_services.sh`：通过。
+- code-review：第二轮复核无 CRITICAL/HIGH，批准通过；仅剩 stale UI unit cleanup 的 MEDIUM 后续建议。
+
+### 已知限制 / 后续
+
+- 当安装时跳过 UI（缺 Node.js 或 Next.js binary）时，旧的 `mcore-ui.service` 仍可能残留；后续可在 skip 分支显式 disable/remove stale unit。
+
+### 回滚
+
+- 回滚 `scripts/mcore`、`scripts/install_services.sh` 与本条 `ITERATION.md` 记录。
+
+---

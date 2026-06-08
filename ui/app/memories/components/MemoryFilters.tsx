@@ -2,7 +2,7 @@
 import { Archive, Pause, Play, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { FiTrash2 } from "react-icons/fi";
+import { FiTrash2Icon as FiTrash2 } from "@/components/shared/react-icons";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "@/store/store";
 import { clearSelection } from "@/store/memoriesSlice";

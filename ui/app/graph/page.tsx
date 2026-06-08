@@ -407,12 +407,21 @@ export default function GraphPage() {
                     <div className="flex flex-wrap gap-1">
                       {allEdgeTypes.map(e => {
                         const active = activeEdgeTypes.has(e);
-                        const color = EDGE_COLORS[e] ?? "#52525b";
+                        const color = EDGE_COLORS[e] ?? "#64748B";
                         return (
                           <button key={e} type="button" onClick={() => toggleEdgeType(e)}
-                            className="rounded px-1.5 py-0.5 text-xs transition-all"
-                            style={{ color: active ? color : "#52525b", background: active ? `${color}15` : "rgba(255,255,255,0.03)", border: `1px solid ${active ? `${color}30` : "rgba(255,255,255,0.06)"}` }}
+                            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium transition-all"
+                            style={{
+                              color: active ? color : "#52525b",
+                              background: active ? `${color}24` : "rgba(255,255,255,0.03)",
+                              border: `1px solid ${active ? `${color}70` : "rgba(255,255,255,0.06)"}`,
+                              boxShadow: active ? `0 0 10px ${color}22, inset 0 0 8px ${color}14` : "none",
+                            }}
                           >
+                            <span
+                              className="w-1.5 h-1.5 rounded-full shrink-0"
+                              style={{ background: active ? color : "#3f3f46", boxShadow: active ? `0 0 8px ${color}` : "none" }}
+                            />
                             {e.replace(/_/g, " ")}
                           </button>
                         );

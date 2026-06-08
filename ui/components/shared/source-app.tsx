@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { BiEdit } from "react-icons/bi";
+import { BiEditIcon as BiEdit } from "@/components/shared/react-icons";
 import Image from "next/image";
 
 export const Icon = ({ source }: { source: string }) => {

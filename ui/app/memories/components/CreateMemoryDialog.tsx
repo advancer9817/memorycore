@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useState, useRef } from "react";
-import { GoPlus } from "react-icons/go";
+import { GoPlusIcon as GoPlus } from "@/components/shared/react-icons";
 import { Loader2 } from "lucide-react";
 import { useMemoriesApi } from "@/hooks/useMemoriesApi";
 import { toast } from "sonner";

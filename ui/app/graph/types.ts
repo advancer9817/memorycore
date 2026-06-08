@@ -31,10 +31,10 @@ export const TYPE_COLORS: Record<string, string> = {
 };
 
 export const EDGE_COLORS: Record<string, string> = {
-  related_to:      "#3F3F46", // zinc-700   — ambient connection
+  related_to:      "#38BDF8", // sky-400    — ambient connection
   supports:        "#10B981", // emerald    — support signal
   contradicts:     "#F43F5E", // rose-500   — conflict alert
-  part_of:         "#475569", // slate-600  — structural bond
+  part_of:         "#C084FC", // violet-400 — structural bond
   supersedes:      "#F97316", // orange-500 — override flow
   causes:          "#FBBF24", // amber-400  — causal chain
   failure_pattern: "#EF4444", // red-500    — failure marker

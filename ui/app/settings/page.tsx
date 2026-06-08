@@ -25,9 +25,11 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { DEFAULT_API_URL, getApiBaseUrl, setApiBaseUrl } from "@/lib/api-url"
+import { useI18n } from "@/hooks/useI18n"
 
 export default function SettingsPage() {
   const { toast } = useToast()
+  const { messages } = useI18n()
   const configState = useSelector((state: RootState) => state.config)
   const [settings, setSettings] = useState({
     settings: configState.settings || {
@@ -47,8 +49,8 @@ export default function SettingsPage() {
         await fetchConfig()
       } catch (error) {
         toast({
-          title: "Error",
-          description: "Failed to load configuration",
+          title: messages.common.error,
+          description: messages.settings.loadFailure,
           variant: "destructive",
         })
       }
@@ -74,13 +76,13 @@ export default function SettingsPage() {
         llm: settings.llm
       })
       toast({
-        title: "Settings saved",
-        description: "Your configuration has been updated successfully.",
+        title: messages.settings.settingsSavedTitle,
+        description: messages.settings.settingsSavedDescription,
       })
     } catch (error) {
       toast({
-        title: "Error",
-        description: "Failed to save configuration",
+        title: messages.common.error,
+        description: messages.settings.saveFailure,
         variant: "destructive",
       })
     }
@@ -91,14 +93,14 @@ export default function SettingsPage() {
       setApiUrl(setApiBaseUrl(DEFAULT_API_URL))
       await resetConfig()
       toast({
-        title: "Settings reset",
-        description: "Configuration has been reset to default values.",
+        title: messages.settings.settingsResetTitle,
+        description: messages.settings.settingsResetDescription,
       })
       await fetchConfig()
     } catch (error) {
       toast({
-        title: "Error",
-        description: "Failed to reset configuration",
+        title: messages.common.error,
+        description: messages.settings.resetFailure,
         variant: "destructive",
       })
     }
@@ -109,29 +111,28 @@ export default function SettingsPage() {
       <div className="container mx-auto py-10 max-w-4xl">
         <div className="flex justify-between items-center mb-8">
           <div className="animate-fade-slide-down">
-            <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-            <p className="text-muted-foreground mt-1">Manage your MemoryCore configuration</p>
+            <h1 className="text-3xl font-bold tracking-tight">{messages.settings.title}</h1>
+            <p className="text-muted-foreground mt-1">{messages.settings.description}</p>
           </div>
           <div className="flex space-x-2">
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button variant="outline" className="border-zinc-800 text-zinc-200 hover:bg-zinc-700 hover:text-zinc-50 animate-fade-slide-down" disabled={isLoading}>
                   <RotateCcw className="mr-2 h-4 w-4" />
-                  Reset Defaults
+                  {messages.settings.resetDefaults}
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Reset Configuration?</AlertDialogTitle>
+                  <AlertDialogTitle>{messages.settings.resetTitle}</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This will reset all settings to the system defaults. Any custom configuration will be lost.
-                    API keys will be set to use environment variables.
+                    {messages.settings.resetDescription}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogCancel>{messages.common.cancel}</AlertDialogCancel>
                   <AlertDialogAction onClick={handleReset} className="bg-red-600 hover:bg-red-700">
-                    Reset
+                    {messages.common.reset}
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
@@ -139,19 +140,19 @@ export default function SettingsPage() {
             
             <Button onClick={handleSave} className="bg-primary hover:bg-primary/90 animate-fade-slide-down" disabled={isLoading}>
               <SaveIcon className="mr-2 h-4 w-4" />
-              {isLoading ? "Saving..." : "Save Configuration"}
+              {isLoading ? messages.common.saving : messages.settings.saveConfiguration}
             </Button>
           </div>
         </div>
 
         <Card className="mb-8 animate-fade-slide-down delay-1">
           <CardHeader>
-            <CardTitle>API Connection</CardTitle>
-            <CardDescription>Configure the MemoryCore backend API endpoint</CardDescription>
+            <CardTitle>{messages.settings.apiConnection}</CardTitle>
+            <CardDescription>{messages.settings.apiConnectionDescription}</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              <Label htmlFor="api-url">API URL</Label>
+              <Label htmlFor="api-url">{messages.settings.apiUrl}</Label>
               <Input
                 id="api-url"
                 value={apiUrl}
@@ -164,8 +165,8 @@ export default function SettingsPage() {
 
         <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as "form" | "json")} className="w-full animate-fade-slide-down delay-1">
           <TabsList className="grid w-full grid-cols-2 mb-8">
-            <TabsTrigger value="form">Form View</TabsTrigger>
-            <TabsTrigger value="json">JSON Editor</TabsTrigger>
+            <TabsTrigger value="form">{messages.settings.formView}</TabsTrigger>
+            <TabsTrigger value="json">{messages.settings.jsonEditor}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="form">
@@ -175,8 +176,8 @@ export default function SettingsPage() {
           <TabsContent value="json">
             <Card>
               <CardHeader>
-                <CardTitle>JSON Configuration</CardTitle>
-                <CardDescription>Edit the entire configuration directly as JSON</CardDescription>
+                <CardTitle>{messages.settings.jsonConfiguration}</CardTitle>
+                <CardDescription>{messages.settings.jsonConfigurationDescription}</CardDescription>
               </CardHeader>
               <CardContent>
                 <JsonEditor value={settings} onChange={setSettings} />

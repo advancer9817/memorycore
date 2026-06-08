@@ -22,6 +22,7 @@ apply_llm_curator(report, dry_run) -> dict
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time as _time
@@ -54,6 +55,14 @@ _SPLIT_CONTENT_THRESHOLD = 400
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _normalize_fact_text(text: str) -> str:
+    return " ".join((text or "").strip().lower().split())
+
+
+def _llm_split_fact_hash(parent_id: str, content: str) -> str:
+    return hashlib.sha256(f"{parent_id}:{_normalize_fact_text(content)}".encode()).hexdigest()
+
 
 def _call_llm_with_thinking(prompt: str, system: str, config: Any) -> tuple[str, str]:
     """Call LLM and return (json_content, thinking).
@@ -135,7 +144,13 @@ def _find_semantic_duplicate_candidates(
 ) -> list[tuple[dict, dict, float]]:
     """Return (mem_a, mem_b, score) pairs above sim_threshold, deduplicated."""
     now = _time.time()
+    original_count = len(memories)
     memories = [m for m in memories if now - _reviewed_memory_ids.get(m["id"], 0) >= _REVIEW_COOLDOWN_SECONDS]
+    if original_count > 500:
+        logger.warning(
+            "Large LLM duplicate candidate pool (%d memories); scanning all eligible memories may be slow",
+            original_count,
+        )
 
     seen: set[frozenset[str]] = set()
     pairs: list[tuple[dict, dict, float]] = []
@@ -625,18 +640,40 @@ def apply_llm_curator(report: dict[str, Any], dry_run: bool = True) -> dict[str,
     from memorycore.storage.db import _managed_query, managed_conn
     from memorycore.models import now
 
-    applied: dict[str, int] = {"archived": 0, "contradicted": 0, "importance_updated": 0}
+    applied: dict[str, int] = {
+        "archived": 0,
+        "contradicted": 0,
+        "importance_updated": 0,
+        "duplicate_merge_audits": 0,
+        "split_links_created": 0,
+        "split_links_skipped": 0,
+        "duplicate_atomic_facts_archived": 0,
+    }
+    duplicate_merge_audits: list[dict[str, Any]] = []
+    duplicate_atomic_fact_audits: list[dict[str, Any]] = []
     now_ts = now()
 
     with managed_conn() as conn:
         for dup in report.get("semantic_duplicates", []):
             drop_id = dup.get("drop_id")
+            keep_id = dup.get("keep_id")
             if drop_id:
-                conn.execute(
+                cursor = conn.execute(
                     "UPDATE memories SET status='archived', updated_at=? WHERE id=? AND status NOT IN ('archived')",
                     (now_ts, drop_id),
                 )
-                applied["archived"] += 1
+                if cursor.rowcount > 0:
+                    applied["archived"] += 1
+            if keep_id and drop_id and (dup.get("merge_info") or dup.get("action") == "archive_and_merge_duplicate"):
+                duplicate_merge_audits.append({
+                    "keep_id": keep_id,
+                    "drop_id": drop_id,
+                    "keep_title": dup.get("keep_title", ""),
+                    "drop_title": dup.get("drop_title", ""),
+                    "merge_info": dup.get("merge_info", ""),
+                    "reason": dup.get("reason", "semantic duplicate"),
+                })
+                applied["duplicate_merge_audits"] += 1
 
         for contra in report.get("contradictions", []):
             older_id = contra.get("older_id")
@@ -673,38 +710,76 @@ def apply_llm_curator(report: dict[str, Any], dry_run: bool = True) -> dict[str,
                     )
                 applied["importance_updated"] += 1
 
-        # Apply split operations: create sub-memories and archive the original
+        # Apply split operations: create sub-memories and archive the original.
+        # Idempotency is critical because scheduled/manual LLM curator runs can
+        # revisit the same parent.  Use the same parent_id + normalized content
+        # hash contract as rule-based atomization, and skip facts already written.
         applied["split"] = 0
+        applied["split_children_created"] = 0
+        applied["split_children_skipped"] = 0
         for split in report.get("split_candidates", []):
             orig_id = split.get("id")
             sub_memories = split.get("sub_memories", [])
             if not orig_id or not sub_memories:
                 continue
-            # Get original for metadata inheritance
             orig_row = conn.execute("SELECT * FROM memories WHERE id=?", (orig_id,)).fetchone()
             if not orig_row:
                 continue
-            from memorycore.models import row_to_dict, now as _now_fn
+            from memorycore.models import row_to_dict
             orig = row_to_dict(orig_row)
-            # Archive original
             conn.execute(
                 "UPDATE memories SET status='archived', updated_at=? WHERE id=?",
                 (now_ts, orig_id),
             )
-            # Create sub-memories
             import uuid as _uuid
+            created_for_parent = 0
             for sub in sub_memories:
                 sub_title = str(sub.get("title") or "")[:120].strip()
                 sub_content = str(sub.get("content") or "").strip()
                 if not sub_title or not sub_content:
                     continue
-                # Use LLM-assigned importance if present; fall back to parent's importance
+                fact_hash = _llm_split_fact_hash(orig_id, sub_content)
+                existing_row = conn.execute(
+                    """
+                    SELECT id FROM memories
+                    WHERE json_extract(metadata_json, '$.parent_id') = ?
+                      AND json_extract(metadata_json, '$.fact_hash') = ?
+                    LIMIT 1
+                    """,
+                    (orig_id, fact_hash),
+                ).fetchone()
+                if existing_row:
+                    for source_id, target_id, relation_type, note in (
+                        (existing_row["id"], orig_id, "part_of", "LLM curator split child fact"),
+                        (orig_id, existing_row["id"], "supports", "LLM curator split generated child fact"),
+                    ):
+                        cursor = conn.execute(
+                            """
+                            INSERT INTO memory_links(id, source_id, target_id, relation_type, weight, note, created_at, source_agent)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            ON CONFLICT(source_id, target_id, relation_type) DO NOTHING
+                            """,
+                            (str(_uuid.uuid4()), source_id, target_id, relation_type, 1.0, note, now_ts, "llm_curator"),
+                        )
+                        if cursor.rowcount > 0:
+                            applied["split_links_created"] += 1
+                        else:
+                            applied["split_links_skipped"] += 1
+                    applied["split_children_skipped"] += 1
+                    continue
                 raw_imp = sub.get("importance")
                 if raw_imp is not None:
                     sub_importance = float(max(0.0, min(1.0, raw_imp)))
                 else:
                     sub_importance = float(orig.get("importance", 0.5))
                 sub_id = str(_uuid.uuid4())
+                metadata = json.dumps({
+                    "kind": "atomic_fact",
+                    "parent_id": orig_id,
+                    "fact_hash": fact_hash,
+                    "atomizer_version": "llm-curator-v1",
+                    "source_type": "llm_split",
+                }, ensure_ascii=False)
                 conn.execute(
                     """INSERT INTO memories
                        (id,type,scope,title,content,tags_json,source,source_agent,project_path,
@@ -719,13 +794,78 @@ def apply_llm_curator(report: dict[str, Any], dry_run: bool = True) -> dict[str,
                         now_ts, now_ts,
                         float(orig.get("confidence", 0.7)), sub_importance,
                         "active", orig.get("decay_policy", "review"),
-                        "[]",
-                        '{"kind":"atomic_fact","parent_id":"' + orig_id + '"}',
-                        None, None,
+                        "[]", metadata, None, None,
                     ),
                 )
-            applied["split"] += 1
+                for source_id, target_id, relation_type, note in (
+                    (sub_id, orig_id, "part_of", "LLM curator split child fact"),
+                    (orig_id, sub_id, "supports", "LLM curator split generated child fact"),
+                ):
+                    cursor = conn.execute(
+                        """
+                        INSERT INTO memory_links(id, source_id, target_id, relation_type, weight, note, created_at, source_agent)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(source_id, target_id, relation_type) DO NOTHING
+                        """,
+                        (str(_uuid.uuid4()), source_id, target_id, relation_type, 1.0, note, now_ts, "llm_curator"),
+                    )
+                    if cursor.rowcount > 0:
+                        applied["split_links_created"] += 1
+                    else:
+                        applied["split_links_skipped"] += 1
+                created_for_parent += 1
+            if created_for_parent > 0:
+                applied["split"] += 1
+                applied["split_children_created"] += created_for_parent
+
+        duplicate_fact_rows = conn.execute(
+            """
+            SELECT parent_id, fact_hash, GROUP_CONCAT(id) AS memory_ids
+            FROM (
+                SELECT id,
+                       json_extract(metadata_json, '$.parent_id') AS parent_id,
+                       json_extract(metadata_json, '$.fact_hash') AS fact_hash
+                FROM memories
+                WHERE status NOT IN ('archived')
+                  AND json_extract(metadata_json, '$.parent_id') IS NOT NULL
+                  AND json_extract(metadata_json, '$.fact_hash') IS NOT NULL
+                ORDER BY created_at ASC, id ASC
+            )
+            GROUP BY parent_id, fact_hash
+            HAVING COUNT(*) > 1
+            """,
+        ).fetchall()
+        for row in duplicate_fact_rows:
+            memory_ids = [mid for mid in str(row["memory_ids"] or "").split(",") if mid]
+            if len(memory_ids) < 2:
+                continue
+            keep_id = memory_ids[0]
+            drop_ids = memory_ids[1:]
+            for drop_id in drop_ids:
+                cursor = conn.execute(
+                    "UPDATE memories SET status='archived', updated_at=? WHERE id=? AND status NOT IN ('archived')",
+                    (now_ts, drop_id),
+                )
+                if cursor.rowcount > 0:
+                    applied["duplicate_atomic_facts_archived"] += 1
+            if drop_ids:
+                duplicate_atomic_fact_audits.append({
+                    "parent_id": row["parent_id"],
+                    "fact_hash": row["fact_hash"],
+                    "keep_id": keep_id,
+                    "archived_ids": drop_ids,
+                    "reason": "duplicate atomic facts with same parent_id and fact_hash",
+                })
 
     from memorycore.storage.audit import log_audit_event
-    log_audit_event("llm_curator_apply", detail={**applied, "dry_run": False})
+    log_audit_event(
+        "llm_curator_apply",
+        agent="llm_curator",
+        detail={
+            **applied,
+            "dry_run": False,
+            "duplicate_merge_audits": duplicate_merge_audits,
+            "duplicate_atomic_fact_audits": duplicate_atomic_fact_audits,
+        },
+    )
     return {"dry_run": False, "applied": applied}

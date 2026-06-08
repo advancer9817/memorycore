@@ -1,0 +1,275 @@
+#!/usr/bin/env bash
+# mcore — MemoryCore 服务管理与 CLI 入口。
+#
+# 用法：
+#   mcore start [all|server|ui]
+#   mcore stop [all|server|ui]
+#   mcore restart [all|server|ui]
+#   mcore status [all|server|ui]
+#   mcore <memorycore-cli-args...>
+#
+# 说明：
+#   - 当首个参数是 start/stop/restart/status 时，走 systemd 用户服务管理。
+#   - 其他参数原样透传给 `python -m memorycore`，兼容 export/import 等子命令。
+#   - 无参数时默认展示全部服务状态。
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${MCORE_DIR:-__ROOT__}"
+if [[ "$ROOT" == "__ROOT__" ]]; then
+  if [[ "$(basename "$SCRIPT_DIR")" == "scripts" ]]; then
+    ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+  else
+    ROOT="$HOME/project/memorycore"
+  fi
+fi
+PYTHON="__PYTHON__"
+if [[ "$PYTHON" == "__PYTHON__" || ! -x "$PYTHON" ]]; then
+  PYTHON="$ROOT/.venv/bin/python"
+fi
+if [[ ! -x "$PYTHON" ]]; then
+  for candidate in python3.11 python3.12 python3.13 python3; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      PYTHON="$(command -v "$candidate")"
+      break
+    fi
+  done
+fi
+
+MCORE_UNIT="mcore.service"
+UI_UNIT="mcore-ui.service"
+SERVER_TARGETS=("$MCORE_UNIT")
+UI_TARGETS=("$UI_UNIT")
+ALL_TARGETS=("$MCORE_UNIT" "$UI_UNIT")
+UI_PID_FILE="${MCORE_UI_PID_FILE:-/tmp/mcore-ui.pid}"
+UI_LOG_FILE="${MCORE_UI_LOG_FILE:-/tmp/mcore-ui.log}"
+UI_PORT="${MCORE_UI_PORT:-18318}"
+NODE_BIN="${MCORE_NODE_BIN:-$(command -v node 2>/dev/null || true)}"
+NEXT_BIN="$ROOT/ui/node_modules/next/dist/bin/next"
+DAEMON_SCRIPT="$ROOT/scripts/mcore-daemon.sh"
+
+log() { echo "[mcore] $*"; }
+die() { echo "[mcore] ERROR: $*" >&2; exit 1; }
+
+has_systemd_user() {
+  systemctl --user show-environment >/dev/null 2>&1
+}
+
+normalize_target() {
+  case "${1:-all}" in
+    all|server|backend|mcp|ui|frontend|web) printf '%s\n' "$1" ;;
+    "") printf 'all\n' ;;
+    *) die "Unknown target: $1 (expected all|server|ui)" ;;
+  esac
+}
+
+resolve_targets() {
+  case "$1" in
+    all) printf '%s\n' "${ALL_TARGETS[@]}" ;;
+    server|backend|mcp) printf '%s\n' "${SERVER_TARGETS[@]}" ;;
+    ui|frontend|web) printf '%s\n' "${UI_TARGETS[@]}" ;;
+    *) die "Unknown target: $1" ;;
+  esac
+}
+
+systemd_action() {
+  local action="$1"
+  local target="$2"
+  local -a units=()
+  mapfile -t units < <(resolve_targets "$target")
+
+  case "$action" in
+    start)
+      if [[ "$target" == "all" ]]; then
+        systemctl --user start "${units[@]}"
+      else
+        systemctl --user start "${units[@]}"
+      fi
+      ;;
+    stop)
+      if [[ "$target" == "all" ]]; then
+        systemctl --user stop "$UI_UNIT" "$MCORE_UNIT"
+      else
+        systemctl --user stop "${units[@]}"
+      fi
+      ;;
+    restart)
+      if [[ "$target" == "all" ]]; then
+        systemctl --user restart "$MCORE_UNIT" "$UI_UNIT"
+      else
+        systemctl --user restart "${units[@]}"
+      fi
+      ;;
+    status)
+      if [[ "$target" == "all" ]]; then
+        systemctl --user status --no-pager "$MCORE_UNIT" "$UI_UNIT"
+      else
+        systemctl --user status --no-pager "${units[@]}"
+      fi
+      ;;
+    *) die "Unsupported action: $action" ;;
+  esac
+}
+
+port_listening() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -tln 2>/dev/null | awk '{print $4}' | grep -E "[:.]${port}$" >/dev/null 2>&1
+  elif command -v netstat >/dev/null 2>&1; then
+    netstat -tln 2>/dev/null | awk '{print $4}' | grep -E "[:.]${port}$" >/dev/null 2>&1
+  else
+    bash -c "exec 3<>/dev/tcp/127.0.0.1/${port}" >/dev/null 2>&1 && exec 3>&- 3<&-
+  fi
+}
+
+ui_pid_alive() {
+  local pid="${1:-}"
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+ui_start_fallback() {
+  [[ -x "$NODE_BIN" ]] || die "node not found; install Node.js or use systemd user services"
+  [[ -f "$NEXT_BIN" ]] || die "Next.js binary not found: $NEXT_BIN"
+  if port_listening "$UI_PORT"; then
+    log "UI already listening on :$UI_PORT"
+    return 0
+  fi
+  if [[ -f "$UI_PID_FILE" ]]; then
+    local old_pid
+    old_pid="$(cat "$UI_PID_FILE" 2>/dev/null || true)"
+    if ui_pid_alive "$old_pid"; then
+      log "UI already running (pid $old_pid)"
+      return 0
+    fi
+    rm -f "$UI_PID_FILE"
+  fi
+  mkdir -p "$(dirname "$UI_LOG_FILE")"
+  (
+    cd "$ROOT/ui"
+    exec "$NODE_BIN" "$NEXT_BIN" dev --port "$UI_PORT"
+  ) >>"$UI_LOG_FILE" 2>&1 &
+  local new_pid=$!
+  echo "$new_pid" > "$UI_PID_FILE"
+  local i=0
+  while [[ $i -lt 30 ]]; do
+    if port_listening "$UI_PORT"; then
+      log "UI started on :$UI_PORT"
+      return 0
+    fi
+    if ! ui_pid_alive "$new_pid"; then
+      rm -f "$UI_PID_FILE"
+      die "UI process exited early; check $UI_LOG_FILE"
+    fi
+    sleep 0.2
+    i=$((i + 1))
+  done
+  die "UI started but port :$UI_PORT was not ready after 6s"
+}
+
+ui_stop_fallback() {
+  if [[ -f "$UI_PID_FILE" ]]; then
+    local pid
+    pid="$(cat "$UI_PID_FILE" 2>/dev/null || true)"
+    if ui_pid_alive "$pid"; then
+      kill "$pid" 2>/dev/null || true
+      sleep 0.5
+      ui_pid_alive "$pid" && kill -9 "$pid" 2>/dev/null || true
+    fi
+    rm -f "$UI_PID_FILE"
+  fi
+  if port_listening "$UI_PORT"; then
+    log "UI still listening on :$UI_PORT; check $UI_LOG_FILE"
+    return 1
+  fi
+  log "UI stopped"
+}
+
+ui_status_fallback() {
+  if port_listening "$UI_PORT"; then
+    log "UI: listening on :$UI_PORT"
+    [[ -f "$UI_PID_FILE" ]] && log "UI pid: $(cat "$UI_PID_FILE" 2>/dev/null || true)"
+    return 0
+  fi
+  log "UI: not running"
+  return 1
+}
+
+fallback_action() {
+  local action="$1"
+  local target="$2"
+
+  case "$target" in
+    all)
+      case "$action" in
+        start)
+          "$DAEMON_SCRIPT" start
+          ui_start_fallback
+          ;;
+        stop)
+          ui_stop_fallback || true
+          "$DAEMON_SCRIPT" stop
+          ;;
+        restart)
+          ui_stop_fallback || true
+          "$DAEMON_SCRIPT" restart
+          ui_start_fallback
+          ;;
+        status)
+          local server_ok=0 ui_ok=0
+          "$DAEMON_SCRIPT" status || server_ok=$?
+          ui_status_fallback || ui_ok=$?
+          return $(( server_ok != 0 || ui_ok != 0 ))
+          ;;
+      esac
+      ;;
+    server|backend|mcp)
+      case "$action" in
+        start) "$DAEMON_SCRIPT" start ;;
+        stop) "$DAEMON_SCRIPT" stop ;;
+        restart) "$DAEMON_SCRIPT" restart ;;
+        status) "$DAEMON_SCRIPT" status ;;
+      esac
+      ;;
+    ui|frontend|web)
+      case "$action" in
+        start) ui_start_fallback ;;
+        stop) ui_stop_fallback ;;
+        restart) ui_stop_fallback || true; ui_start_fallback ;;
+        status) ui_status_fallback ;;
+      esac
+      ;;
+  esac
+}
+
+run_management_command() {
+  local action="$1"
+  local target="$2"
+
+  if has_systemd_user; then
+    systemd_action "$action" "$target"
+  else
+    fallback_action "$action" "$target"
+  fi
+}
+
+main() {
+  local first="${1:-}"
+  case "$first" in
+    start|stop|restart|status)
+      local action="$1"
+      shift || true
+      local target="${1:-all}"
+      [[ $# -gt 1 ]] && die "Too many arguments for $action: $*"
+      target="$(normalize_target "$target")"
+      run_management_command "$action" "$target"
+      ;;
+    "")
+      run_management_command status all
+      ;;
+    *)
+      exec "$PYTHON" -m memorycore "$@"
+      ;;
+  esac
+}
+
+main "$@"

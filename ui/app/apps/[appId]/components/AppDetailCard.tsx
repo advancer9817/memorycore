@@ -5,7 +5,7 @@ import { useAppsApi } from "@/hooks/useAppsApi";
 import Image from "next/image";
 import { useDispatch, useSelector } from "react-redux";
 import { setAppDetails } from "@/store/appsSlice";
-import { BiEdit } from "react-icons/bi";
+import { BiEditIcon as BiEdit } from "@/components/shared/react-icons";
 import { constants } from "@/components/shared/source-app";
 import { RootState } from "@/store/store";
 

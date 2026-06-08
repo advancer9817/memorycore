@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/hooks/useI18n";
 
 interface MemoryPaginationProps {
   currentPage: number;
@@ -12,6 +13,8 @@ export function MemoryPagination({
   totalPages,
   setCurrentPage,
 }: MemoryPaginationProps) {
+  const { messages } = useI18n();
+
   return (
     <div className="flex items-center justify-between my-auto">
       <div className="flex items-center gap-2">
@@ -24,7 +27,7 @@ export function MemoryPagination({
           <ChevronLeft className="h-4 w-4" />
         </Button>
         <div className="text-sm">
-          Page {currentPage} of {totalPages}
+          {messages.common.page} {currentPage} {messages.common.of} {totalPages}
         </div>
         <Button
           variant="outline"

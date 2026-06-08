@@ -1,8 +1,5 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { HiMiniRectangleStack } from "react-icons/hi2"
-import { PiSwatches } from "react-icons/pi"
-import { GoPackage } from "react-icons/go"
-import { CiCalendar } from "react-icons/ci"
+import { CiCalendarIcon as CiCalendar, GoPackageIcon as GoPackage, HiMiniRectangleStackIcon as HiMiniRectangleStack, PiSwatchesIcon as PiSwatches } from "@/components/shared/react-icons"
 import { MoreHorizontal } from "lucide-react"
 
 export function MemoryTableSkeleton() {
