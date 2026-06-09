@@ -158,7 +158,40 @@ def test_auto_disabled_routes_candidate_to_review(monkeypatch, tmp_path):
     assert list_governance_decisions(limit=1)[0]["review_status"] == "needs_review"
 
 
-def test_candidate_detection_scoped_to_same_type_scope_project(monkeypatch, tmp_path):
+def test_rollback_removes_supersedes_link_from_memory_links(monkeypatch, tmp_path):
+    """Rollback must clean up the supersedes link created during apply, not just restore memory fields."""
+    _enable_auto(monkeypatch, tmp_path)
+    old = add_memory_record("feedback", "Retry limit", "Retry limit is three attempts", importance=0.4)
+    new = add_memory_record("feedback", "Retry limit", "Retry limit is three attempts", importance=0.4)
+
+    # Supersedes link exists after auto-apply
+    lineage_before_rollback = memory_lineage(new["id"])
+    assert any(
+        link["source_id"] == new["id"] and link["target_id"] == old["id"]
+        for link in lineage_before_rollback["links"]
+    ), "supersedes link should exist after auto-apply"
+
+    decision = list_governance_decisions(limit=1)[0]
+    rollback_governance_decision(decision["id"], source_agent="pytest")
+
+    # Memory fields restored
+    assert get_record(old["id"])["status"] == "active"
+    assert get_record(old["id"])["superseded_by"] is None
+
+    # Supersedes link must be gone
+    with managed_conn() as conn:
+        link_count = conn.execute(
+            "SELECT COUNT(*) FROM memory_links WHERE source_id=? AND target_id=? AND relation_type='supersedes'",
+            (new["id"], old["id"]),
+        ).fetchone()[0]
+    assert link_count == 0, "supersedes link must be removed after rollback"
+
+    # Lineage should no longer show the supersedes link
+    lineage_after_rollback = memory_lineage(old["id"])
+    assert not any(
+        link["source_id"] == new["id"] and link["target_id"] == old["id"]
+        for link in lineage_after_rollback["links"]
+    ), "lineage must not contain rolled-back supersedes link"
     _enable_auto(monkeypatch, tmp_path)
     old = add_memory_record("feedback", "Retry limit", "Retry limit is three attempts", scope="global", project_path="/a")
     add_memory_record("feedback", "Retry limit", "Retry limit is three attempts", scope="global", project_path="/b")

@@ -373,6 +373,9 @@ def rollback_governance_decision(decision_id: str, source_agent: str = "agent") 
     before = rollback_data.get("before") or []
     if not before:
         raise ValueError("decision has no rollback snapshot")
+    after_state = rollback_data.get("after") or []
+    before_by_id = {m["id"]: m for m in before}
+    after_by_id = {m["id"]: m for m in after_state}
     ts = now()
     restored_records: list[dict[str, Any]] = []
     with managed_conn() as conn:
@@ -393,6 +396,16 @@ def rollback_governance_decision(decision_id: str, source_agent: str = "agent") 
             restored = conn.execute("SELECT * FROM memories WHERE id=?", (memory.get("id"),)).fetchone()
             if restored is not None:
                 restored_records.append(row_to_dict(restored))
+        # Remove supersedes links that were created by the apply step.
+        # A link was created if a memory had no superseded_by before but does after.
+        for mem_id, before_mem in before_by_id.items():
+            after_mem = after_by_id.get(mem_id, {})
+            if not before_mem.get("superseded_by") and after_mem.get("superseded_by"):
+                linker_id = after_mem["superseded_by"]
+                conn.execute(
+                    "DELETE FROM memory_links WHERE source_id=? AND target_id=? AND relation_type='supersedes'",
+                    (linker_id, mem_id),
+                )
         conn.execute(
             "UPDATE governance_decisions SET review_status='rolled_back', rolled_back_at=?, updated_at=?, rolled_back_by=? WHERE id=?",
             (ts, ts, source_agent or "agent", decision_id),
