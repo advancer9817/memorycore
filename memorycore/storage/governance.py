@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from typing import Any
 
@@ -88,6 +89,24 @@ def _stable_candidate_hash(
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+_SQL_PATTERN = re.compile(
+    r"\b(SELECT|UPDATE|INSERT|DELETE|DROP|ALTER|CREATE|TRUNCATE|EXEC|EXECUTE)\b",
+    re.IGNORECASE,
+)
+_TOOL_CALL_PATTERN = re.compile(r"\b\w+\s*\(.*\)", re.DOTALL)
+
+
+def _contains_llm_instruction_injection(text: str) -> bool:
+    """Return True if text looks like embedded SQL or a tool-call instruction."""
+    if _SQL_PATTERN.search(text):
+        return True
+    if _TOOL_CALL_PATTERN.search(text) and any(
+        kw in text.lower() for kw in ("execute", "call", "invoke", "run", "query")
+    ):
+        return True
+    return False
+
+
 def _fetch_memory_summaries(memory_ids: list[str]) -> list[dict[str, Any]]:
     if not memory_ids:
         return []
@@ -113,6 +132,13 @@ def policy_gate(
     reasons: list[str] = []
     normalized_risk = (risk_level or "medium").lower()
 
+    if _contains_llm_instruction_injection(action):
+        return {
+            "review_status": "rejected",
+            "policy_reason": "LLM action contains SQL or tool-call instruction",
+            "policy_reasons": ["llm_instruction_injection_in_action"],
+            "policy_version": POLICY_VERSION,
+        }
     if action in DELETE_ACTIONS or "delete" in action:
         return {
             "review_status": "rejected",

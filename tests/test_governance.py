@@ -186,6 +186,7 @@ def test_create_governance_decision_dedupes_open_candidate_hash():
     record = add_memory_record("episodic_memory", "Dedupe candidate", "Same recommendation", importance=0.2)
     finding = {"id": record["id"], "action": "downgrade", "new_importance": 0.1}
 
+    before_count = len(list_governance_decisions(limit=500))
     first = create_governance_decision(
         "importance_reassessment",
         "downgrade",
@@ -202,10 +203,45 @@ def test_create_governance_decision_dedupes_open_candidate_hash():
         "low",
         dict(finding),
     )
+    after_count = len(list_governance_decisions(limit=500))
 
+    # Second call returns same decision — no new row created
     assert second["id"] == first["id"]
     assert first["candidate_hash"]
-    assert len(list_governance_decisions(limit=10)) == 1
+    assert after_count == before_count + 1
+
+
+def test_policy_gate_rejects_llm_sql_injection_in_action():
+    sql_actions = [
+        "UPDATE memories SET status='archived' WHERE 1=1",
+        "SELECT * FROM memories",
+        "DELETE FROM memories WHERE id='x'",
+        "DROP TABLE memories",
+    ]
+    for sql_action in sql_actions:
+        result = policy_gate(sql_action, 0.99, "low")
+        assert result["review_status"] == "rejected", f"Expected rejected for: {sql_action!r}"
+        assert "llm_instruction_injection_in_action" in result["policy_reasons"]
+
+
+def test_create_governance_decision_with_sql_action_is_rejected_by_policy():
+    record = add_memory_record("episodic_memory", "SQL injection target", "Victim content", importance=0.2)
+
+    decision = create_governance_decision(
+        "importance_reassessment",
+        "UPDATE memories SET status='archived' WHERE 1=1",
+        [record["id"]],
+        0.99,
+        "low",
+        {"id": record["id"]},
+    )
+
+    assert decision["review_status"] == "rejected"
+    assert "llm_instruction_injection_in_action" in decision["policy_reasons"]
+    # Memory must not have been mutated
+    with read_conn() as conn:
+        row = conn.execute("SELECT status FROM memories WHERE id=?", (record["id"],)).fetchone()
+    assert row["status"] == "active"
 
 
 def test_apply_records_execution_metadata_and_rollback_is_idempotent():
