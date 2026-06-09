@@ -6,6 +6,7 @@ export const zh = {
     memories: "记忆",
     apps: "应用",
     graph: "图谱",
+    governance: "治理",
     settings: "设置",
     refresh: "刷新",
     refreshing: "刷新中...",

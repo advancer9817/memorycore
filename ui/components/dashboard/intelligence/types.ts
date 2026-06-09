@@ -51,3 +51,17 @@ export interface LineagePayload {
 }
 
 export type GovernanceAction = "accept" | "skip" | "swap" | "keepBoth" | "rollback";
+
+export interface GovernanceMetrics {
+  applied_count: number;
+  rolled_back_count: number;
+  needs_review_count: number;
+  rejected_count: number;
+  rollback_rate: number;
+  revival_rate: number;
+  review_queue_age_hours: number;
+  rejection_rate_by_type: Record<string, number>;
+  auto_supersede_enabled: boolean;
+  degraded_warning: boolean;
+  policy_version: string;
+}

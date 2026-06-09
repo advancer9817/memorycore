@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ReactNode, useEffect, useMemo, useState } from "react";
+import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useSelector } from "react-redux";
 import {
   Activity,
@@ -112,6 +112,7 @@ interface AttentionItem {
   detail: string;
   count: number;
   severity: "high" | "medium" | "low" | "good";
+  onRun?: () => void;
 }
 
 interface HealthSignal {
@@ -207,7 +208,7 @@ function getMemoryTitle(memory?: MemoryApiItem): string {
   return content.length > 92 ? `${content.slice(0, 92)}…` : content;
 }
 
-function buildAttentionItems(curatorStatus: CuratorStatusPayload | null, t: ReturnType<typeof useI18n>["messages"]["dashboard"]): AttentionItem[] {
+function buildAttentionItems(curatorStatus: CuratorStatusPayload | null, t: ReturnType<typeof useI18n>["messages"]["dashboard"], onRunLlm: (() => void) | null): AttentionItem[] {
   const summary = curatorStatus?.curator?.summary ?? {};
   const llmSummary = curatorStatus?.llm_curator?.summary ?? {};
   const byStatus = curatorStatus?.stats?.by_status ?? {};
@@ -237,12 +238,14 @@ function buildAttentionItems(curatorStatus: CuratorStatusPayload | null, t: Retu
       detail: t.attentionContradictionsDetail,
       count: contradictionCount,
       severity: contradictionCount > 0 ? "high" : "good",
+      onRun: onRunLlm ?? undefined,
     },
     {
       label: t.attentionMergeOpportunities,
       detail: t.attentionMergeOpportunitiesDetail,
       count: duplicateCount,
       severity: duplicateCount > 0 ? "medium" : "good",
+      onRun: onRunLlm ?? undefined,
     },
     {
       label: t.attentionAgingKnowledge,
@@ -442,6 +445,8 @@ export function MemoryIntelligenceCenter() {
   const t = messages.dashboard;
   const [state, setState] = useState<IntelligenceState>(INITIAL_STATE);
   const [selectedReviewLabel, setSelectedReviewLabel] = useState<string | null>(null);
+  const [llmRunning, setLlmRunning] = useState(false);
+  const [localRefreshKey, setLocalRefreshKey] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -512,7 +517,33 @@ export function MemoryIntelligenceCenter() {
       controller.abort();
       clearTimeout(timeoutId);
     };
-  }, [dashboardRefreshKey, userId]);
+  }, [dashboardRefreshKey, localRefreshKey, userId]);
+
+  const handleRunLlm = useCallback(async () => {
+    if (llmRunning) return;
+    setLlmRunning(true);
+    try {
+      const apiBaseUrl = getApiBaseUrl();
+      await fetch(`${apiBaseUrl}/api/curator/llm`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dry_run: false }),
+      });
+      const poll = async (): Promise<void> => {
+        const res = await fetch(`${apiBaseUrl}/api/curator/llm/latest`);
+        if (!res.ok) return;
+        const data = (await res.json()) as { status?: string };
+        if (data.status === "running") {
+          await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+          return poll();
+        }
+      };
+      await poll();
+    } finally {
+      setLlmRunning(false);
+      setLocalRefreshKey((k) => k + 1);
+    }
+  }, [llmRunning]);
 
   const curatorStatus = state.curatorStatus;
   const statusStats = curatorStatus?.stats ?? {};
@@ -532,7 +563,7 @@ export function MemoryIntelligenceCenter() {
   const activeRatio = percentage(active, totalMemories);
   const archivedRatio = percentage(archived, totalMemories);
   const nonArchivedRatio = inversePercentage(archived, totalMemories);
-  const attentionItems = useMemo(() => buildAttentionItems(curatorStatus, t), [curatorStatus, t]);
+  const attentionItems = useMemo(() => buildAttentionItems(curatorStatus, t, llmRunning ? null : handleRunLlm), [curatorStatus, t, llmRunning, handleRunLlm]);
   const highRiskCount = attentionItems.filter((item) => item.severity === "high").length;
   const curatorSummary = curatorStatus?.curator?.summary ?? {};
   const llmSummary = curatorStatus?.llm_curator?.summary ?? {};
@@ -626,9 +657,27 @@ export function MemoryIntelligenceCenter() {
               <div key={item.label} className={`rounded-lg border px-3 py-2.5 ${severityClassName[item.severity]}`}>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-sm font-medium">{item.label}</span>
-                  <Badge variant="outline" className="border-current/30 bg-black/20 text-current">
-                    {item.count}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    {item.onRun && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 border-current/30 bg-black/20 px-2 text-xs text-current hover:bg-black/40"
+                        onClick={item.onRun}
+                        disabled={llmRunning}
+                      >
+                        {llmRunning ? (
+                          <Activity className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-3 w-3" />
+                        )}
+                        <span className="ml-1">{llmRunning ? t.running : t.runLlm}</span>
+                      </Button>
+                    )}
+                    <Badge variant="outline" className="border-current/30 bg-black/20 text-current">
+                      {item.count}
+                    </Badge>
+                  </div>
                 </div>
                 <p className="mt-1 text-xs leading-relaxed text-current/75">{item.detail}</p>
               </div>

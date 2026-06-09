@@ -4,6 +4,7 @@ export const en = {
     memories: "Memories",
     apps: "Apps",
     graph: "Graph",
+    governance: "Governance",
     settings: "Settings",
     refresh: "Refresh",
     refreshing: "Refreshing...",

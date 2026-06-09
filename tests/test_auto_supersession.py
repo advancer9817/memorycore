@@ -192,11 +192,17 @@ def test_rollback_removes_supersedes_link_from_memory_links(monkeypatch, tmp_pat
         link["source_id"] == new["id"] and link["target_id"] == old["id"]
         for link in lineage_after_rollback["links"]
     ), "lineage must not contain rolled-back supersedes link"
+
+
+def test_different_project_paths_skip_auto_supersession(monkeypatch, tmp_path):
+    """Memories from different project paths must not supersede each other."""
     _enable_auto(monkeypatch, tmp_path)
+    with managed_conn() as conn:
+        before_count = conn.execute("SELECT COUNT(*) FROM governance_decisions").fetchone()[0]
     old = add_memory_record("feedback", "Retry limit", "Retry limit is three attempts", scope="global", project_path="/a")
     add_memory_record("feedback", "Retry limit", "Retry limit is three attempts", scope="global", project_path="/b")
 
     with managed_conn() as conn:
-        count = conn.execute("SELECT COUNT(*) FROM governance_decisions").fetchone()[0]
+        after_count = conn.execute("SELECT COUNT(*) FROM governance_decisions").fetchone()[0]
     assert get_record(old["id"])["status"] == "active"
-    assert count == 0
+    assert after_count == before_count

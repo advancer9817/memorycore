@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode, useCallback, useState } from "react";
-import { AppWindow, Home, Layers3, RefreshCcw, Settings } from "lucide-react";
+import { AppWindow, Home, Layers3, RefreshCcw, Settings, ShieldCheck } from "lucide-react";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/hooks/useI18n";
@@ -85,6 +85,7 @@ export function Navbar() {
     { href: "/memories", label: messages.nav.memories, icon: <Layers3 /> },
     { href: "/apps", label: messages.nav.apps, icon: <AppWindow /> },
     { href: "/graph", label: messages.nav.graph, icon: null },
+    { href: "/governance", label: messages.nav.governance, icon: <ShieldCheck className="h-4 w-4" /> },
     { href: "/settings", label: messages.nav.settings, icon: <Settings className="h-4 w-4" /> },
   ];
 

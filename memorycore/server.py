@@ -547,6 +547,14 @@ def governance_rollback(decision_id: str, source_agent: str = "agent") -> dict[s
 
 @mcp.tool()
 @_safe_tool
+def governance_metrics() -> dict[str, Any]:
+    """Return operational governance health metrics: rollback rate, revival rate, review queue depth/age, and degraded warning."""
+    from memorycore.storage.governance import get_governance_metrics
+    return get_governance_metrics()
+
+
+@mcp.tool()
+@_safe_tool
 def memory_audit_log(
     memory_id: str | None = None,
     event_type: str | None = None,

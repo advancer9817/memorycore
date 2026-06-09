@@ -378,6 +378,9 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
     if len(parts) == 3 and parts[0] == "governance" and parts[2] == "rollback" and method == "POST":
         from memorycore.storage.governance import rollback_governance_decision
         return rollback_governance_decision(parts[1], source_agent=body.get("source_agent", "frontend"))
+    if parts == ["governance", "metrics"] and method == "GET":
+        from memorycore.storage.governance import get_governance_metrics
+        return get_governance_metrics()
     if len(parts) == 2 and parts[0] == "lineage" and method == "GET":
         return memory_lineage(parts[1], _int_q(query, "limit", 100))
     if parts == ["audit"] and method == "GET":

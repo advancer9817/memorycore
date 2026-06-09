@@ -9,6 +9,7 @@ import hashlib
 import json
 import re
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from memorycore.models import as_json, now, row_to_dict
@@ -36,6 +37,7 @@ MUTATING_ACTIONS = {
 }
 DESTRUCTIVE_ACTIONS = {"archive_duplicate", "archive_and_merge_duplicate", "archive", "split", "supersede"}
 MERGE_ACTIONS = {"archive_and_merge_duplicate"}
+MANUAL_ONLY_ACTIONS = {"split"}
 DELETE_ACTIONS = {"delete", "hard_delete"}
 
 
@@ -174,6 +176,8 @@ def policy_gate(
         reasons.append("high_importance_memory")
     if action in MERGE_ACTIONS:
         reasons.append("merge_requires_review")
+    if action in MANUAL_ONLY_ACTIONS:
+        reasons.append("split_requires_manual_action")
     if has_positive_feedback and is_destructive:
         reasons.append("positive_feedback_requires_review")
     if is_destructive and normalized_risk != "low":
@@ -447,10 +451,178 @@ def _apply_finding(decision: dict[str, Any]) -> dict[str, Any]:
         old_id = finding.get("old_id") or finding.get("older_id")
         new_id = finding.get("new_id") or finding.get("newer_id")
         return supersede_memory_record(old_id, new_id, source_agent=decision.get("source_agent", "governance"), note="auto-supersession governance decision")
+    if decision["decision_type"] == "split_candidate" and action == "split":
+        return _apply_split(decision, finding)
     raise ValueError(f"governance apply does not support action {action!r}")
+
+
+def _apply_split(decision: dict[str, Any], finding: dict[str, Any]) -> dict[str, Any]:
+    """Create atomic sub-memory records from a split_candidate decision.
+
+    Archives the original memory, creates child records (idempotent via fact_hash),
+    and wires part_of / supports links. Mirrors the curator_llm split executor.
+    """
+    orig_id = finding.get("id")
+    sub_memories = finding.get("sub_memories") or []
+    if not orig_id or not sub_memories:
+        raise ValueError("split finding requires 'id' and 'sub_memories'")
+
+    with read_conn() as rconn:
+        orig_row = rconn.execute("SELECT * FROM memories WHERE id=?", (orig_id,)).fetchone()
+    if not orig_row:
+        raise ValueError(f"split source memory {orig_id!r} not found")
+    orig = row_to_dict(orig_row)
+
+    _update_memory_fields(orig_id, status="archived")
+
+    source_agent = decision.get("source_agent", "governance")
+    now_ts = now()
+    created_ids: list[str] = []
+
+    with managed_conn() as conn:
+        for sub in sub_memories:
+            sub_title = str(sub.get("title") or "")[:120].strip()
+            sub_content = str(sub.get("content") or "").strip()
+            if not sub_title or not sub_content:
+                continue
+
+            normalized = " ".join(sub_content.lower().split())
+            fact_hash = hashlib.sha256(f"{orig_id}:{normalized}".encode()).hexdigest()[:16]
+            existing = conn.execute(
+                "SELECT id FROM memories WHERE json_extract(metadata_json,'$.parent_id')=? AND json_extract(metadata_json,'$.fact_hash')=? LIMIT 1",
+                (orig_id, fact_hash),
+            ).fetchone()
+            if existing:
+                created_ids.append(existing["id"])
+                continue
+
+            sub_importance = max(0.0, min(1.0, float(sub.get("importance") or orig.get("importance") or 0.5)))
+            child_id = str(uuid.uuid4())
+            metadata = as_json({"parent_id": orig_id, "fact_hash": fact_hash})
+            conn.execute(
+                """INSERT INTO memories
+                   (id, type, title, content, status, source_agent, scope,
+                    project_path, importance, confidence, metadata_json, created_at, updated_at)
+                   VALUES (?,?,?,?,'active',?,?,?,?,?,?,?,?)""",
+                (child_id, orig.get("type", "episodic_memory"), sub_title, sub_content,
+                 source_agent, orig.get("scope"), orig.get("project_path"),
+                 sub_importance, float(orig.get("confidence") or 0.7), metadata, now_ts, now_ts),
+            )
+            for source_id, target_id, rel, note in (
+                (child_id, orig_id, "part_of", "governance split child fact"),
+                (orig_id, child_id, "supports", "governance split generated child"),
+            ):
+                conn.execute(
+                    """INSERT INTO memory_links
+                       (id, source_id, target_id, relation_type, weight, note, created_at, source_agent)
+                       VALUES (?,?,?,?,?,?,?,?)
+                       ON CONFLICT(source_id, target_id, relation_type) DO NOTHING""",
+                    (str(uuid.uuid4()), source_id, target_id, rel, 1.0, note, now_ts, source_agent),
+                )
+            created_ids.append(child_id)
+
+    return {
+        "original_id": orig_id,
+        "children_created": len(created_ids),
+        "child_ids": created_ids,
+    }
 
 
 def _update_memory_fields(memory_id: str, status: str) -> dict[str, Any]:
     if not memory_id:
         raise ValueError("memory id is required")
     return update_memory_content(memory_id, new_status=status)
+
+
+def get_governance_metrics() -> dict[str, Any]:
+    """Compute operational governance health metrics.
+
+    Returns:
+        Dict with rollback_rate, revival_rate, review_queue stats,
+        rejection_rate_by_type, and degraded_warning flag.
+    """
+    from memorycore.models import load_config
+
+    with read_conn() as conn:
+        rows = conn.execute(
+            "SELECT review_status, decision_type, created_at FROM governance_decisions"
+        ).fetchall()
+
+    counts: dict[str, int] = {}
+    type_total: dict[str, int] = {}
+    type_rejected: dict[str, int] = {}
+    review_ages_hours: list[float] = []
+
+    now_dt = datetime.now(timezone.utc)
+
+    for row in rows:
+        status = row["review_status"]
+        dtype = row["decision_type"]
+        counts[status] = counts.get(status, 0) + 1
+        type_total[dtype] = type_total.get(dtype, 0) + 1
+        if status == "rejected":
+            type_rejected[dtype] = type_rejected.get(dtype, 0) + 1
+        if status == "needs_review" and row["created_at"]:
+            try:
+                created = datetime.fromisoformat(row["created_at"].rstrip("Z"))
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc)
+                age_hours = (now_dt - created).total_seconds() / 3600.0
+                review_ages_hours.append(age_hours)
+            except ValueError:
+                pass
+
+    applied = counts.get("applied", 0)
+    rolled_back = counts.get("rolled_back", 0)
+    needs_review = counts.get("needs_review", 0)
+    rejected = counts.get("rejected", 0)
+    total_decided = applied + rolled_back
+
+    rollback_rate = rolled_back / total_decided if total_decided > 0 else 0.0
+
+    # Revival rate: auto-supersessions that were rolled back
+    with read_conn() as conn:
+        supersession_applied = conn.execute(
+            "SELECT COUNT(*) FROM governance_decisions WHERE decision_type='supersession' AND review_status IN ('applied', 'rolled_back')"
+        ).fetchone()[0]
+        supersession_rolled_back = conn.execute(
+            "SELECT COUNT(*) FROM governance_decisions WHERE decision_type='supersession' AND review_status='rolled_back'"
+        ).fetchone()[0]
+
+    revival_rate = (
+        supersession_rolled_back / supersession_applied if supersession_applied > 0 else 0.0
+    )
+
+    review_queue_age_hours = (
+        sum(review_ages_hours) / len(review_ages_hours) if review_ages_hours else 0.0
+    )
+
+    rejection_rate_by_type = {
+        dtype: round(type_rejected.get(dtype, 0) / total, 3)
+        for dtype, total in type_total.items()
+        if total > 0
+    }
+
+    cfg = load_config()
+    temporal_cfg = cfg.get("temporal") or {}
+    auto_supersede_enabled = bool(temporal_cfg.get("auto_supersede_enabled", False))
+
+    degraded_warning = (
+        revival_rate > 0.05
+        or rollback_rate > 0.10
+        or (auto_supersede_enabled is False and needs_review > 20)
+    )
+
+    return {
+        "applied_count": applied,
+        "rolled_back_count": rolled_back,
+        "needs_review_count": needs_review,
+        "rejected_count": rejected,
+        "rollback_rate": round(rollback_rate, 4),
+        "revival_rate": round(revival_rate, 4),
+        "review_queue_age_hours": round(review_queue_age_hours, 2),
+        "rejection_rate_by_type": rejection_rate_by_type,
+        "auto_supersede_enabled": auto_supersede_enabled,
+        "degraded_warning": degraded_warning,
+        "policy_version": POLICY_VERSION,
+    }
