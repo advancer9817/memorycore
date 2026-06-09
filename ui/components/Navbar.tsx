@@ -1,20 +1,19 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode, useCallback, useState } from "react";
-import { Settings } from "lucide-react";
-import { CreateMemoryDialog } from "@/app/memories/components/CreateMemoryDialog";
+import { AppWindow, Home, Layers3, RefreshCcw, Settings } from "lucide-react";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Button } from "@/components/ui/button";
-import {
-  FiRefreshCcwIcon as FiRefreshCcw,
-  HiHomeIcon as HiHome,
-  HiMiniRectangleStackIcon as HiMiniRectangleStack,
-  RiApps2AddFillIcon as RiApps2AddFill,
-} from "@/components/shared/react-icons";
 import { useI18n } from "@/hooks/useI18n";
 import { useToast } from "@/hooks/use-toast";
+
+const CreateMemoryDialog = dynamic(
+  () => import("@/app/memories/components/CreateMemoryDialog").then((mod) => mod.CreateMemoryDialog),
+  { ssr: false }
+);
 
 interface NavItem {
   href: string;
@@ -82,9 +81,9 @@ export function Navbar() {
   };
 
   const navItems: NavItem[] = [
-    { href: "/", label: messages.nav.dashboard, icon: <HiHome /> },
-    { href: "/memories", label: messages.nav.memories, icon: <HiMiniRectangleStack /> },
-    { href: "/apps", label: messages.nav.apps, icon: <RiApps2AddFill /> },
+    { href: "/", label: messages.nav.dashboard, icon: <Home /> },
+    { href: "/memories", label: messages.nav.memories, icon: <Layers3 /> },
+    { href: "/apps", label: messages.nav.apps, icon: <AppWindow /> },
     { href: "/graph", label: messages.nav.graph, icon: null },
     { href: "/settings", label: messages.nav.settings, icon: <Settings className="h-4 w-4" /> },
   ];
@@ -127,7 +126,7 @@ export function Navbar() {
             size="sm"
             className="border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-60"
           >
-            <FiRefreshCcw className={`transition-transform duration-500 ${isRefreshing ? "animate-spin" : ""}`} />
+            <RefreshCcw className={`transition-transform duration-500 ${isRefreshing ? "animate-spin" : ""}`} />
             {isRefreshing ? messages.nav.refreshing : messages.nav.refresh}
           </Button>
           <CreateMemoryDialog />

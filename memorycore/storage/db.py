@@ -263,7 +263,17 @@ def init_db(conn: sqlite3.Connection) -> None:
           updated_at TEXT NOT NULL,
           applied_at TEXT,
           rolled_back_at TEXT,
-          source_agent TEXT NOT NULL DEFAULT 'llm_curator'
+          source_agent TEXT NOT NULL DEFAULT 'llm_curator',
+          candidate_hash TEXT NOT NULL DEFAULT '',
+          policy_reasons_json TEXT NOT NULL DEFAULT '[]',
+          policy_version TEXT NOT NULL DEFAULT '',
+          judge_model TEXT NOT NULL DEFAULT '',
+          judge_schema_version TEXT NOT NULL DEFAULT '',
+          decision_version TEXT NOT NULL DEFAULT '',
+          execution_id TEXT NOT NULL DEFAULT '',
+          applied_by TEXT NOT NULL DEFAULT '',
+          rolled_back_by TEXT NOT NULL DEFAULT '',
+          approval_kind TEXT NOT NULL DEFAULT ''
         );
 
         CREATE INDEX IF NOT EXISTS idx_governance_review ON governance_decisions(review_status);
@@ -343,9 +353,23 @@ def init_db(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "memories", "valid_until", "TEXT")
     _ensure_column(conn, "memories", "superseded_by", "TEXT")
     _ensure_column(conn, "memories", "fact_lineage_root", "TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_superseded_by ON memories(superseded_by)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_lineage_root ON memories(fact_lineage_root)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_status_lineage ON memories(status, fact_lineage_root)")
     _ensure_column(conn, "governance_decisions", "llm_trace_json", "TEXT NOT NULL DEFAULT '{}'")
     _ensure_column(conn, "governance_decisions", "before_state_json", "TEXT NOT NULL DEFAULT '[]'")
     _ensure_column(conn, "governance_decisions", "after_state_json", "TEXT NOT NULL DEFAULT '[]'")
+    _ensure_column(conn, "governance_decisions", "candidate_hash", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "governance_decisions", "policy_reasons_json", "TEXT NOT NULL DEFAULT '[]'")
+    _ensure_column(conn, "governance_decisions", "policy_version", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "governance_decisions", "judge_model", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "governance_decisions", "judge_schema_version", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "governance_decisions", "decision_version", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "governance_decisions", "execution_id", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "governance_decisions", "applied_by", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "governance_decisions", "rolled_back_by", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "governance_decisions", "approval_kind", "TEXT NOT NULL DEFAULT ''")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_governance_candidate_hash ON governance_decisions(candidate_hash)")
     try:
         null_fts = conn.execute("SELECT COUNT(*) FROM memories_fts WHERE id IS NULL").fetchone()[0]
     except sqlite3.OperationalError:

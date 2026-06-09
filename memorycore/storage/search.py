@@ -14,7 +14,7 @@ from memorycore.injection_guard import (
     check_memory_for_injection,
     warning_for_filtered_memory,
 )
-from memorycore.models import as_json, fts_phrase, local_now, normalize_list, now, parse_ts, row_to_dict
+from memorycore.models import as_json, fts_phrase, load_config, local_now, normalize_list, now, parse_ts, row_to_dict
 from memorycore.storage.db import _managed_query, managed_conn, read_conn
 from memorycore.storage.entities import entity_search
 
@@ -551,6 +551,14 @@ def _parent_id(record: dict[str, Any]) -> str:
     return str(_metadata(record).get("parent_id") or "")
 
 
+def _context_recency_weight() -> float:
+    value = (load_config().get("context_pack", {}) or {}).get("recency_weight", 0.03)
+    try:
+        return max(0.0, min(0.1, float(value)))
+    except Exception:
+        return 0.03
+
+
 def build_context_pack(
     task: str,
     agent: str = "agent",
@@ -671,11 +679,14 @@ def build_context_pack(
     # Unified re-ranking.  Relevance evidence dominates; type weighting is a
     # small multiplier so generic high-priority memories cannot outrank clearly
     # task-matching records.
+    recency_weight = _context_recency_weight()
+
     def _rank_score(r: dict[str, Any]) -> float:
-        vscore = vector_hits.get(r["id"], 0.0)
         lexical = _lexical_relevance(task, r)
         sources = r.get("_retrieval_sources", [])
-        source_bonus = 0.08 if ("fts" in sources or "keyword" in sources) else 0.0
+        text_matched = "fts" in sources or "keyword" in sources
+        vscore = lexical if text_matched else vector_hits.get(r["id"], 0.0)
+        source_bonus = 0.08 if text_matched else 0.0
         source_bonus += 0.06 if "entity" in sources else 0.0
         atomic_bonus = 0.07 if prefer_atomic and _is_atomic_fact(r) else 0.0
         parent_penalty = -0.05 if prefer_atomic and not include_parent and _metadata(r).get("kind") == "parent_memory" else 0.0
@@ -691,7 +702,7 @@ def build_context_pack(
             + float(r.get("importance") or 0) * 0.07
             + float(r.get("effectiveness_score") or 0) * 0.05
             + feedback * 0.02
-            + _recency_score(r) * 0.03
+            + _recency_score(r) * recency_weight
         )
 
     fallback_used = False
@@ -720,7 +731,8 @@ def build_context_pack(
         scored_records,
         key=lambda item: (
             item[1] * float(type_weights.get(item[0].get("type"), 1.0)),
-            item[1],
+            _recency_score(item[0]) * recency_weight,
+            item[0].get("updated_at") or item[0].get("created_at") or "" if recency_weight > 0 else "",
         ),
         reverse=True,
     )]

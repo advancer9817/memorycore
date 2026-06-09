@@ -127,6 +127,54 @@ def test_init_db_migrates_existing_memories_table_without_effectiveness_columns(
     assert migrated["last_injected_at"] is not None
 
 
+def test_init_db_migrates_existing_governance_table_before_candidate_hash_index(tmp_path, monkeypatch):
+    import sqlite3
+
+    db = tmp_path / "legacy-governance.sqlite3"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """CREATE TABLE governance_decisions (
+          id TEXT PRIMARY KEY,
+          decision_type TEXT NOT NULL,
+          source_ids_json TEXT NOT NULL DEFAULT '[]',
+          recommended_action TEXT NOT NULL,
+          llm_confidence REAL NOT NULL DEFAULT 0.0,
+          risk_level TEXT NOT NULL DEFAULT 'medium',
+          review_status TEXT NOT NULL DEFAULT 'needs_review',
+          policy_reason TEXT NOT NULL DEFAULT '',
+          finding_json TEXT NOT NULL DEFAULT '{}',
+          llm_trace_json TEXT NOT NULL DEFAULT '{}',
+          raw_response_ref TEXT NOT NULL DEFAULT '',
+          before_state_json TEXT NOT NULL DEFAULT '[]',
+          after_state_json TEXT NOT NULL DEFAULT '[]',
+          rollback_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          applied_at TEXT,
+          rolled_back_at TEXT,
+          source_agent TEXT NOT NULL DEFAULT 'llm_curator'
+        )"""
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setenv("LOCAL_MEMORY_DB", str(db))
+    lm._INITIALIZED_DB_PATHS.clear()
+
+    lm.add_memory_record("episodic_memory", "Migration trigger", "content")
+
+    conn = sqlite3.connect(db)
+    try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(governance_decisions)").fetchall()}
+        indexes = {row[1] for row in conn.execute("PRAGMA index_list(governance_decisions)").fetchall()}
+    finally:
+        conn.close()
+
+    assert "candidate_hash" in columns
+    assert "policy_reasons_json" in columns
+    assert "idx_governance_candidate_hash" in indexes
+
+
 # ---------------------------------------------------------------------------
 # memory_warnings MCP tool
 # ---------------------------------------------------------------------------

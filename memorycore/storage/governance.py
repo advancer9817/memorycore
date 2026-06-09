@@ -5,6 +5,7 @@ small deterministic policy gate before any database mutation occurs.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from typing import Any
@@ -18,6 +19,10 @@ PRECIOUS_TYPES = {"user_profile", "decision", "project_memory"}
 HIGH_IMPORTANCE_THRESHOLD = 0.85
 AUTO_CONFIDENCE_THRESHOLD = 0.90
 REVIEW_CONFIDENCE_THRESHOLD = 0.55
+POLICY_VERSION = "2026-06-09.1"
+JUDGE_SCHEMA_VERSION = "1"
+DECISION_VERSION = "1"
+JUDGE_MODEL = "deterministic"
 MUTATING_ACTIONS = {
     "archive_duplicate",
     "archive_and_merge_duplicate",
@@ -66,6 +71,23 @@ def _source_ids_for_finding(finding: dict[str, Any]) -> list[str]:
     return ids
 
 
+def _stable_candidate_hash(
+    decision_type: str,
+    recommended_action: str,
+    source_ids: list[str],
+    finding: dict[str, Any],
+) -> str:
+    payload = {
+        "decision_type": decision_type,
+        "recommended_action": recommended_action,
+        "source_ids": sorted(str(x) for x in source_ids),
+        "finding": finding,
+        "policy_version": POLICY_VERSION,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def _fetch_memory_summaries(memory_ids: list[str]) -> list[dict[str, Any]]:
     if not memory_ids:
         return []
@@ -92,13 +114,28 @@ def policy_gate(
     normalized_risk = (risk_level or "medium").lower()
 
     if action in DELETE_ACTIONS or "delete" in action:
-        return {"review_status": "rejected", "policy_reason": "delete actions are never auto-governed"}
+        return {
+            "review_status": "rejected",
+            "policy_reason": "delete actions are never auto-governed",
+            "policy_reasons": ["delete_action_not_allowed"],
+            "policy_version": POLICY_VERSION,
+        }
     if action not in MUTATING_ACTIONS and action != "keep":
-        return {"review_status": "rejected", "policy_reason": f"unsupported action: {action}"}
+        return {
+            "review_status": "rejected",
+            "policy_reason": f"unsupported action: {action}",
+            "policy_reasons": ["unsupported_action"],
+            "policy_version": POLICY_VERSION,
+        }
     if confidence < REVIEW_CONFIDENCE_THRESHOLD:
-        return {"review_status": "rejected", "policy_reason": "LLM confidence below review threshold"}
+        return {
+            "review_status": "rejected",
+            "policy_reason": "LLM confidence below review threshold",
+            "policy_reasons": ["confidence_below_review_threshold"],
+            "policy_version": POLICY_VERSION,
+        }
     if normalized_risk == "high":
-        reasons.append("high risk action requires human review")
+        reasons.append("high_risk_action")
 
     is_precious = any(m.get("type") in PRECIOUS_TYPES for m in memories)
     is_high_importance = any(float(m.get("importance") or 0.0) >= HIGH_IMPORTANCE_THRESHOLD for m in memories)
@@ -106,21 +143,31 @@ def policy_gate(
     is_destructive = action in DESTRUCTIVE_ACTIONS or "delete" in action or "merge" in action
 
     if is_precious:
-        reasons.append("precious memory type requires human review")
+        reasons.append("precious_memory_type")
     if is_high_importance:
-        reasons.append("high-importance memory requires human review")
+        reasons.append("high_importance_memory")
     if action in MERGE_ACTIONS:
-        reasons.append("merge actions always require human review")
+        reasons.append("merge_requires_review")
     if has_positive_feedback and is_destructive:
-        reasons.append("positively reinforced memory requires human review")
+        reasons.append("positive_feedback_requires_review")
     if is_destructive and normalized_risk != "low":
-        reasons.append("destructive action is not low risk")
+        reasons.append("destructive_action_not_low_risk")
     if confidence < AUTO_CONFIDENCE_THRESHOLD:
-        reasons.append("confidence below auto-approval threshold")
+        reasons.append("confidence_below_auto_threshold")
 
     if reasons:
-        return {"review_status": "needs_review", "policy_reason": "; ".join(reasons)}
-    return {"review_status": "auto_approved", "policy_reason": "low-risk high-confidence recommendation"}
+        return {
+            "review_status": "needs_review",
+            "policy_reason": "; ".join(reasons),
+            "policy_reasons": reasons,
+            "policy_version": POLICY_VERSION,
+        }
+    return {
+        "review_status": "auto_approved",
+        "policy_reason": "low-risk high-confidence recommendation",
+        "policy_reasons": [],
+        "policy_version": POLICY_VERSION,
+    }
 
 
 def create_governance_decision(
@@ -147,26 +194,43 @@ def create_governance_decision(
         scope=(memories[0].get("scope") if memories else "global"),
         project_path=(memories[0].get("project_path") if memories else ""),
     )
+    candidate_hash = _stable_candidate_hash(decision_type, recommended_action, source_ids, finding)
     decision_id = str(uuid.uuid4())
     ts = now()
     with managed_conn() as conn:
+        existing = conn.execute(
+            """
+            SELECT * FROM governance_decisions
+            WHERE candidate_hash=?
+              AND review_status IN ('needs_review', 'auto_approved', 'applied')
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (candidate_hash,),
+        ).fetchone()
+        if existing is not None:
+            return _decision_row_to_dict(existing)
         conn.execute(
             """
             INSERT INTO governance_decisions (
               id, decision_type, source_ids_json, recommended_action, llm_confidence,
               risk_level, review_status, policy_reason, finding_json, llm_trace_json, raw_response_ref,
-              before_state_json, after_state_json, created_at, updated_at, applied_at, rolled_back_at, source_agent
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              before_state_json, after_state_json, created_at, updated_at, applied_at, rolled_back_at, source_agent,
+              candidate_hash, policy_reasons_json, policy_version, judge_model, judge_schema_version,
+              decision_version, execution_id, applied_by, rolled_back_by, approval_kind
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 decision_id, decision_type, as_json(source_ids), recommended_action, confidence,
                 risk_level or "medium", gate["review_status"], gate["policy_reason"],
                 as_json(finding), as_json(llm_trace), raw_response_ref or "", "[]", "[]",
                 ts, ts, None, None, source_agent or "llm_curator",
+                candidate_hash, as_json(gate.get("policy_reasons", [])), gate.get("policy_version", POLICY_VERSION),
+                JUDGE_MODEL, JUDGE_SCHEMA_VERSION, DECISION_VERSION, "", "", "", "",
             ),
         )
         row = conn.execute("SELECT * FROM governance_decisions WHERE id=?", (decision_id,)).fetchone()
-    _audit.log_audit_event("governance_decision_create", memory_id=source_ids[0] if source_ids else None, agent=source_agent, detail={"decision_id": decision_id, "review_status": gate["review_status"], "action": recommended_action})
+    _audit.log_audit_event("governance_decision_create", memory_id=source_ids[0] if source_ids else None, agent=source_agent, detail={"decision_id": decision_id, "review_status": gate["review_status"], "action": recommended_action, "policy_reasons": gate.get("policy_reasons", []), "policy_version": gate.get("policy_version", POLICY_VERSION)})
     return _decision_row_to_dict(row)
 
 
@@ -177,6 +241,7 @@ def _decision_row_to_dict(row: Any) -> dict[str, Any]:
     data["llm_trace"] = json.loads(data.pop("llm_trace_json", "{}") or "{}")
     data["before_state"] = json.loads(data.pop("before_state_json", "[]") or "[]")
     data["after_state"] = json.loads(data.pop("after_state_json", "[]") or "[]")
+    data["policy_reasons"] = json.loads(data.pop("policy_reasons_json", "[]") or "[]")
     return data
 
 
@@ -250,6 +315,8 @@ def apply_governance_decision(decision_id: str, source_agent: str = "agent") -> 
     before = _snapshot_memories(decision["source_ids"])
     applied = _apply_finding(decision)
     ts = now()
+    execution_id = str(uuid.uuid4())
+    approval_kind = "auto" if decision["review_status"] == "auto_approved" else "human_accept"
     after = _snapshot_memories(decision["source_ids"])
     rollback = {"before": before, "after": after}
     with managed_conn() as conn:
@@ -257,14 +324,14 @@ def apply_governance_decision(decision_id: str, source_agent: str = "agent") -> 
             """
             UPDATE governance_decisions
             SET review_status='applied', applied_at=?, updated_at=?, rollback_json=?,
-                before_state_json=?, after_state_json=?
+                before_state_json=?, after_state_json=?, execution_id=?, applied_by=?, approval_kind=?
             WHERE id=?
             """,
-            (ts, ts, as_json(rollback), as_json(before), as_json(after), decision_id),
+            (ts, ts, as_json(rollback), as_json(before), as_json(after), execution_id, source_agent or "agent", approval_kind, decision_id),
         )
         updated = conn.execute("SELECT * FROM governance_decisions WHERE id=?", (decision_id,)).fetchone()
     updated_decision = _decision_row_to_dict(updated)
-    _audit.log_audit_event("governance_decision_apply", memory_id=(decision["source_ids"][0] if decision["source_ids"] else None), agent=source_agent, detail={"decision_id": decision_id, "applied": applied, "before_state": before, "after_state": after})
+    _audit.log_audit_event("governance_decision_apply", memory_id=(decision["source_ids"][0] if decision["source_ids"] else None), agent=source_agent, detail={"decision_id": decision_id, "execution_id": execution_id, "applied": applied, "before_state": before, "after_state": after, "approval_kind": approval_kind})
     return {"decision": updated_decision, "applied": applied}
 
 
@@ -274,6 +341,8 @@ def rollback_governance_decision(decision_id: str, source_agent: str = "agent") 
     if row is None:
         raise ValueError(f"governance decision not found: {decision_id}")
     decision = _decision_row_to_dict(row)
+    if decision.get("rolled_back_at"):
+        return {"decision": decision, "already_rolled_back": True, "restored": []}
     rollback_data = json.loads(decision.get("rollback_json") or "{}")
     before = rollback_data.get("before") or []
     if not before:
@@ -298,14 +367,17 @@ def rollback_governance_decision(decision_id: str, source_agent: str = "agent") 
             restored = conn.execute("SELECT * FROM memories WHERE id=?", (memory.get("id"),)).fetchone()
             if restored is not None:
                 restored_records.append(row_to_dict(restored))
-        conn.execute("UPDATE governance_decisions SET review_status='rolled_back', rolled_back_at=?, updated_at=? WHERE id=?", (ts, ts, decision_id))
+        conn.execute(
+            "UPDATE governance_decisions SET review_status='rolled_back', rolled_back_at=?, updated_at=?, rolled_back_by=? WHERE id=?",
+            (ts, ts, source_agent or "agent", decision_id),
+        )
         updated = conn.execute("SELECT * FROM governance_decisions WHERE id=?", (decision_id,)).fetchone()
     from memorycore.storage.crud import _sync_record_indexes
 
     for record in restored_records:
         _sync_record_indexes(record)
     _audit.log_audit_event("governance_decision_rollback", memory_id=(decision["source_ids"][0] if decision["source_ids"] else None), agent=source_agent, detail={"decision_id": decision_id, "restored": [m.get("id") for m in before]})
-    return {"decision": _decision_row_to_dict(updated), "restored": before}
+    return {"decision": _decision_row_to_dict(updated), "restored": before, "already_rolled_back": False}
 
 
 def _snapshot_memories(memory_ids: list[str]) -> list[dict[str, Any]]:

@@ -292,7 +292,19 @@ def supersede_memory_record(
             raise ValueError(f"new memory not found: {new_id}")
         old_record = row_to_dict(old_row)
         new_record = row_to_dict(new_row)
-        root_id = new_record.get("fact_lineage_root") or old_record.get("fact_lineage_root") or old_id
+        if old_record.get("status") == "archived":
+            raise ValueError(f"old memory is archived and cannot be superseded: {old_id}")
+        if old_record.get("superseded_by"):
+            raise ValueError(f"old memory already superseded: {old_id}")
+        if new_record.get("status") == "archived":
+            raise ValueError(f"new memory is archived and cannot supersede another record: {new_id}")
+        if new_record.get("superseded_by"):
+            raise ValueError(f"new memory already superseded: {new_id}")
+        old_root = old_record.get("fact_lineage_root") or old_id
+        new_root = new_record.get("fact_lineage_root") or new_id
+        if new_root != new_id and new_root != old_root:
+            raise ValueError("lineage merge requires human review")
+        root_id = old_root
         conn.execute(
             """
             UPDATE memories
@@ -304,7 +316,7 @@ def supersede_memory_record(
         conn.execute(
             """
             UPDATE memories
-            SET fact_lineage_root=COALESCE(fact_lineage_root, ?), updated_at=?
+            SET fact_lineage_root=?, updated_at=?
             WHERE id=?
             """,
             (root_id, ts, new_id),
@@ -357,6 +369,9 @@ def memory_lineage(memory_id: str, limit: int = 100) -> dict[str, Any]:
         if memory_id not in known_ids:
             records.append(base)
             known_ids.add(memory_id)
+        if len(records) > cap:
+            records = records[:cap]
+            known_ids = {record["id"] for record in records}
         placeholders = ",".join("?" for _ in known_ids)
         links = []
         if placeholders:
@@ -371,7 +386,49 @@ def memory_lineage(memory_id: str, limit: int = 100) -> dict[str, Any]:
                 [*known_ids, *known_ids, cap],
             ).fetchall()
             links = [dict(row) for row in link_rows]
-    return {"memory_id": memory_id, "root_id": root_id, "records": records, "links": links}
+    record_by_id = {record["id"]: record for record in records}
+    inbound = {link["target_id"] for link in links if link.get("target_id") in record_by_id}
+    heads = [record for record in records if record["status"] != "superseded" and record["id"] not in inbound]
+    current_head_id = heads[0]["id"] if len(heads) == 1 else None
+    branches = [
+        {
+            "id": record["id"],
+            "title": record.get("title", ""),
+            "status": record.get("status", ""),
+            "superseded_by": record.get("superseded_by"),
+            "fact_lineage_root": record.get("fact_lineage_root"),
+        }
+        for record in heads
+    ] if len(heads) > 1 else []
+    chain: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    ordered_records = sorted(records, key=lambda r: (r.get("created_at") or "", r.get("updated_at") or ""))
+    for record in ordered_records:
+        if record["id"] in seen:
+            continue
+        seen.add(record["id"])
+        chain.append({
+            "id": record["id"],
+            "title": record.get("title", ""),
+            "type": record.get("type", ""),
+            "status": record.get("status", ""),
+            "created_at": record.get("created_at"),
+            "updated_at": record.get("updated_at"),
+            "valid_from": record.get("valid_from"),
+            "valid_until": record.get("valid_until"),
+            "confidence": record.get("confidence"),
+            "importance": record.get("importance"),
+            "superseded_by": record.get("superseded_by"),
+        })
+    return {
+        "memory_id": memory_id,
+        "root_id": root_id,
+        "current_head_id": current_head_id,
+        "chain": chain,
+        "branches": branches,
+        "records": records,
+        "links": links,
+    }
 
 
 def add_feedback(

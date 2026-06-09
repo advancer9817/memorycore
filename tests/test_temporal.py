@@ -8,6 +8,7 @@ import memorycore as lm
 from memorycore.storage import add_memory_record, build_context_pack, memory_lineage, search_memory_records, supersede_memory_record
 from memorycore.storage.curator import curator_report, _DECAY_STEP, _DECAY_MIN_CONFIDENCE
 from memorycore.storage.db import managed_conn
+from memorycore.models import invalidate_config_cache
 
 
 @pytest.fixture(autouse=True)
@@ -114,7 +115,11 @@ def test_supersede_memory_record_marks_old_and_links_lineage():
 
     lineage = memory_lineage(new["id"])
     lineage_ids = {record["id"] for record in lineage["records"]}
+    chain_ids = [record["id"] for record in lineage["chain"]]
     assert {old["id"], new["id"]}.issubset(lineage_ids)
+    assert chain_ids == [old["id"], new["id"]]
+    assert lineage["current_head_id"] == new["id"]
+    assert lineage["branches"] == []
     assert any(link["source_id"] == new["id"] and link["target_id"] == old["id"] for link in lineage["links"])
 
     with managed_conn() as conn:
@@ -123,6 +128,87 @@ def test_supersede_memory_record_marks_old_and_links_lineage():
             (old["id"],),
         ).fetchone()
     assert audit is not None
+
+
+def test_lineage_reports_branch_when_multiple_active_heads_share_root():
+    root = add_memory_record("feedback", "Fact", "root fact")
+    left = add_memory_record("feedback", "Fact", "left update")
+    right = add_memory_record("feedback", "Fact", "right update")
+
+    supersede_memory_record(root["id"], left["id"], source_agent="pytest")
+    with managed_conn() as conn:
+        conn.execute("UPDATE memories SET fact_lineage_root=? WHERE id=?", (root["id"], right["id"]))
+
+    lineage = memory_lineage(root["id"])
+
+    assert lineage["current_head_id"] is None
+    assert {branch["id"] for branch in lineage["branches"]} == {left["id"], right["id"]}
+
+
+def test_supersede_rejects_archived_old_memory():
+    old = add_memory_record("feedback", "Archived", "archived old fact", status="archived")
+    new = add_memory_record("feedback", "New", "new fact")
+
+    with pytest.raises(ValueError, match="archived"):
+        supersede_memory_record(old["id"], new["id"], source_agent="pytest")
+
+
+def test_supersede_rejects_new_memory_that_is_not_lineage_head():
+    first = add_memory_record("feedback", "Fact", "first fact")
+    second = add_memory_record("feedback", "Fact", "second fact")
+    third = add_memory_record("feedback", "Fact", "third fact")
+    fourth = add_memory_record("feedback", "Fact", "fourth fact")
+
+    supersede_memory_record(first["id"], second["id"], source_agent="pytest")
+    supersede_memory_record(second["id"], third["id"], source_agent="pytest")
+
+    with pytest.raises(ValueError, match="already superseded"):
+        supersede_memory_record(fourth["id"], second["id"], source_agent="pytest")
+
+
+def test_supersede_rejects_lineage_merge_without_review():
+    left_root = add_memory_record("feedback", "Left", "left root")
+    left_head = add_memory_record("feedback", "Left", "left head")
+    right_root = add_memory_record("feedback", "Right", "right root")
+    right_head = add_memory_record("feedback", "Right", "right head")
+
+    supersede_memory_record(left_root["id"], left_head["id"], source_agent="pytest")
+    supersede_memory_record(right_root["id"], right_head["id"], source_agent="pytest")
+
+    with pytest.raises(ValueError, match="lineage merge"):
+        supersede_memory_record(left_head["id"], right_head["id"], source_agent="pytest")
+
+
+def test_temporal_lineage_indexes_are_created():
+    with managed_conn() as conn:
+        indexes = {row["name"] for row in conn.execute("PRAGMA index_list(memories)").fetchall()}
+
+    assert "idx_memories_superseded_by" in indexes
+    assert "idx_memories_lineage_root" in indexes
+    assert "idx_memories_status_lineage" in indexes
+
+
+def test_context_pack_recency_weight_is_configurable(monkeypatch, tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("context_pack:\n  recency_weight: 0.0\n", encoding="utf-8")
+    monkeypatch.setenv("LOCAL_MEMORY_CONFIG", str(cfg))
+    invalidate_config_cache()
+
+    old = add_memory_record("feedback", "SharedRecency", "shared recency config marker")
+    new = add_memory_record("feedback", "SharedRecency", "shared recency config marker")
+    with managed_conn() as conn:
+        conn.execute(
+            "UPDATE memories SET updated_at=?, importance=0.5, effectiveness_score=0.5, feedback_score=0 WHERE id=?",
+            (_past(400), old["id"]),
+        )
+        conn.execute(
+            "UPDATE memories SET updated_at=?, importance=0.5, effectiveness_score=0.5, feedback_score=0 WHERE id=?",
+            (_future(0), new["id"]),
+        )
+
+    pack = build_context_pack("shared recency config marker", token_budget=1000)
+    assert old["id"] in pack["used_ids"]
+    assert new["id"] in pack["used_ids"]
 
 
 # ── auto_decay in curator_report ─────────────────────────────────────────────

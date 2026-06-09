@@ -70,6 +70,9 @@ def test_governance_decision_persists_with_policy_status():
 
     assert decision["source_ids"] == [record["id"]]
     assert decision["review_status"] == "auto_approved"
+    assert decision["candidate_hash"]
+    assert decision["policy_reasons"] == []
+    assert decision["policy_version"]
     assert decision["llm_trace"]["rationale"] == ""
     assert decision["before_state"] == []
     assert decision["after_state"] == []
@@ -162,3 +165,67 @@ def test_reject_governance_decision_writes_audit():
     rows = get_audit_log(event_type="governance_decision_reject", limit=1)
     detail = json.loads(rows[0]["detail_json"])
     assert detail["decision_id"] == decision["id"]
+
+
+def test_policy_gate_returns_structured_reasons_and_version():
+    result = policy_gate(
+        "archive_duplicate",
+        0.80,
+        "high",
+        memories=[{"type": "user_profile", "importance": 0.9, "feedback_score": 1.0}],
+    )
+
+    assert result["review_status"] == "needs_review"
+    assert result["policy_version"]
+    assert "precious_memory_type" in result["policy_reasons"]
+    assert "high_importance_memory" in result["policy_reasons"]
+    assert "high_risk_action" in result["policy_reasons"]
+
+
+def test_create_governance_decision_dedupes_open_candidate_hash():
+    record = add_memory_record("episodic_memory", "Dedupe candidate", "Same recommendation", importance=0.2)
+    finding = {"id": record["id"], "action": "downgrade", "new_importance": 0.1}
+
+    first = create_governance_decision(
+        "importance_reassessment",
+        "downgrade",
+        [record["id"]],
+        0.95,
+        "low",
+        finding,
+    )
+    second = create_governance_decision(
+        "importance_reassessment",
+        "downgrade",
+        [record["id"]],
+        0.95,
+        "low",
+        dict(finding),
+    )
+
+    assert second["id"] == first["id"]
+    assert first["candidate_hash"]
+    assert len(list_governance_decisions(limit=10)) == 1
+
+
+def test_apply_records_execution_metadata_and_rollback_is_idempotent():
+    record = add_memory_record("episodic_memory", "Execution metadata", "Can be downgraded", importance=0.6)
+    decision = create_governance_decision(
+        "importance_reassessment",
+        "downgrade",
+        [record["id"]],
+        0.95,
+        "low",
+        {"id": record["id"], "action": "downgrade", "new_importance": 0.2},
+    )
+
+    applied = apply_governance_decision(decision["id"], source_agent="pytest")
+    rolled_back = rollback_governance_decision(decision["id"], source_agent="pytest")
+    rolled_back_again = rollback_governance_decision(decision["id"], source_agent="pytest")
+
+    assert applied["decision"]["execution_id"]
+    assert applied["decision"]["applied_by"] == "pytest"
+    assert applied["decision"]["approval_kind"] == "auto"
+    assert rolled_back["decision"]["rolled_back_by"] == "pytest"
+    assert rolled_back_again["already_rolled_back"] is True
+    assert rolled_back_again["decision"]["review_status"] == "rolled_back"

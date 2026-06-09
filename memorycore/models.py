@@ -68,7 +68,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "ollama_url": "http://127.0.0.1:11434",
         "timeout": 30,
     },
-    "context_pack": {"default_token_budget": 2000, "include_stale_warnings": True, "max_records_per_group": 6},
+    "context_pack": {
+        "default_token_budget": 2000,
+        "include_stale_warnings": True,
+        "max_records_per_group": 6,
+        "recency_weight": 0.03,
+    },
     "temporal": {
         "enabled": False,
         "contradiction_detection": "heuristic",
