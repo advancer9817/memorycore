@@ -80,13 +80,16 @@ def test_large_pool_sampling_limit():
 
 
 def test_run_llm_curator_applies_and_rebuilds_vectors(monkeypatch):
-    """Scheduled and manual LLM curator paths should share one synchronous runner."""
+    """Scheduled and manual LLM curator paths should share the governance runner."""
     import memorycore.storage.curator_llm as clm
 
     report = {"summary": {"semantic_duplicates": 1}, "errors": []}
-    applied = {"dry_run": False, "applied": {"archived": 1}}
+    governance = {"decisions_created": 1, "decisions": [], "auto_applied": [{"applied": {"downgraded": 1}}]}
     monkeypatch.setattr(clm, "llm_curator_report", lambda **_: report)
-    monkeypatch.setattr(clm, "apply_llm_curator", lambda report, dry_run: applied)
+    monkeypatch.setattr(
+        "memorycore.storage.governance.convert_llm_findings_to_decisions",
+        lambda report, auto_apply: governance,
+    )
 
     rebuild_calls = []
     monkeypatch.setattr(
@@ -101,7 +104,8 @@ def test_run_llm_curator_applies_and_rebuilds_vectors(monkeypatch):
     result = clm.run_llm_curator(config={}, limit=10, sim_threshold=0.7, apply=True)
 
     assert result["summary"] == {"semantic_duplicates": 1}
-    assert result["applied"] == applied
+    assert result["governance"] == governance
+    assert result["applied"] == {"governance_auto_applied": 1}
     assert result["rebuild_vectors"] == {"rebuilt": 1}
     assert rebuild_calls == [True]
 

@@ -3597,3 +3597,27 @@ Phase 2 已完成 governance decisions、deterministic policy gate、apply/rejec
 ### 回滚
 
 - 回滚 `ITERATION.md`、`README.md`、`docs/tools.md`、`docs/plans/2026-06-09-temporal-governance-engine.md`；如需完整撤回本次架构升级，还需连同迭代 122–124 中列出的 Phase 1–3 文件一并回滚。
+---
+
+## [迭代 126] 2026-06-09 — main 合并远端治理分支与测试对齐
+
+### 背景
+
+用户要求将远端 `fix/refresh-dashboard-deploy-iteration` 分支合并入 `main`。该分支包含 Temporal Governance Phase 2/3、架构文档、记忆同步数据和 UI/API 改动；合并本身可 fast-forward，但全量回归暴露出旧测试仍断言 pre-governance 的 `apply_llm_curator()` 直写路径。
+
+### 变更
+
+- `main` fast-forward 合并 `origin/fix/refresh-dashboard-deploy-iteration`，引入 4 个远端提交。
+- `tests/test_curator_llm_jobs.py`：将 `run_llm_curator(apply=True)` 测试从旧的 `apply_llm_curator()` 直写断言更新为 governance decision 流程断言，验证 `convert_llm_findings_to_decisions(auto_apply=True)`、`governance` payload、`governance_auto_applied` 计数与向量重建仍由同一同步 runner 负责。
+
+### 验证
+
+- `git merge --ff-only origin/fix/refresh-dashboard-deploy-iteration`：成功；post-merge memory import applied。
+- `cd /home/advancer/project/memorycore/ui && pnpm build`：通过。
+- 合并后首次全量 pytest：451 passed / 1 skipped / 1 failed；失败为 `tests/test_curator_llm_jobs.py::test_run_llm_curator_applies_and_rebuilds_vectors` 的旧断言，不是合并冲突。
+- `pnpm test -- --runInBand`：项目没有 `test` 脚本，该命令失败；改用 `pnpm build` 验证 UI。
+
+### 回滚
+
+- 如需撤回本次测试对齐，回滚 `tests/test_curator_llm_jobs.py` 的本迭代改动。
+- 如需撤回分支合并，回退 `main` 到合并前提交 `f90e6056ae7878b4119cb1489a5a05ef9ced6554`，并重新导入/同步记忆数据。
