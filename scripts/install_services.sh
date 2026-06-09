@@ -8,8 +8,6 @@
 #   mcore-curator.timer    — hourly 触发器
 #   ~/.local/bin/mcore     — 快捷管理命令
 #
-# 同时迁移旧单元（lmmcp.service / lmmcp-curator.*），避免冲突。
-#
 # 用法：
 #   bash scripts/install_services.sh
 #   bash scripts/install_services.sh --host 0.0.0.0 --port 8318 --ui-port 18318
@@ -102,18 +100,6 @@ install_systemd() {
 
   # --- mcore CLI ---
   install_mcore_cmd
-
-  # --- 迁移旧单元 ---
-  for old in lmmcp.service lmmcp-curator.service lmmcp-curator.timer; do
-    if systemctl --user is-enabled "$old" &>/dev/null; then
-      _log "Disabling legacy unit: $old"
-      systemctl --user disable "$old" 2>/dev/null || true
-    fi
-    if systemctl --user is-active "$old" &>/dev/null; then
-      _log "Stopping legacy unit: $old"
-      systemctl --user stop "$old" 2>/dev/null || true
-    fi
-  done
 
   systemctl --user daemon-reload
   systemctl --user enable --now mcore.service

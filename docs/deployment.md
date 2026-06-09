@@ -14,7 +14,7 @@ command-line options or environment variables.
 From a clone or copied checkout:
 
 ```bash
-cd /path/to/local-memory-mcp
+cd /path/to/memorycore
 scripts/deploy.sh
 ```
 
@@ -49,7 +49,7 @@ http://127.0.0.1:8318/metrics metrics
 The default bind host is loopback-only. For remote access, provide a token:
 
 ```bash
-LOCAL_MEMORY_FRONTEND_TOKEN='change-me' .venv/bin/python -m local_memory_mcp serve --host 0.0.0.0 --port 8318
+LOCAL_MEMORY_FRONTEND_TOKEN='change-me' .venv/bin/python -m memorycore serve --host 0.0.0.0 --port 8318
 ```
 
 MCP clients should continue using:
@@ -68,7 +68,7 @@ scripts/deploy.sh
 scripts/deploy.sh --force-config
 
 # Install into another root
-scripts/deploy.sh --root /opt/local-memory-mcp
+scripts/deploy.sh --root /opt/memorycore
 
 # Initialize only; do not install services
 scripts/deploy.sh --no-systemd
@@ -87,13 +87,12 @@ scripts/deploy.sh --skip-tests
 scripts/deploy.sh --dry-run
 ```
 
-Backward-compatible conservative initialization is still available:
+For initialization without service installation, use the deployment entrypoint
+directly:
 
 ```bash
-scripts/init_local_memory.sh
+scripts/deploy.sh --no-systemd
 ```
-
-`init_local_memory.sh` now delegates to `scripts/deploy.sh --no-systemd`.
 
 ## Docker Compose
 
@@ -193,7 +192,7 @@ Useful commands:
 ```bash
 systemctl --user status qdrant.service mcore.service mcore-curator.timer
 journalctl --user -u mcore.service -f
-tail -80 /path/to/local-memory-mcp/logs/curator.log
+tail -80 /path/to/memorycore/logs/curator.log
 ```
 
 ## MCP client configuration
@@ -238,7 +237,7 @@ Claude Code user config:
 ```bash
 curl -fsS http://127.0.0.1:6333/collections
 systemctl --user is-active qdrant.service mcore.service mcore-curator.timer
-PY=/path/to/local-memory-mcp/.venv/bin/python
+PY=/path/to/memorycore/.venv/bin/python
 $PY -m pytest tests -q
 ```
 

@@ -14,18 +14,23 @@ def test_checked_in_config_is_portable():
     assert "primary: sqlite" in text
 
 
-def test_init_script_exists_and_documents_safe_behavior():
-    script = ROOT / "scripts" / "init_local_memory.sh"
-    text = script.read_text(encoding="utf-8")
+def test_deployment_entrypoints_are_consolidated():
+    scripts = ROOT / "scripts"
+    deploy = (scripts / "deploy.sh").read_text(encoding="utf-8")
+    docs = (ROOT / "docs" / "deployment.md").read_text(encoding="utf-8")
 
-    assert script.exists()
-    assert "set -euo pipefail" in text
-    assert "--force-config" in text
-    assert "python3.11" in text
-    assert "rsync" in text and "tar" in text
-    assert "http://127.0.0.1:8318/mcp" in text
-    assert "Hermes/Codex/Claude Code/Gemini/OpenCode" in text
-    assert "does not" in text.lower() and "automatically" in text.lower()
+    assert (scripts / "deploy.sh").exists()
+    assert (scripts / "install_services.sh").exists()
+    assert (scripts / "mcore").exists()
+    assert (scripts / "init_local_memory.sh").exists() is False
+    assert (scripts / "install_curator_timer.sh").exists() is False
+    assert (scripts / "serve.sh").exists() is False
+    assert (scripts / "lmmcp-curator.timer").exists() is False
+    assert "--force-config" in deploy
+    assert "python3.11" in deploy
+    assert "rsync" in deploy and "tar" in deploy
+    assert "http://127.0.0.1:8318/mcp" in docs
+    assert "scripts/deploy.sh --no-systemd" in docs
 
 
 def test_deployment_doc_mentions_target_machine_verification():

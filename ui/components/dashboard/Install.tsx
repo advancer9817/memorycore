@@ -126,10 +126,16 @@ export const Install = () => {
 
   const fetchStatus = async () => {
     setLoading(true);
-    const response = await fetch(`${getApiBaseUrl()}/api/curator/status`);
-    const payload = await response.json();
-    setStatus(payload.data);
-    setLoading(false);
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/curator/status`);
+      if (!response.ok) {
+        throw new Error(`Curator status request failed with ${response.status}`);
+      }
+      const payload = await response.json();
+      setStatus(payload.data);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {

@@ -25,7 +25,7 @@ PRODUCTION_DB = str(ROOT / 'memory.sqlite3')
 
 
 async def main() -> None:
-    parser = argparse.ArgumentParser(description='Protocol-level MCP probe for local-memory-mcp')
+    parser = argparse.ArgumentParser(description='Protocol-level MCP probe for MemoryCore')
     parser.add_argument('--production', action='store_true', help='write the probe record to the production memory.sqlite3 DB')
     parser.add_argument('--db', default='', help='explicit probe DB path; defaults to a temporary DB unless --production is set')
     args = parser.parse_args()
@@ -37,7 +37,7 @@ async def main() -> None:
         db = PRODUCTION_DB
         cleanup_dir = None
     else:
-        cleanup_dir = tempfile.TemporaryDirectory(prefix='local-memory-mcp-probe-')
+        cleanup_dir = tempfile.TemporaryDirectory(prefix='memorycore-probe-')
         db = str(Path(cleanup_dir.name) / 'memory.sqlite3')
 
     env = {**os.environ, 'LOCAL_MEMORY_DB': db}
@@ -51,7 +51,7 @@ async def main() -> None:
                 print('TOOLS', [t.name for t in tools.tools])
                 add = await session.call_tool('memory_add', {
                     'type': 'timeline_event',
-                    'title': 'local-memory-mcp protocol probe',
+                    'title': 'MemoryCore protocol probe',
                     'content': '协议级 probe 已通过 stdio MCP 调用写入。',
                     'tags': ['probe', 'mcp'],
                     'importance': 0.6,

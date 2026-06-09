@@ -199,5 +199,6 @@
 ## 已发现待修复问题
 
 - [x] 修复 UI TypeScript 全量 typecheck 的 `react-icons` JSX 兼容问题：新增 `ui/components/shared/react-icons.tsx` typed wrapper，统一适配 React 19 / react-icons `ReactNode` 返回类型；`pnpm exec tsc --noEmit` 已通过。
+- [x] Dashboard 首次打开 loading 卡死：首屏加载增加 dashboard refresh token、AbortController + timeout、Install/useStats loading 收尾，避免 skeleton 一直卡住。
 - [x] Dashboard 后续成熟化：增加健康分趋势/分解、duplicates/contradictions/never accessed/LLM curator duration 视图、可点击 drill-down、导出治理报告、按风险排序的 review queue。
 - [x] 数据质量后续治理：LLM split 子记忆补 parent/child links，LLM duplicate archive 写 merge audit，LLM finding 支持批量接受/拒绝，并自动归档同 parent+fact_hash 的历史重复 atomic facts。

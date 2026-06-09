@@ -433,26 +433,35 @@ function downloadGovernanceReport(report: Record<string, unknown>): void {
   URL.revokeObjectURL(url);
 }
 
+const DASHBOARD_FETCH_TIMEOUT_MS = 15_000;
+
 export function MemoryIntelligenceCenter() {
   const userId = useSelector((state: RootState) => state.profile.userId);
+  const dashboardRefreshKey = useSelector((state: RootState) => state.ui.dashboardRefreshKey);
   const { messages } = useI18n();
   const t = messages.dashboard;
   const [state, setState] = useState<IntelligenceState>(INITIAL_STATE);
   const [selectedReviewLabel, setSelectedReviewLabel] = useState<string | null>(null);
 
   useEffect(() => {
-    let isMounted = true;
+    const controller = new AbortController();
+    let didTimeout = false;
+    const timeoutId = setTimeout(() => {
+      didTimeout = true;
+      controller.abort();
+    }, DASHBOARD_FETCH_TIMEOUT_MS);
 
     async function loadIntelligence(): Promise<void> {
       setState((current) => ({ ...current, isLoading: true, error: null }));
       try {
         const apiBaseUrl = getApiBaseUrl();
         const [curatorResponse, statsResponse, memoriesResponse] = await Promise.all([
-          fetch(`${apiBaseUrl}/api/curator/status`),
-          fetch(`${apiBaseUrl}/api/v1/stats?user_id=${encodeURIComponent(userId)}`),
+          fetch(`${apiBaseUrl}/api/curator/status`, { signal: controller.signal }),
+          fetch(`${apiBaseUrl}/api/v1/stats?user_id=${encodeURIComponent(userId)}`, { signal: controller.signal }),
           fetch(`${apiBaseUrl}/api/v1/memories/filter`, {
             method: "POST",
             headers: { "content-type": "application/json" },
+            signal: controller.signal,
             body: JSON.stringify({
               user_id: userId,
               page: 1,
@@ -474,7 +483,7 @@ export function MemoryIntelligenceCenter() {
 
         const curatorData = (curatorPayload as ApiEnvelope<CuratorStatusPayload>).data ?? (curatorPayload as CuratorStatusPayload);
 
-        if (!isMounted) return;
+        if (controller.signal.aborted) return;
         setState({
           curatorStatus: curatorData,
           recentMemories: memoriesPayload.items ?? [],
@@ -483,20 +492,27 @@ export function MemoryIntelligenceCenter() {
           error: null,
         });
       } catch (error: unknown) {
-        if (!isMounted) return;
+        if (controller.signal.aborted && !didTimeout) return;
         setState({
           ...INITIAL_STATE,
           isLoading: false,
-          error: error instanceof Error ? error.message : "Unable to load intelligence data",
+          error: didTimeout || (error instanceof DOMException && error.name === "AbortError")
+            ? "Dashboard data load timed out. Please try Refresh again."
+            : error instanceof Error
+              ? error.message
+              : "Unable to load intelligence data",
         });
+      } finally {
+        clearTimeout(timeoutId);
       }
     }
 
     loadIntelligence();
     return () => {
-      isMounted = false;
+      controller.abort();
+      clearTimeout(timeoutId);
     };
-  }, [userId]);
+  }, [dashboardRefreshKey, userId]);
 
   const curatorStatus = state.curatorStatus;
   const statusStats = curatorStatus?.stats ?? {};

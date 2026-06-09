@@ -3328,3 +3328,162 @@ Graph 左侧连接类型筛选里 `part of` 与 `related to` 使用灰色/暗 sl
 - 回滚 `ui/components/dashboard/MemoryIntelligenceCenter.tsx`、`ui/components/dashboard/Install.tsx`、`ui/app/memories/components/FilterComponent.tsx`、i18n 字典与本条 `ITERATION.md` 记录。
 
 ---
+
+## [迭代 118] 2026-06-09 — Apps 页面 Refresh 功能修复
+
+### 背景
+
+点击 Navbar 刷新按钮时，`/apps` 路由走 `else` 分支，调用 `resetAppsState()` 清空数据，但未触发重新拉取，导致页面变为空白。
+
+### 根因
+
+1. **Navbar 逻辑缺少 `/apps` 分支**：`/memories` 用 `requestMemoriesRefresh()`，`/apps` 却进入 `else` 并调用 `resetAppsState()`（销毁数据）而非 `requestAppsRefresh()`（清 TTL + 触发重取）。
+2. **`useAppsApi.fetchApps` 闭包过期**：`lastFetchedAt` 和 `cachedApps` 直接从 Redux selector 读入 `useCallback` 闭包，但 `[dispatch]` 依赖数组不包含它们，导致缓存守卫始终读到初次挂载时的快照值，无法正确判断缓存是否新鲜。
+3. **`appsSlice` 缺少 `refreshKey`**：没有对应 `memoriesSlice.requestMemoriesRefresh` 的机制让 `AppGrid` 感知到"用户手动刷新"信号。
+
+### 变更
+
+- **`ui/store/appsSlice.ts`**
+  - `AppsState` 新增 `refreshKey: number`（初始值 0）。
+  - 新增 `requestAppsRefresh` reducer：`refreshKey += 1`，同时清空 `lastFetchedAt`，与 `memoriesSlice.requestMemoriesRefresh` 对称。
+  - 导出 `requestAppsRefresh`。
+
+- **`ui/hooks/useAppsApi.ts`**
+  - 引入 `useRef` / `useEffect`；为 `lastFetchedAt` 和 `cachedApps` 各建一个 ref，用 `useEffect` 保持同步，解决闭包过期问题（与 `useMemoriesApi` 一致）。
+  - `FetchAppsParams` 新增可选 `forceRefresh?: boolean`，缓存守卫加 `!forceRefresh` 前置条件。
+  - `useCallback` 依赖数组保持 `[dispatch]`（refs 本身稳定，无需列入）。
+
+- **`ui/components/Navbar.tsx`**
+  - `handleRefresh` 新增 `else if (pathname.startsWith("/apps"))` 分支，调用 `requestAppsRefresh()`，不再走 `else` 的 `resetAppsState()`。
+  - 原 `else` 分支保留，仅去掉 `resetAppsState()` 调用，profile 重置保持不变。
+
+- **`ui/app/apps/components/AppGrid.tsx`**
+  - 从 Redux 读取 `refreshKey`，加入 `useEffect` 依赖数组。
+  - `fetchApps` 调用时传 `forceRefresh: refreshKey > 0`，确保手动刷新时绕过缓存。
+
+### 验证
+
+- `cd ui && pnpm exec tsc --noEmit`：通过，零错误。
+
+### 回滚
+
+- 回滚 `ui/store/appsSlice.ts`、`ui/hooks/useAppsApi.ts`、`ui/components/Navbar.tsx`、`ui/app/apps/components/AppGrid.tsx` 与本条 `ITERATION.md` 记录。
+
+---
+
+## [迭代 119] 2026-06-09 — Graph 页面 Refresh 功能修复
+
+### 背景
+
+点击 Navbar 刷新按钮时，`/graph` 路由进入 `else` 分支：`refreshForPath` 仅发起一次被丢弃的 fetch（不写入任何状态），然后重置 profile，`GraphPage` 的本地状态完全不受影响，数据不刷新。
+
+### 根因
+
+`GraphPage` 使用纯 React 本地状态（无 Redux），其数据拉取 `useEffect` 只依赖 `limit`。Navbar 刷新没有任何机制触发该 effect 重新执行。
+
+### 变更
+
+- **`ui/store/uiSlice.ts`**
+  - `UIState` 新增 `graphRefreshKey: number`（初始值 0）。
+  - 新增 `requestGraphRefresh` reducer：以不可变方式返回 `graphRefreshKey + 1` 的新 state（与 `uiSlice` 现有 immutable reducer 风格一致）。
+  - 导出 `requestGraphRefresh`。
+
+- **`ui/components/Navbar.tsx`**
+  - `handleRefresh` 新增 `else if (pathname.startsWith("/graph"))` 分支，调用 `requestGraphRefresh()`，不再走 `else` 分支的 `refreshForPath` + profile 重置。
+
+- **`ui/app/graph/page.tsx`**
+  - 引入 `useSelector` 和 `RootState`，读取 `state.ui.graphRefreshKey`。
+  - 将 `graphRefreshKey` 加入数据拉取 `useEffect` 的依赖数组，保证 Navbar 刷新时触发真实的网络请求重取图数据。
+
+### 验证
+
+- `cd ui && pnpm exec tsc --noEmit`：通过，零错误。
+
+### 回滚
+
+- 回滚 `ui/store/uiSlice.ts`、`ui/components/Navbar.tsx`、`ui/app/graph/page.tsx` 与本条 `ITERATION.md` 记录。
+
+---
+
+## [迭代 120] 2026-06-09 — Dashboard 首次打开 loading 卡死修复
+
+### 背景
+
+Dashboard 首次打开时，顶部统计卡和 Memory Intelligence Center 可能一直停留在 skeleton / unknown 状态，需要手动刷新浏览器页面后才恢复。该问题说明首屏加载缺少超时、取消和显式刷新信号，部分 local loading 也可能无法在失败路径上退出。
+
+### 根因
+
+1. **MemoryIntelligenceCenter 首屏加载是 all-or-nothing**：三个接口并发拉取，但没有 `AbortController`、超时或 dashboard refresh token；一旦某个请求在后端 warmup 期间挂住，`isLoading` 就可能一直不结束。
+2. **`Install.fetchStatus()` 缺少 `finally`**：如果 curator status 请求抛错，`loading` 可能卡住。
+3. **`useStats.fetchStats()` 只在 catch 里清 loading**：成功分支没有统一收尾，hook loading 状态可能长期停留。
+4. **Navbar 对 `/` 的刷新没有 dashboard 专用信号**：刷新按钮不会触发 Dashboard 本地数据重新拉取。
+
+### 变更
+
+- **`ui/store/uiSlice.ts`**
+  - `UIState` 新增 `dashboardRefreshKey: number`（初始值 0）。
+  - 新增 `requestDashboardRefresh` reducer，按 immutable pattern 递增 refresh key。
+  - 导出 `requestDashboardRefresh`。
+
+- **`ui/components/Navbar.tsx`**
+  - `handleRefresh` 新增 `pathname === "/"` 分支，dispatch `requestDashboardRefresh()`。
+  - 现有 `/memories`、`/apps`、`/graph` 分支保持不变。
+
+- **`ui/components/dashboard/MemoryIntelligenceCenter.tsx`**
+  - 读取 `state.ui.dashboardRefreshKey` 并加入首屏加载 effect 依赖。
+  - 用 `AbortController` + 15s timeout 包裹 `/api/curator/status`、`/api/v1/stats`、`/api/v1/memories/filter` 三个请求。
+  - 非中止错误会落到可见错误态，而不是永久 skeleton。
+
+- **`ui/components/dashboard/Install.tsx`**
+  - `fetchStatus()` 增加 `try/finally`，确保 loading 退出。
+  - 同时补充 `response.ok` 检查，避免静默失败。
+
+- **`ui/hooks/useStats.ts`**
+  - 将 `setIsLoading(false)` 移到 `finally`，确保成功/失败都能收尾。
+  - 统一使用 `unknown` 处理错误对象。
+
+### 验证
+
+- `cd ui && pnpm exec tsc --noEmit`：通过，零错误。
+- 手动验证 Dashboard 首次打开不再无限 skeleton；失败时应显示可恢复错误。
+- 手动验证 Navbar 在 `/` 页面点击 Refresh 会触发 Dashboard 重新加载。
+
+### 回滚
+
+- 回滚 `ui/store/uiSlice.ts`、`ui/components/Navbar.tsx`、`ui/components/dashboard/MemoryIntelligenceCenter.tsx`、`ui/components/dashboard/Install.tsx`、`ui/hooks/useStats.ts` 与本条 `ITERATION.md` 记录。
+
+---
+
+## [迭代 121] 2026-06-09 — 部署入口收敛与旧 lmmcp 脚本清理
+
+### 背景
+
+项目已从 `local-memory-mcp` / `lmmcp` 迁移到 `memorycore` / `mcore` 命名，但部署入口、Docker 启动命令、探测脚本和部分文档仍残留旧名称或旧兼容 wrapper。继续保留多套入口会增加新环境初始化歧义，也会让 service 安装脚本承担过时迁移逻辑。
+
+### 根因
+
+1. Dockerfile 仍复制旧包目录并用 `python -m local_memory_mcp` 启动。
+2. 部署文档仍引用 `/path/to/local-memory-mcp`、`/opt/local-memory-mcp` 和 `scripts/init_local_memory.sh`。
+3. `init_local_memory.sh`、`install_curator_timer.sh`、`serve.sh`、`lmmcp-curator.timer` 属于旧入口，与当前 `deploy.sh`、`install_services.sh`、`scripts/mcore` 职责重复。
+4. `install_services.sh` 仍包含旧 `lmmcp.service` / `lmmcp-curator.*` 的迁移清理逻辑。
+5. 部署测试仍验证旧初始化 wrapper 存在，不符合入口收敛后的预期。
+
+### 变更
+
+- Dockerfile 改为复制 `memorycore/` 并通过 `python -m memorycore serve` 启动。
+- 部署文档统一改用 `memorycore` 路径和 `python -m memorycore` 示例。
+- 初始化场景统一推荐 `scripts/deploy.sh --no-systemd`。
+- 删除旧兼容入口：`scripts/init_local_memory.sh`、`scripts/install_curator_timer.sh`、`scripts/serve.sh`、`scripts/lmmcp-curator.timer`。
+- `scripts/install_services.sh` 移除旧 lmmcp systemd unit disable/stop 迁移段，仅负责当前 mcore service/timer 安装。
+- `probe_mcp.py` 文案和临时目录 prefix 改为 MemoryCore。
+- `tests/test_deployment.py` 改为验证部署入口已收敛：当前入口存在、旧 wrapper 不存在、文档指向 `deploy.sh --no-systemd`。
+
+### 验证
+
+- `cd /home/advancer/project/memorycore && uv run pytest tests/test_deployment.py -q`：18/18 pass。
+- `cd /home/advancer/project/memorycore/ui && pnpm exec tsc --noEmit`：通过，零错误。
+- `git diff --check`：通过，零 whitespace 错误。
+
+### 回滚
+
+- 回滚 Dockerfile、`docs/deployment.md`、`memorycore/server.py`、`probe_mcp.py`、`scripts/install_services.sh`、`start.sh`、`tests/test_deployment.py`，并恢复删除的旧脚本与本条 `ITERATION.md` 记录。

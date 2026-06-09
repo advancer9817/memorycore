@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Memory, Client, Category } from '@/components/types';
 import { useDispatch, useSelector } from 'react-redux';
@@ -82,7 +82,8 @@ interface UseMemoriesApiReturn {
       sortColumn?: string;
       sortDirection?: 'asc' | 'desc';
       showArchived?: boolean;
-    }
+    },
+    forceRefresh?: boolean
   ) => Promise<{ memories: Memory[]; total: number; pages: number }>;
   fetchMemoryById: (memoryId: string) => Promise<void>;
   fetchAccessLogs: (memoryId: string, page?: number, pageSize?: number) => Promise<void>;
@@ -107,6 +108,16 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
   const memories = useSelector((state: RootState) => state.memories.memories);
   const selectedMemory = useSelector((state: RootState) => state.memories.selectedMemory);
   const lastFetchedAt = useSelector((state: RootState) => state.memories.lastFetchedAt);
+  const memoriesRef = useRef(memories);
+  const lastFetchedAtRef = useRef(lastFetchedAt);
+
+  useEffect(() => {
+    memoriesRef.current = memories;
+  }, [memories]);
+
+  useEffect(() => {
+    lastFetchedAtRef.current = lastFetchedAt;
+  }, [lastFetchedAt]);
 
   const fetchMemories = useCallback(async (
     query?: string,
@@ -118,7 +129,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
       sortColumn?: string;
       sortDirection?: 'asc' | 'desc';
       showArchived?: boolean;
-    }
+    },
+    forceRefresh: boolean = false
   ): Promise<{ memories: Memory[], total: number, pages: number }> => {
     // Skip fetch if cached data is fresh and this is a plain first-page load
     const isDefaultLoad =
@@ -129,8 +141,10 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
       !filters?.sortColumn &&
       !filters?.sortDirection &&
       filters?.showArchived === undefined;
-    if (isDefaultLoad && lastFetchedAt && Date.now() - lastFetchedAt < CACHE_TTL_MS && memories.length > 0) {
-      return { memories, total: memories.length, pages: 1 };
+    const cachedMemories = memoriesRef.current;
+    const cachedAt = lastFetchedAtRef.current;
+    if (!forceRefresh && isDefaultLoad && cachedAt && Date.now() - cachedAt < CACHE_TTL_MS && cachedMemories.length > 0) {
+      return { memories: cachedMemories, total: cachedMemories.length, pages: 1 };
     }
     setIsLoading(true);
     setError(null);
@@ -173,7 +187,7 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
       setIsLoading(false);
       throw new Error(errorMessage);
     }
-  }, [user_id, dispatch]);
+  }, [dispatch, user_id]);
 
   const createMemory = async (text: string): Promise<void> => {
     try {

@@ -1,4 +1,4 @@
-"""MCP server and CLI entry point for local-memory-mcp.
+"""MCP server and CLI entry point for MemoryCore.
 
 Contains the FastMCP instance, all @mcp.tool() registrations, the main()
 CLI argument parser, and the standard if-__main__ entry point.

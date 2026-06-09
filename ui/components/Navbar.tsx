@@ -28,26 +28,9 @@ async function refreshForPath(pathname: string): Promise<void> {
   const fetches: Promise<unknown>[] = [];
 
   if (pathname === "/") {
-    fetches.push(
-      fetch(`${base}/api/v1/stats`),
-      fetch(`${base}/api/v1/memories/filter`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ page: 1, size: 20 }),
-      })
-    );
+    fetches.push(fetch(`${base}/api/v1/stats`));
   } else if (pathname.startsWith("/memories")) {
-    const sp = new URLSearchParams(window.location.search);
-    fetches.push(
-      fetch(`${base}/api/v1/memories/filter`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          page: Number(sp.get("page") || 1),
-          size: Number(sp.get("size") || 20),
-        }),
-      })
-    );
+    return;
   } else if (pathname.startsWith("/apps")) {
     fetches.push(fetch(`${base}/api/v1/apps/`));
   } else if (pathname.startsWith("/settings")) {
@@ -69,14 +52,24 @@ export function Navbar() {
     if (isRefreshing) return;
     setIsRefreshing(true);
     try {
-      await refreshForPath(pathname);
       const { store } = await import("@/store/store");
-      const { resetMemoriesState } = await import("@/store/memoriesSlice");
-      const { resetAppsState } = await import("@/store/appsSlice");
-      const { resetProfileState } = await import("@/store/profileSlice");
-      store.dispatch(resetMemoriesState());
-      store.dispatch(resetAppsState());
-      store.dispatch(resetProfileState());
+      if (pathname === "/") {
+        const { requestDashboardRefresh } = await import("@/store/uiSlice");
+        store.dispatch(requestDashboardRefresh());
+      } else if (pathname.startsWith("/memories")) {
+        const { requestMemoriesRefresh } = await import("@/store/memoriesSlice");
+        store.dispatch(requestMemoriesRefresh());
+      } else if (pathname.startsWith("/apps")) {
+        const { requestAppsRefresh } = await import("@/store/appsSlice");
+        store.dispatch(requestAppsRefresh());
+      } else if (pathname.startsWith("/graph")) {
+        const { requestGraphRefresh } = await import("@/store/uiSlice");
+        store.dispatch(requestGraphRefresh());
+      } else {
+        await refreshForPath(pathname);
+        const { resetProfileState } = await import("@/store/profileSlice");
+        store.dispatch(resetProfileState());
+      }
       toast({ description: messages.nav.refreshed });
     } finally {
       setIsRefreshing(false);

@@ -2,10 +2,12 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import { useSelector } from "react-redux";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { getApiBaseUrl } from "@/lib/api-url";
+import { RootState } from "@/store/store";
 import {
   type GraphNode,
   type GraphEdge,
@@ -51,6 +53,7 @@ const GRAPH_HIGH_LIMIT_WARNING = 5000;
 interface GraphData { nodes: GraphNode[]; edges: GraphEdge[]; }
 
 export default function GraphPage() {
+  const graphRefreshKey = useSelector((state: RootState) => state.ui.graphRefreshKey);
   const [data, setData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -112,7 +115,7 @@ export default function GraphPage() {
       });
 
     return () => controller.abort();
-  }, [limit]);
+  }, [limit, graphRefreshKey]);
 
   useEffect(() => {
     const el = containerRef.current;

@@ -44,6 +44,7 @@ export function AppGrid() {
   const { fetchApps, isLoading } = useAppsApi();
   const apps = useSelector((state: RootState) => state.apps.apps);
   const filters = useSelector((state: RootState) => state.apps.filters);
+  const refreshKey = useSelector((state: RootState) => state.apps.refreshKey);
 
   useEffect(() => {
     fetchApps({
@@ -52,8 +53,9 @@ export function AppGrid() {
       sort_by: filters.sortBy,
       sort_direction: filters.sortDirection,
       page_size: 100,
+      forceRefresh: refreshKey > 0,
     });
-  }, [fetchApps, filters]);
+  }, [fetchApps, filters, refreshKey]);
 
   if (isLoading) {
     return (

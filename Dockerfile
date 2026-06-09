@@ -11,7 +11,7 @@ ENV PIP_NO_CACHE_DIR=1 \
 # Install from the checked-in source so package metadata and optional extras
 # stay in sync with pyproject.toml.
 COPY pyproject.toml README.md ./
-COPY local_memory_mcp/ ./local_memory_mcp/
+COPY memorycore/ ./memorycore/
 
 ARG INSTALL_EXTRAS=all
 RUN if [ "$INSTALL_EXTRAS" = "none" ]; then \
@@ -31,4 +31,4 @@ ENV LOCAL_MEMORY_DB=/data/memory.sqlite3 \
 
 EXPOSE 8318
 
-CMD ["python", "-m", "local_memory_mcp", "serve", "--host", "0.0.0.0", "--port", "8318"]
+CMD ["python", "-m", "memorycore", "serve", "--host", "0.0.0.0", "--port", "8318"]

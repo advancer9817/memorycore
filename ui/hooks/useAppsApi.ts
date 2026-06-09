@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useDispatch, useSelector } from 'react-redux';
 import { AppDispatch, RootState } from '@/store/store';
@@ -50,6 +50,7 @@ interface FetchAppsParams {
   sort_direction?: 'asc' | 'desc';
   page?: number;
   page_size?: number;
+  forceRefresh?: boolean;
 }
 
 interface UseAppsApiReturn {
@@ -70,6 +71,16 @@ export const useAppsApi = (): UseAppsApiReturn => {
   const user_id = useSelector((state: RootState) => state.profile.userId);
   const lastFetchedAt = useSelector((state: RootState) => state.apps.lastFetchedAt);
   const cachedApps = useSelector((state: RootState) => state.apps.apps);
+  const lastFetchedAtRef = useRef(lastFetchedAt);
+  const cachedAppsRef = useRef(cachedApps);
+
+  useEffect(() => {
+    lastFetchedAtRef.current = lastFetchedAt;
+  }, [lastFetchedAt]);
+
+  useEffect(() => {
+    cachedAppsRef.current = cachedApps;
+  }, [cachedApps]);
 
   const fetchApps = useCallback(async (params: FetchAppsParams = {}): Promise<{ apps: App[], total: number }> => {
     const {
@@ -78,12 +89,15 @@ export const useAppsApi = (): UseAppsApiReturn => {
       sort_by = 'name',
       sort_direction = 'asc',
       page = 1,
-      page_size = 10
+      page_size = 10,
+      forceRefresh = false,
     } = params;
 
     // Skip fetch if cache is fresh and no search filters applied
-    if (!name && is_active === undefined && page === 1 && lastFetchedAt && Date.now() - lastFetchedAt < 30_000 && cachedApps.length > 0) {
-      return { apps: cachedApps, total: cachedApps.length };
+    const cachedAt = lastFetchedAtRef.current;
+    const cached = cachedAppsRef.current;
+    if (!forceRefresh && !name && is_active === undefined && page === 1 && cachedAt && Date.now() - cachedAt < 30_000 && cached.length > 0) {
+      return { apps: cached, total: cached.length };
     }
 
     setIsLoading(true);
@@ -116,7 +130,7 @@ export const useAppsApi = (): UseAppsApiReturn => {
       setIsLoading(false);
       throw new Error(errorMessage);
     }
-  }, [dispatch]);
+  }, [dispatch]); // refs are stable — lastFetchedAtRef/cachedAppsRef don't need to be listed
 
   const fetchAppDetails = useCallback(async (appId: string): Promise<void> => {
     setIsLoading(true);

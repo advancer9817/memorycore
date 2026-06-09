@@ -16,6 +16,7 @@ export function MemoriesSection() {
   const searchParams = useSearchParams();
   const { fetchMemories } = useMemoriesApi();
   const memories = useSelector((state: RootState) => state.memories.memories);
+  const refreshKey = useSelector((state: RootState) => state.memories.refreshKey);
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
@@ -38,7 +39,8 @@ export function MemoriesSection() {
           searchQuery,
           currentPage,
           itemsPerPage,
-          { sortColumn, sortDirection }
+          { sortColumn, sortDirection },
+          refreshKey > 0
         );
         setTotalItems(result.total);
         setTotalPages(result.pages);
@@ -49,7 +51,7 @@ export function MemoriesSection() {
     };
 
     loadMemories();
-  }, [currentPage, itemsPerPage, sortColumn, sortDirection, fetchMemories]);
+  }, [currentPage, itemsPerPage, sortColumn, sortDirection, fetchMemories, refreshKey]);
 
   const setCurrentPage = (page: number) => {
     const params = new URLSearchParams(searchParams.toString());

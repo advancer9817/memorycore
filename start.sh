@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# start.sh — 一键启动 local-memory-mcp（含记忆导入）
+# start.sh — 一键启动 MemoryCore（含记忆导入）
 #
 # 适用场景：新设备 clone 仓库后第一次启动，或日常启动。
 # 执行步骤：
@@ -15,7 +15,7 @@
 #   bash start.sh --daemon          # 后台运行（PID 写入 /tmp/mcore.pid）
 #   bash start.sh --no-import       # 跳过记忆导入
 #   bash start.sh --host 0.0.0.0 --port 8318
-#   MCORE_AUTO_SYNC=0 bash start.sh # 同上效果（兼容旧 lmmcp 脚本变量）
+#   MCORE_AUTO_SYNC=0 bash start.sh # 禁用启动前/停止后的记忆同步
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -61,6 +61,7 @@ interface AppsState {
   status: 'idle' | 'loading' | 'succeeded' | 'failed';
   error: string | null;
   lastFetchedAt: number | null;
+  refreshKey: number;
   filters: {
     searchQuery: string;
     isActive: 'all' | true | false;
@@ -99,6 +100,7 @@ const initialState: AppsState = {
   status: 'idle',
   error: null,
   lastFetchedAt: null,
+  refreshKey: 0,
   filters: {
     searchQuery: '',
     isActive: 'all',
@@ -191,6 +193,10 @@ const appsSlice = createSlice({
         state.selectedApp.details.is_active = action.payload.isActive;
       }
     },
+    requestAppsRefresh: (state) => {
+      state.refreshKey += 1;
+      state.lastFetchedAt = null;
+    },
     setSearchQuery: (state, action: PayloadAction<string>) => {
       state.filters.searchQuery = action.payload;
     },
@@ -211,6 +217,7 @@ export const {
   setAppsSuccess,
   setAppsError,
   resetAppsState,
+  requestAppsRefresh,
   setSelectedAppLoading,
   setSelectedAppDetails,
   setSelectedAppError,

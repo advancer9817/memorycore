@@ -18,6 +18,7 @@ interface MemoriesState {
   error: string | null;
   selectedMemoryIds: string[];
   lastFetchedAt: number | null;
+  refreshKey: number;
 }
 
 const initialState: MemoriesState = {
@@ -29,6 +30,7 @@ const initialState: MemoriesState = {
   error: null,
   selectedMemoryIds: [],
   lastFetchedAt: null,
+  refreshKey: 0,
 };
 
 const memoriesSlice = createSlice({
@@ -56,6 +58,10 @@ const memoriesSlice = createSlice({
       state.status = 'failed';
       state.error = action.payload;
     },
+    requestMemoriesRefresh: (state) => {
+      state.refreshKey += 1;
+      state.lastFetchedAt = null;
+    },
     resetMemoriesState: (state) => {
       state.status = 'idle';
       state.error = null;
@@ -64,6 +70,7 @@ const memoriesSlice = createSlice({
       state.selectedMemory = null;
       state.accessLogs = [];
       state.relatedMemories = [];
+      state.lastFetchedAt = null;
     },
     selectMemory: (state, action: PayloadAction<string>) => {
       if (!state.selectedMemoryIds.includes(action.payload)) {
@@ -90,6 +97,7 @@ export const {
   setMemoriesLoading, 
   setMemoriesSuccess, 
   setMemoriesError,
+  requestMemoriesRefresh,
   resetMemoriesState,
   selectMemory,
   deselectMemory,
