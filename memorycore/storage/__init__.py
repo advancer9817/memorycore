@@ -25,6 +25,8 @@ from memorycore.storage.crud import (
     get_record,
     timeline,
     get_memory_stats,
+    supersede_memory_record,
+    memory_lineage,
 )
 from memorycore.storage.search import (
     search_memory_records,
@@ -58,6 +60,15 @@ from memorycore.storage.handoff import (
     agent_handoff_update,
 )
 from memorycore.storage.dashboard import dashboard_payload, export_html
+from memorycore.storage.governance import (
+    policy_gate,
+    create_governance_decision,
+    convert_llm_findings_to_decisions,
+    list_governance_decisions,
+    apply_governance_decision,
+    reject_governance_decision,
+    rollback_governance_decision,
+)
 
 __all__ = [
     "connect",
@@ -100,4 +111,13 @@ __all__ = [
     "agent_handoff_update",
     "get_active_warnings",
     "get_context_quality_stats",
+    "supersede_memory_record",
+    "memory_lineage",
+    "policy_gate",
+    "create_governance_decision",
+    "convert_llm_findings_to_decisions",
+    "list_governance_decisions",
+    "apply_governance_decision",
+    "reject_governance_decision",
+    "rollback_governance_decision",
 ]

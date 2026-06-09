@@ -154,7 +154,9 @@ def init_db(conn: sqlite3.Connection) -> None:
           effectiveness_score REAL NOT NULL DEFAULT 0.5,
           last_injected_at TEXT,
           valid_from TEXT,
-          valid_until TEXT
+          valid_until TEXT,
+          superseded_by TEXT,
+          fact_lineage_root TEXT
         );
 
         CREATE TABLE IF NOT EXISTS feedback_events (
@@ -242,6 +244,32 @@ def init_db(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_audit_type ON audit_events(event_type);
         CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_events(created_at);
 
+        CREATE TABLE IF NOT EXISTS governance_decisions (
+          id TEXT PRIMARY KEY,
+          decision_type TEXT NOT NULL,
+          source_ids_json TEXT NOT NULL DEFAULT '[]',
+          recommended_action TEXT NOT NULL,
+          llm_confidence REAL NOT NULL DEFAULT 0.0,
+          risk_level TEXT NOT NULL DEFAULT 'medium',
+          review_status TEXT NOT NULL DEFAULT 'needs_review',
+          policy_reason TEXT NOT NULL DEFAULT '',
+          finding_json TEXT NOT NULL DEFAULT '{}',
+          llm_trace_json TEXT NOT NULL DEFAULT '{}',
+          raw_response_ref TEXT NOT NULL DEFAULT '',
+          before_state_json TEXT NOT NULL DEFAULT '[]',
+          after_state_json TEXT NOT NULL DEFAULT '[]',
+          rollback_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          applied_at TEXT,
+          rolled_back_at TEXT,
+          source_agent TEXT NOT NULL DEFAULT 'llm_curator'
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_governance_review ON governance_decisions(review_status);
+        CREATE INDEX IF NOT EXISTS idx_governance_created ON governance_decisions(created_at);
+        CREATE INDEX IF NOT EXISTS idx_governance_type ON governance_decisions(decision_type);
+
         CREATE TABLE IF NOT EXISTS agent_messages (
           id TEXT PRIMARY KEY,
           from_agent TEXT NOT NULL,
@@ -313,6 +341,11 @@ def init_db(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "agent_messages", "expires_at", "TEXT")
     _ensure_column(conn, "memories", "valid_from", "TEXT")
     _ensure_column(conn, "memories", "valid_until", "TEXT")
+    _ensure_column(conn, "memories", "superseded_by", "TEXT")
+    _ensure_column(conn, "memories", "fact_lineage_root", "TEXT")
+    _ensure_column(conn, "governance_decisions", "llm_trace_json", "TEXT NOT NULL DEFAULT '{}'")
+    _ensure_column(conn, "governance_decisions", "before_state_json", "TEXT NOT NULL DEFAULT '[]'")
+    _ensure_column(conn, "governance_decisions", "after_state_json", "TEXT NOT NULL DEFAULT '[]'")
     try:
         null_fts = conn.execute("SELECT COUNT(*) FROM memories_fts WHERE id IS NULL").fetchone()[0]
     except sqlite3.OperationalError:

@@ -14,7 +14,7 @@ from memorycore.injection_guard import (
     check_memory_for_injection,
     warning_for_filtered_memory,
 )
-from memorycore.models import as_json, fts_phrase, normalize_list, now, row_to_dict
+from memorycore.models import as_json, fts_phrase, local_now, normalize_list, now, parse_ts, row_to_dict
 from memorycore.storage.db import _managed_query, managed_conn, read_conn
 from memorycore.storage.entities import entity_search
 
@@ -539,6 +539,14 @@ def _is_atomic_fact(record: dict[str, Any]) -> bool:
     return _metadata(record).get("kind") == "atomic_fact"
 
 
+def _recency_score(record: dict[str, Any]) -> float:
+    """Soft freshness signal for ranking: updated now=1.0, 1+ year old=0.0."""
+    updated_at = record.get("updated_at") or record.get("created_at")
+    updated = parse_ts(str(updated_at) if updated_at else None)
+    age_days = max(0.0, (local_now() - updated.astimezone(local_now().tzinfo)).total_seconds() / 86400)
+    return max(0.0, min(1.0, 1.0 - age_days / 365.0))
+
+
 def _parent_id(record: dict[str, Any]) -> str:
     return str(_metadata(record).get("parent_id") or "")
 
@@ -683,6 +691,7 @@ def build_context_pack(
             + float(r.get("importance") or 0) * 0.07
             + float(r.get("effectiveness_score") or 0) * 0.05
             + feedback * 0.02
+            + _recency_score(r) * 0.03
         )
 
     fallback_used = False

@@ -202,3 +202,49 @@
 - [x] Dashboard 首次打开 loading 卡死：首屏加载增加 dashboard refresh token、AbortController + timeout、Install/useStats loading 收尾，避免 skeleton 一直卡住。
 - [x] Dashboard 后续成熟化：增加健康分趋势/分解、duplicates/contradictions/never accessed/LLM curator duration 视图、可点击 drill-down、导出治理报告、按风险排序的 review queue。
 - [x] 数据质量后续治理：LLM split 子记忆补 parent/child links，LLM duplicate archive 写 merge audit，LLM finding 支持批量接受/拒绝，并自动归档同 parent+fact_hash 的历史重复 atomic facts。
+
+## Temporal Governance Engine — Phase 1 Foundation
+
+> 背景：记忆系统需要从“被动检索库 + 人工审查工具”升级为“时间线事实系统 + 可审计治理”。Phase 1 只做低风险基础能力，不引入 LLM 自动改库：明确 superseded 状态、事实 lineage、recency 软排序、curator supersession 候选、审计与测试。
+
+- [x] 增加 `superseded` 状态：扩展模型状态校验、非 active 向量同步删除、搜索默认排除，作为“已被新事实替代”的明确生命周期状态。
+- [x] 增加 `superseded_by` 与 `fact_lineage_root` 字段：初始化新库与老库迁移都补齐字段，支持记录旧事实被哪条新事实替代以及事实链根节点。
+- [x] 增加事实 lineage / supersede 基础操作：提供内部函数查询某条记忆的前驱/后继链，并提供可审计的 supersede 操作，避免直接删除旧记忆。
+- [x] Context Pack 排序加入 `recency_score`：新记忆获得小权重加成，但不能压倒文本相关性、importance、effectiveness 和 feedback。
+- [x] Curator 增加 supersession candidate：对同 scope/project/type/title-key 的 active 新旧记忆生成可解释候选，不自动处理高价值类型。
+- [x] MCP/API 暴露最小必要能力：优先复用 `memory_timeline` / `memory_update` / `memory_curator_report`，仅在确有必要时新增 lineage 查询工具，避免继续膨胀工具面。
+- [x] 补测试与文档记录：覆盖状态校验、schema 迁移、supersede audit、context recency 排序、curator candidate；完成后追加 `ITERATION.md`。
+
+## Temporal Governance Engine — Phase 2 LLM Governance Decision
+
+> 背景：Phase 1 已具备 lineage / supersede / recency / supersession candidate。Phase 2 目标是让 LLM 只做结构化语义判断，由 deterministic policy gate 决定 auto-approve / human-review / reject，并且所有治理动作可审计、可回滚；LLM 不直接写 SQL、不直接改库。
+
+- [x] 新增治理决策模型：设计 `governance_decisions` 持久化结构或等价存储，记录 source ids、decision type、recommended action、LLM confidence、risk level、review status、policy reason、LLM trace、before/after state、rollback snapshot、applied/rolled_back 时间。
+- [x] 抽出 deterministic policy gate：根据 action type、confidence、risk、memory type、importance、feedback、scope/project 判断 `auto_approved` / `needs_review` / `rejected`。
+- [x] 将 LLM curator finding 转换为 governance decision：保留原始 finding、LLM rationale、raw response 指针，禁止 LLM 直接执行数据库写入。
+- [x] 增加治理 apply / reject / rollback 基础接口：复用现有 LLM curator apply-single / batch 能力，写入 audit event，并支持低风险 auto-apply。
+- [x] 为 high-value / precious memory 加强人工审查保护：`user_profile`、`decision`、`project_memory`、高 importance 记忆、merge/delete 类动作必须进入 review queue。
+- [x] 补 Phase 2 测试：policy gate 分支、decision 持久化、auto-approved apply、needs-review 不改库、reject/rollback 审计。
+
+## Temporal Governance Engine — Phase 3 Auto-Supersession
+
+> 背景：Phase 1 只报告 supersession candidate，Phase 3 允许在高置信、低风险场景中自动 supersede 旧事实；中等置信冲突继续进入治理队列，避免误伤高价值记忆。
+
+- [x] 配置化 auto-supersession 阈值：新增 `temporal.auto_supersede_threshold`、`temporal.review_similarity_threshold`、`temporal.auto_supersede_enabled`，默认保守关闭或仅低风险开启。
+- [x] 写入路径接入候选检测：在 `memory_add` / `memory_ingest` 后对同 type/scope/project 的 active 记忆做语义/词法候选查找。
+- [x] 高置信自动 supersede：相似度达到阈值且非 precious / 非高 importance 时调用 `supersede_memory_record()`，并写入 governance/audit 记录。
+- [x] 中等置信进入 review：相似度在 review 区间时创建 contradiction / supersession governance decision，不自动改状态。
+- [x] 保障向量索引一致性：被 superseded 的旧记录从 Qdrant 删除，新 head 保留 active 向量，rollback 后能重建索引。
+- [x] 补 Phase 3 测试：阈值命中、阈值未命中、precious 跳过、review decision 创建、Qdrant 不可用降级、lineage 链连续性。
+
+## Temporal Governance Engine — Phase 4 Auto-Governance Cockpit UI
+
+> 背景：Phase 2/3 后端具备治理决策与自动处理能力，Phase 4 将 Dashboard 从 manual-review-first 改为 Auto-Governance Cockpit：系统默认自动处理低风险项，只让用户审查少量高风险项，并提供完整 audit / undo / lineage 解释。
+
+- [ ] 拆分 `MemoryIntelligenceCenter.tsx`：抽出 `AutoAppliedStrip`、`ReviewQueue`、`ConflictComparisonPanel`、`HealthMetricsPanel`、`CurationTimeline` 等小组件，降低大文件复杂度。
+- [ ] 增加 Auto-Applied 区：展示最近自动执行的 stale/archive/supersede/reweight/split/promote 动作，支持跳转 audit log。
+- [ ] 增加 Needs Human Review 队列：展示 governance decisions 中 `needs_review` 的项目，支持 Accept / Skip / Swap / Keep Both。
+- [ ] 增加 lineage 展示：记忆详情页与冲突面板展示 `memory_lineage` 数据，说明“谁替代了谁 / 当前 head 是谁”。
+- [ ] 增加 Undo / rollback UI：对可回滚 auto-applied action 显示 Undo，调用 Phase 2 rollback 接口。
+- [ ] 保持 Claude 设计语言与 i18n：新增文案进入 typed dictionary，确保中英文 key 完整一致。
+- [ ] 补 Phase 4 验证：UI TypeScript、关键组件单测/Playwright smoke、Dashboard 空队列健康态、review accept/skip/undo 交互。

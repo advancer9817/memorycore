@@ -3487,3 +3487,113 @@ Dashboard 首次打开时，顶部统计卡和 Memory Intelligence Center 可能
 ### 回滚
 
 - 回滚 Dockerfile、`docs/deployment.md`、`memorycore/server.py`、`probe_mcp.py`、`scripts/install_services.sh`、`start.sh`、`tests/test_deployment.py`，并恢复删除的旧脚本与本条 `ITERATION.md` 记录。
+
+---
+
+## [迭代 122] 2026-06-09 — Temporal Governance Phase 1 收敛
+
+### 背景
+
+用户要求把所有 Temporal Governance 优化项先写入 TODO，再按顺序执行。本轮聚焦 Phase 1 基础能力：把记忆从“被动检索库”升级为具备时间线语义的事实系统，优先补齐 superseded 生命周期、lineage、recency 排序、curator 候选与最小工具暴露。
+
+### 变更
+
+- `TODO.md` 新增 `Temporal Governance Engine — Phase 1 Foundation`，把所有优化项一次性记录到待办并保持 TODO / ITERATION 职责分离。
+- `memorycore/models.py`：新增 `superseded` 状态，扩展状态校验。
+- `memorycore/storage/db.py`：`memories` 表新增 `superseded_by`、`fact_lineage_root`，并补充旧库迁移列。
+- `memorycore/storage/crud.py`：新增 `supersede_memory_record()` 与 `memory_lineage()`，支持可审计的 supersede 操作与 lineage 查询；`update_status_batch()` 继续保持批量同步。
+- `memorycore/storage/search.py`：新增 `_recency_score()`，在 context pack 排序中引入轻量 recency soft boost。
+- `memorycore/storage/curator.py`：新增 `supersession_candidates`，只报告同 title/type/scope/project 的新旧 active 候选，不自动处理高价值类型。
+- `memorycore/server.py`：新增 MCP 工具 `memory_lineage` 与 `memory_supersede`，复用现有工具面并保持可审计接口。
+- `tests/test_temporal.py`：补齐 superseded 状态、lineage、supersede 审计、recency 排序、curator supersession candidate 的回归测试。
+- `README.md`：更新 MCP 工具总数与工具表，补充 `memory_lineage` / `memory_supersede`。
+
+### 验证
+
+- `cd /home/advancer/project/memorycore && .venv/bin/python -m pytest tests/test_temporal.py tests/test_docs_consistency.py -q`：20/20 pass。
+- `cd /home/advancer/project/memorycore && .venv/bin/python -m py_compile memorycore/models.py memorycore/storage/db.py memorycore/storage/crud.py memorycore/storage/search.py memorycore/storage/curator.py memorycore/server.py`：通过。
+- `scripts/generate_tools_doc.py`：已重新生成，`docs/tools.md` 与实际注册工具一致。
+
+### 回滚
+
+- 回滚 `TODO.md`、`README.md`、`memorycore/models.py`、`memorycore/storage/db.py`、`memorycore/storage/crud.py`、`memorycore/storage/search.py`、`memorycore/storage/curator.py`、`memorycore/server.py`、`tests/test_temporal.py` 以及本条 `ITERATION.md` 记录。
+
+---
+
+## [迭代 123] 2026-06-09 — Temporal Governance Phase 2 LLM 决策治理
+
+### 背景
+
+Phase 1 已提供 superseded 状态、lineage、recency 排序和 curator supersession 候选。Phase 2 聚焦 LLM 治理闭环：LLM 只能产生结构化建议，所有写库动作必须先落为 governance decision，再由 deterministic policy gate 决定自动执行、进入人工审查或拒绝。
+
+### 变更
+
+- `memorycore/storage/db.py`：新增 `governance_decisions` 表及 review/status/type/created 索引，持久化 source ids、decision type、推荐动作、LLM confidence、risk、review status、policy reason、finding、LLM trace（prompt/response/thinking/rationale）、before/after state、rollback snapshot 与 applied/rolled_back 时间，并补旧库 schema 迁移列。
+- `memorycore/storage/governance.py`：新增治理决策模块，包含 `policy_gate()`、finding → decision 转换、decision list、apply/reject/rollback 基础能力与审计事件。
+- policy gate 采用保守阈值：`confidence < 0.55` 直接 reject，`confidence >= 0.90` 且低风险才允许 auto approve；`user_profile`、`decision`、`project_memory`、高 importance、正反馈和 archive/split 等高风险动作强制进入 `needs_review`；delete 类动作直接 reject；merge 类动作永远人工审查。
+- `memorycore/storage/curator_llm.py`：`run_llm_curator(apply=...)` 改为先创建 governance decisions；`apply=True` 只自动执行 policy gate 批准的低风险决策，不再让 LLM finding 直接写库。
+- `memorycore/frontend.py`：`/api/curator/llm/apply-single` 复用 governance decision 流程，先建 decision，再按 policy status 执行或返回 review/reject 结果。
+- `memorycore/server.py` / `memorycore/storage/__init__.py`：暴露 governance decisions/apply/reject/rollback 基础接口，供后续 Phase 4 UI cockpit 使用。
+- `tests/test_governance.py`：覆盖 policy gate 分支、delete reject、merge review、decision 持久化、LLM trace 持久化、LLM finding 转 decision、needs-review 不改库、auto-approved apply、reject/rollback 审计。
+- `TODO.md`：Phase 2 项全部标记完成，Phase 3/4 保持未开始；Phase 3 继续负责 auto-supersession 写入路径、阈值配置和向量一致性，Phase 4 负责 Auto-Governance Cockpit UI、review queue 和 undo/lineage 展示。
+
+### 验证
+
+- `cd /home/advancer/project/memorycore && python3 -m py_compile memorycore/storage/governance.py memorycore/storage/db.py memorycore/storage/curator_llm.py memorycore/frontend.py memorycore/server.py`：通过。
+- `cd /home/advancer/project/memorycore && uv run pytest tests/test_governance.py tests/test_curator_apply.py -q`：11/11 pass。
+
+### 回滚
+
+- 回滚 `TODO.md`、`ITERATION.md`、`memorycore/storage/db.py`、`memorycore/storage/governance.py`、`memorycore/storage/__init__.py`、`memorycore/storage/curator_llm.py`、`memorycore/frontend.py`、`memorycore/server.py`、`tests/test_governance.py`。
+
+---
+
+## [迭代 124] 2026-06-09 — Temporal Governance Phase 3 自动 Supersession
+
+### 背景
+
+Phase 2 已完成 governance decisions、deterministic policy gate、apply/reject/rollback 与审计快照。Phase 3 在此基础上接入写入路径的自动 supersession：仅对同 type/scope/project 的 active 记忆做候选检测，高置信且低风险时自动替代旧事实，中等置信或高价值记忆进入治理审查队列。
+
+### 变更
+
+- `memorycore/models.py`：`temporal` 默认配置新增 `auto_supersede_enabled=false`、`auto_supersede_threshold=0.96`、`review_similarity_threshold=0.82`，默认保守关闭自动写库。
+- 新增 `memorycore/storage/temporal_governance.py`：提供写后候选检测、词法/序列相似度评分、precious/high-importance/positive-feedback 保护、auto/review 分流。
+- `memorycore/storage/crud.py`：`add_memory_record()` 写入并同步索引后调用 `process_auto_supersession()`；`memory_ingest` 通过共享 add path 自动覆盖候选检测。
+- `memorycore/storage/governance.py`：policy/apply 支持 `supersede` 治理动作，auto-approved 时复用 `supersede_memory_record()`，并在 rollback 后重新同步恢复记录到向量索引。
+- `tests/test_auto_supersession.py`：覆盖阈值命中、阈值未命中、precious skip、positive-feedback skip、中等置信 review、auto disabled review、Qdrant 不可用降级、同 type/scope/project 约束、lineage 连续性与 rollback vector sync。
+- `TODO.md`：Phase 3 项全部标记完成；Phase 4 UI cockpit 保持未开始。
+
+### 验证
+
+- `cd /home/advancer/project/memorycore && uv run pytest tests/test_auto_supersession.py tests/test_governance.py tests/test_temporal.py -q`：34/34 pass。
+- `cd /home/advancer/project/memorycore && uv run python -m py_compile memorycore/models.py memorycore/storage/crud.py memorycore/storage/governance.py memorycore/storage/temporal_governance.py tests/test_auto_supersession.py`：通过。
+- `cd /home/advancer/project/memorycore && git diff --check`：通过，零 whitespace 错误。
+
+### 回滚
+
+- 回滚 `TODO.md`、`ITERATION.md`、`memorycore/models.py`、`memorycore/storage/crud.py`、`memorycore/storage/governance.py`、`memorycore/storage/temporal_governance.py`、`tests/test_auto_supersession.py`。
+
+---
+
+## [迭代 125] 2026-06-09 — Temporal Governance 架构文档落地与提交前校验
+
+### 背景
+
+用户要求将 Temporal Governance Engine 原始方案落地为项目文档，并在提交推送前生成对应迭代记录。本轮不继续实现 Phase 4 UI，而是把已完成的 Phase 1–3 代码、治理文档、工具文档和验证结果统一收敛，准备提交推送。
+
+### 变更
+
+- 新增 `docs/plans/2026-06-09-temporal-governance-engine.md`：完整记录“时间线记忆治理引擎”架构方案，包括 Temporal Memory、Auto-Supersession、LLM Judge + Policy Gate、Audit/Rollback、Auto-Governance Cockpit、MCP 工具面建议、数据库建议、Phase 1–4 分阶段计划和 8 条最终原则。
+- `README.md`：同步 MCP 工具总数到 41，并补充 `governance_decisions`、`governance_apply`、`governance_reject`、`governance_rollback` 工具说明。
+- `docs/tools.md`：通过 `scripts/generate_tools_doc.py` 重新生成，确保工具文档与 `memorycore/server.py` 的实际 MCP 注册列表一致。
+- 保留 Phase 4 未完成状态：`TODO.md` 中 Auto-Governance Cockpit UI 相关 7 项仍为未完成，后续单独实现。
+
+### 验证
+
+- `cd /home/advancer/project/memorycore && uv run pytest tests/test_auto_supersession.py tests/test_governance.py tests/test_temporal.py tests/test_docs_consistency.py -q`：37/37 pass。
+- `cd /home/advancer/project/memorycore/ui && pnpm exec tsc --noEmit`：通过，零 TypeScript 错误。
+- `cd /home/advancer/project/memorycore && git diff --check`：通过，零 whitespace 错误。
+
+### 回滚
+
+- 回滚 `ITERATION.md`、`README.md`、`docs/tools.md`、`docs/plans/2026-06-09-temporal-governance-engine.md`；如需完整撤回本次架构升级，还需连同迭代 122–124 中列出的 Phase 1–3 文件一并回滚。

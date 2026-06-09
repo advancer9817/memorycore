@@ -52,13 +52,19 @@ from memorycore.storage import (
     entity_search,
     list_agent_presence,
     list_recent,
+    list_governance_decisions,
+    apply_governance_decision,
+    reject_governance_decision,
+    rollback_governance_decision,
     memory_backup as create_memory_backup,
     memory_export as export_memory_payload,
     memory_import as import_memory_payload,
     memory_rebuild_vectors as rebuild_memory_vectors,
     memory_vector_audit as audit_memory_vectors,
+    memory_lineage as get_memory_lineage,
     query_links,
     rollup_report,
+    supersede_memory_record,
     search_memory_records,
     send_agent_message,
     timeline,
@@ -473,6 +479,25 @@ def memory_link_query(
 
 @mcp.tool()
 @_safe_tool
+def memory_lineage(memory_id: str, limit: int = 100) -> dict[str, Any]:
+    """Return the supersession lineage for a memory without mutating records."""
+    return get_memory_lineage(memory_id, limit=limit)
+
+
+@mcp.tool()
+@_safe_tool
+def memory_supersede(
+    old_id: str,
+    new_id: str,
+    source_agent: str = "agent",
+    note: str = "",
+) -> dict[str, Any]:
+    """Mark an older memory as superseded by a newer memory and write an audit event."""
+    return supersede_memory_record(old_id, new_id, source_agent=source_agent, note=note)
+
+
+@mcp.tool()
+@_safe_tool
 def memory_warnings(
     memory_ids: list[str],
     min_weight: float = 0.4,
@@ -490,6 +515,34 @@ def memory_warnings(
         sorted by severity (high first) then weight descending.
     """
     return get_active_warnings(memory_ids, min_weight=min_weight, max_warnings=max_warnings)
+
+
+@mcp.tool()
+@_safe_tool
+def governance_decisions(review_status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    """Return governance decisions ordered by newest first."""
+    return list_governance_decisions(review_status=review_status, limit=limit)
+
+
+@mcp.tool()
+@_safe_tool
+def governance_apply(decision_id: str, source_agent: str = "agent") -> dict[str, Any]:
+    """Apply an approved governance decision and emit audit records."""
+    return apply_governance_decision(decision_id, source_agent=source_agent)
+
+
+@mcp.tool()
+@_safe_tool
+def governance_reject(decision_id: str, source_agent: str = "agent", reason: str = "") -> dict[str, Any]:
+    """Reject a governance decision and emit audit records."""
+    return reject_governance_decision(decision_id, source_agent=source_agent, reason=reason)
+
+
+@mcp.tool()
+@_safe_tool
+def governance_rollback(decision_id: str, source_agent: str = "agent") -> dict[str, Any]:
+    """Rollback an applied governance decision and restore the prior snapshot."""
+    return rollback_governance_decision(decision_id, source_agent=source_agent)
 
 
 @mcp.tool()

@@ -5,7 +5,7 @@ import pytest
 from datetime import datetime, timedelta, timezone
 
 import memorycore as lm
-from memorycore.storage import add_memory_record, search_memory_records
+from memorycore.storage import add_memory_record, build_context_pack, memory_lineage, search_memory_records, supersede_memory_record
 from memorycore.storage.curator import curator_report, _DECAY_STEP, _DECAY_MIN_CONFIDENCE
 from memorycore.storage.db import managed_conn
 
@@ -73,6 +73,58 @@ def test_expired_memory_still_exists_in_db():
     assert row is not None
 
 
+# ── superseded / lineage ─────────────────────────────────────────────────────
+
+
+def test_superseded_status_is_valid_and_excluded_from_default_search():
+    r = add_memory_record("feedback", "OldFact", "old superseded content", status="superseded")
+    assert r["status"] == "superseded"
+    results = search_memory_records("old superseded content")
+    assert r["id"] not in [item["id"] for item in results]
+
+
+def test_context_pack_recency_soft_boost_prefers_newer_equally_relevant_memory():
+    old = add_memory_record("feedback", "SharedRecency", "shared recency ranking marker")
+    new = add_memory_record("feedback", "SharedRecency", "shared recency ranking marker")
+    with managed_conn() as conn:
+        conn.execute(
+            "UPDATE memories SET updated_at=?, importance=0.5, effectiveness_score=0.5, feedback_score=0 WHERE id=?",
+            (_past(400), old["id"]),
+        )
+        conn.execute(
+            "UPDATE memories SET updated_at=?, importance=0.5, effectiveness_score=0.5, feedback_score=0 WHERE id=?",
+            (_future(0), new["id"]),
+        )
+
+    pack = build_context_pack("shared recency ranking marker", token_budget=1000)
+    ordered_ids = pack["used_ids"]
+    assert ordered_ids.index(new["id"]) < ordered_ids.index(old["id"])
+
+
+def test_supersede_memory_record_marks_old_and_links_lineage():
+    old = add_memory_record("feedback", "Fact", "old fact content")
+    new = add_memory_record("feedback", "Fact", "new fact content")
+
+    result = supersede_memory_record(old["id"], new["id"], source_agent="pytest", note="newer correction")
+
+    assert result["old"]["status"] == "superseded"
+    assert result["old"]["superseded_by"] == new["id"]
+    assert result["old"]["fact_lineage_root"] == old["id"]
+    assert result["new"]["fact_lineage_root"] == old["id"]
+
+    lineage = memory_lineage(new["id"])
+    lineage_ids = {record["id"] for record in lineage["records"]}
+    assert {old["id"], new["id"]}.issubset(lineage_ids)
+    assert any(link["source_id"] == new["id"] and link["target_id"] == old["id"] for link in lineage["links"])
+
+    with managed_conn() as conn:
+        audit = conn.execute(
+            "SELECT detail_json FROM audit_events WHERE event_type='memory_supersede' AND memory_id=?",
+            (old["id"],),
+        ).fetchone()
+    assert audit is not None
+
+
 # ── auto_decay in curator_report ─────────────────────────────────────────────
 
 def _set_last_accessed(memory_id: str, days_ago: int) -> None:
@@ -82,6 +134,19 @@ def _set_last_accessed(memory_id: str, days_ago: int) -> None:
             "UPDATE memories SET last_accessed_at=?, updated_at=?, effectiveness_score=0.2, importance=0.4, injected_count=1 WHERE id=?",
             (ts, ts, memory_id),
         )
+
+
+def test_curator_reports_supersession_candidates_for_newer_same_fact():
+    old = add_memory_record("feedback", "Same Fact", "old same fact content", importance=0.4)
+    new = add_memory_record("feedback", "Same Fact", "new same fact content", importance=0.4)
+    with managed_conn() as conn:
+        conn.execute("UPDATE memories SET updated_at=? WHERE id=?", (_past(10), old["id"]))
+        conn.execute("UPDATE memories SET updated_at=? WHERE id=?", (_future(0), new["id"]))
+
+    report = curator_report(dry_run=True)
+    candidates = report["supersession_candidates"]
+    assert any(candidate["old_id"] == old["id"] and candidate["new_id"] == new["id"] for candidate in candidates)
+    assert report["summary"]["supersession_candidates"] >= 1
 
 
 def test_auto_decay_candidates_listed_in_dry_run():

@@ -39,6 +39,7 @@ from memorycore.storage import (
     entity_search,
     list_agent_presence,
     list_recent,
+    memory_lineage,
     memory_backup,
     memory_export,
     memory_import,
@@ -303,13 +304,11 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
         t.start()
         return {"job_id": job_id, "status": "running"}
     if parts == ["curator", "llm", "apply-single"] and method == "POST":
-        # Apply a single LLM curator finding by category and payload
-        from memorycore.storage.curator_llm import apply_llm_curator
+        from memorycore.storage.governance import apply_governance_decision, convert_llm_findings_to_decisions
         category = body.get("category", "")
         finding = body.get("finding", {})
         if not category or not finding:
             raise ValueError("'category' and 'finding' are required")
-        # Build a minimal report with just this single finding
         single_report: dict = {
             "semantic_duplicates": [],
             "contradictions": [],
@@ -319,8 +318,14 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
         if category not in single_report:
             raise ValueError(f"Unknown category: {category!r}")
         single_report[category] = [finding]
-        result = apply_llm_curator(single_report, dry_run=False)
-        return result
+        decision_result = convert_llm_findings_to_decisions(single_report, auto_apply=False)
+        decisions = decision_result.get("decisions", [])
+        if not decisions:
+            return decision_result
+        decision = decisions[0]
+        if decision.get("review_status") == "rejected":
+            return {"decision": decision, "applied": None}
+        return apply_governance_decision(decision["id"], source_agent="frontend")
     if parts == ["curator", "llm", "latest"] and method == "GET":
         with _llm_curator_lock:
             job_id = _latest_llm_job_id[0] if _latest_llm_job_id else None
@@ -361,6 +366,20 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
     if len(parts) == 2 and parts[0] == "handoffs" and method == "PATCH":
         return agent_handoff_update(parts[1], body.get("from_agent", "frontend"), body.get("status", ""), body.get("result"), body.get("error", ""))
 
+    if parts == ["governance", "decisions"] and method == "GET":
+        from memorycore.storage.governance import list_governance_decisions
+        return list_governance_decisions(_str_q(query, "review_status", None), _int_q(query, "limit", 100))
+    if len(parts) == 3 and parts[0] == "governance" and parts[2] == "apply" and method == "POST":
+        from memorycore.storage.governance import apply_governance_decision
+        return apply_governance_decision(parts[1], source_agent=body.get("source_agent", "frontend"))
+    if len(parts) == 3 and parts[0] == "governance" and parts[2] == "reject" and method == "POST":
+        from memorycore.storage.governance import reject_governance_decision
+        return reject_governance_decision(parts[1], source_agent=body.get("source_agent", "frontend"), reason=body.get("reason", ""))
+    if len(parts) == 3 and parts[0] == "governance" and parts[2] == "rollback" and method == "POST":
+        from memorycore.storage.governance import rollback_governance_decision
+        return rollback_governance_decision(parts[1], source_agent=body.get("source_agent", "frontend"))
+    if len(parts) == 2 and parts[0] == "lineage" and method == "GET":
+        return memory_lineage(parts[1], _int_q(query, "limit", 100))
     if parts == ["audit"] and method == "GET":
         return get_audit_log(_str_q(query, "memory_id", None), _str_q(query, "event_type", None), _int_q(query, "limit", 50))
     if parts == ["export"] and method == "GET":

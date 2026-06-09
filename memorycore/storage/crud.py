@@ -22,6 +22,8 @@ from memorycore.storage.audit import log_audit_event
 from memorycore.storage.atomization import atomize_record, should_atomize
 from memorycore.storage.entities import sync_memory_entities
 
+_LINEAGE_RELEVANT_STATUSES = {"active", "stale", "contradicted", "superseded"}
+
 logger = logging.getLogger(__name__)
 
 
@@ -165,6 +167,12 @@ def add_memory_record(
     result = row_to_dict(row)
     log_audit_event("memory_add", memory_id=memory_id, agent=source_agent, detail={"type": memory_type})
     _sync_record_indexes(result)
+    try:
+        from memorycore.storage.temporal_governance import process_auto_supersession
+
+        process_auto_supersession(result, source_agent=source_agent)
+    except Exception as exc:
+        logger.warning("process_auto_supersession: failed for id=%s: %s", result.get("id"), exc)
     if should_atomize(result, atomize):
         try:
             atomize_record(
@@ -263,6 +271,107 @@ def update_status_batch(conn, updates: list[tuple[str, str]]) -> None:
             changed_records.extend(_cascade_child_status(memory_id, status, conn=conn))
             for record in changed_records:
                 _sync_record_indexes(record, conn=conn)
+
+
+def supersede_memory_record(
+    old_id: str,
+    new_id: str,
+    source_agent: str = "agent",
+    note: str = "",
+) -> dict[str, Any]:
+    """Mark an older memory as superseded by a newer memory and link the pair."""
+    if old_id == new_id:
+        raise ValueError("old_id and new_id must be different")
+    ts = now()
+    with managed_conn() as conn:
+        old_row = conn.execute("SELECT * FROM memories WHERE id=?", (old_id,)).fetchone()
+        new_row = conn.execute("SELECT * FROM memories WHERE id=?", (new_id,)).fetchone()
+        if old_row is None:
+            raise ValueError(f"old memory not found: {old_id}")
+        if new_row is None:
+            raise ValueError(f"new memory not found: {new_id}")
+        old_record = row_to_dict(old_row)
+        new_record = row_to_dict(new_row)
+        root_id = new_record.get("fact_lineage_root") or old_record.get("fact_lineage_root") or old_id
+        conn.execute(
+            """
+            UPDATE memories
+            SET status='superseded', superseded_by=?, fact_lineage_root=?, updated_at=?
+            WHERE id=?
+            """,
+            (new_id, root_id, ts, old_id),
+        )
+        conn.execute(
+            """
+            UPDATE memories
+            SET fact_lineage_root=COALESCE(fact_lineage_root, ?), updated_at=?
+            WHERE id=?
+            """,
+            (root_id, ts, new_id),
+        )
+        import uuid as _uuid
+        link_id = str(_uuid.uuid4())
+        link_note = note or "newer memory supersedes older fact"
+        conn.execute(
+            """
+            INSERT INTO memory_links(id, source_id, target_id, relation_type, weight, note, created_at, source_agent)
+            VALUES (?, ?, ?, 'supersedes', 1.0, ?, ?, ?)
+            ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET
+              weight=excluded.weight, note=excluded.note, source_agent=excluded.source_agent
+            """,
+            (link_id, new_id, old_id, link_note, ts, source_agent or "agent"),
+        )
+        old_after = row_to_dict(conn.execute("SELECT * FROM memories WHERE id=?", (old_id,)).fetchone())
+        new_after = row_to_dict(conn.execute("SELECT * FROM memories WHERE id=?", (new_id,)).fetchone())
+    log_audit_event(
+        "memory_supersede",
+        memory_id=old_id,
+        agent=source_agent,
+        detail={"old_id": old_id, "new_id": new_id, "note": note, "root_id": root_id},
+    )
+    _sync_record_indexes(old_after)
+    _sync_record_indexes(new_after)
+    return {"old": old_after, "new": new_after, "root_id": root_id}
+
+
+def memory_lineage(memory_id: str, limit: int = 100) -> dict[str, Any]:
+    """Return a compact fact-lineage view for a memory and its supersession links."""
+    cap = max(1, min(int(limit), 500))
+    with read_conn() as conn:
+        base_row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
+        if base_row is None:
+            raise ValueError(f"memory not found: {memory_id}")
+        base = row_to_dict(base_row)
+        root_id = base.get("fact_lineage_root") or memory_id
+        rows = conn.execute(
+            """
+            SELECT * FROM memories
+            WHERE id = ? OR fact_lineage_root = ? OR superseded_by = ?
+            ORDER BY created_at ASC, updated_at ASC
+            LIMIT ?
+            """,
+            (root_id, root_id, memory_id, cap),
+        ).fetchall()
+        records = [row_to_dict(row) for row in rows]
+        known_ids = {record["id"] for record in records}
+        if memory_id not in known_ids:
+            records.append(base)
+            known_ids.add(memory_id)
+        placeholders = ",".join("?" for _ in known_ids)
+        links = []
+        if placeholders:
+            link_rows = conn.execute(
+                f"""
+                SELECT * FROM memory_links
+                WHERE relation_type='supersedes'
+                  AND (source_id IN ({placeholders}) OR target_id IN ({placeholders}))
+                ORDER BY created_at ASC
+                LIMIT ?
+                """,
+                [*known_ids, *known_ids, cap],
+            ).fetchall()
+            links = [dict(row) for row in link_rows]
+    return {"memory_id": memory_id, "root_id": root_id, "records": records, "links": links}
 
 
 def add_feedback(

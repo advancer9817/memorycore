@@ -600,9 +600,18 @@ def run_llm_curator(
     """Run LLM curation, optionally apply findings, and record run metadata."""
     report = llm_curator_report(config=config, limit=limit, sim_threshold=sim_threshold)
     applied: dict[str, Any] | None = None
-    if apply:
-        applied = apply_llm_curator(report, dry_run=False)
-        report = {**report, "applied": applied}
+    governance: dict[str, Any] | None = None
+    try:
+        from memorycore.storage.governance import convert_llm_findings_to_decisions
+
+        governance = convert_llm_findings_to_decisions(report, auto_apply=apply)
+        report = {**report, "governance": governance}
+        if apply:
+            applied = {"governance_auto_applied": len(governance.get("auto_applied", []))}
+            report = {**report, "applied": applied}
+    except Exception as exc:
+        logger.warning("governance decision conversion failed: %s", exc)
+        report = {**report, "governance_error": str(exc)}
 
     if rebuild_vectors:
         try:
@@ -623,6 +632,7 @@ def run_llm_curator(
                 "summary": report.get("summary", {}),
                 "errors": report.get("errors", []),
                 "applied": applied,
+                "governance": governance,
                 "rebuild_vectors_error": report.get("rebuild_vectors_error"),
             },
         )

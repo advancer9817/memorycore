@@ -113,6 +113,7 @@ def curator_report(
     promote_candidates: list[dict] = []
     skill_promotion_candidates: list[dict] = []
     evolution_candidates: list[dict] = []
+    supersession_candidates: list[dict[str, Any]] = []
 
     for r in all_rows:
         typ = _s(r, "type", "")
@@ -205,6 +206,40 @@ def curator_report(
 
     duplicate_title_groups = [v for k, v in by_title.items() if k and len(v) > 1]
     dead_candidates = dead_candidates_episodic + dead_candidates_precious + dead_candidates_default
+
+    # Supersession candidates: same fact key/type/scope/project with newer active record.
+    # Curator only reports these; applying supersession is handled by the explicit,
+    # audited supersede operation so high-value memories never change silently.
+    for group in duplicate_title_groups:
+        active_group = [r for r in group if r.get("status") == "active"]
+        if len(active_group) < 2:
+            continue
+        buckets: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+        for row in active_group:
+            bucket_key = (
+                str(row.get("type") or ""),
+                str(row.get("scope") or "global"),
+                str(row.get("project_path") or ""),
+            )
+            buckets.setdefault(bucket_key, []).append(row)
+        for bucket_rows in buckets.values():
+            if len(bucket_rows) < 2:
+                continue
+            ordered = sorted(bucket_rows, key=lambda row: str(row.get("updated_at") or row.get("created_at") or ""), reverse=True)
+            survivor = ordered[0]
+            for old in ordered[1:]:
+                is_precious = str(old.get("type") or "") in _PRECIOUS
+                supersession_candidates.append({
+                    "old_id": old["id"],
+                    "new_id": survivor["id"],
+                    "title": old.get("title"),
+                    "type": old.get("type"),
+                    "scope": old.get("scope"),
+                    "project_path": old.get("project_path"),
+                    "reason": "same_title_type_scope_project_newer_active_record",
+                    "review_required": is_precious or float(old.get("importance") or 0) >= 0.7,
+                    "action": "supersede_candidate",
+                })
 
     # contradiction candidates (title-key overlap between active and contradicted)
     active_by_key: dict[str, list[dict]] = {}
@@ -340,6 +375,7 @@ def curator_report(
         "archive_candidates": all_archive,
         "never_accessed_candidates": never_accessed_candidates,
         "contradiction_candidates": contradiction_candidates,
+        "supersession_candidates": supersession_candidates,
         "skill_promotion_candidates": skill_promotion_candidates,
         "auto_decay_candidates": auto_decay_candidates,
         "promote_candidates": promote_candidates,
@@ -352,6 +388,7 @@ def curator_report(
             "stale": len(all_stale),
             "archive": len(all_archive) + len(dead_candidates) + len(never_accessed_candidates),
             "contradictions": len(contradiction_candidates),
+            "supersession_candidates": len(supersession_candidates),
             "skill_promotions": len(skill_promotion_candidates),
             "auto_decay_candidates": len(auto_decay_candidates),
             "promote_candidates": len(promote_candidates),

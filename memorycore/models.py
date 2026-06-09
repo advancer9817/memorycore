@@ -69,7 +69,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "timeout": 30,
     },
     "context_pack": {"default_token_budget": 2000, "include_stale_warnings": True, "max_records_per_group": 6},
-    "temporal": {"enabled": False, "contradiction_detection": "heuristic", "auto_supersede_user_corrections": True},
+    "temporal": {
+        "enabled": False,
+        "contradiction_detection": "heuristic",
+        "auto_supersede_user_corrections": True,
+        "auto_supersede_enabled": False,
+        "auto_supersede_threshold": 0.96,
+        "review_similarity_threshold": 0.82,
+    },
 }
 
 MEMORY_TYPES: set[str] = {
@@ -85,7 +92,7 @@ MEMORY_TYPES: set[str] = {
     "raw_event",
 }
 
-STATUSES: set[str] = {"active", "stale", "archived", "contradicted", "candidate"}
+STATUSES: set[str] = {"active", "stale", "archived", "contradicted", "candidate", "superseded"}
 
 VALID_RELATION_TYPES: frozenset[str] = frozenset({
     "related_to",
