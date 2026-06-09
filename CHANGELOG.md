@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-06-10
+
+### Added
+- **`_apply_split()`**: 治理 split 决策执行 — 归档原始记录，按 `fact_hash` 幂等创建子记录，自动写入 `part_of` / `supports` 链接；镜像 curator_llm split executor 逻辑
+- **`MANUAL_ONLY_ACTIONS`**: split 动作永远路由到 `needs_review`，不可被策略门自动批准（`split_requires_manual_action` 策略原因）
+- **`get_governance_metrics()`**: 返回治理运营健康指标 — `rollback_rate`、`revival_rate`、`review_queue_age_hours`、`rejection_rate_by_type`、`degraded_warning`；通过 MCP tool `governance_metrics` 和 `GET /api/governance/metrics` 暴露
+- **Governance 导航入口**: 前端 Navbar 新增"治理"页面入口（ShieldCheck 图标），中文 i18n `"治理"`
+- **`GovernanceMetrics` 接口**: `ui/components/dashboard/intelligence/types.ts` 新增完整 TypeScript 类型定义
+- **LLM curator 快速触发**: `MemoryIntelligenceCenter` 注意力面板矛盾/重复条目可直接触发 LLM curator 并每 2s 轮询直至任务完成
+- **3 个新测试**: split 策略门路由至 `needs_review`、split apply 子记录生成/链接/归档验证、`get_governance_metrics` 结构与比率
+
+### Fixed
+- 治理 split 决策点击"接受"时抛 `ValueError: governance apply does not support action 'split'` — 在 `_apply_finding` 补充缺失的 `split_candidate` 分支并实现 `_apply_split()`
+- `test_auto_supersession` 跨 `project_path` 不应互相 supersede 的测试隔离问题（改用 `before_count` 基线对比）
+
+### Changed
+- MCP 工具总数：41 → 42（新增 `governance_metrics`）
+- Extraction 模型配置：`gpt-5.5` → `claude-sonnet-4-6`
+
 ## [0.25.0] - 2026-05-28
 
 ### Added
