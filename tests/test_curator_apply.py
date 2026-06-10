@@ -4,8 +4,8 @@ import json
 import pytest
 
 
-def test_apply_llm_curator_split_writes_children(tmp_path, monkeypatch):
-    """apply_llm_curator split branch should insert child records into SQLite."""
+def test_apply_llm_curator_split_queues_and_logs_requests(tmp_path, monkeypatch):
+    """LLM curator split branch should queue medium-risk writes with ledger rows."""
     pytest.importorskip("memorycore")
     from memorycore.storage.curator_llm import apply_llm_curator
     from memorycore import add_memory_record
@@ -37,36 +37,52 @@ def test_apply_llm_curator_split_writes_children(tmp_path, monkeypatch):
     result = apply_llm_curator(plan, dry_run=False)
     assert isinstance(result, dict)
     assert result["dry_run"] is False
-    assert result["applied"]["split_children_created"] == 2
+    assert result["execution"]["status"] == "queued"
+    assert result["applied"]["split_children_created"] == 0
     assert result["applied"]["split_children_skipped"] == 0
 
     duplicate_result = apply_llm_curator(plan, dry_run=False)
+    assert duplicate_result["execution"]["status"] == "queued"
     assert duplicate_result["applied"]["split_children_created"] == 0
-    assert duplicate_result["applied"]["split_children_skipped"] == 2
+    assert duplicate_result["applied"]["split_children_skipped"] == 0
 
     from memorycore.storage.db import read_conn
+    from memorycore.storage.mutation_executor import query_ledger
+
+    ledger_rows = query_ledger(origin="llm_curator", target_id=parent["id"])
+    assert any(row["mutation_type"] == "memory_archive" for row in ledger_rows)
 
     with read_conn() as conn:
         rows = conn.execute(
-            "SELECT id, metadata_json FROM memories WHERE json_extract(metadata_json, '$.parent_id') = ?",
+            "SELECT id FROM memories WHERE json_extract(metadata_json, '$.parent_id') = ?",
             (parent["id"],),
         ).fetchall()
         link_rows = conn.execute(
             "SELECT source_id, target_id, relation_type FROM memory_links WHERE source_id = ? OR target_id = ?",
             (parent["id"], parent["id"]),
         ).fetchall()
-    hashes = []
-    child_ids = []
-    for row in rows:
-        metadata = json.loads(row["metadata_json"])
-        hashes.append(metadata["fact_hash"])
-        child_ids.append(row["id"])
-    assert len(hashes) == len(set(hashes)) == 2
-    assert {(row["source_id"], row["target_id"], row["relation_type"]) for row in link_rows} == {
-        (child_id, parent["id"], "part_of") for child_id in child_ids
-    } | {
-        (parent["id"], child_id, "supports") for child_id in child_ids
-    }
+    assert rows == []
+    assert link_rows == []
+
+
+def test_apply_llm_curator_medium_risk_queues_without_mutation(tmp_path, monkeypatch):
+    """Medium-risk LLM curator actions should queue instead of auto-applying."""
+    pytest.importorskip("memorycore")
+    from memorycore.storage.curator_llm import apply_llm_curator
+    from memorycore import add_memory_record, get_record
+
+    record = add_memory_record("project_memory", "Contradiction target", "Old fact", memory_id="contra-target")
+
+    result = apply_llm_curator({
+        "semantic_duplicates": [],
+        "contradictions": [{"older_id": record["id"], "confidence": 0.95}],
+        "importance_reassessments": [],
+        "split_candidates": [],
+    }, dry_run=False)
+
+    assert result["execution"]["status"] == "queued"
+    assert result["applied"]["contradicted"] == 0
+    assert get_record(record["id"])["status"] == "active"
 
 
 def test_apply_llm_curator_logs_duplicate_merge_audit(tmp_path, monkeypatch):

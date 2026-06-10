@@ -3651,3 +3651,28 @@ Phase 2 已完成 governance decisions、deterministic policy gate、apply/rejec
 
 - 回滚 `memorycore/server.py`、`memorycore/storage/__init__.py`、`memorycore/storage/db.py`、`memorycore/storage/governance.py`、`memorycore/storage/mutation_executor.py`、`memorycore/storage/mutations.py`、`tests/test_governance_foundation.py` 与本 `ITERATION.md` 条目。
 - 对已初始化过新表的本地 SQLite DB，如需严格回退 schema，可保留空表兼容旧代码；若必须删除，应先备份 DB，再删除 `governance_runs`、`governance_executions`、`governance_mutation_log`。
+
+---
+
+## [迭代 128] 2026-06-10 — Phase 3 reviewer verification 与文档一致性修复
+
+### 背景
+
+用户要求不依赖旧 transcript，从当前仓库状态重新验证 Phase 3 reviewer 结果。初次全量回归发现 README 中的 MCP 工具总数与注册表不一致，且缺少新暴露的 `governance_ledger` 工具说明。
+
+### 变更
+
+- 重新以当前工作树为准验证 Phase 3 相关改动：`tests/test_curator_apply.py`、`tests/test_governance.py`、`tests/test_governance_foundation.py`、`tests/test_curator_llm_jobs.py`、`tests/test_curator_plan.py` 全部通过。
+- 修复文档一致性问题：`README.md` 中 HTTP MCP server 工具总数从 42 更新为 43，并补充 `governance_ledger` 工具条目。
+- `docs/tools.md` 已由生成脚本同步更新，确保工具参考与实际 MCP 注册列表一致。
+
+### 验证
+
+- `uv --directory /home/advancer/project/memorycore run pytest tests/test_docs_consistency.py -q`：3/3 pass。
+- `uv --directory /home/advancer/project/memorycore run pytest tests/test_curator_apply.py tests/test_governance.py tests/test_governance_foundation.py tests/test_curator_llm_jobs.py tests/test_curator_plan.py -q`：35 pass / 1 skipped。
+- `uv --directory /home/advancer/project/memorycore run pytest -q`：475 passed / 1 skipped。
+- `git diff --check`：通过。
+
+### 回滚
+
+- 如需撤回本次修复，回滚 `README.md`、`docs/tools.md`、`ITERATION.md` 本条目即可。

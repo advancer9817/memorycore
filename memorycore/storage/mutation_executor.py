@@ -155,6 +155,7 @@ def execute_batch(
         transition_execution(resolved_execution_id, "policy_evaluated", conn)
         if blocking:
             status = "rejected" if any(r["policy_decision"] == "rejected" for r in blocking) else "queued"
+            _record_blocked_requests(conn, resolved_execution_id, requests, policy_results)
             transition_execution(resolved_execution_id, status, conn)
             return {"execution_id": resolved_execution_id, "status": status, "policy_results": policy_results, "results": []}
         transition_execution(resolved_execution_id, "applying", conn)
@@ -301,6 +302,46 @@ def _apply_request(conn: Any, execution_id: str, seq: int, request: MutationRequ
         ),
     )
     return {"log_id": log_id, "entity_id": entity_id, "mutation_type": request.action_type, "before": before, "after": after}
+
+
+def _record_blocked_requests(
+    conn: Any,
+    execution_id: str,
+    requests: list[MutationRequest],
+    policy_results: list[dict[str, Any]],
+) -> None:
+    ts = now()
+    for seq, (request, policy) in enumerate(zip(requests, policy_results), start=1):
+        conn.execute(
+            """
+            INSERT INTO governance_mutation_log (
+              id, execution_id, seq, mutation_type, entity_type, entity_id, operation,
+              risk_level, policy_decision, policy_reason, request_json, before_json,
+              after_json, inverse_json, index_effect_json, status, idempotency_key,
+              created_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                str(uuid.uuid4()),
+                execution_id,
+                seq,
+                request.action_type,
+                request.target_type,
+                request.target_id,
+                _operation_for(request.action_type),
+                request.risk_level,
+                policy["policy_decision"],
+                policy["policy_reason"],
+                as_json(request.canonical()),
+                None,
+                None,
+                None,
+                None,
+                "skipped",
+                request.idempotency_key or f"{execution_id}:{seq}:{request.action_type}:{request.target_id or ''}",
+                ts,
+            ),
+        )
 
 
 def _operation_for(action_type: str) -> str:
