@@ -56,6 +56,7 @@ from memorycore.storage import (
     apply_governance_decision,
     reject_governance_decision,
     rollback_governance_decision,
+    query_governance_ledger,
     memory_backup as create_memory_backup,
     memory_export as export_memory_payload,
     memory_import as import_memory_payload,
@@ -551,6 +552,19 @@ def governance_metrics() -> dict[str, Any]:
     """Return operational governance health metrics: rollback rate, revival rate, review queue depth/age, and degraded warning."""
     from memorycore.storage.governance import get_governance_metrics
     return get_governance_metrics()
+
+
+@mcp.tool()
+@_safe_tool
+def governance_ledger(
+    correlation_id: str = "",
+    target_id: str = "",
+    origin: str = "",
+    status: str = "",
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Query governance mutation ledger entries for backend observability."""
+    return query_governance_ledger(correlation_id, target_id, origin, status, limit)
 
 
 @mcp.tool()

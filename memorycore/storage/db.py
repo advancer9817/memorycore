@@ -280,6 +280,79 @@ def init_db(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_governance_created ON governance_decisions(created_at);
         CREATE INDEX IF NOT EXISTS idx_governance_type ON governance_decisions(decision_type);
 
+        CREATE TABLE IF NOT EXISTS governance_runs (
+          id TEXT PRIMARY KEY,
+          source TEXT NOT NULL,
+          mode TEXT NOT NULL,
+          policy_version TEXT NOT NULL,
+          status TEXT NOT NULL,
+          started_at TEXT NOT NULL,
+          finished_at TEXT,
+          summary_json TEXT,
+          error_json TEXT,
+          created_by TEXT NOT NULL,
+          metadata_json TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_governance_runs_source_status ON governance_runs(source, status);
+        CREATE INDEX IF NOT EXISTS idx_governance_runs_started_at ON governance_runs(started_at);
+
+        CREATE TABLE IF NOT EXISTS governance_executions (
+          id TEXT PRIMARY KEY,
+          run_id TEXT,
+          decision_id TEXT,
+          approval_kind TEXT NOT NULL,
+          risk_level TEXT NOT NULL,
+          status TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL,
+          policy_snapshot_json TEXT NOT NULL,
+          started_at TEXT NOT NULL,
+          finished_at TEXT,
+          error_json TEXT,
+          created_by TEXT NOT NULL,
+          metadata_json TEXT,
+          FOREIGN KEY(run_id) REFERENCES governance_runs(id) ON DELETE SET NULL,
+          FOREIGN KEY(decision_id) REFERENCES governance_decisions(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_governance_executions_run_id ON governance_executions(run_id);
+        CREATE INDEX IF NOT EXISTS idx_governance_executions_decision_id ON governance_executions(decision_id);
+        CREATE INDEX IF NOT EXISTS idx_governance_executions_status ON governance_executions(status);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_governance_executions_idempotency_key
+          ON governance_executions(COALESCE(run_id, ''), COALESCE(decision_id, ''), approval_kind, idempotency_key);
+
+        CREATE TABLE IF NOT EXISTS governance_mutation_log (
+          id TEXT PRIMARY KEY,
+          execution_id TEXT NOT NULL,
+          seq INTEGER NOT NULL,
+          mutation_type TEXT NOT NULL,
+          entity_type TEXT NOT NULL,
+          entity_id TEXT,
+          operation TEXT NOT NULL,
+          risk_level TEXT NOT NULL,
+          policy_decision TEXT NOT NULL,
+          policy_reason TEXT,
+          request_json TEXT NOT NULL,
+          before_json TEXT,
+          after_json TEXT,
+          inverse_json TEXT,
+          index_effect_json TEXT,
+          status TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          applied_at TEXT,
+          rolled_back_at TEXT,
+          error_json TEXT,
+          FOREIGN KEY(execution_id) REFERENCES governance_executions(id) ON DELETE CASCADE
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_governance_mutation_log_execution_seq
+          ON governance_mutation_log(execution_id, seq);
+        CREATE INDEX IF NOT EXISTS idx_governance_mutation_log_entity ON governance_mutation_log(entity_type, entity_id);
+        CREATE INDEX IF NOT EXISTS idx_governance_mutation_log_status ON governance_mutation_log(status);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_governance_mutation_log_idempotency_key
+          ON governance_mutation_log(execution_id, seq, idempotency_key);
+
         CREATE TABLE IF NOT EXISTS agent_messages (
           id TEXT PRIMARY KEY,
           from_agent TEXT NOT NULL,

@@ -3621,3 +3621,33 @@ Phase 2 已完成 governance decisions、deterministic policy gate、apply/rejec
 
 - 如需撤回本次测试对齐，回滚 `tests/test_curator_llm_jobs.py` 的本迭代改动。
 - 如需撤回分支合并，回退 `main` 到合并前提交 `f90e6056ae7878b4119cb1489a5a05ef9ced6554`，并重新导入/同步记忆数据。
+
+
+---
+
+## [迭代 127] 2026-06-10 — Auto-Governance v4 Backend Safety Foundation 基础落地
+
+### 背景
+
+用户要求按照 `.omc/plans/memorycore-auto-governance-v4-backend-safety-foundation.md` 开始实施 Backend Safety Foundation。本轮聚焦后端安全基础，不实现 UI cockpit：将治理写入路径收敛到确定性的 mutation request、policy gate、execution state machine、mutation log 和 rollback executor 基础上。
+
+### 变更
+
+- `memorycore/storage/db.py`：新增并幂等初始化 `governance_runs`、`governance_executions`、`governance_mutation_log` 三表及查询/幂等索引，保留现有 `governance_decisions` 兼容字段。
+- 新增 `memorycore/storage/mutations.py`：定义 `MutationContext`、`MutationRequest`、风险/来源/action 常量、执行状态机校验和 mutation-level policy evaluation。
+- 新增 `memorycore/storage/mutation_executor.py`：实现 governance run/execution 创建、批量执行、per-step mutation log、memory/link 写入、inverse rollback、ledger query helper。
+- `memorycore/storage/governance.py`：将 `apply_governance_decision()` 从直接调用 CRUD/SQL 改为构造 typed mutation requests 并通过 executor 执行；`rollback_governance_decision()` 改为按 `governance_mutation_log` 逆序回滚；split action 现在记录 parent archive、child insert、link insert 步骤。
+- `memorycore/storage/__init__.py` 与 `memorycore/server.py`：导出 `query_governance_ledger`，新增后端观测用 MCP tool `governance_ledger()`；现有 governance apply/reject/rollback 工具保持兼容并附加 execution 元数据。
+- 新增 `tests/test_governance_foundation.py`：覆盖 ledger schema、mutation request validation、policy outcome、execution state transition/duplicate applying guard、apply 写入 execution + mutation log。
+
+### 验证
+
+- `uv run --project /home/advancer/project/memorycore pytest /home/advancer/project/memorycore/tests/test_governance.py /home/advancer/project/memorycore/tests/test_governance_foundation.py /home/advancer/project/memorycore/tests/test_auto_supersession.py /home/advancer/project/memorycore/tests/test_phase10.py /home/advancer/project/memorycore/tests/test_concurrent_and_migration.py -q`：54/54 pass。
+- 静态 bypass scan：`grep -nE "conn\.execute\(.*(UPDATE memories|INSERT INTO memories|DELETE FROM memory_links|INSERT INTO memory_links)|UPDATE memories|INSERT INTO memories|DELETE FROM memory_links|INSERT INTO memory_links" memorycore/storage/governance.py memorycore/storage/mutation_executor.py`，结果显示治理相关 target-table 写入仅保留在 `mutation_executor.py` executor 内部，`governance.py` 未再直接执行 evidence-listed target-table writes。
+- code-reviewer 发现并修复 2 个 HIGH：supersession governance apply 兼容性恢复；queued/rejected executor result 不再被 `apply_governance_decision()` 误标为 applied。
+- 早期直接 `python` / `python3 -m pytest` 验证因环境中无 `python` 命令、系统解释器缺少 `mcp` 依赖失败；最终使用项目标准 `uv run --project` 验证通过。
+
+### 回滚
+
+- 回滚 `memorycore/server.py`、`memorycore/storage/__init__.py`、`memorycore/storage/db.py`、`memorycore/storage/governance.py`、`memorycore/storage/mutation_executor.py`、`memorycore/storage/mutations.py`、`tests/test_governance_foundation.py` 与本 `ITERATION.md` 条目。
+- 对已初始化过新表的本地 SQLite DB，如需严格回退 schema，可保留空表兼容旧代码；若必须删除，应先备份 DB，再删除 `governance_runs`、`governance_executions`、`governance_mutation_log`。

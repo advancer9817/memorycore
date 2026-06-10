@@ -70,6 +70,7 @@ from memorycore.storage.governance import (
     reject_governance_decision,
     rollback_governance_decision,
 )
+from memorycore.storage.mutation_executor import query_ledger as query_governance_ledger
 
 __all__ = [
     "connect",
@@ -121,4 +122,5 @@ __all__ = [
     "apply_governance_decision",
     "reject_governance_decision",
     "rollback_governance_decision",
+    "query_governance_ledger",
 ]

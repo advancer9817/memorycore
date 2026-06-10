@@ -14,8 +14,9 @@ from typing import Any
 
 from memorycore.models import as_json, now, row_to_dict
 from memorycore.storage import audit as _audit
-from memorycore.storage.crud import supersede_memory_record, update_memory_content
 from memorycore.storage.db import managed_conn, read_conn
+from memorycore.storage.mutation_executor import execute_batch, query_ledger, rollback_execution
+from memorycore.storage.mutations import MutationContext, MutationRequest
 
 PRECIOUS_TYPES = {"user_profile", "decision", "project_memory"}
 HIGH_IMPORTANCE_THRESHOLD = 0.85
@@ -342,13 +343,29 @@ def apply_governance_decision(decision_id: str, source_agent: str = "agent") -> 
     if decision.get("applied_at"):
         return {"decision": decision, "applied": {"already_applied": True}}
 
-    before = _snapshot_memories(decision["source_ids"])
-    applied = _apply_finding(decision)
-    ts = now()
+    approval_kind = "auto_policy" if decision["review_status"] == "auto_approved" else "human_accept"
+    context = MutationContext(
+        actor=source_agent or "agent",
+        origin="governance",
+        approval_kind=approval_kind,
+        decision_id=decision_id,
+        correlation_id=decision_id,
+    )
+    requests = _mutation_requests_for_decision(decision)
     execution_id = str(uuid.uuid4())
-    approval_kind = "auto" if decision["review_status"] == "auto_approved" else "human_accept"
-    after = _snapshot_memories(decision["source_ids"])
-    rollback = {"before": before, "after": after}
+    execution = execute_batch(
+        requests,
+        context,
+        execution_id=execution_id,
+        idempotency_key=_execution_key(decision),
+    )
+    if execution["status"] != "applied":
+        return {"decision": decision, "applied": {"blocked": True, "status": execution["status"]}, "execution": execution}
+    before, after = _snapshots_for_execution(execution["execution_id"])
+    applied = _applied_payload(decision, execution)
+    ts = now()
+    legacy_approval_kind = "auto" if decision["review_status"] == "auto_approved" else "human_accept"
+    rollback = {"execution_id": execution["execution_id"], "before": before, "after": after}
     with managed_conn() as conn:
         conn.execute(
             """
@@ -357,12 +374,12 @@ def apply_governance_decision(decision_id: str, source_agent: str = "agent") -> 
                 before_state_json=?, after_state_json=?, execution_id=?, applied_by=?, approval_kind=?
             WHERE id=?
             """,
-            (ts, ts, as_json(rollback), as_json(before), as_json(after), execution_id, source_agent or "agent", approval_kind, decision_id),
+            (ts, ts, as_json(rollback), as_json(before), as_json(after), execution["execution_id"], source_agent or "agent", legacy_approval_kind, decision_id),
         )
         updated = conn.execute("SELECT * FROM governance_decisions WHERE id=?", (decision_id,)).fetchone()
     updated_decision = _decision_row_to_dict(updated)
-    _audit.log_audit_event("governance_decision_apply", memory_id=(decision["source_ids"][0] if decision["source_ids"] else None), agent=source_agent, detail={"decision_id": decision_id, "execution_id": execution_id, "applied": applied, "before_state": before, "after_state": after, "approval_kind": approval_kind})
-    return {"decision": updated_decision, "applied": applied}
+    _audit.log_audit_event("governance_decision_apply", memory_id=(decision["source_ids"][0] if decision["source_ids"] else None), agent=source_agent, detail={"decision_id": decision_id, "execution_id": execution["execution_id"], "applied": applied, "before_state": before, "after_state": after, "approval_kind": legacy_approval_kind})
+    return {"decision": updated_decision, "applied": applied, "execution": execution}
 
 
 def rollback_governance_decision(decision_id: str, source_agent: str = "agent") -> dict[str, Any]:
@@ -373,165 +390,210 @@ def rollback_governance_decision(decision_id: str, source_agent: str = "agent") 
     decision = _decision_row_to_dict(row)
     if decision.get("rolled_back_at"):
         return {"decision": decision, "already_rolled_back": True, "restored": []}
-    rollback_data = json.loads(decision.get("rollback_json") or "{}")
-    before = rollback_data.get("before") or []
-    if not before:
-        raise ValueError("decision has no rollback snapshot")
-    after_state = rollback_data.get("after") or []
-    before_by_id = {m["id"]: m for m in before}
-    after_by_id = {m["id"]: m for m in after_state}
+    execution_id = decision.get("execution_id") or (json.loads(decision.get("rollback_json") or "{}").get("execution_id"))
+    if not execution_id:
+        raise ValueError("decision has no execution id for rollback")
+    rollback = rollback_execution(
+        execution_id,
+        MutationContext(
+            actor=source_agent or "agent",
+            origin="governance",
+            approval_kind="rollback",
+            decision_id=decision_id,
+            correlation_id=decision_id,
+        ),
+    )
     ts = now()
-    restored_records: list[dict[str, Any]] = []
     with managed_conn() as conn:
-        for memory in before:
-            conn.execute(
-                """
-                UPDATE memories
-                SET title=?, content=?, confidence=?, importance=?, status=?, superseded_by=?,
-                    fact_lineage_root=?, updated_at=?
-                WHERE id=?
-                """,
-                (
-                    memory.get("title"), memory.get("content"), memory.get("confidence"),
-                    memory.get("importance"), memory.get("status"), memory.get("superseded_by"),
-                    memory.get("fact_lineage_root"), ts, memory.get("id"),
-                ),
-            )
-            restored = conn.execute("SELECT * FROM memories WHERE id=?", (memory.get("id"),)).fetchone()
-            if restored is not None:
-                restored_records.append(row_to_dict(restored))
-        # Remove supersedes links that were created by the apply step.
-        # A link was created if a memory had no superseded_by before but does after.
-        for mem_id, before_mem in before_by_id.items():
-            after_mem = after_by_id.get(mem_id, {})
-            if not before_mem.get("superseded_by") and after_mem.get("superseded_by"):
-                linker_id = after_mem["superseded_by"]
-                conn.execute(
-                    "DELETE FROM memory_links WHERE source_id=? AND target_id=? AND relation_type='supersedes'",
-                    (linker_id, mem_id),
-                )
         conn.execute(
             "UPDATE governance_decisions SET review_status='rolled_back', rolled_back_at=?, updated_at=?, rolled_back_by=? WHERE id=?",
             (ts, ts, source_agent or "agent", decision_id),
         )
         updated = conn.execute("SELECT * FROM governance_decisions WHERE id=?", (decision_id,)).fetchone()
-    from memorycore.storage.crud import _sync_record_indexes
-
-    for record in restored_records:
-        _sync_record_indexes(record)
-    _audit.log_audit_event("governance_decision_rollback", memory_id=(decision["source_ids"][0] if decision["source_ids"] else None), agent=source_agent, detail={"decision_id": decision_id, "restored": [m.get("id") for m in before]})
-    return {"decision": _decision_row_to_dict(updated), "restored": before, "already_rolled_back": False}
+    restored_ids = [item.get("entity_id") for item in rollback.get("restored", []) if item.get("entity_id")]
+    _audit.log_audit_event("governance_decision_rollback", memory_id=(decision["source_ids"][0] if decision["source_ids"] else None), agent=source_agent, detail={"decision_id": decision_id, "execution_id": execution_id, "restored": restored_ids})
+    return {"decision": _decision_row_to_dict(updated), "restored": rollback.get("restored", []), "already_rolled_back": False}
 
 
-def _snapshot_memories(memory_ids: list[str]) -> list[dict[str, Any]]:
-    if not memory_ids:
-        return []
-    placeholders = ",".join("?" for _ in memory_ids)
-    with read_conn() as conn:
-        rows = conn.execute(f"SELECT * FROM memories WHERE id IN ({placeholders})", tuple(memory_ids)).fetchall()
-    return [row_to_dict(row) for row in rows]
+def _execution_key(decision: dict[str, Any]) -> str:
+    return f"governance:{decision['id']}:{decision.get('candidate_hash') or decision.get('updated_at') or ''}"
 
 
-def _apply_finding(decision: dict[str, Any]) -> dict[str, Any]:
+def _mutation_requests_for_decision(decision: dict[str, Any]) -> list[MutationRequest]:
     finding = decision.get("finding") or {}
     action = decision.get("recommended_action")
+    confidence = float(decision.get("llm_confidence") or 1.0)
+    risk = str(decision.get("risk_level") or "medium")
+    decision_id = str(decision.get("id"))
+
     if decision["decision_type"] == "importance_reassessment" and action in {"promote", "downgrade", "archive"}:
-        mem_id = finding.get("id")
+        mem_id = str(finding.get("id") or "")
         if action == "archive":
-            return _update_memory_fields(mem_id, status="archived")
-        kwargs: dict[str, Any] = {"new_importance": finding.get("new_importance")}
+            return [_memory_request("memory_archive", mem_id, {"status": "archived"}, risk, confidence, decision_id)]
+        payload: dict[str, Any] = {"importance": finding.get("new_importance")}
         if action == "promote":
-            kwargs["new_status"] = "active"
-        return update_memory_content(mem_id, **kwargs)
+            payload["status"] = "active"
+        return [_memory_request("memory_importance_update", mem_id, payload, risk, confidence, decision_id)]
     if decision["decision_type"] == "semantic_duplicate" and action in {"archive_duplicate", "archive_and_merge_duplicate"}:
-        return _update_memory_fields(finding.get("drop_id"), status="archived")
+        mem_id = str(finding.get("drop_id") or "")
+        return [_memory_request("memory_archive", mem_id, {"status": "archived"}, risk, confidence, decision_id)]
     if decision["decision_type"] == "contradiction" and action == "mark_contradicted":
-        return _update_memory_fields(finding.get("older_id"), status="contradicted")
+        mem_id = str(finding.get("older_id") or "")
+        return [_memory_request("memory_status_update", mem_id, {"status": "contradicted"}, risk, confidence, decision_id)]
     if decision["decision_type"] == "supersession" and action == "supersede":
-        old_id = finding.get("old_id") or finding.get("older_id")
-        new_id = finding.get("new_id") or finding.get("newer_id")
-        return supersede_memory_record(old_id, new_id, source_agent=decision.get("source_agent", "governance"), note="auto-supersession governance decision")
+        return _supersede_requests(decision, finding, confidence, risk)
     if decision["decision_type"] == "split_candidate" and action == "split":
-        return _apply_split(decision, finding)
+        return _split_requests(decision, finding, confidence, risk)
     raise ValueError(f"governance apply does not support action {action!r}")
 
 
-def _apply_split(decision: dict[str, Any], finding: dict[str, Any]) -> dict[str, Any]:
-    """Create atomic sub-memory records from a split_candidate decision.
+def _memory_request(action_type: str, memory_id: str, payload: dict[str, Any], risk: str, confidence: float, decision_id: str) -> MutationRequest:
+    if not memory_id:
+        raise ValueError("memory id is required")
+    return MutationRequest(
+        action_type=action_type,
+        target_type="memory",
+        target_id=memory_id,
+        payload=payload,
+        risk_level=risk,
+        confidence=confidence,
+        idempotency_key=f"{decision_id}:{action_type}:{memory_id}",
+    )
 
-    Archives the original memory, creates child records (idempotent via fact_hash),
-    and wires part_of / supports links. Mirrors the curator_llm split executor.
-    """
-    orig_id = finding.get("id")
+
+def _supersede_requests(decision: dict[str, Any], finding: dict[str, Any], confidence: float, risk: str) -> list[MutationRequest]:
+    old_id = str(finding.get("old_id") or finding.get("older_id") or "")
+    new_id = str(finding.get("new_id") or finding.get("newer_id") or "")
+    if not old_id or not new_id or old_id == new_id:
+        raise ValueError("supersession finding requires distinct old/new memory ids")
+    with read_conn() as conn:
+        old_row = conn.execute("SELECT * FROM memories WHERE id=?", (old_id,)).fetchone()
+        new_row = conn.execute("SELECT * FROM memories WHERE id=?", (new_id,)).fetchone()
+    if old_row is None:
+        raise ValueError(f"old memory not found: {old_id}")
+    if new_row is None:
+        raise ValueError(f"new memory not found: {new_id}")
+    old_record = row_to_dict(old_row)
+    new_record = row_to_dict(new_row)
+    old_root = old_record.get("fact_lineage_root") or old_id
+    new_root = new_record.get("fact_lineage_root") or new_id
+    if new_root != new_id and new_root != old_root:
+        raise ValueError("lineage merge requires human review")
+    root_id = old_root
+    decision_id = str(decision.get("id"))
+    return [
+        _memory_request(
+            "memory_supersede",
+            old_id,
+            {"status": "superseded", "superseded_by": new_id, "fact_lineage_root": root_id},
+            risk,
+            confidence,
+            decision_id,
+        ),
+        _memory_request(
+            "memory_update",
+            new_id,
+            {"fact_lineage_root": root_id},
+            "low",
+            confidence,
+            decision_id,
+        ),
+        MutationRequest(
+            action_type="memory_link_insert",
+            target_type="memory_link",
+            payload={
+                "source_id": new_id,
+                "target_id": old_id,
+                "relation_type": "supersedes",
+                "weight": 1.0,
+                "note": "auto-supersession governance decision",
+            },
+            risk_level="low",
+            confidence=confidence,
+            idempotency_key=f"{decision_id}:supersedes-link:{new_id}:{old_id}",
+        ),
+    ]
+
+
+def _split_requests(decision: dict[str, Any], finding: dict[str, Any], confidence: float, risk: str) -> list[MutationRequest]:
+    orig_id = str(finding.get("id") or "")
     sub_memories = finding.get("sub_memories") or []
     if not orig_id or not sub_memories:
         raise ValueError("split finding requires 'id' and 'sub_memories'")
-
-    with read_conn() as rconn:
-        orig_row = rconn.execute("SELECT * FROM memories WHERE id=?", (orig_id,)).fetchone()
-    if not orig_row:
+    with read_conn() as conn:
+        orig_row = conn.execute("SELECT * FROM memories WHERE id=?", (orig_id,)).fetchone()
+    if orig_row is None:
         raise ValueError(f"split source memory {orig_id!r} not found")
     orig = row_to_dict(orig_row)
-
-    _update_memory_fields(orig_id, status="archived")
-
-    source_agent = decision.get("source_agent", "governance")
-    now_ts = now()
-    created_ids: list[str] = []
-
-    with managed_conn() as conn:
-        for sub in sub_memories:
-            sub_title = str(sub.get("title") or "")[:120].strip()
-            sub_content = str(sub.get("content") or "").strip()
-            if not sub_title or not sub_content:
-                continue
-
-            normalized = " ".join(sub_content.lower().split())
-            fact_hash = hashlib.sha256(f"{orig_id}:{normalized}".encode()).hexdigest()[:16]
-            existing = conn.execute(
-                "SELECT id FROM memories WHERE json_extract(metadata_json,'$.parent_id')=? AND json_extract(metadata_json,'$.fact_hash')=? LIMIT 1",
-                (orig_id, fact_hash),
-            ).fetchone()
-            if existing:
-                created_ids.append(existing["id"])
-                continue
-
-            sub_importance = max(0.0, min(1.0, float(sub.get("importance") or orig.get("importance") or 0.5)))
-            child_id = str(uuid.uuid4())
-            metadata = as_json({"parent_id": orig_id, "fact_hash": fact_hash})
-            conn.execute(
-                """INSERT INTO memories
-                   (id, type, title, content, status, source_agent, scope,
-                    project_path, importance, confidence, metadata_json, created_at, updated_at)
-                   VALUES (?,?,?,?,'active',?,?,?,?,?,?,?,?)""",
-                (child_id, orig.get("type", "episodic_memory"), sub_title, sub_content,
-                 source_agent, orig.get("scope"), orig.get("project_path"),
-                 sub_importance, float(orig.get("confidence") or 0.7), metadata, now_ts, now_ts),
-            )
-            for source_id, target_id, rel, note in (
-                (child_id, orig_id, "part_of", "governance split child fact"),
-                (orig_id, child_id, "supports", "governance split generated child"),
-            ):
-                conn.execute(
-                    """INSERT INTO memory_links
-                       (id, source_id, target_id, relation_type, weight, note, created_at, source_agent)
-                       VALUES (?,?,?,?,?,?,?,?)
-                       ON CONFLICT(source_id, target_id, relation_type) DO NOTHING""",
-                    (str(uuid.uuid4()), source_id, target_id, rel, 1.0, note, now_ts, source_agent),
-                )
-            created_ids.append(child_id)
-
-    return {
-        "original_id": orig_id,
-        "children_created": len(created_ids),
-        "child_ids": created_ids,
-    }
+    decision_id = str(decision.get("id"))
+    requests = [_memory_request("memory_archive", orig_id, {"status": "archived"}, risk, confidence, decision_id)]
+    for index, sub in enumerate(sub_memories):
+        sub_title = str(sub.get("title") or "")[:120].strip()
+        sub_content = str(sub.get("content") or "").strip()
+        if not sub_title or not sub_content:
+            continue
+        normalized = " ".join(sub_content.lower().split())
+        fact_hash = hashlib.sha256(f"{orig_id}:{normalized}".encode()).hexdigest()[:16]
+        child_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{decision_id}:{orig_id}:{fact_hash}"))
+        child_payload = {
+            "id": child_id,
+            "type": orig.get("type", "episodic_memory"),
+            "title": sub_title,
+            "content": sub_content,
+            "scope": orig.get("scope") or "global",
+            "project_path": orig.get("project_path") or "",
+            "importance": max(0.0, min(1.0, float(sub.get("importance") or orig.get("importance") or 0.5))),
+            "confidence": float(orig.get("confidence") or 0.7),
+            "status": "active",
+            "source": "governance_split",
+            "metadata": {"parent_id": orig_id, "fact_hash": fact_hash},
+        }
+        requests.append(MutationRequest(
+            action_type="memory_insert",
+            target_type="memory",
+            target_id=child_id,
+            payload=child_payload,
+            risk_level="low",
+            confidence=confidence,
+            idempotency_key=f"{decision_id}:split-child:{index}:{child_id}",
+        ))
+        for rel_index, (source_id, target_id, relation_type, note) in enumerate((
+            (child_id, orig_id, "part_of", "governance split child fact"),
+            (orig_id, child_id, "supports", "governance split generated child"),
+        )):
+            requests.append(MutationRequest(
+                action_type="memory_link_insert",
+                target_type="memory_link",
+                payload={
+                    "source_id": source_id,
+                    "target_id": target_id,
+                    "relation_type": relation_type,
+                    "weight": 1.0,
+                    "note": note,
+                },
+                risk_level="low",
+                confidence=confidence,
+                idempotency_key=f"{decision_id}:split-link:{index}:{rel_index}:{child_id}",
+            ))
+    return requests
 
 
-def _update_memory_fields(memory_id: str, status: str) -> dict[str, Any]:
-    if not memory_id:
-        raise ValueError("memory id is required")
-    return update_memory_content(memory_id, new_status=status)
+def _snapshots_for_execution(execution_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    rows = query_ledger(correlation_id=execution_id, limit=500)
+    before = [json.loads(row["before_json"]) for row in rows if row.get("before_json") and row.get("entity_type") == "memory"]
+    after = [json.loads(row["after_json"]) for row in rows if row.get("after_json") and row.get("entity_type") == "memory"]
+    return before, after
+
+
+def _applied_payload(decision: dict[str, Any], execution: dict[str, Any]) -> dict[str, Any]:
+    if decision.get("decision_type") == "split_candidate":
+        child_ids = [
+            result["entity_id"]
+            for result in execution.get("results", [])
+            if result.get("mutation_type") == "memory_insert" and result.get("entity_id")
+        ]
+        return {"original_id": (decision.get("finding") or {}).get("id"), "children_created": len(child_ids), "child_ids": child_ids}
+    return {"mutations_applied": len(execution.get("results", [])), "execution_id": execution.get("execution_id")}
 
 
 def get_governance_metrics() -> dict[str, Any]:
