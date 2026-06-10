@@ -52,9 +52,8 @@ export function GovernanceMetricsCards({ metrics, messages }: GovernanceMetricsC
   ];
 
   return (
-    <section aria-label={messages.metrics} className="space-y-3">
-      <h2 className="text-lg font-semibold text-white">{messages.metrics}</h2>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <section aria-label={messages.metrics} className="space-y-2">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {cards.map((card) => (
           <Card key={card.label} className="border-zinc-800 bg-zinc-950/80">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">

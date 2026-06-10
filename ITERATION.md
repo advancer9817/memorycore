@@ -3707,3 +3707,43 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 ### 回滚
 
 - 回滚 `ui/app/governance/`、`ui/hooks/useGovernanceCockpit.ts`、`ui/store/uiSlice.ts`、`ui/components/Navbar.tsx`、`ui/components/dashboard/intelligence/types.ts`、`ui/components/dashboard/intelligence/utils.ts`、`ui/lib/i18n/dictionaries/en.ts`、`ui/lib/i18n/dictionaries/zh.ts`、`ui/tests/openmemory-smoke.spec.ts`、`TODO.md` 与本 `ITERATION.md` 条目。
+
+---
+
+## [迭代 130] 2026-06-11 — 治理页面重设计 + 看板优化
+
+### 背景
+
+治理页面（/governance）存在布局溢出（navbar 高度计算偏差、flex 高度链断裂）、水平滚动条、强制固定视口分栏与其他页面风格不一致等 UI 问题。看板（Dashboard）存在冗余区块和无效操作按钮。
+
+### 变更
+
+**治理页面（/governance）完全重做：**
+- 从固定视口分栏改为自然流式滚动（`text-white py-6` + `container`），与记忆页/看板风格一致
+- 决策列表改为 Table 组件（checkbox + 列：内容/风险/置信度/建议动作/创建时间）
+- 添加 checkbox 全选 + 批量操作（批量应用/批量拒绝），通过 Actions 下拉菜单触发
+- 详情从右侧面板改为 Sheet 侧栏（点击行从右侧滑出，sm:max-w-2xl）
+- Sheet 内保留 header + 操作按钮 + 三个 Tab（概览/证据/历史）
+- 分页 20 条/页，底部 Previous/Next
+- 标题：「自动治理驾驶舱」→「记忆治理」/ "Auto-Governance Cockpit" → "Memory Governance"
+- 分页按钮从硬编码中文改为 i18n
+- 拒绝 textarea 只在 canApply 时显示
+- 删除旧组件 GovernanceDecisionDetail.tsx / GovernanceDecisionQueue.tsx
+- 新增 GovernanceTable.tsx / GovernanceDecisionSheet.tsx
+
+**看板（Dashboard）优化：**
+- 删除 Install.tsx 调度栏的「运行 Curator」和「运行 LLM」按钮
+- 删除 MemoryIntelligenceCenter 需要关注面板中的「运行 LLM」内联按钮
+- 删除冗余区块：需要关注面板（审查流程已包含）、知识图谱快照、健康趋势快照
+- 保留并优化：记忆健康度（2/5）+ 审查流程（3/5）、审计活动（3/5）+ 来源分布（2/5）
+- 推荐行动条件显示（仅在有推荐时出现）
+- 审查流程底部按钮：「打开队列」+「打开运维」→ 合并为「前往治理」链接到 /governance
+
+**i18n 变更：**
+- 新增 keys：previousPage, nextPage, tabOverview, tabEvidence, tabHistory, batchApply, batchReject, batchApplyConfirm, batchRejectConfirm, batchSuccess, selected, reviewOpenGovernance
+- 修改 keys：governance.title, defaultRejectReason, loading
+- 删除 keys：reviewOpenQueue, reviewOpenOperations
+
+### 验证
+
+- `pnpm tsc --noEmit`：通过

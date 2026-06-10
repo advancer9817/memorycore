@@ -497,26 +497,6 @@ export const Install = () => {
           <span className="text-zinc-500 hidden sm:inline">
             {t.dashboard.scanned} <span className="text-zinc-200">{status?.curator.scanned ?? "-"}</span>
           </span>
-          <div className="ml-auto flex gap-2 shrink-0">
-            <Button
-              size="sm"
-              className="bg-primary hover:bg-primary/90 h-7 px-3 text-xs"
-              onClick={applyCurator}
-              disabled={applying || llmRunning}
-            >
-              <Play className="h-3 w-3 mr-1" />
-              {applying ? t.dashboard.running : t.dashboard.runCurator}
-            </Button>
-            <Button
-              size="sm"
-              className="bg-violet-700 hover:bg-violet-600 text-white h-7 px-3 text-xs"
-              onClick={runLlmCurator}
-              disabled={applying || llmRunning}
-            >
-              <Brain className="h-3 w-3 mr-1" />
-              {llmRunning ? t.dashboard.analyzing : t.dashboard.runLlm}
-            </Button>
-          </div>
         </div>
 
         {/* Manual run result — only when active */}

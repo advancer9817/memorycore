@@ -644,48 +644,30 @@ export function MemoryIntelligenceCenter() {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+      {/* Recommended Actions */}
+      {recommendations.length > 0 && (
         <Card className="border-zinc-800 bg-zinc-900">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center justify-between text-sm font-medium text-zinc-300">
-              {t.needsAttention}
-              <AlertTriangle className="h-4 w-4 text-amber-400" />
+              {t.recommendedActions}
+              <ArrowRight className="h-4 w-4 text-zinc-500" />
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
-            {attentionItems.map((item) => (
-              <div key={item.label} className={`rounded-lg border px-3 py-2.5 ${severityClassName[item.severity]}`}>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-medium">{item.label}</span>
-                  <div className="flex items-center gap-2">
-                    {item.onRun && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-6 border-current/30 bg-black/20 px-2 text-xs text-current hover:bg-black/40"
-                        onClick={item.onRun}
-                        disabled={llmRunning}
-                      >
-                        {llmRunning ? (
-                          <Activity className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <Sparkles className="h-3 w-3" />
-                        )}
-                        <span className="ml-1">{llmRunning ? t.running : t.runLlm}</span>
-                      </Button>
-                    )}
-                    <Badge variant="outline" className="border-current/30 bg-black/20 text-current">
-                      {item.count}
-                    </Badge>
-                  </div>
-                </div>
+          <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {recommendations.map((item) => (
+              <div key={item.title} className={`rounded-xl border px-3 py-3 ${severityClassName[item.severity]}`}>
+                <p className="text-sm font-medium">{item.title}</p>
                 <p className="mt-1 text-xs leading-relaxed text-current/75">{item.detail}</p>
               </div>
             ))}
           </CardContent>
         </Card>
+      )}
 
-        <Card className="border-zinc-800 bg-zinc-900">
+      {/* Row 1: Health + Review Flow */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
+        {/* Memory Health */}
+        <Card className="border-zinc-800 bg-zinc-900 xl:col-span-2">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center justify-between text-sm font-medium text-zinc-300">
               {t.memoryHealth}
@@ -717,69 +699,8 @@ export function MemoryIntelligenceCenter() {
           </CardContent>
         </Card>
 
-        <Card className="border-zinc-800 bg-zinc-900">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center justify-between text-sm font-medium text-zinc-300">
-              {t.graphSnapshot}
-              <Network className="h-4 w-4 text-violet-300" />
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 gap-3">
-              <GraphMetric icon={<BrainCircuit className="h-4 w-4" />} label={t.nodes} value={totalMemories} />
-              <GraphMetric icon={<GitBranch className="h-4 w-4" />} label={t.links} value={linkCount} />
-              <GraphMetric icon={<Sparkles className="h-4 w-4" />} label={t.candidates} value={candidates} />
-              <GraphMetric icon={<RadioTower className="h-4 w-4" />} label={t.apps} value={totalApps} />
-            </div>
-            <div className="mt-4 rounded-xl border border-violet-900/40 bg-violet-950/20 p-3 text-xs leading-relaxed text-violet-100/80">
-              {t.graphSnapshotDescription}
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-              <MiniMetric label={t.active} value={`${activeRatio}%`} />
-              <MiniMetric label={t.archived} value={`${archivedRatio}%`} />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="border-zinc-800 bg-zinc-900">
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center justify-between text-sm font-medium text-zinc-300">
-            {t.recommendedActions}
-            <ArrowRight className="h-4 w-4 text-zinc-500" />
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {recommendations.length > 0 ? (
-            recommendations.map((item) => (
-              <div key={item.title} className={`rounded-xl border px-3 py-3 ${severityClassName[item.severity]}`}>
-                <p className="text-sm font-medium">{item.title}</p>
-                <p className="mt-1 text-xs leading-relaxed text-current/75">{item.detail}</p>
-              </div>
-            ))
-          ) : (
-            <div className="rounded-xl border border-emerald-800/70 bg-emerald-950/25 px-3 py-3 text-sm text-emerald-200">
-              {t.noRecommendations}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
+        {/* Review Flow */}
         <Card className="border-zinc-800 bg-zinc-900 xl:col-span-3">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center justify-between text-sm font-medium text-zinc-300">
-              {t.healthTrendSnapshot}
-              <TrendingUp className="h-4 w-4 text-emerald-400" />
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            {trendPoints.map((point) => (
-              <TrendTile key={point.label} point={point} />
-            ))}
-          </CardContent>
-        </Card>
-        <Card className="border-zinc-800 bg-zinc-900 xl:col-span-2">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center justify-between text-sm font-medium text-zinc-300">
               {t.reviewFlow}
@@ -790,7 +711,7 @@ export function MemoryIntelligenceCenter() {
             {selectedReviewItem ? (
               <>
                 <p className="text-xs leading-relaxed text-zinc-500">{t.reviewFlowDescription}</p>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {reviewQueue.map((item) => {
                     const isSelected = selectedReviewItem.label === item.label;
                     return (
@@ -841,15 +762,9 @@ export function MemoryIntelligenceCenter() {
                   </ol>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button asChild size="sm" variant="outline" className="h-8 border-current/30 bg-black/20 text-current hover:bg-black/35">
-                      <Link href={selectedReviewItem.href}>
+                      <Link href="/governance">
                         <CheckSquare className="h-3.5 w-3.5" />
-                        {t.reviewOpenQueue}
-                      </Link>
-                    </Button>
-                    <Button asChild size="sm" variant="outline" className="h-8 border-current/30 bg-black/20 text-current hover:bg-black/35">
-                      <Link href="#memory-operations">
-                        <Workflow className="h-3.5 w-3.5" />
-                        {t.reviewOpenOperations}
+                        {t.reviewOpenGovernance}
                       </Link>
                     </Button>
                     <Button size="sm" variant="outline" className="h-8 border-current/30 bg-black/20 text-current hover:bg-black/35" onClick={() => downloadGovernanceReport(governanceReport)}>
@@ -866,6 +781,7 @@ export function MemoryIntelligenceCenter() {
         </Card>
       </div>
 
+      {/* Row 2: Activity + Source Breakdown */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
         <Card className="border-zinc-800 bg-zinc-900 xl:col-span-3">
           <CardHeader className="pb-3">
