@@ -3676,3 +3676,34 @@ Phase 2 已完成 governance decisions、deterministic policy gate、apply/rejec
 ### 回滚
 
 - 如需撤回本次修复，回滚 `README.md`、`docs/tools.md`、`ITERATION.md` 本条目即可。
+
+---
+
+## [迭代 129] 2026-06-10 — Phase 4 Auto-Governance Cockpit UI MVP
+
+### 背景
+
+Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略门控结果、lineage、audit 与 rollback 能力暴露到前端，避免 `/governance` 导航入口为空，并让用户可以在 UI 中审查需要人工处理的治理决策。
+
+### 变更
+
+- 新增 `/governance` 页面：提供 Auto-Governance Cockpit 标题区、治理指标、状态筛选、决策队列、决策详情、before/after 快照、LLM trace、lineage 与 audit 面板。
+- 新增 `useGovernanceCockpit()`：复用现有 REST API 加载 `governance/decisions`、`governance/metrics`、`lineage` 与 `audit`，并封装 Apply / Reject / Rollback 操作与刷新逻辑。
+- 新增治理 UI 组件：`GovernanceMetricsCards`、`GovernanceDecisionQueue`、`GovernanceDecisionDetail`、`MemorySnapshotCompare`，保持页面拆分和低耦合。
+- `Navbar`：让全局刷新支持 `/governance`，通过 `governanceRefreshKey` 触发页面 hook 重新加载，而不是只做后台 fetch。
+- `uiSlice`：新增 `governanceRefreshKey` 与 `requestGovernanceRefresh()`。
+- i18n：新增英文/中文 `governance` 字典，覆盖标题、指标、状态、操作、确认弹窗、lineage/audit/trace 文案。
+- Playwright smoke：补充 `/governance` 页面可见性测试，并更新 Dashboard smoke 中已过时的 selector。
+- 安全交互：Apply / Reject / Rollback 增加确认弹窗，避免单击直接修改治理状态。
+
+### 验证
+
+- `pnpm --dir /home/advancer/project/memorycore/ui exec tsc --noEmit`：通过。
+- `pnpm --dir /home/advancer/project/memorycore/ui build`：通过，`/governance` 已出现在 Next build route 列表。
+- `MEMORYCORE_UI_PORT=18319 pnpm --dir /home/advancer/project/memorycore/ui exec playwright test tests/openmemory-smoke.spec.ts -g "opens the governance cockpit"`：1/1 pass。
+- `MEMORYCORE_UI_PORT=18319 pnpm --dir /home/advancer/project/memorycore/ui test:e2e`：2/3 pass；剩余失败为既有 memories smoke 在 `/memories?search=...` 等待新建 marker 可见超时，本轮新增的 governance smoke 已通过。
+- reviewer pass：发现 2 个 MEDIUM（治理操作缺少确认、Navbar refresh 不刷新页面状态），均已修复。
+
+### 回滚
+
+- 回滚 `ui/app/governance/`、`ui/hooks/useGovernanceCockpit.ts`、`ui/store/uiSlice.ts`、`ui/components/Navbar.tsx`、`ui/components/dashboard/intelligence/types.ts`、`ui/components/dashboard/intelligence/utils.ts`、`ui/lib/i18n/dictionaries/en.ts`、`ui/lib/i18n/dictionaries/zh.ts`、`ui/tests/openmemory-smoke.spec.ts`、`TODO.md` 与本 `ITERATION.md` 条目。

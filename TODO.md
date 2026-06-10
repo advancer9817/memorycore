@@ -241,10 +241,11 @@
 
 > 背景：Phase 2/3 后端具备治理决策与自动处理能力，Phase 4 将 Dashboard 从 manual-review-first 改为 Auto-Governance Cockpit：系统默认自动处理低风险项，只让用户审查少量高风险项，并提供完整 audit / undo / lineage 解释。
 
+- [x] 新增 `/governance` Auto-Governance Cockpit MVP：治理指标、决策队列、决策详情、before/after、LLM trace、lineage、audit、Apply/Reject/Rollback 操作入口。
 - [ ] 拆分 `MemoryIntelligenceCenter.tsx`：抽出 `AutoAppliedStrip`、`ReviewQueue`、`ConflictComparisonPanel`、`HealthMetricsPanel`、`CurationTimeline` 等小组件，降低大文件复杂度。
 - [ ] 增加 Auto-Applied 区：展示最近自动执行的 stale/archive/supersede/reweight/split/promote 动作，支持跳转 audit log。
 - [ ] 增加 Needs Human Review 队列：展示 governance decisions 中 `needs_review` 的项目，支持 Accept / Skip / Swap / Keep Both。
 - [ ] 增加 lineage 展示：记忆详情页与冲突面板展示 `memory_lineage` 数据，说明“谁替代了谁 / 当前 head 是谁”。
 - [ ] 增加 Undo / rollback UI：对可回滚 auto-applied action 显示 Undo，调用 Phase 2 rollback 接口。
-- [ ] 保持 Claude 设计语言与 i18n：新增文案进入 typed dictionary，确保中英文 key 完整一致。
+- [x] 保持 Claude 设计语言与 i18n：新增文案进入 typed dictionary，确保中英文 key 完整一致。
 - [ ] 补 Phase 4 验证：UI TypeScript、关键组件单测/Playwright smoke、Dashboard 空队列健康态、review accept/skip/undo 交互。

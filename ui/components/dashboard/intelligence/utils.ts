@@ -43,3 +43,19 @@ export function riskTone(risk: string): string {
   if (risk === "low") return "border-sky-800/70 bg-sky-950/35 text-sky-200";
   return "border-amber-800/70 bg-amber-950/35 text-amber-200";
 }
+
+export function reviewStatusTone(status: string): string {
+  if (status === "applied") return "border-emerald-800/70 bg-emerald-950/35 text-emerald-200";
+  if (status === "auto_approved") return "border-sky-800/70 bg-sky-950/35 text-sky-200";
+  if (status === "rejected") return "border-zinc-700 bg-zinc-900 text-zinc-300";
+  if (status === "rolled_back") return "border-violet-800/70 bg-violet-950/35 text-violet-200";
+  return "border-amber-800/70 bg-amber-950/35 text-amber-200";
+}
+
+export function canApplyDecision(decision: GovernanceDecision): boolean {
+  return decision.review_status === "needs_review" || decision.review_status === "auto_approved";
+}
+
+export function canRollbackDecision(decision: GovernanceDecision): boolean {
+  return decision.review_status === "applied";
+}

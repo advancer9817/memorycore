@@ -46,11 +46,24 @@ export interface AuditEvent {
 export interface LineagePayload {
   memory_id: string;
   root_id: string;
+  current_head_id?: string | null;
+  chain?: GovernanceMemorySnapshot[];
+  branches?: GovernanceMemorySnapshot[];
   records: GovernanceMemorySnapshot[];
   links: Array<{ source_id?: string; target_id?: string; relation_type?: string }>;
 }
 
+export type GovernanceReviewStatus = "all" | "needs_review" | "auto_approved" | "applied" | "rejected" | "rolled_back";
+
 export type GovernanceAction = "accept" | "skip" | "swap" | "keepBoth" | "rollback";
+
+export interface GovernanceActionResult {
+  decision?: GovernanceDecision;
+  applied?: Record<string, unknown>;
+  execution?: Record<string, unknown>;
+  restored?: Array<Record<string, unknown>>;
+  already_rolled_back?: boolean;
+}
 
 export interface GovernanceMetrics {
   applied_count: number;

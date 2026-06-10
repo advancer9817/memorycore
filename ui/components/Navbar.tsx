@@ -36,6 +36,9 @@ async function refreshForPath(pathname: string): Promise<void> {
     fetches.push(fetch(`${base}/api/v1/config`));
   } else if (pathname.startsWith("/graph")) {
     fetches.push(fetch(`${base}/api/graph`));
+  } else if (pathname.startsWith("/governance")) {
+    fetches.push(fetch(`${base}/api/governance/metrics`));
+    fetches.push(fetch(`${base}/api/governance/decisions?limit=100`));
   }
 
   await Promise.allSettled(fetches);
@@ -64,6 +67,9 @@ export function Navbar() {
       } else if (pathname.startsWith("/graph")) {
         const { requestGraphRefresh } = await import("@/store/uiSlice");
         store.dispatch(requestGraphRefresh());
+      } else if (pathname.startsWith("/governance")) {
+        const { requestGovernanceRefresh } = await import("@/store/uiSlice");
+        store.dispatch(requestGovernanceRefresh());
       } else {
         await refreshForPath(pathname);
         const { resetProfileState } = await import("@/store/profileSlice");

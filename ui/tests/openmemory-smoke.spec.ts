@@ -28,9 +28,9 @@ test.describe("MemoryCore UI smoke", () => {
     await page.goto("/");
     await expect(page.getByText("Total Memories").first()).toBeVisible();
     await expect(page.getByRole("heading", { name: "Memory Operations" })).toBeVisible();
-    await expect(page.getByText("Curator Schedule")).toBeVisible();
-    await expect(page.getByRole("button", { name: /run curator now/i })).toBeVisible();
-    await expect(page.getByText("Manual run")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Memory Intelligence Center" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /run curator/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /run llm/i })).toBeVisible();
 
     await page.goto("/apps");
     await expect(page.getByRole("heading", { name: "Agents & Clients" })).toBeVisible();
@@ -45,7 +45,7 @@ test.describe("MemoryCore UI smoke", () => {
       .poll(() => page.evaluate(() => window.localStorage.getItem("memorycore.apiUrl")))
       .toBe(apiURL);
 
-    await page.goto(`/memories?search=${encodeURIComponent(marker)}`);
+    await page.goto(`/memories?search=${encodeURIComponent(marker)}`, { waitUntil: "domcontentloaded" });
     await expect(page.getByPlaceholder("Search memories...")).toBeVisible();
     await expect(page.getByText(marker)).toBeVisible();
 
@@ -60,7 +60,7 @@ test.describe("MemoryCore UI smoke", () => {
     await expect(page.getByText(marker)).toBeVisible();
     expect(imageErrors).toEqual([]);
 
-    await page.goto(`/memories?search=${encodeURIComponent(marker)}`);
+    await page.goto(`/memories?search=${encodeURIComponent(marker)}`, { waitUntil: "domcontentloaded" });
     const row = page.getByRole("row").filter({ hasText: marker });
     await expect(row).toBeVisible();
     const archived = await request.post(`${apiURL}/api/v1/memories/actions/pause`, {
@@ -71,6 +71,14 @@ test.describe("MemoryCore UI smoke", () => {
     const detail = await request.get(`${apiURL}/api/v1/memories/${memory.id}`);
     expect(detail.ok()).toBeTruthy();
     expect((await detail.json()).state).toBe("archived");
+  });
+
+  test("opens the governance cockpit", async ({ page }) => {
+    await page.goto("/governance");
+
+    await expect(page.getByRole("heading", { name: "Auto-Governance Cockpit" })).toBeVisible();
+    await expect(page.getByText("Governance Metrics")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Decision queue" })).toBeVisible();
   });
 
   test("switches UI language and persists the selected locale", async ({ page }) => {

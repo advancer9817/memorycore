@@ -18,6 +18,7 @@ interface UIState {
   language: LanguageState;
   dashboardRefreshKey: number;
   graphRefreshKey: number;
+  governanceRefreshKey: number;
 }
 
 const initialState: UIState = {
@@ -33,6 +34,7 @@ const initialState: UIState = {
   },
   dashboardRefreshKey: 0,
   graphRefreshKey: 0,
+  governanceRefreshKey: 0,
 };
 
 const uiSlice = createSlice({
@@ -78,6 +80,10 @@ const uiSlice = createSlice({
       ...state,
       graphRefreshKey: state.graphRefreshKey + 1,
     }),
+    requestGovernanceRefresh: (state) => ({
+      ...state,
+      governanceRefreshKey: state.governanceRefreshKey + 1,
+    }),
   },
 });
 
@@ -87,6 +93,7 @@ export const {
   setLocale,
   requestDashboardRefresh,
   requestGraphRefresh,
+  requestGovernanceRefresh,
 } = uiSlice.actions;
 
 export default uiSlice.reducer;
