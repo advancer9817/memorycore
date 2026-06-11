@@ -96,6 +96,72 @@ def test_convert_llm_finding_to_decision_keeps_precious_memory_in_review_queue()
     assert status == "active"
 
 
+def test_convert_llm_findings_skips_keep_results():
+    record = add_memory_record("episodic_memory", "Keep note", "No mutation needed", importance=0.2)
+    report = {
+        "importance_reassessments": [{"id": record["id"], "action": "keep", "confidence": 0.99}],
+    }
+
+    result = convert_llm_findings_to_decisions(report, auto_apply=True)
+
+    assert result["decisions_created"] == 0
+    assert result["decisions"] == []
+    assert result["auto_applied"] == []
+    assert result["skipped_keep"] == 1
+
+
+def test_actionable_governance_list_excludes_history_and_noop_keep():
+    active = add_memory_record("episodic_memory", "Active candidate", "Can be downgraded", importance=0.3)
+    keep = add_memory_record("episodic_memory", "Keep candidate", "No mutation needed", importance=0.3)
+    applied_record = add_memory_record("episodic_memory", "Applied candidate", "Already handled", importance=0.3)
+    active_decision = create_governance_decision(
+        "importance_reassessment",
+        "downgrade",
+        [active["id"]],
+        0.75,
+        "low",
+        {"id": active["id"], "action": "downgrade", "new_importance": 0.2},
+    )
+    keep_decision = create_governance_decision(
+        "importance_reassessment",
+        "keep",
+        [keep["id"]],
+        0.95,
+        "medium",
+        {"id": keep["id"], "action": "keep"},
+    )
+    applied_decision = create_governance_decision(
+        "importance_reassessment",
+        "downgrade",
+        [applied_record["id"]],
+        0.95,
+        "low",
+        {"id": applied_record["id"], "action": "downgrade", "new_importance": 0.2},
+    )
+    apply_governance_decision(applied_decision["id"], source_agent="pytest")
+
+    actionable_ids = {decision["id"] for decision in list_governance_decisions("actionable", limit=10)}
+
+    assert active_decision["id"] in actionable_ids
+    assert keep_decision["id"] not in actionable_ids
+    assert applied_decision["id"] not in actionable_ids
+
+
+def test_low_risk_importance_adjustments_auto_approve_at_result_threshold():
+    record = add_memory_record("episodic_memory", "Moderate confidence", "Safe adjustment", importance=0.3)
+
+    decision = create_governance_decision(
+        "importance_reassessment",
+        "promote",
+        [record["id"]],
+        0.70,
+        "low",
+        {"id": record["id"], "action": "promote", "new_importance": 0.5},
+    )
+
+    assert decision["review_status"] == "auto_approved"
+
+
 def test_auto_approved_apply_and_rollback_are_audited():
     record = add_memory_record("episodic_memory", "Drifted score", "Can be downgraded", importance=0.6)
     decision = create_governance_decision(

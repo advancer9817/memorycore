@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import {
   AlertDialog,
@@ -26,7 +27,6 @@ import { Textarea } from "@/components/ui/textarea";
 import type { AuditEvent, GovernanceDecision, LineagePayload } from "@/components/dashboard/intelligence/types";
 import {
   canApplyDecision,
-  canRollbackDecision,
   decisionSummary,
   decisionTitle,
   formatGovernanceDate,
@@ -48,7 +48,6 @@ interface GovernanceDecisionSheetProps {
   onClose: () => void;
   onApply: (decisionId: string) => Promise<void>;
   onReject: (decisionId: string, reason: string) => Promise<void>;
-  onRollback: (decisionId: string) => Promise<void>;
 }
 
 function JsonBlock({ value }: { value: Record<string, unknown> | undefined }) {
@@ -154,7 +153,7 @@ function ConfirmActionButton({
           <AlertDialogCancel className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800">
             {cancelLabel}
           </AlertDialogCancel>
-          <AlertDialogAction onClick={() => void onConfirm()}>{label}</AlertDialogAction>
+          <AlertDialogAction onClick={() => void onConfirm().catch(() => undefined)}>{label}</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -171,15 +170,14 @@ export function GovernanceDecisionSheet({
   onClose,
   onApply,
   onReject,
-  onRollback,
 }: GovernanceDecisionSheetProps) {
   const [rejectReason, setRejectReason] = useState("");
 
   const isPending = actionPendingId === decision?.id;
   const canApply = decision ? canApplyDecision(decision) : false;
-  const canRollback = decision ? canRollbackDecision(decision) : false;
-  const showActions = canApply || canRollback;
+  const showActions = canApply;
   const normalizedRejectReason = rejectReason.trim() || messages.defaultRejectReason;
+  const primarySourceId = decision?.source_ids?.[0] || decision?.before_state?.[0]?.id || decision?.after_state?.[0]?.id || "";
 
   return (
     <Sheet open={!!decision} onOpenChange={(open) => !open && onClose()}>
@@ -212,6 +210,13 @@ export function GovernanceDecisionSheet({
               <span>{messages.policyReason}: <span className="text-zinc-300">{decision.policy_reason || "n/a"}</span></span>
               <span className="break-all">{messages.sourceMemories}: <span className="text-zinc-300">{decision.source_ids?.join(", ") || "n/a"}</span></span>
             </div>
+            {primarySourceId ? (
+              <div className="mt-3">
+                <Button asChild variant="outline" size="sm" className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800">
+                  <Link href={`/memory/${encodeURIComponent(primarySourceId)}`}>{messages.openSourceMemory}</Link>
+                </Button>
+              </div>
+            ) : null}
 
             {/* Actions */}
             {showActions && (
@@ -251,17 +256,6 @@ export function GovernanceDecisionSheet({
                       cancelLabel={messages.cancel}
                       variant="outline"
                       onConfirm={() => onReject(decision.id, normalizedRejectReason)}
-                    />
-                  )}
-                  {canRollback && (
-                    <ConfirmActionButton
-                      label={messages.rollback}
-                      title={messages.confirmRollbackTitle}
-                      description={messages.confirmRollbackDescription(decision.id)}
-                      disabled={isPending}
-                      cancelLabel={messages.cancel}
-                      variant="destructive"
-                      onConfirm={() => onRollback(decision.id)}
                     />
                   )}
                 </div>

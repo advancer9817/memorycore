@@ -12,12 +12,19 @@ import type {
   GovernanceReviewStatus,
   LineagePayload,
 } from "@/components/dashboard/intelligence/types";
+import { isActionableDecision } from "@/components/dashboard/intelligence/utils";
 import type { RootState } from "@/store/store";
+
+interface ApiErrorPayload {
+  code?: string;
+  message?: string;
+  detail?: unknown;
+}
 
 interface ApiEnvelope<T> {
   ok?: boolean;
   data?: T;
-  error?: string;
+  error?: string | ApiErrorPayload;
 }
 
 interface GovernanceCockpitState {
@@ -40,11 +47,36 @@ interface UseGovernanceCockpitReturn extends GovernanceCockpitState {
   applyDecision: (decisionId: string) => Promise<void>;
   rejectDecision: (decisionId: string, reason: string) => Promise<void>;
   rollbackDecision: (decisionId: string) => Promise<void>;
+  applyDecisionOrThrow: (decisionId: string) => Promise<void>;
+  rejectDecisionOrThrow: (decisionId: string, reason: string) => Promise<void>;
 }
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return "Unexpected governance cockpit error";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function extractApiErrorMessage(payload: unknown, response: Response, rawBody: string): string {
+  if (isRecord(payload)) {
+    const error = payload.error;
+    if (typeof error === "string" && error.trim()) return error;
+    if (isRecord(error) && typeof error.message === "string" && error.message.trim()) return error.message;
+  }
+
+  return rawBody.trim() || response.statusText || "Request failed";
+}
+
+function parseJsonBody<T>(rawBody: string): ApiEnvelope<T> | T | null {
+  if (!rawBody) return {} as ApiEnvelope<T>;
+  try {
+    return JSON.parse(rawBody) as ApiEnvelope<T> | T;
+  } catch {
+    return null;
+  }
 }
 
 function appendQuery(url: string, params: Record<string, string | number | undefined>): string {
@@ -59,13 +91,16 @@ function appendQuery(url: string, params: Record<string, string | number | undef
 }
 
 async function readJson<T>(response: Response): Promise<T> {
-  const payload = (await response.json()) as ApiEnvelope<T> | T;
+  const rawBody = await response.text();
+  const payload = parseJsonBody<T>(rawBody);
   if (!response.ok) {
-    const errorMessage = typeof (payload as ApiEnvelope<T>).error === "string" ? (payload as ApiEnvelope<T>).error : response.statusText;
-    throw new Error(errorMessage || "Request failed");
+    throw new Error(extractApiErrorMessage(payload, response, rawBody));
   }
-  if (typeof payload === "object" && payload !== null && "data" in payload) {
-    return (payload as ApiEnvelope<T>).data as T;
+  if (payload === null) {
+    throw new Error("Response body must be valid JSON");
+  }
+  if (isRecord(payload) && "data" in payload) {
+    return payload.data as T;
   }
   return payload as T;
 }
@@ -80,13 +115,43 @@ function primaryMemoryId(decision: GovernanceDecision | null): string {
   return decision.source_ids?.[0] || decision.before_state?.[0]?.id || decision.after_state?.[0]?.id || "";
 }
 
+const RISK_PRIORITY: Record<string, number> = { high: 0, medium: 1, low: 2 };
+const ACTION_PRIORITY: Record<string, number> = {
+  mark_contradicted: 0,
+  archive_and_merge_duplicate: 1,
+  supersede: 2,
+  archive_duplicate: 3,
+  archive: 4,
+  split: 5,
+  downgrade: 6,
+  promote: 7,
+};
+
+function compareDecisionsByPriority(a: GovernanceDecision, b: GovernanceDecision): number {
+  const riskDelta = (RISK_PRIORITY[a.risk_level] ?? 1) - (RISK_PRIORITY[b.risk_level] ?? 1);
+  if (riskDelta !== 0) return riskDelta;
+
+  const actionDelta = (ACTION_PRIORITY[a.recommended_action] ?? 8) - (ACTION_PRIORITY[b.recommended_action] ?? 8);
+  if (actionDelta !== 0) return actionDelta;
+
+  const confidenceDelta = b.llm_confidence - a.llm_confidence;
+  if (confidenceDelta !== 0) return confidenceDelta;
+
+  return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+}
+
+function prioritizedDecisions(decisions: GovernanceDecision[], reviewStatus: GovernanceReviewStatus): GovernanceDecision[] {
+  const visibleDecisions = reviewStatus === "actionable" ? decisions.filter(isActionableDecision) : decisions;
+  return [...visibleDecisions].sort(compareDecisionsByPriority);
+}
+
 function reconcileSelection(current: GovernanceDecision | null, decisions: GovernanceDecision[]): GovernanceDecision | null {
   if (!decisions.length) return null;
   if (current) {
     const existing = decisions.find((decision) => decision.id === current.id);
     if (existing) return existing;
   }
-  return decisions.find((decision) => decision.review_status === "needs_review") ?? decisions[0];
+  return decisions.find(isActionableDecision) ?? decisions[0];
 }
 
 export function useGovernanceCockpit(): UseGovernanceCockpitReturn {
@@ -102,7 +167,7 @@ export function useGovernanceCockpit(): UseGovernanceCockpitReturn {
     isDetailLoading: false,
     actionPendingId: null,
     error: null,
-    reviewStatus: "all",
+    reviewStatus: "actionable",
   });
 
   const baseUrl = useMemo(() => getApiBaseUrl(), []);
@@ -111,18 +176,19 @@ export function useGovernanceCockpit(): UseGovernanceCockpitReturn {
     setState((current) => ({ ...current, isLoading: true, error: null }));
     try {
       const decisionUrl = appendQuery(`${baseUrl}/api/governance/decisions`, {
-        review_status: state.reviewStatus === "all" ? undefined : state.reviewStatus,
-        limit: 100,
+        review_status: state.reviewStatus,
+        limit: 500,
       });
       const [metrics, decisions] = await Promise.all([
         fetchJson<GovernanceMetrics>(`${baseUrl}/api/governance/metrics`, { signal }),
         fetchJson<GovernanceDecision[]>(decisionUrl, { signal }),
       ]);
+      const sortedDecisions = prioritizedDecisions(decisions, state.reviewStatus);
       setState((current) => ({
         ...current,
-        decisions,
+        decisions: sortedDecisions,
         metrics,
-        selectedDecision: reconcileSelection(current.selectedDecision, decisions),
+        selectedDecision: reconcileSelection(current.selectedDecision, sortedDecisions),
         isLoading: false,
         error: null,
       }));
@@ -140,11 +206,24 @@ export function useGovernanceCockpit(): UseGovernanceCockpitReturn {
     }
     setState((current) => ({ ...current, isDetailLoading: true }));
     try {
-      const [lineage, auditEvents] = await Promise.all([
+      const fetches: [Promise<LineagePayload>, Promise<AuditEvent[]>, Promise<GovernanceDecision> | null] = [
         fetchJson<LineagePayload>(`${baseUrl}/api/lineage/${encodeURIComponent(memoryId)}?limit=100`, { signal }),
         fetchJson<AuditEvent[]>(appendQuery(`${baseUrl}/api/audit`, { memory_id: memoryId, limit: 25 }), { signal }),
-      ]);
-      setState((current) => ({ ...current, lineage, auditEvents, isDetailLoading: false }));
+        !decision.before_state?.length
+          ? fetchJson<GovernanceDecision>(`${baseUrl}/api/governance/${encodeURIComponent(decision.id)}`, { signal })
+          : null,
+      ];
+      const [lineage, auditEvents, detail] = await Promise.all(fetches);
+      setState((current) => ({
+        ...current,
+        lineage,
+        auditEvents,
+        isDetailLoading: false,
+        selectedDecision:
+          detail && current.selectedDecision?.id === decision.id
+            ? { ...current.selectedDecision, before_state: detail.before_state ?? current.selectedDecision.before_state }
+            : current.selectedDecision,
+      }));
     } catch (error: unknown) {
       if (error instanceof DOMException && error.name === "AbortError") return;
       setState((current) => ({
@@ -188,22 +267,31 @@ export function useGovernanceCockpit(): UseGovernanceCockpitReturn {
       const message = getErrorMessage(error);
       setState((current) => ({ ...current, error: message }));
       toast({ variant: "destructive", description: message });
+      throw new Error(message);
     } finally {
       setState((current) => ({ ...current, actionPendingId: null }));
     }
   }, [baseUrl, loadOverview, toast]);
 
   const applyDecision = useCallback(async (decisionId: string): Promise<void> => {
-    await runAction(decisionId, "apply", { source_agent: "frontend" }, "Decision applied");
+    await runAction(decisionId, "apply", { source_agent: "frontend" }, "Decision applied").catch(() => undefined);
   }, [runAction]);
 
   const rejectDecision = useCallback(async (decisionId: string, reason: string): Promise<void> => {
-    await runAction(decisionId, "reject", { source_agent: "frontend", reason }, "Decision rejected");
+    await runAction(decisionId, "reject", { source_agent: "frontend", reason }, "Decision rejected").catch(() => undefined);
   }, [runAction]);
 
   const rollbackDecision = useCallback(async (decisionId: string): Promise<void> => {
-    await runAction(decisionId, "rollback", { source_agent: "frontend" }, "Decision rolled back");
+    await runAction(decisionId, "rollback", { source_agent: "frontend" }, "Decision rolled back").catch(() => undefined);
   }, [runAction]);
+
+  const applyDecisionOrThrow = useCallback((decisionId: string): Promise<void> =>
+    runAction(decisionId, "apply", { source_agent: "frontend" }, "Decision applied"),
+  [runAction]);
+
+  const rejectDecisionOrThrow = useCallback((decisionId: string, reason: string): Promise<void> =>
+    runAction(decisionId, "reject", { source_agent: "frontend", reason }, "Decision rejected"),
+  [runAction]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -225,5 +313,7 @@ export function useGovernanceCockpit(): UseGovernanceCockpitReturn {
     applyDecision,
     rejectDecision,
     rollbackDecision,
+    applyDecisionOrThrow,
+    rejectDecisionOrThrow,
   };
 }

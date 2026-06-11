@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
-import { AlertTriangle, CheckCircle2, RotateCcw, ShieldAlert } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { AlertTriangle, CheckCircle2, GitPullRequestClosed, ShieldCheck } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { GovernanceMetrics } from "@/components/dashboard/intelligence/types";
 import { formatPercent } from "@/components/dashboard/intelligence/utils";
@@ -22,13 +21,6 @@ interface MetricCard {
 export function GovernanceMetricsCards({ metrics, messages }: GovernanceMetricsCardsProps) {
   const cards: MetricCard[] = [
     {
-      label: messages.needsReview,
-      value: String(metrics?.needs_review_count ?? 0),
-      detail: messages.decisionQueue,
-      icon: <ShieldAlert className="h-4 w-4" />,
-      tone: "text-amber-300",
-    },
-    {
       label: messages.applied,
       value: String(metrics?.applied_count ?? 0),
       detail: messages.policyVersionValue(metrics?.policy_version || "n/a"),
@@ -36,11 +28,11 @@ export function GovernanceMetricsCards({ metrics, messages }: GovernanceMetricsC
       tone: "text-emerald-300",
     },
     {
-      label: messages.rollbackRate,
-      value: formatPercent(metrics?.rollback_rate),
-      detail: messages.rolledBackCount(metrics?.rolled_back_count ?? 0),
-      icon: <RotateCcw className="h-4 w-4" />,
-      tone: "text-violet-300",
+      label: messages.rejected,
+      value: String(metrics?.rejected_count ?? 0),
+      detail: messages.decisionQueue,
+      icon: <GitPullRequestClosed className="h-4 w-4" />,
+      tone: "text-zinc-300",
     },
     {
       label: messages.revivalRate,
@@ -48,6 +40,13 @@ export function GovernanceMetricsCards({ metrics, messages }: GovernanceMetricsC
       detail: messages.reviewQueueAge(Math.round(metrics?.review_queue_age_hours ?? 0)),
       icon: <AlertTriangle className="h-4 w-4" />,
       tone: metrics?.degraded_warning ? "text-red-300" : "text-sky-300",
+    },
+    {
+      label: messages.policyVersion,
+      value: metrics?.policy_version || "n/a",
+      detail: metrics?.auto_supersede_enabled ? messages.autoApproved : messages.needsReview,
+      icon: <ShieldCheck className="h-4 w-4" />,
+      tone: "text-violet-300",
     },
   ];
 
@@ -66,11 +65,6 @@ export function GovernanceMetricsCards({ metrics, messages }: GovernanceMetricsC
             </CardContent>
           </Card>
         ))}
-        {metrics?.degraded_warning ? (
-          <div className="md:col-span-2 xl:col-span-4">
-            <Badge className="border-red-800/70 bg-red-950/40 text-red-200">{messages.degradedWarning}</Badge>
-          </div>
-        ) : null}
       </div>
     </section>
   );

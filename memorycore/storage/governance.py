@@ -40,6 +40,7 @@ DESTRUCTIVE_ACTIONS = {"archive_duplicate", "archive_and_merge_duplicate", "arch
 MERGE_ACTIONS = {"archive_and_merge_duplicate"}
 MANUAL_ONLY_ACTIONS = {"split"}
 DELETE_ACTIONS = {"delete", "hard_delete"}
+ACTIONABLE_REVIEW_STATUSES = {"needs_review", "auto_approved"}
 
 
 _CATEGORY_TO_DECISION_TYPE = {
@@ -183,7 +184,14 @@ def policy_gate(
         reasons.append("positive_feedback_requires_review")
     if is_destructive and normalized_risk != "low":
         reasons.append("destructive_action_not_low_risk")
-    if confidence < AUTO_CONFIDENCE_THRESHOLD:
+    is_low_risk_importance_adjustment = (
+        action in {"promote", "downgrade"}
+        and normalized_risk == "low"
+        and not is_precious
+        and not is_high_importance
+    )
+    effective_auto_threshold = 0.70 if is_low_risk_importance_adjustment else AUTO_CONFIDENCE_THRESHOLD
+    if confidence < effective_auto_threshold:
         reasons.append("confidence_below_auto_threshold")
 
     if reasons:
@@ -280,21 +288,57 @@ def list_governance_decisions(review_status: str | None = None, limit: int = 100
     cap = max(1, min(int(limit), 500))
     where = ""
     params: list[Any] = []
-    if review_status:
+    if review_status == "actionable":
+        where = "WHERE review_status IN ('needs_review', 'auto_approved') AND recommended_action != 'keep'"
+    elif review_status and review_status != "all":
         where = "WHERE review_status=?"
         params.append(review_status)
     params.append(cap)
+    order_by = """
+        ORDER BY
+          CASE risk_level WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 1 END,
+          CASE recommended_action
+            WHEN 'mark_contradicted' THEN 0
+            WHEN 'archive_and_merge_duplicate' THEN 1
+            WHEN 'supersede' THEN 2
+            WHEN 'archive_duplicate' THEN 3
+            WHEN 'archive' THEN 4
+            WHEN 'split' THEN 5
+            WHEN 'downgrade' THEN 6
+            WHEN 'promote' THEN 7
+            ELSE 8
+          END,
+          llm_confidence DESC,
+          created_at DESC
+    """
     with read_conn() as conn:
-        rows = conn.execute(f"SELECT * FROM governance_decisions {where} ORDER BY created_at DESC LIMIT ?", tuple(params)).fetchall()
+        rows = conn.execute(f"SELECT * FROM governance_decisions {where} {order_by} LIMIT ?", tuple(params)).fetchall()
     return [_decision_row_to_dict(row) for row in rows]
+
+
+def get_governance_decision(decision_id: str) -> dict[str, Any] | None:
+    with read_conn() as conn:
+        row = conn.execute("SELECT * FROM governance_decisions WHERE id=?", (decision_id,)).fetchone()
+    if row is None:
+        return None
+    decision = _decision_row_to_dict(row)
+    if not decision.get("before_state"):
+        source_ids = decision.get("source_ids") or []
+        summaries = _fetch_memory_summaries(source_ids) if source_ids else []
+        decision["before_state"] = summaries
+    return decision
 
 
 def convert_llm_findings_to_decisions(report: dict[str, Any], auto_apply: bool = False) -> dict[str, Any]:
     decisions: list[dict[str, Any]] = []
     applied: list[dict[str, Any]] = []
+    skipped_keep = 0
     for category, decision_type in _CATEGORY_TO_DECISION_TYPE.items():
         for finding in report.get(category, []) or []:
             action = str(finding.get("action") or "keep")
+            if action == "keep":
+                skipped_keep += 1
+                continue
             confidence = finding.get("confidence", finding.get("score", 0.7))
             risk = _risk_for_action(action)
             decision = create_governance_decision(
@@ -309,7 +353,7 @@ def convert_llm_findings_to_decisions(report: dict[str, Any], auto_apply: bool =
             decisions.append(decision)
             if auto_apply and decision["review_status"] == "auto_approved":
                 applied.append(apply_governance_decision(decision["id"], source_agent="llm_curator"))
-    return {"decisions_created": len(decisions), "decisions": decisions, "auto_applied": applied}
+    return {"decisions_created": len(decisions), "decisions": decisions, "auto_applied": applied, "skipped_keep": skipped_keep}
 
 
 def _risk_for_action(action: str) -> str:

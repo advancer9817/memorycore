@@ -17,6 +17,7 @@ import {
   decisionTitle,
   formatGovernanceDate,
   formatPercent,
+  isActionableDecision,
   reviewStatusTone,
   riskTone,
   titleCase,
@@ -42,8 +43,9 @@ export function GovernanceTable({
   messages,
   isLoading,
 }: GovernanceTableProps) {
-  const isAllSelected = decisions.length > 0 && decisions.every((d) => selectedIds.has(d.id));
-  const isPartial = decisions.some((d) => selectedIds.has(d.id)) && !isAllSelected;
+  const selectableDecisions = decisions.filter(isActionableDecision);
+  const isAllSelected = selectableDecisions.length > 0 && selectableDecisions.every((d) => selectedIds.has(d.id));
+  const isPartial = selectableDecisions.some((d) => selectedIds.has(d.id)) && !isAllSelected;
 
   return (
     <div className="rounded-md border border-zinc-800">
@@ -56,6 +58,7 @@ export function GovernanceTable({
                 checked={isAllSelected}
                 data-state={isPartial ? "indeterminate" : isAllSelected ? "checked" : "unchecked"}
                 onCheckedChange={onToggleSelectAll}
+                disabled={!selectableDecisions.length}
               />
             </TableHead>
             <TableHead className="min-w-[400px]">{messages.decisionQueue}</TableHead>
@@ -81,7 +84,9 @@ export function GovernanceTable({
               </TableCell>
             </TableRow>
           ) : (
-            decisions.map((decision) => (
+            decisions.map((decision) => {
+              const isSelectable = isActionableDecision(decision);
+              return (
               <TableRow
                 key={decision.id}
                 className={`hover:bg-zinc-900/50 ${isLoading ? "animate-pulse opacity-50" : ""}`}
@@ -91,6 +96,7 @@ export function GovernanceTable({
                     className="data-[state=checked]:border-primary border-zinc-500/50"
                     checked={selectedIds.has(decision.id)}
                     onCheckedChange={() => onToggleSelect(decision.id)}
+                    disabled={!isSelectable}
                   />
                 </TableCell>
                 <TableCell>
@@ -129,7 +135,8 @@ export function GovernanceTable({
                   {formatGovernanceDate(decision.created_at)}
                 </TableCell>
               </TableRow>
-            ))
+              );
+            })
           )}
         </TableBody>
       </Table>

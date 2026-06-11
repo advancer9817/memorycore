@@ -1,7 +1,18 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { RefreshCcw } from "lucide-react";
+import { useState, useCallback, useEffect } from "react";
+import { CheckCheck, RefreshCcw } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,17 +21,19 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useGovernanceCockpit } from "@/hooks/useGovernanceCockpit";
 import { useI18n } from "@/hooks/useI18n";
 import { useToast } from "@/hooks/use-toast";
 import type { GovernanceReviewStatus } from "@/components/dashboard/intelligence/types";
+import { isActionableDecision } from "@/components/dashboard/intelligence/utils";
 import { GovernanceDecisionSheet } from "./components/GovernanceDecisionSheet";
 import { GovernanceTable } from "./components/GovernanceTable";
 import { GovernanceMetricsCards } from "./components/GovernanceMetricsCards";
 
 const REVIEW_STATUSES: GovernanceReviewStatus[] = [
-  "all", "needs_review", "auto_approved", "applied", "rejected", "rolled_back",
+  "actionable", "needs_review", "auto_approved", "all", "applied", "rejected", "rolled_back",
 ];
 
 const PAGE_SIZE = 20;
@@ -33,23 +46,44 @@ export default function GovernancePage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
   const [batchPending, setBatchPending] = useState(false);
+  const [jumpValue, setJumpValue] = useState("1");
 
   const totalPages = Math.max(1, Math.ceil(cockpit.decisions.length / PAGE_SIZE));
   const paginated = cockpit.decisions.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
+  useEffect(() => {
+    const clampedPage = Math.min(page, Math.max(0, totalPages - 1));
+    if (clampedPage !== page) setPage(clampedPage);
+  }, [page, totalPages]);
+
+  useEffect(() => {
+    setJumpValue(String(page + 1));
+  }, [page]);
+
+  const allActionableCount = cockpit.decisions.filter(isActionableDecision).length;
+
+  const handleJump = useCallback(() => {
+    const n = parseInt(jumpValue, 10);
+    if (Number.isFinite(n)) {
+      setPage(Math.max(0, Math.min(n - 1, totalPages - 1)));
+    }
+  }, [jumpValue, totalPages]);
+
   const toggleSelect = useCallback((id: string) => {
+    const decision = cockpit.decisions.find((item) => item.id === id);
+    if (!decision || !isActionableDecision(decision)) return;
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  }, []);
+  }, [cockpit.decisions]);
 
   const toggleSelectAll = useCallback(() => {
     setSelectedIds((prev) => {
-      const pageIds = paginated.map((d) => d.id);
-      const allSelected = pageIds.every((id) => prev.has(id));
+      const pageIds = paginated.filter(isActionableDecision).map((d) => d.id);
+      const allSelected = pageIds.length > 0 && pageIds.every((id) => prev.has(id));
       const next = new Set(prev);
       if (allSelected) {
         pageIds.forEach((id) => next.delete(id));
@@ -60,24 +94,30 @@ export default function GovernancePage() {
     });
   }, [paginated]);
 
-  const runBatch = useCallback(async (action: "apply" | "reject") => {
-    const ids = Array.from(selectedIds);
-    if (!ids.length) return;
-    setBatchPending(true);
+  const runBatch = useCallback(async (ids: string[], action: "apply" | "reject") => {
+    if (!ids.length) return 0;
     let successCount = 0;
     const reason = messages.governance.defaultRejectReason;
     for (const id of ids) {
       try {
         if (action === "apply") {
-          await cockpit.applyDecision(id);
+          await cockpit.applyDecisionOrThrow(id);
         } else {
-          await cockpit.rejectDecision(id, reason);
+          await cockpit.rejectDecisionOrThrow(id, reason);
         }
         successCount++;
       } catch {
         // individual failures handled by the hook's toast
       }
     }
+    return successCount;
+  }, [cockpit, messages.governance.defaultRejectReason]);
+
+  const runSelectedBatch = useCallback(async (action: "apply" | "reject") => {
+    const ids = Array.from(selectedIds);
+    if (!ids.length) return;
+    setBatchPending(true);
+    const successCount = await runBatch(ids, action);
     setBatchPending(false);
     setSelectedIds(new Set());
     if (successCount > 0) {
@@ -85,7 +125,20 @@ export default function GovernancePage() {
       toast({ description: messages.governance.batchSuccess(successCount, actionLabel) });
     }
     await cockpit.refresh();
-  }, [selectedIds, cockpit, messages.governance, toast]);
+  }, [selectedIds, runBatch, messages.governance, toast, cockpit]);
+
+  const runApproveAll = useCallback(async () => {
+    const ids = cockpit.decisions.filter(isActionableDecision).map((d) => d.id);
+    if (!ids.length) return;
+    setBatchPending(true);
+    const successCount = await runBatch(ids, "apply");
+    setBatchPending(false);
+    setSelectedIds(new Set());
+    if (successCount > 0) {
+      toast({ description: messages.governance.batchSuccess(successCount, messages.governance.apply) });
+    }
+    await cockpit.refresh();
+  }, [cockpit, runBatch, messages.governance, toast]);
 
   return (
     <div className="text-white py-6">
@@ -110,13 +163,13 @@ export default function GovernancePage() {
                 <DropdownMenuContent align="end" className="bg-zinc-900 border-zinc-800">
                   <DropdownMenuItem
                     disabled={batchPending}
-                    onClick={() => void runBatch("apply")}
+                    onClick={() => void runSelectedBatch("apply")}
                   >
                     {messages.governance.batchApply}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     disabled={batchPending}
-                    onClick={() => void runBatch("reject")}
+                    onClick={() => void runSelectedBatch("reject")}
                     className="text-red-500 focus:text-red-500"
                   >
                     {messages.governance.batchReject}
@@ -124,6 +177,38 @@ export default function GovernancePage() {
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
+
+            {allActionableCount > 0 && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    disabled={batchPending}
+                    className="border-violet-700/50 bg-violet-950/40 text-violet-200 hover:bg-violet-900/50"
+                  >
+                    <CheckCheck className="mr-2 h-4 w-4" />
+                    {messages.governance.approveAll(allActionableCount)}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent className="border-zinc-800 bg-zinc-950 text-zinc-100">
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{messages.governance.confirmApproveAllTitle}</AlertDialogTitle>
+                    <AlertDialogDescription className="text-zinc-400">
+                      {messages.governance.confirmApproveAllDescription(allActionableCount)}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800">
+                      {messages.governance.cancel}
+                    </AlertDialogCancel>
+                    <AlertDialogAction onClick={() => void runApproveAll()}>
+                      {messages.governance.apply}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+
             <Select
               value={cockpit.reviewStatus}
               onValueChange={(v) => {
@@ -203,6 +288,24 @@ export default function GovernancePage() {
               >
                 {messages.governance.nextPage}
               </Button>
+              <Input
+                type="number"
+                min={1}
+                max={totalPages}
+                value={jumpValue}
+                onChange={(e) => setJumpValue(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleJump(); }}
+                aria-label={messages.governance.jumpToPage}
+                className="w-16 border-zinc-700/50 bg-zinc-900 text-center text-sm text-zinc-200"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleJump}
+                className="border-zinc-700/50 bg-zinc-900 text-zinc-200"
+              >
+                {messages.governance.goButton}
+              </Button>
             </div>
           </div>
         )}
@@ -218,7 +321,6 @@ export default function GovernancePage() {
           onClose={() => cockpit.selectDecision(null)}
           onApply={cockpit.applyDecision}
           onReject={cockpit.rejectDecision}
-          onRollback={cockpit.rollbackDecision}
         />
       </div>
     </div>

@@ -64,6 +64,7 @@ from memorycore.storage.governance import (
     policy_gate,
     create_governance_decision,
     convert_llm_findings_to_decisions,
+    get_governance_decision,
     get_governance_metrics,
     list_governance_decisions,
     apply_governance_decision,

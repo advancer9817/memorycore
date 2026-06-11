@@ -56,6 +56,10 @@ export function canApplyDecision(decision: GovernanceDecision): boolean {
   return decision.review_status === "needs_review" || decision.review_status === "auto_approved";
 }
 
+export function isActionableDecision(decision: GovernanceDecision): boolean {
+  return canApplyDecision(decision) && decision.recommended_action !== "keep";
+}
+
 export function canRollbackDecision(decision: GovernanceDecision): boolean {
   return decision.review_status === "applied";
 }

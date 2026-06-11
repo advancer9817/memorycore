@@ -53,7 +53,7 @@ export interface LineagePayload {
   links: Array<{ source_id?: string; target_id?: string; relation_type?: string }>;
 }
 
-export type GovernanceReviewStatus = "all" | "needs_review" | "auto_approved" | "applied" | "rejected" | "rolled_back";
+export type GovernanceReviewStatus = "actionable" | "all" | "needs_review" | "auto_approved" | "applied" | "rejected" | "rolled_back";
 
 export type GovernanceAction = "accept" | "skip" | "swap" | "keepBoth" | "rollback";
 

@@ -3747,3 +3747,77 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 ### 验证
 
 - `pnpm tsc --noEmit`：通过
+
+---
+
+## [迭代 131] 2026-06-11 — 治理操作错误提示修复
+
+### 背景
+
+用户在治理决策 Sheet 中执行 Apply/Reject 操作时，界面只显示通用 `Bad Request` toast，无法看到后端返回的真实失败原因。排查确认后端已返回结构化错误 `{ ok: false, error: { code, message } }`，问题在前端 hook 只按字符串错误读取，导致丢失 `error.message`。
+
+### 修复
+
+- `ui/hooks/useGovernanceCockpit.ts`：扩展 API envelope 类型，支持字符串错误和 `{ code, message, detail }` 结构化错误。
+- `ui/hooks/useGovernanceCockpit.ts`：新增安全的 JSON body 解析与错误消息提取逻辑，非 JSON 错误响应也会回退到响应正文或 statusText。
+- `ui/hooks/useGovernanceCockpit.ts`：治理操作失败后继续显示错误 toast，并重新抛出错误，修复批量操作成功计数会误计失败项的问题。
+- `ui/app/governance/components/GovernanceDecisionSheet.tsx`：确认按钮捕获已由 hook 处理过的 promise rejection，避免 Sheet 操作产生未处理 rejection。
+- `tests/test_frontend.py`：新增治理 API 400 合约测试，确认后端错误响应包含可供前端展示的 `error.message`。
+
+### 验证
+
+- `uv --directory /home/advancer/project/memorycore run pytest tests/test_frontend.py tests/test_governance.py`：27/27 pass。
+- `pnpm --dir /home/advancer/project/memorycore/ui exec tsc --noEmit`：通过。
+- `pnpm --dir /home/advancer/project/memorycore/ui build`：通过。
+- `pnpm --dir /home/advancer/project/memorycore/ui lint`：未完成；当前 `next lint` 因项目未配置 ESLint 而进入交互式初始化提示并退出，没有执行实际 lint。
+
+---
+
+## [迭代 132] 2026-06-11 — 治理页结果化与优先级排序
+
+### 背景
+
+用户明确反馈不希望人工审查 1800+ 条治理决策，只希望看到治理结果，按优先级排序，并能直接进入来源记忆进行修改；同时已处理的 Applied 条目不应继续占据默认列表位置阻塞下一条处理。
+
+### 变更
+
+- `memorycore/storage/governance.py`：新增 `review_status=actionable` 列表语义，仅返回可处理且非 `keep` 的治理结果，并按风险级别、动作严重度、置信度、创建时间排序。
+- `memorycore/storage/governance.py`：LLM 结果转换时跳过 `keep` 这类无 mutation 的 no-op 建议，避免继续制造无意义待审条目。
+- `memorycore/storage/governance.py`：低风险、非珍贵、非高重要度的 promote/downgrade 重要性调整使用较低自动批准阈值，减少安全低风险建议进入人工队列。
+- `ui/hooks/useGovernanceCockpit.ts`：治理页默认加载 `actionable` 结果并在前端保持同样的优先级排序；处理完条目后自动回到下一个可处理结果。
+- `ui/app/governance/page.tsx` 与 `GovernanceTable.tsx`：状态筛选新增「优先结果」，默认不展示 Applied 历史；批量选择只允许可处理条目。
+- `ui/app/governance/components/GovernanceDecisionSheet.tsx`：移除主流程中的回滚按钮，新增「打开记忆」入口，直接跳转来源记忆详情用于修改。
+- `ui/app/governance/components/GovernanceMetricsCards.tsx`：不再把巨大待审队列作为主指标展示，改为突出已应用、已拒绝、复活率和策略版本。
+- `ui/components/Navbar.tsx`：治理页刷新预取改为 `review_status=actionable`。
+- `ui/lib/i18n/dictionaries/en.ts`、`zh.ts`：同步更新治理页描述、优先结果筛选与打开记忆文案。
+
+### 验证
+
+- `uv --directory /home/advancer/project/memorycore run pytest tests/test_frontend.py tests/test_governance.py`：31/31 pass。
+- `pnpm --dir /home/advancer/project/memorycore/ui exec tsc --noEmit`：通过。
+- `pnpm --dir /home/advancer/project/memorycore/ui build`：通过。
+- `mcore restart && mcore status`：后端和 UI 均为 active (running)。
+- 后端 HTTP 根路径 `http://127.0.0.1:8318/`：200。
+- 治理页 `http://127.0.0.1:18318/governance`：200。
+- `GET /api/governance/decisions?review_status=actionable&limit=5`：返回 5 条可处理结果，状态均为 `needs_review` 且非 terminal history。
+
+---
+
+## [迭代 133] 2026-06-11 — 治理页四项修复：Hydration / 快照预览 / 一键应用全部 / 分页跳转
+
+### 修复
+
+- **Hydration 错误**：`I18nProvider` 改为 SSR 首渲染使用 `DEFAULT_LOCALE (en)`，在 `useEffect` 中读取 `localStorage`/`navigator.language`，消除了服务端 "Dashboard" 与客户端 "看板" 文字不一致导致的 React hydration 报错。
+
+- **变更前快照空白**：新增后端 `get_governance_decision(id)` helper（`memorycore/storage/governance.py`）和 `GET /api/governance/:id` 路由（`memorycore/frontend.py`）；当 `before_state_json` 为空时，用 `source_ids` 从 `memories` 表获取实时快照填充变更前数据。前端 `loadDecisionDetails` 在打开 Sheet 时同步拉取 decision detail，将 `before_state` 回填到 `selectedDecision`。
+
+- **一键应用全部**：治理页头部新增「一键应用全部（N）」按钮，带确认弹窗，按当前加载的全部可操作决策批量执行 apply，处理后刷新列表并显示摘要 toast。
+
+- **分页跳转**：分页栏新增数字输入框和「跳转」按钮，支持直接跳到指定页；页码越界时自动 clamp；当 decisions 数量变化后页码也自动修正。
+
+### 验证
+
+- `uv --directory /home/advancer/project/memorycore run pytest tests/test_frontend.py tests/test_governance.py`：31/31 pass。
+- `pnpm --dir /home/advancer/project/memorycore/ui exec tsc --noEmit`：通过。
+- `pnpm --dir /home/advancer/project/memorycore/ui build`：通过。
+- `mcore restart && mcore status`：后端和 UI 均为 active (running)。

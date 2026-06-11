@@ -9,6 +9,7 @@ from starlette.routing import Route
 from starlette.testclient import TestClient
 
 import memorycore as lm
+from memorycore.storage import add_memory_record, apply_governance_decision, create_governance_decision, reject_governance_decision
 from memorycore.frontend import (
     configure_frontend,
     frontend_api,
@@ -144,6 +145,61 @@ def test_frontend_missing_memory_returns_404():
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "not_found"
+
+
+def test_frontend_governance_bad_request_includes_message():
+    record = add_memory_record("episodic_memory", "Governance API note", "Can be downgraded", importance=0.6)
+    decision = create_governance_decision(
+        "importance_reassessment",
+        "downgrade",
+        [record["id"]],
+        0.95,
+        "low",
+        {"id": record["id"], "action": "downgrade", "new_importance": 0.2},
+    )
+    reject_governance_decision(decision["id"], source_agent="pytest", reason="reject before apply")
+
+    with _client() as client:
+        response = client.post(f"/api/governance/{decision['id']}/apply", json={"source_agent": "pytest"})
+
+    payload = response.json()
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "bad_request"
+    assert payload["error"]["message"] == "decision cannot be applied from status 'rejected'"
+
+
+def test_frontend_governance_actionable_filter_excludes_applied_history():
+    active = add_memory_record("episodic_memory", "Frontend active", "Actionable", importance=0.3)
+    applied = add_memory_record("episodic_memory", "Frontend applied", "Historical", importance=0.3)
+    active_decision = create_governance_decision(
+        "importance_reassessment",
+        "downgrade",
+        [active["id"]],
+        0.75,
+        "low",
+        {"id": active["id"], "action": "downgrade", "new_importance": 0.2},
+    )
+    applied_decision = create_governance_decision(
+        "importance_reassessment",
+        "downgrade",
+        [applied["id"]],
+        0.95,
+        "low",
+        {"id": applied["id"], "action": "downgrade", "new_importance": 0.2},
+    )
+    apply_governance_decision(applied_decision["id"], source_agent="pytest")
+
+    with _client() as client:
+        actionable = client.get("/api/governance/decisions?review_status=actionable")
+        history = client.get("/api/governance/decisions?review_status=all")
+
+    actionable_ids = {decision["id"] for decision in actionable.json()["data"]}
+    history_ids = {decision["id"] for decision in history.json()["data"]}
+    assert actionable.status_code == 200
+    assert active_decision["id"] in actionable_ids
+    assert applied_decision["id"] not in actionable_ids
+    assert applied_decision["id"] in history_ids
 
 
 def test_frontend_auth_token_required_for_api():

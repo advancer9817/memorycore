@@ -44,7 +44,17 @@ function detectInitialLocale(): Locale {
 
 export function I18nProvider({ children }: I18nProviderProps) {
   const dispatch = useDispatch<AppDispatch>();
-  const [locale, setLocaleState] = useState<Locale>(detectInitialLocale);
+  const [locale, setLocaleState] = useState<Locale>(DEFAULT_LOCALE);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(LOCALE_STORAGE_KEY);
+    if (isLocale(stored)) {
+      setLocaleState(stored);
+      return;
+    }
+    const lang = window.navigator.language.toLowerCase();
+    if (lang.startsWith("zh")) setLocaleState("zh");
+  }, []);
 
   useEffect(() => {
     document.documentElement.lang = toHtmlLang(locale);

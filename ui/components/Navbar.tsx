@@ -38,7 +38,7 @@ async function refreshForPath(pathname: string): Promise<void> {
     fetches.push(fetch(`${base}/api/graph`));
   } else if (pathname.startsWith("/governance")) {
     fetches.push(fetch(`${base}/api/governance/metrics`));
-    fetches.push(fetch(`${base}/api/governance/decisions?limit=100`));
+    fetches.push(fetch(`${base}/api/governance/decisions?review_status=actionable&limit=500`));
   }
 
   await Promise.allSettled(fetches);
