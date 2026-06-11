@@ -552,11 +552,11 @@ def _parent_id(record: dict[str, Any]) -> str:
 
 
 def _context_recency_weight() -> float:
-    value = (load_config().get("context_pack", {}) or {}).get("recency_weight", 0.03)
+    value = (load_config().get("context_pack", {}) or {}).get("recency_weight", 0.05)
     try:
         return max(0.0, min(0.1, float(value)))
     except Exception:
-        return 0.03
+        return 0.05
 
 
 def build_context_pack(

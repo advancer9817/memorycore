@@ -151,6 +151,7 @@ function reconcileSelection(current: GovernanceDecision | null, decisions: Gover
     const existing = decisions.find((decision) => decision.id === current.id);
     if (existing) return existing;
   }
+  // Remove auto-selection behavior so no decision is selected by default
   return null;
 }
 
