@@ -108,8 +108,8 @@ _ensure_write_consumer()
 
 _GREETINGS = {"hi", "hello", "hey", "你好", "嗯", "好", "ok", "okay", "yes", "no"}
 _VECTOR_SEARCH_THRESHOLD = 0.35
-_MIN_CONTEXT_RELEVANCE_SCORE = 0.22
-_MIN_VECTOR_ONLY_RELEVANCE_SCORE = 0.45
+_MIN_CONTEXT_RELEVANCE_SCORE = 0.15
+_MIN_VECTOR_ONLY_RELEVANCE_SCORE = 0.35
 _MIN_KEYWORD_LEXICAL_RELEVANCE_SCORE = 0.08
 _STOP_TERMS = {
     "a", "an", "and", "are", "as", "at", "be", "for", "from", "how", "i", "in",
