@@ -3919,3 +3919,38 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 **测试：**
 - Next.js 编译通过，前后端服务正常工作，接口返回数据已适配前端。
+
+---
+
+## [迭代 136] 2026-06-12 — 全面技术框架审查 + Phase 1 数据完整性修复
+
+### 背景
+
+对 MemoryCore 进行全面技术框架审查，发现 6 个关键问题（3 Critical + 3 High），完成 Phase 1 三项数据完整性修复。
+
+### 审查产出
+
+- 技术审查文档：`docs/2026-06-12-technical-review-and-improvement-plan.md`
+- 涵盖：系统架构图、数据模型、记忆生命周期、LLM 治理管线、前端页面、已有优势确认
+- 4 阶段改进计划（12 项任务）
+
+### Phase 1 修复
+
+**1.1 持久化 LLM Curator 冷却注册表**
+- `memorycore/storage/db.py`：新增 `curator_review_log` 表（memory_id + review_type + reviewed_at）
+- `memorycore/storage/curator_llm.py`：移除内存 `_reviewed_memory_ids` dict，替换为 `_get_recently_reviewed_ids()` / `_mark_reviewed()` DB 操作
+- 效果：cron 跨进程运行时冷却状态不再丢失
+
+**1.2 向量同步重试队列**
+- `memorycore/storage/db.py`：新增 `vector_sync_queue` 表
+- `memorycore/storage/crud.py`：`_sync_to_vector()` 失败时调用 `_enqueue_vector_sync()` 入队；新增 `_drain_vector_sync_queue()`（50条/批，3次重试）和 `get_vector_sync_queue_status()` 监控
+- `memorycore/server.py`：daemon 线程每轮调用 `_drain_vector_sync_queue()`
+- 效果：Qdrant 故障时记录不再静默丢失
+
+**1.3 LLM Curator 零结果诊断**
+- `memorycore/storage/curator_llm.py`：`llm_curator_report()` 新增 `diagnostics` dict（9 个字段），`summary` 扩展含 `total_memories`、`dedup_pairs_found`、`importance_skipped_keep` 等
+- 效果：零结果时可定位到具体阶段（冷却过滤/配对/LLM调用/keep过滤）
+
+### 验证
+
+- `uv run pytest tests/test_core.py tests/test_curator.py tests/test_curator_llm_jobs.py tests/test_vector_sync.py tests/test_governance.py`：42 passed, 3 skipped

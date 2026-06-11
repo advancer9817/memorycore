@@ -44,7 +44,7 @@ except Exception:
 
 
 def _sync_to_vector(record: dict[str, Any]) -> None:
-    """Async fire-and-forget Qdrant sync. Never raises."""
+    """Async fire-and-forget Qdrant sync. On failure, enqueues for retry."""
     import threading as _threading
     def _run():
         try:
@@ -68,8 +68,108 @@ def _sync_to_vector(record: dict[str, Any]) -> None:
             }
             vs.upsert(record["id"], text, payload)
         except Exception as exc:
-            logger.warning("_sync_to_vector: failed for id=%s: %s", record.get("id"), exc)
+            logger.warning("_sync_to_vector: failed for id=%s, enqueuing for retry: %s", record.get("id"), exc)
+            _enqueue_vector_sync(record["id"], "upsert" if record.get("status") == "active" else "delete", str(exc))
     _threading.Thread(target=_run, daemon=True).start()
+
+
+def _enqueue_vector_sync(memory_id: str, operation: str, error: str) -> None:
+    """Enqueue a failed vector sync for later retry."""
+    import uuid as _uuid
+    from memorycore.models import now as _now
+    try:
+        with managed_conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO vector_sync_queue
+                   (id, memory_id, operation, retry_count, max_retries, created_at, last_attempt_at, error)
+                   VALUES (?, ?, ?, 0, 3, ?, ?, ?)""",
+                (str(_uuid.uuid4()), memory_id, operation, _now(), _now(), error),
+            )
+    except Exception as exc:
+        logger.warning("_enqueue_vector_sync: failed to enqueue id=%s: %s", memory_id, exc)
+
+
+def _drain_vector_sync_queue() -> dict[str, int]:
+    """Process pending vector sync retries. Returns counts of succeeded/failed/skipped."""
+    from memorycore.storage.db import read_conn as _read_conn
+    from memorycore.models import now as _now
+
+    with _read_conn() as conn:
+        pending = conn.execute(
+            "SELECT * FROM vector_sync_queue WHERE retry_count < max_retries ORDER BY created_at ASC LIMIT 50"
+        ).fetchall()
+
+    if not pending:
+        return {"succeeded": 0, "failed": 0, "skipped": 0}
+
+    succeeded = 0
+    failed = 0
+
+    for row in pending:
+        memory_id = row["memory_id"]
+        operation = row["operation"]
+        queue_id = row["id"]
+        retry_count = row["retry_count"]
+
+        try:
+            if _get_vector_store is None:
+                continue
+            vs = _get_vector_store(load_config())
+
+            if operation == "delete":
+                vs.delete(memory_id)
+            else:
+                with _read_conn() as conn:
+                    mem_row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
+                if mem_row is None:
+                    with managed_conn() as conn:
+                        conn.execute("DELETE FROM vector_sync_queue WHERE id=?", (queue_id,))
+                    continue
+                record = row_to_dict(mem_row)
+                if record.get("status") != "active":
+                    vs.delete(memory_id)
+                else:
+                    text = f"{record.get('title', '')} {record.get('content', '')}".strip()
+                    metadata = record.get("metadata") or {}
+                    payload = {
+                        "type": record.get("type", ""),
+                        "scope": record.get("scope", ""),
+                        "status": record.get("status", "active"),
+                        "source_agent": record.get("source_agent", ""),
+                        "tags": record.get("tags", []),
+                        "kind": metadata.get("kind", ""),
+                        "parent_id": metadata.get("parent_id", ""),
+                    }
+                    vs.upsert(memory_id, text, payload)
+
+            with managed_conn() as conn:
+                conn.execute("DELETE FROM vector_sync_queue WHERE id=?", (queue_id,))
+            succeeded += 1
+
+        except Exception as exc:
+            logger.warning("_drain_vector_sync_queue: retry failed for id=%s (attempt %d): %s", memory_id, retry_count + 1, exc)
+            with managed_conn() as conn:
+                conn.execute(
+                    "UPDATE vector_sync_queue SET retry_count=?, last_attempt_at=?, error=? WHERE id=?",
+                    (retry_count + 1, _now(), str(exc), queue_id),
+                )
+            failed += 1
+
+    return {"succeeded": succeeded, "failed": failed, "skipped": 0}
+
+
+def get_vector_sync_queue_status() -> dict[str, Any]:
+    """Return current queue depth and status for monitoring."""
+    from memorycore.storage.db import read_conn as _read_conn
+    with _read_conn() as conn:
+        total = conn.execute("SELECT COUNT(*) FROM vector_sync_queue").fetchone()[0]
+        retryable = conn.execute(
+            "SELECT COUNT(*) FROM vector_sync_queue WHERE retry_count < max_retries"
+        ).fetchone()[0]
+        exhausted = conn.execute(
+            "SELECT COUNT(*) FROM vector_sync_queue WHERE retry_count >= max_retries"
+        ).fetchone()[0]
+    return {"total": total, "retryable": retryable, "exhausted": exhausted}
 
 
 def _sync_entities(record: dict[str, Any], conn: Any | None = None) -> None:

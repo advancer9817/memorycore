@@ -411,6 +411,26 @@ def init_db(conn: sqlite3.Connection) -> None:
           version INTEGER PRIMARY KEY,
           applied_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS curator_review_log (
+          memory_id TEXT NOT NULL,
+          review_type TEXT NOT NULL DEFAULT 'llm_curator',
+          reviewed_at TEXT NOT NULL,
+          PRIMARY KEY(memory_id, review_type)
+        );
+        CREATE INDEX IF NOT EXISTS idx_curator_review_reviewed_at ON curator_review_log(reviewed_at);
+
+        CREATE TABLE IF NOT EXISTS vector_sync_queue (
+          id TEXT PRIMARY KEY,
+          memory_id TEXT NOT NULL,
+          operation TEXT NOT NULL DEFAULT 'upsert',
+          retry_count INTEGER NOT NULL DEFAULT 0,
+          max_retries INTEGER NOT NULL DEFAULT 3,
+          created_at TEXT NOT NULL,
+          last_attempt_at TEXT,
+          error TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_vector_sync_queue_memory ON vector_sync_queue(memory_id);
         """
     )
     conn.execute(

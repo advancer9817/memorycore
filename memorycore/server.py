@@ -853,14 +853,18 @@ def _start_auto_curator(interval_hours: float = 6.0) -> None:
         while True:
             try:
                 from memorycore.storage.handoff import cleanup_expired_handoffs
+                from memorycore.storage.crud import _drain_vector_sync_queue
                 handoff_cleanup = cleanup_expired_handoffs()
+                sync_result = _drain_vector_sync_queue()
                 rollup = rollup_report(dry_run=False)
                 rollup_summary = rollup.get("summary", {})
                 result = curator_report(dry_run=False)
                 summary = result.get("summary", {})
                 logger.info(
-                    "[auto-curator] handoff_cleaned=%s rollup_created=%s rollup_archived=%s stale=%s archived=%s promoted=%s decayed=%s",
+                    "[auto-curator] handoff_cleaned=%s sync_retried=%s/%s rollup_created=%s rollup_archived=%s stale=%s archived=%s promoted=%s decayed=%s",
                     handoff_cleanup.get("cleaned", 0),
+                    sync_result.get("succeeded", 0),
+                    sync_result.get("failed", 0),
                     rollup_summary.get("created", 0),
                     rollup_summary.get("archived_sources", 0),
                     summary.get("stale", 0),
