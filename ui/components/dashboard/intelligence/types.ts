@@ -53,6 +53,46 @@ export interface LineagePayload {
   links: Array<{ source_id?: string; target_id?: string; relation_type?: string }>;
 }
 
+export interface ContradictionFinding {
+  newer_id: string;
+  older_id: string;
+  newer_title?: string;
+  older_title?: string;
+  reason?: string;
+  score?: number;
+}
+
+export interface SemanticDuplicateFinding {
+  keep_id: string;
+  drop_id: string;
+  keep_title?: string;
+  drop_title?: string;
+  merge_info?: string;
+  reason?: string;
+  score?: number;
+}
+
+export interface ImportanceReassessmentFinding {
+  id: string;
+  title?: string;
+  old_importance?: number;
+  new_importance?: number;
+  reason?: string;
+}
+
+export interface SplitCandidateFinding {
+  id: string;
+  title?: string;
+  reason?: string;
+  sub_memories?: Array<{ title: string; content: string; importance?: number }>;
+}
+
+export type GovernanceDecisionType =
+  | "contradiction"
+  | "semantic_duplicate"
+  | "importance_reassessment"
+  | "split_candidate";
+
 export type GovernanceReviewStatus = "actionable" | "all" | "needs_review" | "auto_approved" | "applied" | "rejected" | "rolled_back";
 
 export type GovernanceAction = "accept" | "skip" | "swap" | "keepBoth" | "rollback";

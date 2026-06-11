@@ -3867,3 +3867,55 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 - `cd /home/advancer/project/memorycore && .venv/bin/pytest tests/`：通过（482 passed, 1 skipped）。
 - `test_docs_consistency.py` 一致性测试全部通过。
+
+---
+
+## [迭代 136] 2026-06-12 — 全面技术框架审查与改进计划
+
+### 背景
+
+对 MemoryCore 进行全面技术框架审查，检查设计理念、代码现状和改进空间。重点关注：记忆质量（连续性、自动总结、去重）、LLM 高质量记忆治理、前端管理页面配套。
+
+### 审查范围
+
+- 后端 28 个 Python 模块（~6100 行核心代码）
+- 前端 Next.js 15 应用（Dashboard、Memories、Governance、Graph 等 7 个页面）
+- LLM 治理管线（curator_llm.py + governance.py + mutation_executor.py）
+- 数据模型（14 张 SQLite 表 + Qdrant 向量索引）
+
+### 发现的关键问题
+
+**Critical（数据完整性）**：
+1. **LLM Curator 冷却注册表丢失**（curator_llm.py:39）— `_reviewed_memory_ids` 为内存 dict，cron 每次新进程运行时状态全部丢失，导致重复分析
+2. **Daemon 线程不运行 LLM Curator**（server.py:846-876）— `_start_auto_curator` 仅运行 rule-based curator，无 cron 环境永远不执行语义治理
+3. **向量同步无重试**（crud.py `_sync_to_vector`）— fire-and-forget，Qdrant 故障时 DB 与向量索引永久不一致
+
+**High（功能缺陷）**：
+4. **LLM Curator 零结果**— 冷却过滤 + "keep" 过滤 + candidate_hash 去重的组合效应导致输出为空
+5. **自动替换仅词法匹配**（temporal_governance.py:36-45）— 不使用向量余弦相似度
+6. **Dashboard 未按决策重设计**— 两个巨型组件（785+972行）仍为旧布局
+
+### 已确认的优势（保持）
+
+- 治理管线设计（governance → policy_gate → execute_batch → audit）— 生产级
+- Mutation Executor 完整回滚能力（before/after/inverse snapshots）
+- 多层去重机制（写入时向量去重 + 运行时 LLM 语义去重 + atomic fact hash 去重）
+- Episodic → Durable 自动总结（rollup.py）
+- 3D 知识图谱可视化
+
+### 输出
+
+- 技术审查文档：`docs/2026-06-12-technical-review-and-improvement-plan.md`
+- 4 阶段改进计划：Phase 1 数据完整性修复 → Phase 2 LLM 治理可靠性 → Phase 3 前端重设计 → Phase 4 高级质量功能
+
+### [2026-06-12] 治理页面 Type-Specific UI 与 i18n 修复
+
+**变更：**
+- **后端**：在 `governance.py` 的 `_fetch_memory_summaries` 中加入 `title` 和 `content` 字段，修复治理详情快照缺少文本显示的问题。
+- **类型定义**：在 `types.ts` 中添加了针对4种决策类型（Contradiction、Semantic Duplicate、Importance Reassessment、Split Candidate）的专用 Finding 类型声明。
+- **前端翻译**：完善了治理页面 i18n（`en.ts` 和 `zh.ts`），去除了全部硬编码英文，包括 `actionLabels`、`policyReasonLabels` 及其它文案。
+- **UI 面板重构**：为每种决策类型创建独立的 UI 面板（如 `ContradictionPanel`、`SemanticDuplicatePanel` 等），提供对比、去重、重要性修改或拆分的专属可视化界面。
+- **路由分发**：新增 `DecisionOverviewPanel.tsx` 动态分配决策视图，替代统一且无上下文的 `MemorySnapshotCompare`。
+
+**测试：**
+- Next.js 编译通过，前后端服务正常工作，接口返回数据已适配前端。

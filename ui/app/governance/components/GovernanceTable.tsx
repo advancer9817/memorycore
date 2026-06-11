@@ -129,7 +129,7 @@ export function GovernanceTable({
                   </Badge>
                 </TableCell>
                 <TableCell className="text-sm text-zinc-400">
-                  {titleCase(decision.recommended_action)}
+                  {messages.actionLabels?.[decision.recommended_action] ?? titleCase(decision.recommended_action)}
                 </TableCell>
                 <TableCell className="text-sm text-zinc-500">
                   {formatGovernanceDate(decision.created_at)}

@@ -117,7 +117,7 @@ def _fetch_memory_summaries(memory_ids: list[str]) -> list[dict[str, Any]]:
     placeholders = ",".join("?" for _ in memory_ids)
     with read_conn() as conn:
         rows = conn.execute(
-            f"SELECT id, type, importance, feedback_score, scope, project_path, status FROM memories WHERE id IN ({placeholders})",
+            f"SELECT id, title, content, type, importance, feedback_score, scope, project_path, status FROM memories WHERE id IN ({placeholders})",
             tuple(memory_ids),
         ).fetchall()
     return [dict(row) for row in rows]

@@ -37,6 +37,7 @@ import {
 } from "@/components/dashboard/intelligence/utils";
 import type { Messages } from "@/lib/i18n/types";
 import { MemorySnapshotCompare } from "./MemorySnapshotCompare";
+import { DecisionOverviewPanel } from "./DecisionOverviewPanel";
 
 interface GovernanceDecisionSheetProps {
   decision: GovernanceDecision | null;
@@ -72,8 +73,8 @@ function LineagePanel({ lineage, messages }: { lineage: LineagePayload | null; m
         {lineage ? (
           <>
             <div className="grid gap-1 text-xs text-zinc-500 sm:grid-cols-2">
-              <span>{messages.root}: {lineage.root_id || "n/a"}</span>
-              <span>{messages.currentHead}: {lineage.current_head_id || "n/a"}</span>
+              <span>{messages.root}: {lineage.root_id || messages.notAvailable}</span>
+              <span>{messages.currentHead}: {lineage.current_head_id || messages.notAvailable}</span>
             </div>
             <div className="space-y-2">
               {chain.map((record) => (
@@ -85,7 +86,7 @@ function LineagePanel({ lineage, messages }: { lineage: LineagePayload | null; m
                     ) : null}
                   </div>
                   {record.superseded_by ? (
-                    <p className="mt-1 text-xs text-zinc-500">Superseded by {record.superseded_by}</p>
+                    <p className="mt-1 text-xs text-zinc-500">{messages.supersededBy} {record.superseded_by}</p>
                   ) : null}
                 </div>
               ))}
@@ -205,10 +206,10 @@ export function GovernanceDecisionSheet({
 
             {/* Metadata */}
             <div className="mt-4 grid gap-1 text-xs text-zinc-500 sm:grid-cols-2">
-              <span>{messages.recommendedAction}: <span className="text-zinc-300">{titleCase(decision.recommended_action)}</span></span>
+              <span>{messages.recommendedAction}: <span className="text-zinc-300">{messages.actionLabels[decision.recommended_action] ?? titleCase(decision.recommended_action)}</span></span>
               <span>{messages.created}: <span className="text-zinc-300">{formatGovernanceDate(decision.created_at)}</span></span>
-              <span>{messages.policyReason}: <span className="text-zinc-300">{decision.policy_reason || "n/a"}</span></span>
-              <span className="break-all">{messages.sourceMemories}: <span className="text-zinc-300">{decision.source_ids?.join(", ") || "n/a"}</span></span>
+              <span>{messages.policyReason}: <span className="text-zinc-300">{messages.policyReasonLabels[decision.policy_reason] ?? (decision.policy_reason || messages.notAvailable)}</span></span>
+              <span className="break-all">{messages.sourceMemories}: <span className="text-zinc-300">{decision.source_ids?.join(", ") || messages.notAvailable}</span></span>
             </div>
             {primarySourceId ? (
               <div className="mt-3">
@@ -271,11 +272,7 @@ export function GovernanceDecisionSheet({
               </TabsList>
 
               <TabsContent value="overview" className="mt-3">
-                <MemorySnapshotCompare
-                  beforeState={decision.before_state}
-                  afterState={decision.after_state}
-                  messages={messages}
-                />
+                <DecisionOverviewPanel decision={decision} messages={messages} />
               </TabsContent>
 
               <TabsContent value="evidence" className="mt-3">

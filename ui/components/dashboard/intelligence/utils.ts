@@ -21,10 +21,19 @@ export function memoryTitle(memory?: GovernanceMemorySnapshot): string {
   return title.length > 90 ? `${title.slice(0, 90)}…` : title;
 }
 
+function findingTitle(finding?: Record<string, unknown>): string {
+  if (!finding) return "";
+  for (const key of ["title", "newer_title", "keep_title", "older_title", "drop_title"]) {
+    const val = finding[key];
+    if (typeof val === "string" && val.trim()) return val.trim();
+  }
+  return "";
+}
+
 export function decisionTitle(decision: GovernanceDecision): string {
-  const findingTitle = typeof decision.finding?.title === "string" ? decision.finding.title : "";
+  const title = findingTitle(decision.finding);
   const firstMemory = decision.before_state?.[0] ?? decision.after_state?.[0];
-  return findingTitle || memoryTitle(firstMemory) || decision.id;
+  return title || memoryTitle(firstMemory) || decision.id;
 }
 
 export function decisionSummary(decision: GovernanceDecision): string {
