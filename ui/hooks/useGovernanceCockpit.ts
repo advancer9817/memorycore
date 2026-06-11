@@ -151,7 +151,7 @@ function reconcileSelection(current: GovernanceDecision | null, decisions: Gover
     const existing = decisions.find((decision) => decision.id === current.id);
     if (existing) return existing;
   }
-  return decisions.find(isActionableDecision) ?? decisions[0];
+  return null;
 }
 
 export function useGovernanceCockpit(): UseGovernanceCockpitReturn {

@@ -3,6 +3,7 @@ import json
 from memorycore.storage import (
     add_memory_record,
     apply_governance_decision,
+    apply_governance_decisions_batch,
     convert_llm_findings_to_decisions,
     create_governance_decision,
     get_audit_log,
@@ -418,3 +419,89 @@ def test_split_apply_creates_children_and_archives_parent():
     relation_types = {r["relation_type"] for r in links}
     assert "part_of" in relation_types
     assert "supports" in relation_types
+
+
+def test_apply_governance_decisions_batch_success():
+    record1 = add_memory_record("episodic_memory", "Batch record 1", "Will be downgraded", importance=0.8)
+    record2 = add_memory_record("episodic_memory", "Batch record 2", "Will be downgraded", importance=0.7)
+
+    d1 = create_governance_decision(
+        "importance_reassessment",
+        "downgrade",
+        [record1["id"]],
+        0.95,
+        "low",
+        {"id": record1["id"], "action": "downgrade", "new_importance": 0.2},
+    )
+    d2 = create_governance_decision(
+        "importance_reassessment",
+        "downgrade",
+        [record2["id"]],
+        0.95,
+        "low",
+        {"id": record2["id"], "action": "downgrade", "new_importance": 0.3},
+    )
+
+    res = apply_governance_decisions_batch([d1["id"], d2["id"]], source_agent="pytest_batch")
+
+    assert res["applied_count"] == 2
+    assert len(res["decisions"]) == 2
+    assert res["run_id"]
+
+    # Verify database updates
+    with read_conn() as conn:
+        mem1 = conn.execute("SELECT importance, status FROM memories WHERE id=?", (record1["id"],)).fetchone()
+        mem2 = conn.execute("SELECT importance, status FROM memories WHERE id=?", (record2["id"],)).fetchone()
+
+        dec1 = conn.execute("SELECT review_status, execution_id FROM governance_decisions WHERE id=?", (d1["id"],)).fetchone()
+        dec2 = conn.execute("SELECT review_status, execution_id FROM governance_decisions WHERE id=?", (d2["id"],)).fetchone()
+
+    assert mem1["importance"] == 0.2
+    assert mem2["importance"] == 0.3
+    assert dec1["review_status"] == "applied"
+    assert dec2["review_status"] == "applied"
+    assert dec1["execution_id"] != dec2["execution_id"]
+
+    # Check audit log
+    logs = get_audit_log(event_type="governance_decision_apply", limit=2)
+    assert len(logs) >= 2
+
+
+def test_apply_governance_decisions_batch_rollback():
+    record1 = add_memory_record("episodic_memory", "Rollback record 1", "Will not be downgraded", importance=0.8)
+    record2 = add_memory_record("episodic_memory", "Rollback record 2", "Will not be downgraded", importance=0.7)
+
+    d1 = create_governance_decision(
+        "importance_reassessment",
+        "downgrade",
+        [record1["id"]],
+        0.95,
+        "low",
+        {"id": record1["id"], "action": "downgrade", "new_importance": 0.2},
+    )
+    d2 = create_governance_decision(
+        "importance_reassessment",
+        "downgrade",
+        [record2["id"]],
+        0.95,
+        "low",
+        {"id": record2["id"], "action": "downgrade", "new_importance": 0.3},
+    )
+
+    # Reject the second decision so that it is in an invalid status for batch application
+    reject_governance_decision(d2["id"], source_agent="pytest")
+
+    try:
+        apply_governance_decisions_batch([d1["id"], d2["id"]], source_agent="pytest_batch")
+        assert False, "Should have failed due to rejected status on second decision"
+    except ValueError as e:
+        assert "cannot be applied from status" in str(e)
+
+    # Verify that first decision was NOT applied (atomicity check)
+    with read_conn() as conn:
+        mem1 = conn.execute("SELECT importance FROM memories WHERE id=?", (record1["id"],)).fetchone()
+        dec1 = conn.execute("SELECT review_status FROM governance_decisions WHERE id=?", (d1["id"],)).fetchone()
+
+    assert mem1["importance"] == 0.8
+    assert dec1["review_status"] == "auto_approved"
+

@@ -3821,3 +3821,49 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 - `pnpm --dir /home/advancer/project/memorycore/ui exec tsc --noEmit`：通过。
 - `pnpm --dir /home/advancer/project/memorycore/ui build`：通过。
 - `mcore restart && mcore status`：后端和 UI 均为 active (running)。
+
+---
+
+## [迭代 134] 2026-06-11 — 治理页自动弹窗与连续弹窗修复
+
+### 背景
+
+用户反馈在记忆治理页面中，打开治理界面时会自动弹出详情处理界面，并且点击应用/一键应用后也会对每一条都自动弹出下一个处理界面。
+
+### 根因
+
+1. 初始打开页面时，`useGovernanceCockpit` 的 `selectedDecision` 状态初始化为 `null`。在加载 overview 完成后，`reconcileSelection` 发现 `current` 为 `null`，便自动回退到第一个 `isActionableDecision`，导致详情 `Sheet` 抽屉自动被拉起。
+2. 当用户点击应用或拒绝某个决策后，该决策状态流转，从可处理列表（`actionable`）中移除。此时 `reconcileSelection` 发现 `current` 不再存在于列表中，再次自动回退到列表中的下一个可处理决策，使得 `Sheet` 抽屉不断切换到下一个决策并保持弹出状态。
+
+### 修复
+
+- **`ui/hooks/useGovernanceCockpit.ts`**：
+  - 修改 `reconcileSelection` 辅助函数。当 `current` 没有匹配到现存决策时，返回 `null`，不再自动回退到 `decisions.find(isActionableDecision) ?? decisions[0]`。
+  - 这保证了在初始加载时没有决策被自动选中，抽屉保持关闭；也保证了在当前决策被处理并从列表消失后，不再自动选取下一个决策，抽屉自然关闭。
+
+### 验证
+
+- `pnpm --dir /home/advancer/project/memorycore/ui exec tsc --noEmit`：类型检查通过。
+- `mcore restart && mcore status`：后端和 UI 均重启成功并保持 active (running)。
+- 手动验证：打开 `/governance` 页面时不再自动弹出处理界面；处理完选中项后，处理界面不再连续弹起而是正常关闭。
+
+---
+
+## [迭代 135] 2026-06-11 — 批量治理决策接口与 MCP 工具实现
+
+### 背景
+
+为解决逐个应用治理决策速度慢、I/O 开销大以及事务一致性差的问题，需要在后端和 MCP 层实现批量应用治理决策的接口与工具。
+
+### 变更
+
+- **`memorycore/storage/governance.py`**：实现 `apply_governance_decisions_batch(decision_ids: list[str], source_agent: str = "agent") -> dict[str, Any]`。使用单一 SQLite 事务（`with managed_conn()`）原子地评估、应用并记录所有传入的决策，并在事务成功提交后触发关联记忆的向量和检索索引同步。
+- **`memorycore/storage/__init__.py`**：导出 `apply_governance_decisions_batch` 并将其加入 `__all__` 中。
+- **`memorycore/server.py`**：新增 `governance_apply_batch` MCP tool。
+- **`tests/test_governance.py`**：新增 `test_apply_governance_decisions_batch_success` 和 `test_apply_governance_decisions_batch_rollback` 测试用例，覆盖批量应用成功（检查属性、数据库状态以及审计日志）和回滚（确认事务一致性/原子性）。
+- **`README.md`** 和 **`docs/tools.md`**：同步更新文档说明，更新支持的工具数量（43 -> 44）并增加新工具的介绍。
+
+### 验证
+
+- `cd /home/advancer/project/memorycore && .venv/bin/pytest tests/`：通过（482 passed, 1 skipped）。
+- `test_docs_consistency.py` 一致性测试全部通过。

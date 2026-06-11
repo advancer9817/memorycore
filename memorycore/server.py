@@ -54,6 +54,7 @@ from memorycore.storage import (
     list_recent,
     list_governance_decisions,
     apply_governance_decision,
+    apply_governance_decisions_batch,
     reject_governance_decision,
     rollback_governance_decision,
     query_governance_ledger,
@@ -530,6 +531,16 @@ def governance_decisions(review_status: str | None = None, limit: int = 100) -> 
 def governance_apply(decision_id: str, source_agent: str = "agent") -> dict[str, Any]:
     """Apply an approved governance decision and emit audit records."""
     return apply_governance_decision(decision_id, source_agent=source_agent)
+
+
+@mcp.tool()
+@_safe_tool
+def governance_apply_batch(decision_ids: list[str], source_agent: str = "agent") -> dict[str, Any]:
+    """Apply multiple approved governance decisions atomically in a single database transaction.
+
+    If any decision is blocked by policy or is invalid, the entire batch operation is aborted.
+    """
+    return apply_governance_decisions_batch(decision_ids, source_agent=source_agent)
 
 
 @mcp.tool()

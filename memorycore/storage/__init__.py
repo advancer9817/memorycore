@@ -68,6 +68,7 @@ from memorycore.storage.governance import (
     get_governance_metrics,
     list_governance_decisions,
     apply_governance_decision,
+    apply_governance_decisions_batch,
     reject_governance_decision,
     rollback_governance_decision,
 )
@@ -121,6 +122,7 @@ __all__ = [
     "convert_llm_findings_to_decisions",
     "list_governance_decisions",
     "apply_governance_decision",
+    "apply_governance_decisions_batch",
     "reject_governance_decision",
     "rollback_governance_decision",
     "query_governance_ledger",

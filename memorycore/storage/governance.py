@@ -426,6 +426,202 @@ def apply_governance_decision(decision_id: str, source_agent: str = "agent") -> 
     return {"decision": updated_decision, "applied": applied, "execution": execution}
 
 
+def apply_governance_decisions_batch(decision_ids: list[str], source_agent: str = "agent") -> dict[str, Any]:
+    if not decision_ids:
+        return {"applied_count": 0, "decisions": []}
+
+    # Fetch decisions first
+    with read_conn() as conn:
+        placeholders = ",".join("?" for _ in decision_ids)
+        rows = conn.execute(
+            f"SELECT * FROM governance_decisions WHERE id IN ({placeholders})",
+            tuple(decision_ids)
+        ).fetchall()
+
+    decisions = [_decision_row_to_dict(row) for row in rows]
+    decisions_by_id = {d["id"]: d for d in decisions}
+
+    missing_ids = set(decision_ids) - set(decisions_by_id.keys())
+    if missing_ids:
+        raise ValueError(f"governance decisions not found: {list(missing_ids)}")
+
+    valid_decisions = []
+    already_applied = []
+    for d_id in decision_ids:
+        d = decisions_by_id[d_id]
+        if d["review_status"] not in {"auto_approved", "needs_review"}:
+            raise ValueError(f"decision {d_id} cannot be applied from status {d['review_status']!r}")
+        if d.get("applied_at"):
+            already_applied.append(d)
+        else:
+            valid_decisions.append(d)
+
+    if not valid_decisions:
+        return {
+            "applied_count": 0,
+            "decisions": [],
+            "already_applied": [d["id"] for d in already_applied]
+        }
+
+    # Gather mutation requests and evaluate policies for all decisions beforehand
+    from memorycore.storage.mutation_executor import evaluate_mutation_policy
+
+    all_requests_with_decisions = []
+    for d in valid_decisions:
+        requests = _mutation_requests_for_decision(d)
+        approval_kind = "auto_policy" if d["review_status"] == "auto_approved" else "human_accept"
+        context = MutationContext(
+            actor=source_agent or "agent",
+            origin="governance",
+            approval_kind=approval_kind,
+            decision_id=d["id"],
+            correlation_id=d["id"],
+        )
+        policy_results = [evaluate_mutation_policy(req, context) for req in requests]
+
+        # Enforce batch policy gate: if any request is blocked (queued or rejected), fail the entire batch
+        blocking = [r for r in policy_results if r["policy_decision"] in {"queued", "rejected"}]
+        if blocking:
+            raise ValueError(
+                f"decision {d['id']} is blocked by policy: {blocking[0]['policy_reason']}"
+            )
+        all_requests_with_decisions.append((d, requests, context, policy_results))
+
+    results = []
+    applied_decisions = []
+    run_id = f"batch-run-{uuid.uuid4()}"
+    ts = now()
+
+    # Import mutation executor helper functions
+    from memorycore.storage.mutation_executor import _apply_request, _sync_results
+
+    # Run everything in a single database transaction
+    with managed_conn() as conn:
+        # Create a single run record for this batch execution
+        conn.execute(
+            """
+            INSERT INTO governance_runs (
+              id, source, mode, policy_version, status, started_at, created_by, metadata_json
+            ) VALUES (?,?,?,?,?,?,?,?)
+            """,
+            (
+                run_id,
+                "governance",
+                "batch_apply",
+                "2026-06-10.1",
+                "running",
+                ts,
+                source_agent or "agent",
+                as_json({"decision_ids": [d["id"] for d in valid_decisions]}),
+            ),
+        )
+
+        for d, requests, context, policy_results in all_requests_with_decisions:
+            execution_id = str(uuid.uuid4())
+            highest_risk = "high" if any(r.risk_level == "high" for r in requests) else "medium" if any(r.risk_level == "medium" for r in requests) else "low"
+            resolved_key = f"{d['id']}:{context.approval_kind}:{execution_id}"
+
+            # Create a execution record for this decision
+            conn.execute(
+                """
+                INSERT INTO governance_executions (
+                  id, run_id, decision_id, approval_kind, risk_level, status, idempotency_key,
+                  policy_snapshot_json, started_at, created_by, metadata_json
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    execution_id,
+                    run_id,
+                    d["id"],
+                    context.approval_kind,
+                    highest_risk,
+                    "planned",
+                    resolved_key,
+                    as_json({"results": policy_results}),
+                    ts,
+                    context.actor,
+                    as_json(context.metadata),
+                ),
+            )
+
+            # Update statuses
+            conn.execute("UPDATE governance_executions SET status='policy_evaluated' WHERE id=?", (execution_id,))
+            conn.execute("UPDATE governance_executions SET status='applying' WHERE id=?", (execution_id,))
+
+            # Execute mutations
+            decision_results = []
+            for index, request in enumerate(requests, start=1):
+                res = _apply_request(conn, execution_id, index, request, context, policy_results[index - 1])
+                decision_results.append(res)
+                results.append(res)
+
+            conn.execute("UPDATE governance_executions SET status='applied', finished_at=? WHERE id=?", (ts, execution_id))
+
+            # Retrieve snapshots for rollback log directly from database using the connection (in-transaction)
+            log_rows = conn.execute(
+                """
+                SELECT before_json, after_json, entity_type FROM governance_mutation_log
+                WHERE execution_id=? AND status='applied'
+                """,
+                (execution_id,)
+            ).fetchall()
+            before = [json.loads(row["before_json"]) for row in log_rows if row["before_json"] and row["entity_type"] == "memory"]
+            after = [json.loads(row["after_json"]) for row in log_rows if row["after_json"] and row["entity_type"] == "memory"]
+
+            applied_payload = _applied_payload(d, {"results": decision_results, "execution_id": execution_id})
+            rollback_payload = {"execution_id": execution_id, "before": before, "after": after}
+            legacy_approval_kind = "auto" if d["review_status"] == "auto_approved" else "human_accept"
+
+            # Update decision status
+            conn.execute(
+                """
+                UPDATE governance_decisions
+                SET review_status='applied', applied_at=?, updated_at=?, rollback_json=?,
+                    before_state_json=?, after_state_json=?, execution_id=?, applied_by=?, approval_kind=?
+                WHERE id=?
+                """,
+                (
+                    ts, ts, as_json(rollback_payload), as_json(before), as_json(after),
+                    execution_id, source_agent or "agent", legacy_approval_kind, d["id"]
+                ),
+            )
+
+            # Retrieve updated row for the response
+            updated_row = conn.execute("SELECT * FROM governance_decisions WHERE id=?", (d["id"],)).fetchone()
+            applied_decisions.append(_decision_row_to_dict(updated_row))
+
+        # Close the batch run
+        conn.execute("UPDATE governance_runs SET status='finished', finished_at=? WHERE id=?", (ts, run_id))
+
+    # Perform vector/FTS sync outside of transaction
+    _sync_results(results)
+
+    # Log audit events (async background threads or standard log)
+    for d, _, _, _ in all_requests_with_decisions:
+        updated_d = next(ud for ud in applied_decisions if ud["id"] == d["id"])
+        legacy_approval_kind = "auto" if d["review_status"] == "auto_approved" else "human_accept"
+        _audit.log_audit_event(
+            "governance_decision_apply",
+            memory_id=(d["source_ids"][0] if d["source_ids"] else None),
+            agent=source_agent,
+            detail={
+                "decision_id": d["id"],
+                "execution_id": updated_d["execution_id"],
+                "applied": _applied_payload(d, {"results": [r for r in results if r["entity_id"] in d["source_ids"]], "execution_id": updated_d["execution_id"]}),
+                "before_state": updated_d["before_state"],
+                "after_state": updated_d["after_state"],
+                "approval_kind": legacy_approval_kind
+            }
+        )
+
+    return {
+        "applied_count": len(applied_decisions),
+        "decisions": applied_decisions,
+        "already_applied": [d["id"] for d in already_applied],
+        "run_id": run_id
+    }
+
+
 def rollback_governance_decision(decision_id: str, source_agent: str = "agent") -> dict[str, Any]:
     with read_conn() as conn:
         row = conn.execute("SELECT * FROM governance_decisions WHERE id=?", (decision_id,)).fetchone()
