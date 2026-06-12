@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { CheckCheck, RefreshCcw } from "lucide-react";
+import { CheckCheck, RefreshCcw, Loader2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -168,16 +168,18 @@ export default function GovernancePage() {
                 <DropdownMenuContent align="end" className="bg-zinc-900 border-zinc-800">
                   <DropdownMenuItem
                     disabled={batchPending}
-                    onClick={() => void runSelectedBatch("apply")}
+                    onClick={(e) => { e.preventDefault(); void runSelectedBatch("apply"); }}
                   >
-                    {messages.governance.batchApply}
+                    {batchPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {batchPending ? messages.common.saving : messages.governance.batchApply}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     disabled={batchPending}
-                    onClick={() => void runSelectedBatch("reject")}
+                    onClick={(e) => { e.preventDefault(); void runSelectedBatch("reject"); }}
                     className="text-red-500 focus:text-red-500"
                   >
-                    {messages.governance.batchReject}
+                    {batchPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {batchPending ? messages.common.saving : messages.governance.batchReject}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -203,11 +205,12 @@ export default function GovernancePage() {
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
-                    <AlertDialogCancel className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800">
+                    <AlertDialogCancel className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800" disabled={batchPending}>
                       {messages.governance.cancel}
                     </AlertDialogCancel>
-                    <AlertDialogAction onClick={() => void runApproveAll()}>
-                      {messages.governance.apply}
+                    <AlertDialogAction onClick={(e) => { e.preventDefault(); void runApproveAll(); }} disabled={batchPending}>
+                      {batchPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      {batchPending ? messages.common.saving : messages.governance.apply}
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
