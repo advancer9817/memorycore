@@ -96,15 +96,20 @@ export default function GovernancePage() {
 
   const runBatch = useCallback(async (ids: string[], action: "apply" | "reject") => {
     if (!ids.length) return 0;
+    if (action === "apply") {
+      try {
+        return await cockpit.applyBatchDecisions(ids);
+      } catch {
+        return 0; // The hook already shows a toast on error
+      }
+    }
+
+    // Reject doesn't have a batch endpoint yet, process sequentially
     let successCount = 0;
     const reason = messages.governance.defaultRejectReason;
     for (const id of ids) {
       try {
-        if (action === "apply") {
-          await cockpit.applyDecisionOrThrow(id);
-        } else {
-          await cockpit.rejectDecisionOrThrow(id, reason);
-        }
+        await cockpit.rejectDecisionOrThrow(id, reason);
         successCount++;
       } catch {
         // individual failures handled by the hook's toast

@@ -49,6 +49,7 @@ interface UseGovernanceCockpitReturn extends GovernanceCockpitState {
   rollbackDecision: (decisionId: string) => Promise<void>;
   applyDecisionOrThrow: (decisionId: string) => Promise<void>;
   rejectDecisionOrThrow: (decisionId: string, reason: string) => Promise<void>;
+  applyBatchDecisions: (decisionIds: string[]) => Promise<number>;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -294,6 +295,27 @@ export function useGovernanceCockpit(): UseGovernanceCockpitReturn {
     runAction(decisionId, "reject", { source_agent: "frontend", reason }, "Decision rejected"),
   [runAction]);
 
+  const applyBatchDecisions = useCallback(async (decisionIds: string[]): Promise<number> => {
+    if (!decisionIds.length) return 0;
+    setState((current) => ({ ...current, actionPendingId: "batch", error: null }));
+    try {
+      const result = await fetchJson<{ applied_count: number }>(`${baseUrl}/api/governance/batch/apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision_ids: decisionIds, source_agent: "frontend" }),
+      });
+      await loadOverview();
+      return result.applied_count || 0;
+    } catch (error: unknown) {
+      const message = getErrorMessage(error);
+      setState((current) => ({ ...current, error: message }));
+      toast({ variant: "destructive", description: message });
+      throw new Error(message);
+    } finally {
+      setState((current) => ({ ...current, actionPendingId: null }));
+    }
+  }, [baseUrl, loadOverview, toast]);
+
   useEffect(() => {
     const controller = new AbortController();
     void loadOverview(controller.signal);
@@ -316,5 +338,6 @@ export function useGovernanceCockpit(): UseGovernanceCockpitReturn {
     rollbackDecision,
     applyDecisionOrThrow,
     rejectDecisionOrThrow,
+    applyBatchDecisions,
   };
 }

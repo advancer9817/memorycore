@@ -375,6 +375,9 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
         if decision is None:
             raise LookupError(f"governance decision not found: {parts[1]}")
         return decision
+    if parts == ["governance", "batch", "apply"] and method == "POST":
+        from memorycore.storage.governance import apply_governance_decisions_batch
+        return apply_governance_decisions_batch(body.get("decision_ids", []), source_agent=body.get("source_agent", "frontend"))
     if len(parts) == 3 and parts[0] == "governance" and parts[2] == "apply" and method == "POST":
         from memorycore.storage.governance import apply_governance_decision
         return apply_governance_decision(parts[1], source_agent=body.get("source_agent", "frontend"))
