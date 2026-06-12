@@ -476,27 +476,52 @@ export const Install = () => {
       {/* Schedule bar + Operations — unified compact strip */}
       <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm space-y-3">
         {/* Row 1: schedule info + buttons */}
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-          <Badge variant="outline" className="border-emerald-700 bg-emerald-500/10 text-emerald-300 text-xs shrink-0">
-            {t.dashboard.scheduled} · {status?.timer.ActiveState || t.dashboard.unknown}
-          </Badge>
-          <span className="text-zinc-500">
-            {t.dashboard.ruleLast} <span className="text-zinc-200">{formatTime(lastRun)}</span>
-          </span>
-          <span className="text-zinc-500">
-            {t.dashboard.llmLast} <span className="text-zinc-200">{formatTime(llmLastRun)}</span>
-          </span>
-          <span className="text-zinc-500">
-            {t.dashboard.next} <span className="text-zinc-200">{formatTime(nextRun)}</span>
-          </span>
-          <span className="text-zinc-500">
-            {t.dashboard.result} <span className="text-zinc-200">{lastResult}</span>
-            <span className="text-zinc-600"> / </span>
-            <span className="text-violet-300">LLM {llmLastResult}</span>
-          </span>
-          <span className="text-zinc-500 hidden sm:inline">
-            {t.dashboard.scanned} <span className="text-zinc-200">{status?.curator.scanned ?? "-"}</span>
-          </span>
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 w-full">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <Badge variant="outline" className="border-emerald-700 bg-emerald-500/10 text-emerald-300 text-xs shrink-0">
+              {t.dashboard.scheduled} · {status?.timer.ActiveState || t.dashboard.unknown}
+            </Badge>
+            <span className="text-zinc-500">
+              {t.dashboard.ruleLast} <span className="text-zinc-200">{formatTime(lastRun)}</span>
+            </span>
+            <span className="text-zinc-500">
+              {t.dashboard.llmLast} <span className="text-zinc-200">{formatTime(llmLastRun)}</span>
+            </span>
+            <span className="text-zinc-500">
+              {t.dashboard.next} <span className="text-zinc-200">{formatTime(nextRun)}</span>
+            </span>
+            <span className="text-zinc-500">
+              {t.dashboard.result} <span className="text-zinc-200">{lastResult}</span>
+              <span className="text-zinc-600"> / </span>
+              <span className="text-violet-300">LLM {llmLastResult}</span>
+            </span>
+            <span className="text-zinc-500 hidden sm:inline">
+              {t.dashboard.scanned} <span className="text-zinc-200">{status?.curator.scanned ?? "-"}</span>
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 ml-auto shrink-0">
+            <Button
+              onClick={applyCurator}
+              disabled={applying || llmRunning}
+              variant="outline"
+              size="sm"
+              className="h-8 border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
+            >
+              <Play className="h-3 w-3 mr-1" />
+              {applying ? t.dashboard.running : t.dashboard.runCurator}
+            </Button>
+            <Button
+              onClick={runLlmCurator}
+              disabled={applying || llmRunning}
+              variant="outline"
+              size="sm"
+              className="h-8 border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
+            >
+              <Sparkles className="h-3 w-3 mr-1 text-violet-400" />
+              {llmRunning ? t.dashboard.analyzing : t.dashboard.runLlm}
+            </Button>
+          </div>
         </div>
 
         {/* Manual run result — only when active */}
