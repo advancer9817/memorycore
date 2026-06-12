@@ -3971,3 +3971,4 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 - 效果：被 supersede 的记忆 `updated_at` 同步刷新，避免 curator 误判为过时记忆
 - feat(ui): Implement true batch application for governance decisions (uses backend `/api/governance/batch/apply` endpoint instead of sequential individual requests).
 - feat(ui): Show loading spinners in batch action buttons during governance apply/reject execution.
+- feat(ui): Restored 'Manual Run' buttons (Rule Curator and LLM Curator) on the Dashboard scheduled status banner.
