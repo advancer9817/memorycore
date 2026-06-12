@@ -3969,3 +3969,4 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 **dedup.py：update 操作同步更新旧记忆 updated_at**
 - `ingest()` 中 `update` 分支：在写入新候选前先调用 `_update_memory_fn(decision.existing_id)` 触碰旧记忆时间戳
 - 效果：被 supersede 的记忆 `updated_at` 同步刷新，避免 curator 误判为过时记忆
+- feat(ui): Implement true batch application for governance decisions (uses backend `/api/governance/batch/apply` endpoint instead of sequential individual requests).
