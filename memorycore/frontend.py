@@ -325,6 +325,8 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
         decision = decisions[0]
         if decision.get("review_status") == "rejected":
             return {"decision": decision, "applied": None}
+        if decision.get("review_status") == "applied":
+            return {"decision": decision, "applied": {"already_applied": True}}
         return apply_governance_decision(decision["id"], source_agent="frontend")
     if parts == ["curator", "llm", "latest"] and method == "GET":
         with _llm_curator_lock:
@@ -332,14 +334,22 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
             job = _llm_curator_jobs.get(job_id) if job_id else None
         if job is None:
             return {"status": "idle", "job_id": None}
-        return {**job, "job_id": job_id}
+        filtered_job = dict(job)
+        if "result" in filtered_job:
+            from memorycore.storage.governance import filter_applied_or_rejected_findings
+            filtered_job["result"] = filter_applied_or_rejected_findings(filtered_job["result"])
+        return {**filtered_job, "job_id": job_id}
     if len(parts) == 3 and parts[:2] == ["curator", "llm"] and method == "GET":
         job_id = parts[2]
         with _llm_curator_lock:
             job = _llm_curator_jobs.get(job_id)
         if job is None:
             raise LookupError(f"job {job_id} not found")
-        return job
+        filtered_job = dict(job)
+        if "result" in filtered_job:
+            from memorycore.storage.governance import filter_applied_or_rejected_findings
+            filtered_job["result"] = filter_applied_or_rejected_findings(filtered_job["result"])
+        return filtered_job
     if parts == ["links"] and method == "POST":
         return add_link(body.get("source_id", ""), body.get("target_id", ""), body.get("relation_type", "related_to"), body.get("weight", 1.0), body.get("note", ""), body.get("source_agent", "frontend"))
     if len(parts) == 2 and parts[0] == "links" and method == "GET":
@@ -988,6 +998,22 @@ def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
         latest_job_id = _latest_llm_job_id[0] if _latest_llm_job_id else None
         latest_job = dict(_llm_curator_jobs.get(latest_job_id, {})) if latest_job_id else {}
 
+    if "result" in latest_job:
+        from memorycore.storage.governance import filter_applied_or_rejected_findings
+        latest_job["result"] = filter_applied_or_rejected_findings(latest_job["result"])
+
+    from memorycore.storage.governance import _CATEGORY_TO_DECISION_TYPE
+    with _managed_query.__globals__["read_conn"]() as conn:
+        rows = conn.execute(
+            "SELECT decision_type, COUNT(*) as cnt FROM governance_decisions WHERE review_status IN ('needs_review', 'auto_approved') GROUP BY decision_type"
+        ).fetchall()
+    active_counts = {row["decision_type"]: row["cnt"] for row in rows}
+
+    llm_summary = dict(llm_detail.get("summary", {}) if isinstance(llm_detail, dict) else {})
+    for category, decision_type in _CATEGORY_TO_DECISION_TYPE.items():
+        if category in llm_summary:
+            llm_summary[category] = active_counts.get(decision_type, 0)
+
     schedule = {
         "timer": "mcore-curator.timer",
         "service": "mcore-curator.service",
@@ -1007,7 +1033,7 @@ def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
         "llm_curator": {
             "last_run_at": llm_last_run_at,
             "last_result": llm_last_result,
-            "summary": llm_detail.get("summary", {}) if isinstance(llm_detail, dict) else {},
+            "summary": llm_summary,
             "errors": llm_errors if isinstance(llm_errors, list) else [],
             "latest_job": {**latest_job, "job_id": latest_job_id} if latest_job_id else {"status": "idle", "job_id": None},
         },

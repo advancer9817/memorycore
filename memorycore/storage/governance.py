@@ -67,6 +67,40 @@ def _llm_trace_from_finding(finding: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def filter_applied_or_rejected_findings(report: dict[str, Any]) -> dict[str, Any]:
+    """Filter out findings that have already been applied, rejected, or rolled back."""
+    if not report:
+        return report
+
+    with read_conn() as conn:
+        rows = conn.execute(
+            "SELECT candidate_hash FROM governance_decisions WHERE review_status IN ('applied', 'rejected', 'rolled_back')"
+        ).fetchall()
+    inactive_hashes = {row["candidate_hash"] for row in rows if row["candidate_hash"]}
+
+    filtered_report = dict(report)
+    summary = dict(report.get("summary", {}))
+    filtered_report["summary"] = summary
+
+    for category, decision_type in _CATEGORY_TO_DECISION_TYPE.items():
+        if category not in report:
+            continue
+        filtered_findings = []
+        for finding in report[category] or []:
+            action = str(finding.get("action") or "keep")
+            if action == "keep":
+                filtered_findings.append(finding)
+                continue
+            source_ids = _source_ids_for_finding(finding)
+            h = _stable_candidate_hash(decision_type, action, source_ids, finding)
+            if h not in inactive_hashes:
+                filtered_findings.append(finding)
+        filtered_report[category] = filtered_findings
+        if category in summary:
+            summary[category] = len(filtered_findings)
+
+    return filtered_report
+
 def _source_ids_for_finding(finding: dict[str, Any]) -> list[str]:
     ids: list[str] = []
     for key in ("id", "keep_id", "drop_id", "older_id", "newer_id"):
@@ -382,10 +416,10 @@ def apply_governance_decision(decision_id: str, source_agent: str = "agent") -> 
     if row is None:
         raise ValueError(f"governance decision not found: {decision_id}")
     decision = _decision_row_to_dict(row)
+    if decision["review_status"] == "applied" or decision.get("applied_at"):
+        return {"decision": decision, "applied": {"already_applied": True}}
     if decision["review_status"] not in {"auto_approved", "needs_review"}:
         raise ValueError(f"decision cannot be applied from status {decision['review_status']!r}")
-    if decision.get("applied_at"):
-        return {"decision": decision, "applied": {"already_applied": True}}
 
     approval_kind = "auto_policy" if decision["review_status"] == "auto_approved" else "human_accept"
     context = MutationContext(
@@ -449,10 +483,10 @@ def apply_governance_decisions_batch(decision_ids: list[str], source_agent: str 
     already_applied = []
     for d_id in decision_ids:
         d = decisions_by_id[d_id]
-        if d["review_status"] not in {"auto_approved", "needs_review"}:
-            raise ValueError(f"decision {d_id} cannot be applied from status {d['review_status']!r}")
-        if d.get("applied_at"):
+        if d["review_status"] == "applied" or d.get("applied_at"):
             already_applied.append(d)
+        elif d["review_status"] not in {"auto_approved", "needs_review"}:
+            raise ValueError(f"decision {d_id} cannot be applied from status {d['review_status']!r}")
         else:
             valid_decisions.append(d)
 
