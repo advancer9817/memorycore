@@ -3973,3 +3973,4 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 - feat(ui): Show loading spinners in batch action buttons during governance apply/reject execution.
 - feat(ui): Restored 'Manual Run' buttons (Rule Curator and LLM Curator) on the Dashboard scheduled status banner.
 - feat(ui): Dashboard LLM Curator findings and summary counts now dynamically filter out decisions that have already been applied or rejected in the Governance queue.
+- fix(ui): Make Dashboard review queue action buttons dynamic. Clicking 'Open Governance' now goes to '/governance' if there are pending LLM decisions, otherwise dynamically changes to 'Open Memories' and goes to '/memories' with the appropriate search filter to manually resolve remaining database issues.
