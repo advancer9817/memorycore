@@ -3954,3 +3954,18 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 ### 验证
 
 - `uv run pytest tests/test_core.py tests/test_curator.py tests/test_curator_llm_jobs.py tests/test_vector_sync.py tests/test_governance.py`：42 passed, 3 skipped
+
+---
+
+## Iteration 2026-06-12-B: ingest 窗口扩展 & dedup 更新时间戳修复
+
+### 修复
+
+**mcore-ingest.py：transcript 读取窗口从 40→500 条**
+- `_extract_claude` / `_extract_codex` / `_extract_hermes_from_state_db` / `_extract_jsonl_messages` / `_messages_from_json_obj` / `_extract_opencode_from_db`：末尾返回条数从 `-40` 改为 `-500`
+- `splitlines()` 读取行数从 `-300` 改为 `-5000`（hermes state DB LIMIT 从 80 → 800）
+- 效果：长会话下记忆提取不再被截断，更多上下文参与 ingest
+
+**dedup.py：update 操作同步更新旧记忆 updated_at**
+- `ingest()` 中 `update` 分支：在写入新候选前先调用 `_update_memory_fn(decision.existing_id)` 触碰旧记忆时间戳
+- 效果：被 supersede 的记忆 `updated_at` 同步刷新，避免 curator 误判为过时记忆

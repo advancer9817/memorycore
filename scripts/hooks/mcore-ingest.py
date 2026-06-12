@@ -200,7 +200,7 @@ def _payload_transcript_path(payload: dict) -> Path | None:
 
 def _extract_claude(path: Path) -> list[dict[str, str]]:
     messages: list[dict[str, str]] = []
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines()[-300:]:
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines()[-5000:]:
         try:
             item = json.loads(line)
         except Exception:
@@ -215,13 +215,13 @@ def _extract_claude(path: Path) -> list[dict[str, str]]:
         text = text.strip()
         if text:
             messages.append({"role": role, "content": text[:800]})
-    return messages[-40:]
+    return messages[-500:]
 
 
 def _extract_codex(path: Path) -> list[dict[str, str]]:
     messages: list[dict[str, str]] = []
     fallback: list[dict[str, str]] = []
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines()[-300:]:
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines()[-5000:]:
         try:
             item = json.loads(line)
         except Exception:
@@ -262,7 +262,7 @@ def _extract_codex(path: Path) -> list[dict[str, str]]:
             fallback.append(msg)
     if not messages:
         messages = fallback
-    return messages[-40:]
+    return messages[-500:]
 
 
 def _extract_hermes_from_state_db(session_id: str) -> list[dict[str, str]]:
@@ -283,7 +283,7 @@ def _extract_hermes_from_state_db(session_id: str) -> list[dict[str, str]]:
               AND content IS NOT NULL
               AND trim(content) != ''
             ORDER BY id DESC
-            LIMIT 80
+            LIMIT 800
             """,
             (session_id,),
         ).fetchall()
@@ -304,7 +304,7 @@ def _extract_hermes_from_state_db(session_id: str) -> list[dict[str, str]]:
             messages.append({"role": role, "content": text[:800]})
     if messages:
         _log(f"hermes_state_db_transcript session={session_id} messages={len(messages)}")
-    return messages[-40:]
+    return messages[-500:]
 
 
 def _extract_hermes(session_id: str) -> list[dict[str, str]]:
@@ -313,7 +313,7 @@ def _extract_hermes(session_id: str) -> list[dict[str, str]]:
 
 def _extract_jsonl_messages(path: Path) -> list[dict[str, str]]:
     messages: list[dict[str, str]] = []
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines()[-300:]:
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines()[-5000:]:
         item = _parse_json_text(line)
         if not item:
             continue
@@ -324,7 +324,7 @@ def _extract_jsonl_messages(path: Path) -> list[dict[str, str]]:
         text = _text_from_blocks(content).strip() if isinstance(content, list) else str(content or "").strip()
         if text:
             messages.append({"role": "assistant" if role in ("model", "gemini") else role, "content": text[:800]})
-    return messages[-40:]
+    return messages[-500:]
 
 
 def _message_text_from_obj(item: dict) -> str:
@@ -360,7 +360,7 @@ def _messages_from_json_obj(obj: object) -> list[dict[str, str]]:
         raw_items = []
 
     messages: list[dict[str, str]] = []
-    for raw in raw_items[-300:]:
+    for raw in raw_items[-3000:]:
         item = raw if isinstance(raw, dict) else _parse_json_text(raw)
         if not isinstance(item, dict):
             continue
@@ -381,7 +381,7 @@ def _messages_from_json_obj(obj: object) -> list[dict[str, str]]:
         text = _message_text_from_obj(item)
         if text:
             messages.append({"role": "assistant" if role in ("model", "gemini") else role, "content": text[:800]})
-    return messages[-40:]
+    return messages[-500:]
 
 
 def _extract_gemini(path: Path) -> list[dict[str, str]]:
@@ -474,7 +474,7 @@ def _extract_opencode_from_db(session_id: str = "") -> list[dict[str, str]]:
             messages.append({"role": role, "content": text[:800]})
     if messages:
         _log(f"opencode_transcript session={session_id} messages={len(messages)}")
-    return messages[-40:]
+    return messages[-500:]
 
 
 def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:

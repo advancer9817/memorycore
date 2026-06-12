@@ -250,6 +250,12 @@ def ingest(
                 logger.debug("dedup: SKIP  [%.3f] %s", decision.similarity, fact.text[:60])
 
             elif decision.action == "update":
+                # Touch the existing memory to update its updated_at timestamp
+                try:
+                    _update_memory_fn(decision.existing_id)
+                except Exception as exc:
+                    logger.warning("dedup: failed to touch existing memory %s: %s", decision.existing_id, exc)
+
                 # Write new candidate that supersedes the existing one
                 new_id = str(uuid.uuid4())
                 _add_memory_fn(
