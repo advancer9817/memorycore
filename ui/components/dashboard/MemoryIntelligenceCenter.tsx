@@ -132,6 +132,8 @@ interface ReviewQueueItem extends AttentionItem {
   actionLabel: string;
   workflow: string[];
   operationHint: string;
+  primaryHref: string;
+  primaryLabel: string;
 }
 
 interface TrendPoint {
@@ -401,27 +403,47 @@ function getReviewOperationHint(item: AttentionItem, t: ReturnType<typeof useI18
   return t.reviewOperationHintManual;
 }
 
-function buildReviewQueue(attentionItems: AttentionItem[], t: ReturnType<typeof useI18n>["messages"]["dashboard"]): ReviewQueueItem[] {
+function buildReviewQueue(attentionItems: AttentionItem[], curatorStatus: CuratorStatusPayload | null, t: ReturnType<typeof useI18n>["messages"]["dashboard"]): ReviewQueueItem[] {
   const hrefByLabel: Record<string, string> = {
     [t.attentionContradictions]: "/memories?search=contradict&page=1&size=20&sort=created_at&dir=desc",
     [t.attentionMergeOpportunities]: "/memories?search=duplicate&page=1&size=20&sort=created_at&dir=desc",
     [t.attentionAgingKnowledge]: "/memories?search=stale&page=1&size=20&sort=created_at&dir=desc",
     [t.attentionPendingReview]: "/memories?search=candidate&page=1&size=20&sort=created_at&dir=desc",
     [t.attentionPlannedActions]: "/memories?search=candidate&page=1&size=20&sort=created_at&dir=desc",
-    [t.attentionImportanceReviews]: "/memories?search=importance&page=1&size=20&sort=created_at&dir=desc",
-    [t.attentionSplitCandidates]: "/memories?search=split&page=1&size=20&sort=created_at&dir=desc",
+    [t.attentionImportanceReviews]: "/governance",
+    [t.attentionSplitCandidates]: "/governance",
   };
+
+  const llmSummary = curatorStatus?.llm_curator?.summary ?? {};
 
   return attentionItems
     .filter((item) => item.count > 0)
     .slice(0, 5)
-    .map((item) => ({
-      ...item,
-      href: hrefByLabel[item.label] ?? "/memories",
-      actionLabel: item.severity === "high" ? t.reviewNow : t.inspect,
-      workflow: getReviewWorkflow(item, t),
-      operationHint: getReviewOperationHint(item, t),
-    }));
+    .map((item) => {
+      let primaryHref = hrefByLabel[item.label] ?? "/memories";
+      let primaryLabel = t.openMemories;
+
+      if (item.label === t.attentionImportanceReviews || item.label === t.attentionSplitCandidates) {
+        primaryHref = "/governance";
+        primaryLabel = t.reviewOpenGovernance;
+      } else if (item.label === t.attentionContradictions && asNumber(llmSummary.contradictions) > 0) {
+        primaryHref = "/governance";
+        primaryLabel = t.reviewOpenGovernance;
+      } else if (item.label === t.attentionMergeOpportunities && asNumber(llmSummary.semantic_duplicates) > 0) {
+        primaryHref = "/governance";
+        primaryLabel = t.reviewOpenGovernance;
+      }
+
+      return {
+        ...item,
+        href: hrefByLabel[item.label] ?? "/memories",
+        actionLabel: item.severity === "high" ? t.reviewNow : t.inspect,
+        workflow: getReviewWorkflow(item, t),
+        operationHint: getReviewOperationHint(item, t),
+        primaryHref,
+        primaryLabel,
+      };
+    });
 }
 
 function downloadGovernanceReport(report: Record<string, unknown>): void {
@@ -596,7 +618,7 @@ export function MemoryIntelligenceCenter() {
     connectedCoverage,
     llmStatus,
   });
-  const reviewQueue = buildReviewQueue(attentionItems, t);
+  const reviewQueue = buildReviewQueue(attentionItems, curatorStatus, t);
   const selectedReviewItem = reviewQueue.find((item) => item.label === selectedReviewLabel) ?? reviewQueue[0];
   const trendPoints: TrendPoint[] = [
     { label: t.trendHealth, value: qualityScore, detail: t.trendHealthDetail(connectedCoverage), tone: qualityScore >= 70 ? "good" : "warn" },
@@ -762,9 +784,9 @@ export function MemoryIntelligenceCenter() {
                   </ol>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button asChild size="sm" variant="outline" className="h-8 border-current/30 bg-black/20 text-current hover:bg-black/35">
-                      <Link href="/governance">
+                      <Link href={selectedReviewItem.primaryHref}>
                         <CheckSquare className="h-3.5 w-3.5" />
-                        {t.reviewOpenGovernance}
+                        {selectedReviewItem.primaryLabel}
                       </Link>
                     </Button>
                     <Button size="sm" variant="outline" className="h-8 border-current/30 bg-black/20 text-current hover:bg-black/35" onClick={() => downloadGovernanceReport(governanceReport)}>

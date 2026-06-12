@@ -89,7 +89,6 @@ def filter_applied_or_rejected_findings(report: dict[str, Any]) -> dict[str, Any
         for finding in report[category] or []:
             action = str(finding.get("action") or "keep")
             if action == "keep":
-                filtered_findings.append(finding)
                 continue
             source_ids = _source_ids_for_finding(finding)
             h = _stable_candidate_hash(decision_type, action, source_ids, finding)

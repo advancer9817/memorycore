@@ -1005,7 +1005,7 @@ def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
     from memorycore.storage.governance import _CATEGORY_TO_DECISION_TYPE
     with _managed_query.__globals__["read_conn"]() as conn:
         rows = conn.execute(
-            "SELECT decision_type, COUNT(*) as cnt FROM governance_decisions WHERE review_status IN ('needs_review', 'auto_approved') GROUP BY decision_type"
+            "SELECT decision_type, COUNT(*) as cnt FROM governance_decisions WHERE review_status IN ('needs_review', 'auto_approved') AND recommended_action != 'keep' GROUP BY decision_type"
         ).fetchall()
     active_counts = {row["decision_type"]: row["cnt"] for row in rows}
 
