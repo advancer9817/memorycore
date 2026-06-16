@@ -317,15 +317,19 @@ def _decision_row_to_dict(row: Any) -> dict[str, Any]:
     return data
 
 
-def list_governance_decisions(review_status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+def list_governance_decisions(review_status: str | None = None, decision_type: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
     cap = max(1, min(int(limit), 500))
-    where = ""
+    conditions: list[str] = []
     params: list[Any] = []
     if review_status == "actionable":
-        where = "WHERE review_status IN ('needs_review', 'auto_approved') AND recommended_action != 'keep'"
+        conditions.append("review_status IN ('needs_review', 'auto_approved') AND recommended_action != 'keep'")
     elif review_status and review_status != "all":
-        where = "WHERE review_status=?"
+        conditions.append("review_status=?")
         params.append(review_status)
+    if decision_type and decision_type.strip():
+        conditions.append("decision_type=?")
+        params.append(decision_type.strip())
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     params.append(cap)
     order_by = """
         ORDER BY

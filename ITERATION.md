@@ -3974,3 +3974,42 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 - feat(ui): Restored 'Manual Run' buttons (Rule Curator and LLM Curator) on the Dashboard scheduled status banner.
 - feat(ui): Dashboard LLM Curator findings and summary counts now dynamically filter out decisions that have already been applied or rejected in the Governance queue.
 - fix(ui): Make Dashboard review queue action buttons dynamic. Clicking 'Open Governance' now goes to '/governance' if there are pending LLM decisions, otherwise dynamically changes to 'Open Memories' and goes to '/memories' with the appropriate search filter to manually resolve remaining database issues.
+
+---
+
+## [迭代 137] 2026-06-16 — Temporal Governance Phase 4 完成：组件拆分 + Auto-Applied + Lineage + Undo
+
+### 变更
+
+**MemoryIntelligenceCenter 拆分（994 行 → 292 行）**
+- `ui/components/dashboard/intelligence/helpers.ts`：提取 12 个接口、5 个常量和 16 个纯函数
+- `ui/components/dashboard/intelligence/Primitives.tsx`：提取 8 个可复用 UI 组件（SectionHeader、TrendTile、MetricBar、GraphMetric、MiniMetric、TimelineItem、BreakdownList、MemoryIntelligenceSkeleton）
+- `ui/components/dashboard/intelligence/HealthMetricsPanel.tsx`：治理健康分 + 信号分解条
+- `ui/components/dashboard/intelligence/ReviewFlowPanel.tsx`：审查流程面板 + 工作流步骤 + 操作入口
+- `ui/components/dashboard/intelligence/CurationActivityPanel.tsx`：整理活动时间线
+- `ui/components/dashboard/intelligence/SourceBreakdownPanel.tsx`：类型与来源分布
+- `ui/components/dashboard/intelligence/index.ts`：barrel re-export
+- `ui/components/dashboard/MemoryIntelligenceCenter.tsx`：仅保留数据获取、计算值和布局 JSX
+
+**Auto-Applied 区 + Undo/Rollback**
+- `ui/components/dashboard/intelligence/AutoAppliedStrip.tsx`：从 `/api/governance/decisions?review_status=auto_approved` 获取最近自动执行的治理操作，按操作类型着色 badge，每条可展示摘要和时间戳，`canRollbackDecision()` 为 true 时显示 Undo 按钮，调用 `POST /api/governance/{id}/rollback` 回滚
+- `ui/app/page.tsx`：在 Memory Operations 与 MemoryIntelligenceCenter 之间插入 AutoAppliedStrip
+
+**Lineage 展示**
+- `ui/app/memory/[id]/components/MemoryLineage.tsx`：从 `/api/lineage/{id}` 获取事实谱系，以垂直时间线展示 supersession 链，标注 Root/Head 节点，当前记忆高亮，superseded 条目淡化
+- `ui/app/memory/[id]/components/MemoryDetails.tsx`：右侧栏在 RelatedMemories 下方新增 MemoryLineage
+- `ui/app/governance/components/GovernanceDecisionSheet.tsx`：History tab 增强 lineage 链展示，每条标注 Root/Head，superseded 标题淡化，head 条目绿色高亮
+
+**i18n**
+- `ui/lib/i18n/dictionaries/en.ts`、`zh.ts`：新增 autoAppliedTitle/Empty/ViewAll/Undo/Undoing/Undone/UndoFailed 共 7 个键
+
+### 验证
+
+- TypeScript: `pnpm exec tsc --noEmit` 零错误
+- Next.js build: `pnpm build` 9/9 路由通过
+- 后端测试: `test_governance` / `test_governance_foundation` / `test_frontend` / `test_docs_consistency` 42 passed, 1 warning
+- TODO.md: Phase 4 全部 7 项标记完成，无未完成项
+
+### 回滚
+
+- 回滚 `ui/components/dashboard/intelligence/` 下新增的 helpers.ts、Primitives.tsx、HealthMetricsPanel.tsx、ReviewFlowPanel.tsx、CurationActivityPanel.tsx、SourceBreakdownPanel.tsx、AutoAppliedStrip.tsx、index.ts，以及 MemoryIntelligenceCenter.tsx、`ui/app/page.tsx`、`ui/app/memory/[id]/components/MemoryLineage.tsx`、MemoryDetails.tsx、GovernanceDecisionSheet.tsx、i18n dictionaries 与本条 ITERATION.md 记录。

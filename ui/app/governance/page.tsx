@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { CheckCheck, RefreshCcw, Loader2 } from "lucide-react";
 import {
   AlertDialog,
@@ -36,17 +37,37 @@ const REVIEW_STATUSES: GovernanceReviewStatus[] = [
   "actionable", "needs_review", "auto_approved", "all", "applied", "rejected", "rolled_back",
 ];
 
+interface DecisionTypeFilter {
+  value: string;
+  labelKey: "filterAll" | "filterContradictions" | "filterDuplicates" | "filterReassessments" | "filterSplits";
+}
+
+const DECISION_TYPE_FILTERS: DecisionTypeFilter[] = [
+  { value: "", labelKey: "filterAll" },
+  { value: "contradiction", labelKey: "filterContradictions" },
+  { value: "semantic_duplicate", labelKey: "filterDuplicates" },
+  { value: "importance_reassessment", labelKey: "filterReassessments" },
+  { value: "split_candidate", labelKey: "filterSplits" },
+];
+
 const PAGE_SIZE = 20;
 
-export default function GovernancePage() {
+function GovernancePageInner() {
   const { messages } = useI18n();
   const { toast } = useToast();
   const cockpit = useGovernanceCockpit();
+  const searchParams = useSearchParams();
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
   const [batchPending, setBatchPending] = useState(false);
   const [jumpValue, setJumpValue] = useState("1");
+
+  useEffect(() => {
+    const initialType = searchParams.get("type") ?? "";
+    cockpit.setDecisionType(initialType);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const totalPages = Math.max(1, Math.ceil(cockpit.decisions.length / PAGE_SIZE));
   const paginated = cockpit.decisions.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -100,11 +121,10 @@ export default function GovernancePage() {
       try {
         return await cockpit.applyBatchDecisions(ids);
       } catch {
-        return 0; // The hook already shows a toast on error
+        return 0;
       }
     }
 
-    // Reject doesn't have a batch endpoint yet, process sequentially
     let successCount = 0;
     const reason = messages.governance.defaultRejectReason;
     for (const id of ids) {
@@ -216,6 +236,28 @@ export default function GovernancePage() {
                 </AlertDialogContent>
               </AlertDialog>
             )}
+
+            {/* Decision type filter pills */}
+            <div className="flex items-center gap-1 rounded-lg border border-zinc-800 p-1">
+              {DECISION_TYPE_FILTERS.map((filter) => (
+                <button
+                  key={filter.value}
+                  type="button"
+                  onClick={() => {
+                    cockpit.setDecisionType(filter.value);
+                    setPage(0);
+                    setSelectedIds(new Set());
+                  }}
+                  className={`rounded-md px-2 py-1 text-xs transition-colors ${
+                    cockpit.decisionType === filter.value
+                      ? "bg-zinc-700 text-white"
+                      : "bg-zinc-900 text-zinc-400 hover:bg-zinc-800"
+                  }`}
+                >
+                  {messages.governance[filter.labelKey]}
+                </button>
+              ))}
+            </div>
 
             <Select
               value={cockpit.reviewStatus}
@@ -332,5 +374,13 @@ export default function GovernancePage() {
         />
       </div>
     </div>
+  );
+}
+
+export default function GovernancePage() {
+  return (
+    <Suspense>
+      <GovernancePageInner />
+    </Suspense>
   );
 }

@@ -474,10 +474,10 @@ export const Install = () => {
       </div>
 
       {/* Schedule bar + Operations — unified compact strip */}
-      <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm space-y-3">
-        {/* Row 1: schedule info + buttons */}
-        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 w-full">
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+      <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm space-y-2">
+        {/* Row 1: schedule info left + buttons right */}
+        <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 flex-1 text-xs">
             <Badge variant="outline" className="border-emerald-700 bg-emerald-500/10 text-emerald-300 text-xs shrink-0">
               {t.dashboard.scheduled} · {status?.timer.ActiveState || t.dashboard.unknown}
             </Badge>
@@ -495,18 +495,17 @@ export const Install = () => {
               <span className="text-zinc-600"> / </span>
               <span className="text-violet-300">LLM {llmLastResult}</span>
             </span>
-            <span className="text-zinc-500 hidden sm:inline">
+            <span className="text-zinc-500 hidden lg:inline">
               {t.dashboard.scanned} <span className="text-zinc-200">{status?.curator.scanned ?? "-"}</span>
             </span>
           </div>
-
-          <div className="flex items-center gap-2 ml-auto shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             <Button
               onClick={applyCurator}
               disabled={applying || llmRunning}
               variant="outline"
               size="sm"
-              className="h-8 border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
+              className="h-7 text-xs border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
             >
               <Play className="h-3 w-3 mr-1" />
               {applying ? t.dashboard.running : t.dashboard.runCurator}
@@ -516,7 +515,7 @@ export const Install = () => {
               disabled={applying || llmRunning}
               variant="outline"
               size="sm"
-              className="h-8 border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
+              className="h-7 text-xs border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
             >
               <Sparkles className="h-3 w-3 mr-1 text-violet-400" />
               {llmRunning ? t.dashboard.analyzing : t.dashboard.runLlm}

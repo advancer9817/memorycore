@@ -12,6 +12,7 @@ import { useSelector } from "react-redux";
 import { RootState } from "@/store/store";
 import { constants } from "@/components/shared/source-app";
 import { RelatedMemories } from "./RelatedMemories";
+import { MemoryLineage } from "./MemoryLineage";
 
 interface MemoryDetailsProps {
   memory_id: string;
@@ -142,6 +143,7 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
         <div className="w-1/3 flex flex-col gap-4">
           <AccessLog memoryId={memory?.id || ""} />
           <RelatedMemories memoryId={memory?.id || ""} />
+          <MemoryLineage memoryId={memory?.id || ""} />
         </div>
       </div>
     </div>

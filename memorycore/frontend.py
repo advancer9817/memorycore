@@ -378,8 +378,8 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
 
     if parts == ["governance", "decisions"] and method == "GET":
         from memorycore.storage.governance import list_governance_decisions
-        return list_governance_decisions(_str_q(query, "review_status", None), _int_q(query, "limit", 100))
-    if len(parts) == 2 and parts[0] == "governance" and parts[1] not in ("decisions", "metrics") and method == "GET":
+        return list_governance_decisions(_str_q(query, "review_status", None), _str_q(query, "decision_type", None), _int_q(query, "limit", 100))
+    if len(parts) == 2 and parts[0] == "governance" and parts[1] not in ("decisions", "metrics", "counts") and method == "GET":
         from memorycore.storage.governance import get_governance_decision
         decision = get_governance_decision(parts[1])
         if decision is None:
@@ -400,6 +400,22 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
     if parts == ["governance", "metrics"] and method == "GET":
         from memorycore.storage.governance import get_governance_metrics
         return get_governance_metrics()
+    if parts == ["governance", "counts"] and method == "GET":
+        from memorycore.storage.db import read_conn
+        with read_conn() as conn:
+            rows = conn.execute(
+                "SELECT decision_type, COUNT(*) as cnt FROM governance_decisions"
+                " WHERE review_status IN ('needs_review', 'auto_approved') AND recommended_action != 'keep'"
+                " GROUP BY decision_type"
+            ).fetchall()
+        counts: dict[str, int] = {row["decision_type"]: row["cnt"] for row in rows}
+        return {
+            "contradiction": counts.get("contradiction", 0),
+            "semantic_duplicate": counts.get("semantic_duplicate", 0),
+            "importance_reassessment": counts.get("importance_reassessment", 0),
+            "split_candidate": counts.get("split_candidate", 0),
+            "total": sum(counts.values()),
+        }
     if len(parts) == 2 and parts[0] == "lineage" and method == "GET":
         return memory_lineage(parts[1], _int_q(query, "limit", 100))
     if parts == ["audit"] and method == "GET":

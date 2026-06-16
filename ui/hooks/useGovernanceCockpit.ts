@@ -38,10 +38,12 @@ interface GovernanceCockpitState {
   actionPendingId: string | null;
   error: string | null;
   reviewStatus: GovernanceReviewStatus;
+  decisionType: string;
 }
 
 interface UseGovernanceCockpitReturn extends GovernanceCockpitState {
   setReviewStatus: (status: GovernanceReviewStatus) => void;
+  setDecisionType: (decisionType: string) => void;
   selectDecision: (decision: GovernanceDecision | null) => void;
   refresh: () => Promise<void>;
   applyDecision: (decisionId: string) => Promise<void>;
@@ -170,6 +172,7 @@ export function useGovernanceCockpit(): UseGovernanceCockpitReturn {
     actionPendingId: null,
     error: null,
     reviewStatus: "actionable",
+    decisionType: "",
   });
 
   const baseUrl = useMemo(() => getApiBaseUrl(), []);
@@ -179,6 +182,7 @@ export function useGovernanceCockpit(): UseGovernanceCockpitReturn {
     try {
       const decisionUrl = appendQuery(`${baseUrl}/api/governance/decisions`, {
         review_status: state.reviewStatus,
+        decision_type: state.decisionType || undefined,
         limit: 500,
       });
       const [metrics, decisions] = await Promise.all([
@@ -198,7 +202,7 @@ export function useGovernanceCockpit(): UseGovernanceCockpitReturn {
       if (error instanceof DOMException && error.name === "AbortError") return;
       setState((current) => ({ ...current, isLoading: false, error: getErrorMessage(error) }));
     }
-  }, [baseUrl, state.reviewStatus]);
+  }, [baseUrl, state.reviewStatus, state.decisionType]);
 
   const loadDecisionDetails = useCallback(async (decision: GovernanceDecision | null, signal?: AbortSignal): Promise<void> => {
     const memoryId = primaryMemoryId(decision);
@@ -248,6 +252,10 @@ export function useGovernanceCockpit(): UseGovernanceCockpitReturn {
 
   const setReviewStatus = useCallback((reviewStatus: GovernanceReviewStatus): void => {
     setState((current) => ({ ...current, reviewStatus, selectedDecision: null }));
+  }, []);
+
+  const setDecisionType = useCallback((decisionType: string): void => {
+    setState((current) => ({ ...current, decisionType, selectedDecision: null }));
   }, []);
 
   const runAction = useCallback(async (
@@ -331,6 +339,7 @@ export function useGovernanceCockpit(): UseGovernanceCockpitReturn {
   return {
     ...state,
     setReviewStatus,
+    setDecisionType,
     selectDecision,
     refresh,
     applyDecision,
