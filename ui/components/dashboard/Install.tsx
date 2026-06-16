@@ -262,7 +262,7 @@ export const Install = () => {
       }
       const payload = await res.json();
       const pollData = payload.data || payload;
-      if (pollData.status === "done") {
+      if (pollData.status === "done" || pollData.status === "succeeded") {
         const result = pollData.result || pollData;
         const parsed = _parseLlmResult(result);
         setLlmRunState({

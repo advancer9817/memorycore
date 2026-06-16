@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import uuid
 from datetime import datetime, timezone
@@ -17,6 +18,8 @@ from memorycore.storage import audit as _audit
 from memorycore.storage.db import managed_conn, read_conn
 from memorycore.storage.mutation_executor import execute_batch, query_ledger, rollback_execution
 from memorycore.storage.mutations import MutationContext, MutationRequest
+
+logger = logging.getLogger(__name__)
 
 PRECIOUS_TYPES = {"user_profile", "decision", "project_memory"}
 HIGH_IMPORTANCE_THRESHOLD = 0.85
@@ -390,6 +393,11 @@ def convert_llm_findings_to_decisions(report: dict[str, Any], auto_apply: bool =
             decisions.append(decision)
             if auto_apply and decision["review_status"] == "auto_approved":
                 applied.append(apply_governance_decision(decision["id"], source_agent="llm_curator"))
+    if not decisions and skipped_keep > 0:
+        logger.warning(
+            "[governance] All %d LLM findings were 'keep' — no governance decisions created. "
+            "LLM may be too conservative or prompts need adjustment.", skipped_keep,
+        )
     return {"decisions_created": len(decisions), "decisions": decisions, "auto_applied": applied, "skipped_keep": skipped_keep}
 
 

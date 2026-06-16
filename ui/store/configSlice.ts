@@ -67,6 +67,11 @@ export interface LlmCuratorConfig {
   split_content_threshold?: number;
   review_cooldown_seconds?: number;
   reviewed_ids_max_age_seconds?: number;
+  temperature?: number;
+  content_max_chars?: number;
+  prompt_style?: string;
+  keep_threshold?: number;
+  preset?: string;
 }
 
 export interface GovernanceConfig {

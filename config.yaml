@@ -19,13 +19,85 @@ extraction:
   api_key: nk
   base_url: http://127.0.0.1:8317
   max_tokens: 32000
-  model: gemini-3.1-pro-high
+  model: gemini-pro-agent
   temperature: 1
   timeout: 600
+extraction_strategy:
+  chinese_detection_ratio: 0.15
+  context_memory_limit: 10
+  context_sample_length: 200
+  dedup_search_limit: 5
+  default_confidence: 0.65
+  default_decay_policy: review
+  default_importance: 0.5
+  default_memory_type: episodic_memory
+  default_scope: global
+  default_status: candidate
+  link_threshold: 0.55
+  max_related_ids: 10
+  min_importance: 0.3
+  skip_threshold: 0.92
+  title_max_length: 80
+  update_threshold: 0.78
+governance:
+  auto_approve_confidence: 0.95
+  auto_approve_low_risk_confidence: 0.7
+  high_importance_threshold: 0.85
+  manual_only_actions:
+  - split
+  merge_actions:
+  - archive_and_merge_duplicate
+  precious_types:
+  - user_profile
+  - decision
+  - project_memory
+  review_confidence_threshold: 0.55
+llm_curator:
+  batch_size: 20
+  content_max_chars: 800
+  importance_limit: 200
+  keep_threshold: 0.1
+  preset: economy
+  prompt_style: conservative
+  review_cooldown_seconds: 7200
+  reviewed_ids_max_age_seconds: 172800
+  sim_threshold: 0.75
+  split_content_threshold: 800
+  temperature: 0.2
 qdrant:
   collection: agent_memory
   timeout: 30
   url: http://127.0.0.1:6333
+rule_curator:
+  archive_days_default: 730
+  archive_days_episodic: 30
+  candidate_ttl_default_days: 7
+  candidate_ttl_episodic_days: 7
+  candidate_ttl_precious_days: 30
+  contradicted_archive_days: 90
+  decay_interval_days: 30
+  decay_min_confidence: 0.15
+  decay_step: 0.05
+  never_accessed_candidate_days: 14
+  precious_stale_feedback: -2
+  precious_stale_importance: 0.3
+  precious_types:
+  - user_profile
+  - environment_fact
+  - decision
+  - project_memory
+  - skill_candidate
+  promote_importance_threshold: 0.75
+  promote_injected_threshold: 3
+  revival_effectiveness_min: 0.5
+  revival_feedback_min: 0
+  revival_window_days: 7
+  skill_promote_feedback_min: 0
+  skill_promote_importance: 0.65
+  stale_days_default: 365
+  stale_days_episodic: 14
+  stale_feedback_threshold: -0.5
+  stale_importance_threshold: 0.45
 temporal:
   auto_supersede_user_corrections: true
   contradiction_detection: heuristic

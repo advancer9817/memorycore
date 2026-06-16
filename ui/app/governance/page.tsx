@@ -177,7 +177,52 @@ function GovernancePageInner() {
             <h1 className="text-2xl font-semibold">{messages.governance.title}</h1>
             <p className="text-sm text-zinc-500">{messages.governance.description}</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+
+          {/* Controls */}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {/* Filters group — always on one line */}
+            <div className="flex shrink-0 items-center gap-2">
+              {/* Decision type filter pills */}
+              <div className="flex items-center gap-1 rounded-lg border border-zinc-800 p-1">
+                {DECISION_TYPE_FILTERS.map((filter) => (
+                  <button
+                    key={filter.value}
+                    type="button"
+                    onClick={() => {
+                      cockpit.setDecisionType(filter.value);
+                      setPage(0);
+                      setSelectedIds(new Set());
+                    }}
+                    className={`rounded-md px-2 py-1 text-xs transition-colors ${
+                      cockpit.decisionType === filter.value
+                        ? "bg-zinc-700 text-white"
+                        : "bg-zinc-900 text-zinc-400 hover:bg-zinc-800"
+                    }`}
+                  >
+                    {messages.governance[filter.labelKey]}
+                  </button>
+                ))}
+              </div>
+
+              <Select
+                value={cockpit.reviewStatus}
+                onValueChange={(v) => {
+                  cockpit.setReviewStatus(v as GovernanceReviewStatus);
+                  setPage(0);
+                  setSelectedIds(new Set());
+                }}
+              >
+                <SelectTrigger className="w-[170px] border-zinc-700/50 bg-zinc-900 text-zinc-200">
+                  <SelectValue aria-label={messages.common.filter} />
+                </SelectTrigger>
+                <SelectContent>
+                  {REVIEW_STATUSES.map((s) => (
+                    <SelectItem key={s} value={s}>{messages.governance.statusLabels[s]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             {selectedIds.size > 0 && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -236,46 +281,6 @@ function GovernancePageInner() {
                 </AlertDialogContent>
               </AlertDialog>
             )}
-
-            {/* Decision type filter pills */}
-            <div className="flex items-center gap-1 rounded-lg border border-zinc-800 p-1">
-              {DECISION_TYPE_FILTERS.map((filter) => (
-                <button
-                  key={filter.value}
-                  type="button"
-                  onClick={() => {
-                    cockpit.setDecisionType(filter.value);
-                    setPage(0);
-                    setSelectedIds(new Set());
-                  }}
-                  className={`rounded-md px-2 py-1 text-xs transition-colors ${
-                    cockpit.decisionType === filter.value
-                      ? "bg-zinc-700 text-white"
-                      : "bg-zinc-900 text-zinc-400 hover:bg-zinc-800"
-                  }`}
-                >
-                  {messages.governance[filter.labelKey]}
-                </button>
-              ))}
-            </div>
-
-            <Select
-              value={cockpit.reviewStatus}
-              onValueChange={(v) => {
-                cockpit.setReviewStatus(v as GovernanceReviewStatus);
-                setPage(0);
-                setSelectedIds(new Set());
-              }}
-            >
-              <SelectTrigger className="w-[170px] border-zinc-700/50 bg-zinc-900 text-zinc-200">
-                <SelectValue aria-label={messages.common.filter} />
-              </SelectTrigger>
-              <SelectContent>
-                {REVIEW_STATUSES.map((s) => (
-                  <SelectItem key={s} value={s}>{messages.governance.statusLabels[s]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
         </div>
 

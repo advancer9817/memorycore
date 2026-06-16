@@ -4021,3 +4021,31 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 - `ui/app/governance/page.tsx`：删除刷新按钮及 `RefreshCcw` import；筛选列表顺序调整，"全部"移至首位
 - `ui/hooks/useGovernanceCockpit.ts`：默认 `reviewStatus` 从 `actionable` 改为 `needs_review`
 - `memorycore/storage/governance.py`：修复 `governance apply does not support action 'keep'` 报错，`keep` action 直接标记 applied 跳过 mutation
+
+## 2026-06-17
+
+### LLM Curator 调谐面板 + 可配置 Prompt 策略 + Strategy 持久化修复
+
+#### 新增
+
+- `ui/components/dashboard/CuratorTuningPanel.tsx`：Dashboard 页面新增 LLM Curator 调谐面板，5 套预设模板（节能/平衡/精准/激进/深度）+ 10 维度滑块，支持一键切换与手动微调
+- `ui/app/page.tsx`：Dashboard 集成 CuratorTuningPanel 组件
+- `memorycore/storage/curator_llm.py`：新增 `_PROMPT_STYLES` 模块级常量，包含 conservative/balanced/aggressive 三套 prompt 策略，覆盖 duplicate/contradiction/importance/split 四类分析
+- `memorycore/models.py`：`llm_curator` 默认配置新增 `temperature`、`content_max_chars`、`prompt_style`、`keep_threshold`、`preset` 字段
+- `ui/store/configSlice.ts`：`LlmCuratorConfig` 接口扩展上述新字段
+- `ui/lib/i18n/dictionaries/en.ts` / `zh.ts`：新增 `tuning` section（~21 keys），覆盖预设名、维度标签、操作按钮
+
+#### 修复
+
+- `memorycore/frontend.py`：`_read_memorycore_config()` / `_write_memorycore_config()` 未处理 `strategy` 字段，所有 Strategy Configuration 改动无法持久化到 config.yaml — 已修复
+- `memorycore/frontend.py`：LLM job status 从简单 `"done"` 改为条件判定（`succeeded`/`done`/`error`）
+- `memorycore/frontend.py`：`sim_threshold` 默认值从 `0.72` 改为 `0.55`
+- `ui/hooks/useGovernanceCockpit.ts`：默认 `reviewStatus` 从 `"needs_review"` 恢复为 `"actionable"`，修复 Dashboard 审查流程计数与治理页面不一致问题
+- `memorycore/storage/curator_llm.py`：Cooldown 修复，仅标记有实际发现的 memory ID，而非所有抓取的 ID
+- `memorycore/storage/governance.py`：`filter_applied_or_rejected_findings` 新增，过滤已处理的 findings
+
+#### 变更
+
+- `memorycore/storage/curator_llm.py`：四个 LLM 分析函数签名扩展，新增 `content_max_chars`、`prompt_style`、`keep_threshold` 参数
+- `ui/app/governance/page.tsx`：治理页面 UI 重构，metrics cards 提取独立组件
+- `config.yaml`：写入完整 strategy 配置（rule_curator, llm_curator, governance, extraction_strategy）

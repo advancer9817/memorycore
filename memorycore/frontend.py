@@ -89,11 +89,28 @@ def _run_llm_curator_job(job_id: str, cfg: Any, limit: int, sim_threshold: float
 
     try:
         report = run_llm_curator(config=cfg, limit=limit, sim_threshold=sim_threshold, apply=apply)
+        summary = report.get("summary", {})
+        has_findings = (
+            summary.get("semantic_duplicates", 0) > 0
+            or summary.get("contradictions", 0) > 0
+            or summary.get("importance_reassessments", 0) > 0
+            or summary.get("split_candidates", 0) > 0
+        )
+        report_errors = report.get("errors", [])
+        if report_errors and not has_findings:
+            status = "error"
+            error_msg = "; ".join(report_errors)
+        else:
+            status = "succeeded" if has_findings else "done"
+            error_msg = None
         with _llm_curator_lock:
-            _llm_curator_jobs[job_id] = {
-                "status": "done", "result": report,
+            job_entry = {
+                "status": status, "result": report,
                 "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
             }
+            if error_msg:
+                job_entry["error"] = error_msg
+            _llm_curator_jobs[job_id] = job_entry
         _clear_curator_status_cache()
     except Exception as exc:
         logger.warning("[llm-curator job %s] failed: %s", job_id, exc)
@@ -297,7 +314,7 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
             _latest_llm_job_id[:] = [job_id]
         t = threading.Thread(
             target=_run_llm_curator_job,
-            args=(job_id, cfg, int(body.get("limit", 10000)), float(body.get("sim_threshold", 0.72)), apply),
+            args=(job_id, cfg, int(body.get("limit", 10000)), float(body.get("sim_threshold", 0.55)), apply),
             daemon=True,
             name=f"llm-curator-{job_id[:8]}",
         )
@@ -683,6 +700,12 @@ def _read_memorycore_config() -> dict[str, Any]:
                 "timeout": embedding.get("timeout", 30),
             },
         },
+        "strategy": {
+            "rule_curator": cfg.get("rule_curator", {}),
+            "llm_curator": cfg.get("llm_curator", {}),
+            "governance": cfg.get("governance", {}),
+            "extraction_strategy": cfg.get("extraction_strategy", {}),
+        },
     }
 
 
@@ -704,6 +727,14 @@ def _write_memorycore_config(body: dict[str, Any]) -> dict[str, Any]:
         existing.setdefault("embedding", {}).update({
             k: v for k, v in embedding_patch.items() if v is not None and v != ""
         })
+
+    strategy_patch = body.get("strategy", {})
+    for section in ("rule_curator", "llm_curator", "governance", "extraction_strategy"):
+        patch = strategy_patch.get(section, {})
+        if patch:
+            existing.setdefault(section, {}).update(
+                {k: v for k, v in patch.items() if v is not None}
+            )
 
     path.write_text(yaml.safe_dump(existing, allow_unicode=True, default_flow_style=False), encoding="utf-8")
     return _read_memorycore_config()
