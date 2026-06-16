@@ -4013,3 +4013,11 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 ### 回滚
 
 - 回滚 `ui/components/dashboard/intelligence/` 下新增的 helpers.ts、Primitives.tsx、HealthMetricsPanel.tsx、ReviewFlowPanel.tsx、CurationActivityPanel.tsx、SourceBreakdownPanel.tsx、AutoAppliedStrip.tsx、index.ts，以及 MemoryIntelligenceCenter.tsx、`ui/app/page.tsx`、`ui/app/memory/[id]/components/MemoryLineage.tsx`、MemoryDetails.tsx、GovernanceDecisionSheet.tsx、i18n dictionaries 与本条 ITERATION.md 记录。
+
+## 2026-06-16
+
+### 治理页面优化
+
+- `ui/app/governance/page.tsx`：删除刷新按钮及 `RefreshCcw` import；筛选列表顺序调整，"全部"移至首位
+- `ui/hooks/useGovernanceCockpit.ts`：默认 `reviewStatus` 从 `actionable` 改为 `needs_review`
+- `memorycore/storage/governance.py`：修复 `governance apply does not support action 'keep'` 报错，`keep` action 直接标记 applied 跳过 mutation

@@ -171,7 +171,7 @@ export function useGovernanceCockpit(): UseGovernanceCockpitReturn {
     isDetailLoading: false,
     actionPendingId: null,
     error: null,
-    reviewStatus: "actionable",
+    reviewStatus: "needs_review",
     decisionType: "",
   });
 

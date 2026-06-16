@@ -432,6 +432,20 @@ def apply_governance_decision(decision_id: str, source_agent: str = "agent") -> 
         decision_id=decision_id,
         correlation_id=decision_id,
     )
+
+    if decision.get("recommended_action") == "keep":
+        ts = now()
+        legacy_approval_kind = "auto" if decision["review_status"] == "auto_approved" else "human_accept"
+        with managed_conn() as conn:
+            conn.execute(
+                "UPDATE governance_decisions SET review_status='applied', applied_at=?, updated_at=?, applied_by=?, approval_kind=? WHERE id=?",
+                (ts, ts, source_agent or "agent", legacy_approval_kind, decision_id),
+            )
+            updated = conn.execute("SELECT * FROM governance_decisions WHERE id=?", (decision_id,)).fetchone()
+        updated_decision = _decision_row_to_dict(updated)
+        _audit.log_audit_event("governance_decision_apply", memory_id=(decision["source_ids"][0] if decision["source_ids"] else None), agent=source_agent, detail={"decision_id": decision_id, "action": "keep", "approval_kind": legacy_approval_kind})
+        return {"decision": updated_decision, "applied": {"action": "keep"}, "execution": None}
+
     requests = _mutation_requests_for_decision(decision)
     execution_id = str(uuid.uuid4())
     execution = execute_batch(

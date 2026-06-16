@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { CheckCheck, RefreshCcw, Loader2 } from "lucide-react";
+import { CheckCheck, Loader2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,7 +34,7 @@ import { GovernanceTable } from "./components/GovernanceTable";
 import { GovernanceMetricsCards } from "./components/GovernanceMetricsCards";
 
 const REVIEW_STATUSES: GovernanceReviewStatus[] = [
-  "actionable", "needs_review", "auto_approved", "all", "applied", "rejected", "rolled_back",
+  "all", "needs_review", "actionable", "auto_approved", "applied", "rejected", "rolled_back",
 ];
 
 interface DecisionTypeFilter {
@@ -276,15 +276,6 @@ function GovernancePageInner() {
                 ))}
               </SelectContent>
             </Select>
-            <Button
-              variant="outline"
-              onClick={() => void cockpit.refresh()}
-              disabled={cockpit.isLoading}
-              className="border-zinc-700/50 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
-            >
-              <RefreshCcw className={`mr-2 h-4 w-4 ${cockpit.isLoading ? "animate-spin" : ""}`} />
-              {messages.nav.refresh}
-            </Button>
           </div>
         </div>
 
