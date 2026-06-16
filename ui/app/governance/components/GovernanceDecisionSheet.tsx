@@ -49,6 +49,7 @@ interface GovernanceDecisionSheetProps {
   onClose: () => void;
   onApply: (decisionId: string) => Promise<void>;
   onReject: (decisionId: string, reason: string) => Promise<void>;
+  locale?: "en" | "zh";
 }
 
 function JsonBlock({ value }: { value: Record<string, unknown> | undefined }) {
@@ -100,7 +101,7 @@ function LineagePanel({ lineage, messages }: { lineage: LineagePayload | null; m
   );
 }
 
-function AuditPanel({ auditEvents, messages }: { auditEvents: AuditEvent[]; messages: Messages["governance"] }) {
+function AuditPanel({ auditEvents, messages, locale = "en" }: { auditEvents: AuditEvent[]; messages: Messages["governance"]; locale?: "en" | "zh" }) {
   return (
     <Card className="border-zinc-800 bg-zinc-950/70">
       <CardHeader className="pb-3">
@@ -112,7 +113,7 @@ function AuditPanel({ auditEvents, messages }: { auditEvents: AuditEvent[]; mess
             <div key={event.id || `${event.event_type}-${i}`} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
                 <span className="font-medium text-white">{event.event_type || "audit_event"}</span>
-                <span className="text-xs text-zinc-500">{formatGovernanceDate(event.created_at)}</span>
+                <span className="text-xs text-zinc-500">{formatGovernanceDate(event.created_at, locale)}</span>
               </div>
               {event.agent ? <p className="mt-1 text-xs text-zinc-500">{event.agent}</p> : null}
             </div>
@@ -171,6 +172,7 @@ export function GovernanceDecisionSheet({
   onClose,
   onApply,
   onReject,
+  locale = "en",
 }: GovernanceDecisionSheetProps) {
   const [rejectReason, setRejectReason] = useState("");
 
@@ -207,7 +209,7 @@ export function GovernanceDecisionSheet({
             {/* Metadata */}
             <div className="mt-4 grid gap-1 text-xs text-zinc-500 sm:grid-cols-2">
               <span>{messages.recommendedAction}: <span className="text-zinc-300">{messages.actionLabels[decision.recommended_action] ?? titleCase(decision.recommended_action)}</span></span>
-              <span>{messages.created}: <span className="text-zinc-300">{formatGovernanceDate(decision.created_at)}</span></span>
+              <span>{messages.created}: <span className="text-zinc-300">{formatGovernanceDate(decision.created_at, locale)}</span></span>
               <span>{messages.policyReason}: <span className="text-zinc-300">{messages.policyReasonLabels[decision.policy_reason] ?? (decision.policy_reason || messages.notAvailable)}</span></span>
               <span className="break-all">{messages.sourceMemories}: <span className="text-zinc-300">{decision.source_ids?.join(", ") || messages.notAvailable}</span></span>
             </div>
@@ -295,7 +297,7 @@ export function GovernanceDecisionSheet({
                 ) : (
                   <>
                     <LineagePanel lineage={lineage} messages={messages} />
-                    <AuditPanel auditEvents={auditEvents} messages={messages} />
+                    <AuditPanel auditEvents={auditEvents} messages={messages} locale={locale} />
                   </>
                 )}
               </TabsContent>

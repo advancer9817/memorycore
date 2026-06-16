@@ -1,5 +1,4 @@
 "use client";
-import { useMemoriesApi } from "@/hooks/useMemoriesApi";
 import { MemoryActions } from "./MemoryActions";
 import { ArrowLeft, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -7,19 +6,17 @@ import { useRouter } from "next/navigation";
 import { AccessLog } from "./AccessLog";
 import Image from "next/image";
 import Categories from "@/components/shared/categories";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store/store";
 import { constants } from "@/components/shared/source-app";
 import { RelatedMemories } from "./RelatedMemories";
+import { MemoryLineagePanel } from "@/components/dashboard/intelligence/MemoryLineagePanel";
+import { useI18n } from "@/hooks/useI18n";
 
-interface MemoryDetailsProps {
-  memory_id: string;
-}
-
-export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
+export function MemoryDetails() {
   const router = useRouter();
-  const { fetchMemoryById, hasUpdates } = useMemoriesApi();
+  const { messages } = useI18n();
   const memory = useSelector(
     (state: RootState) => state.memories.selectedMemory
   );
@@ -39,10 +36,6 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
     }
   };
 
-  useEffect(() => {
-    fetchMemoryById(memory_id);
-  }, []);
-
   return (
     <div className="container mx-auto py-6 px-4">
       <Button
@@ -51,15 +44,15 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
         onClick={() => router.back()}
       >
         <ArrowLeft className="h-4 w-4 mr-2" />
-        Back to Memories
+        {messages.memoryDetail.backToMemories}
       </Button>
-      <div className="flex gap-4 w-full">
-        <div className="rounded-lg w-2/3 border h-fit pb-2 border-zinc-800 bg-zinc-900 overflow-hidden">
+      <div className="flex flex-col gap-4 w-full lg:flex-row">
+        <div className="rounded-lg w-full lg:w-2/3 border h-fit pb-2 border-zinc-800 bg-zinc-900 overflow-hidden">
           <div className="">
             <div className="flex px-6 py-3 justify-between items-center mb-6 bg-zinc-800 border-b border-zinc-800">
               <div className="flex items-center gap-2">
                 <h1 className="font-semibold text-white">
-                  Memory{" "}
+                  {messages.memoryDetail.memoryLabel}{" "}
                   <span className="ml-1 text-zinc-400 text-sm font-normal">
                     #{memory?.id?.slice(0, 6)}
                   </span>
@@ -67,6 +60,7 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                 <Button
                   variant="ghost"
                   size="icon"
+                  aria-label={messages.memoryDetail.copyId}
                   className="h-4 w-4 text-zinc-400 hover:text-white -ml-[5px] mt-1"
                   onClick={handleCopy}
                 >
@@ -112,7 +106,7 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                     <div className="flex items-center gap-2">
                       <div className="flex items-center gap-1 bg-zinc-700 px-3 py-1 rounded-lg">
                         <span className="text-sm text-zinc-400">
-                          Created by:
+                          {messages.memoryDetail.createdBy}
                         </span>
                         <div className="w-4 h-4 rounded-full bg-zinc-700 flex items-center justify-center overflow-hidden">
                           <Image
@@ -129,17 +123,12 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                     </div>
                   </div>
                 </div>
-
-                {/* <div className="flex justify-end gap-2 w-full mt-2">
-                <p className="text-sm font-semibold text-primary my-auto">
-                    {new Date(memory.created_at).toLocaleString()}
-                  </p>
-                </div> */}
               </div>
             </div>
           </div>
         </div>
-        <div className="w-1/3 flex flex-col gap-4">
+        <div className="w-full lg:w-1/3 flex flex-col gap-4">
+          <MemoryLineagePanel memoryId={memory?.id || ""} />
           <AccessLog memoryId={memory?.id || ""} />
           <RelatedMemories memoryId={memory?.id || ""} />
         </div>

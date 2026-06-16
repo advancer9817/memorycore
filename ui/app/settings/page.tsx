@@ -12,7 +12,7 @@ import { JsonEditor } from "@/components/json-editor"
 import { useConfig } from "@/hooks/useConfig"
 import { useSelector } from "react-redux"
 import { RootState } from "@/store/store"
-import { useToast } from "@/components/ui/use-toast"
+import { useToast } from "@/hooks/use-toast"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,7 +35,8 @@ export default function SettingsPage() {
     settings: configState.settings || {
       custom_instructions: null
     },
-    llm: configState.llm
+    llm: configState.llm,
+    strategy: configState.strategy || {},
   })
   const [viewMode, setViewMode] = useState<"form" | "json">("form")
   const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL)
@@ -64,16 +65,18 @@ export default function SettingsPage() {
     setSettings(prev => ({
       ...prev,
       settings: configState.settings || { custom_instructions: null },
-      llm: configState.llm
+      llm: configState.llm,
+      strategy: configState.strategy || {},
     }))
-  }, [configState.settings, configState.llm])
+  }, [configState.settings, configState.llm, configState.strategy])
 
   const handleSave = async () => {
     try {
       setApiUrl(setApiBaseUrl(apiUrl))
       await saveConfig({
         settings: settings.settings,
-        llm: settings.llm
+        llm: settings.llm,
+        strategy: settings.strategy,
       })
       toast({
         title: messages.settings.settingsSavedTitle,

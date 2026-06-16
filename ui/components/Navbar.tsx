@@ -4,9 +4,10 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode, useCallback, useState } from "react";
-import { AppWindow, Home, Layers3, RefreshCcw, Settings, ShieldCheck } from "lucide-react";
+import { AppWindow, Home, Layers3, Menu, Network, RefreshCcw, Settings, ShieldCheck } from "lucide-react";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useI18n } from "@/hooks/useI18n";
 import { useToast } from "@/hooks/use-toast";
 
@@ -34,8 +35,6 @@ async function refreshForPath(pathname: string): Promise<void> {
     fetches.push(fetch(`${base}/api/v1/apps/`));
   } else if (pathname.startsWith("/settings")) {
     fetches.push(fetch(`${base}/api/v1/config`));
-  } else if (pathname.startsWith("/graph")) {
-    fetches.push(fetch(`${base}/api/graph`));
   } else if (pathname.startsWith("/governance")) {
     fetches.push(fetch(`${base}/api/governance/metrics`));
     fetches.push(fetch(`${base}/api/governance/decisions?review_status=actionable&limit=500`));
@@ -47,6 +46,7 @@ async function refreshForPath(pathname: string): Promise<void> {
 export function Navbar() {
   const pathname = usePathname();
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const { messages } = useI18n();
   const { toast } = useToast();
 
@@ -90,7 +90,7 @@ export function Navbar() {
     { href: "/", label: messages.nav.dashboard, icon: <Home /> },
     { href: "/memories", label: messages.nav.memories, icon: <Layers3 /> },
     { href: "/apps", label: messages.nav.apps, icon: <AppWindow /> },
-    { href: "/graph", label: messages.nav.graph, icon: null },
+    { href: "/graph", label: messages.nav.graph, icon: <Network className="h-4 w-4" /> },
     { href: "/governance", label: messages.nav.governance, icon: <ShieldCheck className="h-4 w-4" /> },
     { href: "/settings", label: messages.nav.settings, icon: <Settings className="h-4 w-4" /> },
   ];
@@ -123,6 +123,37 @@ export function Navbar() {
             </Link>
           ))}
         </nav>
+
+        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+          <SheetTrigger asChild className="md:hidden">
+            <Button variant="ghost" size="sm" className="text-zinc-300">
+              <Menu className="h-5 w-5" />
+              <span className="sr-only">{messages.nav.menu}</span>
+            </Button>
+          </SheetTrigger>
+          <SheetContent side="left" className="w-64 bg-zinc-950 border-zinc-800 p-0">
+            <div className="flex items-center gap-2 px-4 py-4 border-b border-zinc-800">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo.svg" alt="MemoryCore" width={24} height={24} />
+              <span className="text-lg font-medium text-white">MemoryCore</span>
+            </div>
+            <nav className="flex flex-col gap-1 p-2" aria-label="Mobile">
+              {navItems.map((item) => (
+                <Link key={item.href} href={item.href} onClick={() => setMobileOpen(false)}>
+                  <Button
+                    variant="ghost"
+                    className={`w-full justify-start gap-3 ${
+                      isActive(item.href) ? "bg-zinc-800 text-white" : "text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    {item.icon}
+                    {item.label}
+                  </Button>
+                </Link>
+              ))}
+            </nav>
+          </SheetContent>
+        </Sheet>
 
         <div className="flex shrink-0 items-center gap-3">
           <LanguageSwitcher />

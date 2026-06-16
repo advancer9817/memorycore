@@ -1,6 +1,9 @@
+"use client";
+
 import "@/styles/notfound.scss";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/hooks/useI18n";
 
 interface NotFoundProps {
   statusCode?: number;
@@ -18,10 +21,12 @@ const getStatusCode = (message: string) => {
 
 export default function NotFound({
   statusCode,
-  message = "Page Not Found",
+  message,
   title,
 }: NotFoundProps) {
-  const potentialStatusCode = getStatusCode(message);
+  const { messages } = useI18n();
+  const resolvedMessage = message ?? messages.common.pageNotFound;
+  const potentialStatusCode = getStatusCode(resolvedMessage);
 
   return (
     <div className="flex flex-col items-center justify-center h-[calc(100vh-100px)]">
@@ -36,7 +41,7 @@ export default function NotFound({
             : potentialStatusCode
             ? `${potentialStatusCode}:`
             : "404"}
-          <small>{title || message || "Page Not Found"}</small>
+          <small>{title || resolvedMessage}</small>
         </h1>
       </div>
 
@@ -45,7 +50,7 @@ export default function NotFound({
           variant="outline"
           className="bg-primary text-foreground hover:bg-primary/80"
         >
-          <Link href="/">Go Home</Link>
+          <Link href="/">{messages.common.goHome}</Link>
         </Button>
       </div>
     </div>

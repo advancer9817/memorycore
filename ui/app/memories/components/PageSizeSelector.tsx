@@ -5,6 +5,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useI18n } from "@/hooks/useI18n";
 
 interface PageSizeSelectorProps {
   pageSize: number;
@@ -16,10 +17,12 @@ export function PageSizeSelector({
   onPageSizeChange,
 }: PageSizeSelectorProps) {
   const pageSizeOptions = [10, 20, 50, 100];
+  const { messages } = useI18n();
+  const t = messages.memories;
 
   return (
     <div className="flex items-center gap-2">
-      <span className="text-sm text-zinc-500">Show</span>
+      <span className="text-sm text-zinc-500">{t.pageSizeShow}</span>
       <Select
         value={pageSize.toString()}
         onValueChange={(value) => onPageSizeChange(Number(value))}
@@ -35,7 +38,7 @@ export function PageSizeSelector({
           ))}
         </SelectContent>
       </Select>
-      <span className="text-sm text-zinc-500">items</span>
+      <span className="text-sm text-zinc-500">{t.pageSizeItems}</span>
     </div>
   );
 }

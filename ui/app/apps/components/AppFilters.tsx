@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { Search, ChevronDown, SortAsc, SortDesc } from "lucide-react";
 import { useDispatch, useSelector } from "react-redux";
 import {
@@ -31,20 +31,28 @@ import {
   DropdownMenuGroup,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/hooks/useI18n";
 
-const sortOptions = [
-  { value: "name", label: "Name" },
-  { value: "memories", label: "Memories Created" },
-  { value: "memories_accessed", label: "Memories Accessed" },
-  { value: "last_activity", label: "Last Activity" },
-  { value: "status", label: "Status" },
-];
+type SortByValue = "name" | "memories" | "memories_accessed" | "last_activity" | "status";
 
 export function AppFilters() {
   const dispatch = useDispatch();
   const filters = useSelector((state: RootState) => state.apps.filters);
   const [localSearch, setLocalSearch] = useState(filters.searchQuery);
   const { isLoading } = useAppsApi();
+  const { messages } = useI18n();
+  const t = messages.apps;
+
+  const sortOptions = useMemo(
+    () => [
+      { value: "name", label: t.sortName },
+      { value: "memories", label: t.sortMemoriesCreated },
+      { value: "memories_accessed", label: t.sortMemoriesAccessed },
+      { value: "last_activity", label: t.sortLastActivity },
+      { value: "status", label: t.sortStatus },
+    ],
+    [t]
+  );
 
   const debouncedSearch = useCallback(
     debounce((query: string) => {
@@ -63,7 +71,7 @@ export function AppFilters() {
     dispatch(setActiveFilter(value === "all" ? "all" : value === "true"));
   };
 
-  const setSorting = (sortBy: "name" | "memories" | "memories_accessed" | "last_activity" | "status") => {
+  const setSorting = (sortBy: SortByValue) => {
     const newDirection =
       filters.sortBy === sortBy && filters.sortDirection === "asc"
         ? "desc"
@@ -85,7 +93,7 @@ export function AppFilters() {
       <div className="relative flex-1">
         <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
         <Input
-          placeholder="Search agents or clients..."
+          placeholder={t.searchPlaceholder}
           className="pl-8 bg-zinc-950 border-zinc-800 max-w-[500px]"
           value={localSearch}
           onChange={handleSearchChange}
@@ -97,12 +105,12 @@ export function AppFilters() {
         onValueChange={handleActiveFilterChange}
       >
         <SelectTrigger className="w-[130px] border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800">
-          <SelectValue placeholder="Status" />
+          <SelectValue placeholder={t.allStatus} />
         </SelectTrigger>
         <SelectContent className="border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800">
-          <SelectItem value="all">All Status</SelectItem>
-          <SelectItem value="true">Active</SelectItem>
-          <SelectItem value="false">Inactive</SelectItem>
+          <SelectItem value="all">{t.allStatus}</SelectItem>
+          <SelectItem value="true">{t.statusActive}</SelectItem>
+          <SelectItem value="false">{t.statusInactive}</SelectItem>
         </SelectContent>
       </Select>
 
@@ -117,20 +125,18 @@ export function AppFilters() {
             ) : (
               <SortAsc className="h-4 w-4 mr-2" />
             )}
-            Sort: {sortOptions.find((o) => o.value === filters.sortBy)?.label}
+            {t.sortPrefix} {sortOptions.find((o) => o.value === filters.sortBy)?.label}
             <ChevronDown className="h-4 w-4 ml-2" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent className="w-56 bg-zinc-900 border-zinc-800 text-zinc-100">
-          <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+          <DropdownMenuLabel>{t.sortBy}</DropdownMenuLabel>
           <DropdownMenuSeparator className="bg-zinc-800" />
           <DropdownMenuGroup>
             {sortOptions.map((option) => (
               <DropdownMenuItem
                 key={option.value}
-                onClick={() =>
-                  setSorting(option.value as "name" | "memories" | "memories_accessed" | "last_activity" | "status")
-                }
+                onClick={() => setSorting(option.value as SortByValue)}
                 className="cursor-pointer flex justify-between items-center"
               >
                 {option.label}

@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { Pencil, Archive, Trash, Pause, Play, ChevronDown } from "lucide-react";
+import { Pencil, Archive, Pause, Play, ChevronDown } from "lucide-react";
 import { useUI } from "@/hooks/useUI";
 import { useMemoriesApi } from "@/hooks/useMemoriesApi";
 import {
@@ -10,6 +10,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { useI18n } from "@/hooks/useI18n";
 
 interface MemoryActionsProps {
   memoryId: string;
@@ -24,6 +25,8 @@ export function MemoryActions({
 }: MemoryActionsProps) {
   const { handleOpenUpdateMemoryDialog } = useUI();
   const { updateMemoryState, isLoading } = useMemoriesApi();
+  const { messages } = useI18n();
+  const t = messages.memoryDetail;
 
   const handleEdit = () => {
     handleOpenUpdateMemoryDialog(memoryId, memoryContent);
@@ -35,23 +38,17 @@ export function MemoryActions({
 
   const getStateLabel = () => {
     switch (memoryState) {
-      case "archived":
-        return "Archived";
-      case "paused":
-        return "Paused";
-      default:
-        return "Active";
+      case "archived": return t.stateArchived;
+      case "paused": return t.statePaused;
+      default: return t.stateActive;
     }
   };
 
   const getStateIcon = () => {
     switch (memoryState) {
-      case "archived":
-        return <Archive className="h-3 w-3 mr-2" />;
-      case "paused":
-        return <Pause className="h-3 w-3 mr-2" />;
-      default:
-        return <Play className="h-3 w-3 mr-2" />;
+      case "archived": return <Archive className="h-3 w-3 mr-2" />;
+      case "paused": return <Pause className="h-3 w-3 mr-2" />;
+      default: return <Play className="h-3 w-3 mr-2" />;
     }
   };
 
@@ -70,7 +67,7 @@ export function MemoryActions({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent className="w-40 bg-zinc-900 border-zinc-800 text-zinc-100">
-          <DropdownMenuLabel>Change State</DropdownMenuLabel>
+          <DropdownMenuLabel>{t.changeState}</DropdownMenuLabel>
           <DropdownMenuSeparator className="bg-zinc-800" />
           <DropdownMenuItem
             onClick={() => handleStateChange("active")}
@@ -78,7 +75,7 @@ export function MemoryActions({
             disabled={memoryState === "active"}
           >
             <Play className="h-3 w-3 mr-2" />
-            <span className="font-semibold">Active</span>
+            <span className="font-semibold">{t.stateActive}</span>
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => handleStateChange("paused")}
@@ -86,7 +83,7 @@ export function MemoryActions({
             disabled={memoryState === "paused"}
           >
             <Pause className="h-3 w-3 mr-2" />
-            <span className="font-semibold">Pause</span>
+            <span className="font-semibold">{t.actionPause}</span>
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => handleStateChange("archived")}
@@ -94,7 +91,7 @@ export function MemoryActions({
             disabled={memoryState === "archived"}
           >
             <Archive className="h-3 w-3 mr-2" />
-            <span className="font-semibold">Archive</span>
+            <span className="font-semibold">{t.actionArchive}</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -107,7 +104,7 @@ export function MemoryActions({
         className="shadow-md bg-zinc-900 border border-zinc-700/50 hover:bg-zinc-950 text-zinc-400"
       >
         <Pencil className="h-3 w-3 -mr-1" />
-        <span className="font-semibold">Edit</span>
+        <span className="font-semibold">{t.actionEdit}</span>
       </Button>
     </div>
   );

@@ -82,6 +82,67 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "auto_supersede_threshold": 0.96,
         "review_similarity_threshold": 0.82,
     },
+    "rule_curator": {
+        "decay_step": 0.05,
+        "decay_interval_days": 30,
+        "decay_min_confidence": 0.15,
+        "candidate_ttl_episodic_days": 7,
+        "candidate_ttl_precious_days": 30,
+        "candidate_ttl_default_days": 7,
+        "stale_days_episodic": 14,
+        "archive_days_episodic": 30,
+        "stale_days_default": 365,
+        "archive_days_default": 730,
+        "contradicted_archive_days": 90,
+        "never_accessed_candidate_days": 14,
+        "promote_importance_threshold": 0.75,
+        "promote_injected_threshold": 3,
+        "precious_types": ["user_profile", "environment_fact", "decision", "project_memory", "skill_candidate"],
+        "stale_importance_threshold": 0.45,
+        "stale_feedback_threshold": -0.5,
+        "precious_stale_feedback": -2.0,
+        "precious_stale_importance": 0.3,
+        "revival_window_days": 7,
+        "revival_effectiveness_min": 0.5,
+        "revival_feedback_min": 0.0,
+        "skill_promote_importance": 0.65,
+        "skill_promote_feedback_min": 0.0,
+    },
+    "llm_curator": {
+        "sim_threshold": 0.60,
+        "batch_size": 10,
+        "importance_limit": 1000,
+        "split_content_threshold": 400,
+        "review_cooldown_seconds": 7200,
+        "reviewed_ids_max_age_seconds": 86400,
+    },
+    "governance": {
+        "review_confidence_threshold": 0.55,
+        "high_importance_threshold": 0.85,
+        "auto_approve_confidence": 0.90,
+        "auto_approve_low_risk_confidence": 0.70,
+        "precious_types": ["user_profile", "decision", "project_memory"],
+        "manual_only_actions": ["split"],
+        "merge_actions": ["archive_and_merge_duplicate"],
+    },
+    "extraction_strategy": {
+        "min_importance": 0.3,
+        "default_confidence": 0.65,
+        "default_importance": 0.5,
+        "chinese_detection_ratio": 0.15,
+        "skip_threshold": 0.92,
+        "update_threshold": 0.78,
+        "link_threshold": 0.55,
+        "context_sample_length": 200,
+        "context_memory_limit": 10,
+        "dedup_search_limit": 5,
+        "max_related_ids": 10,
+        "default_memory_type": "episodic_memory",
+        "default_status": "candidate",
+        "default_decay_policy": "review",
+        "title_max_length": 80,
+        "default_scope": "global",
+    },
 }
 
 MEMORY_TYPES: set[str] = {
@@ -229,6 +290,108 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
     be = cfg.get("backend", {})
     if be.get("primary") not in ("sqlite", None, ""):
         _warn(f"backend.primary={be.get('primary')!r} unknown, only sqlite is supported")
+
+    # rule_curator
+    rc = cfg.get("rule_curator", {})
+    _day_keys = (
+        "decay_interval_days", "candidate_ttl_episodic_days", "candidate_ttl_precious_days",
+        "candidate_ttl_default_days", "stale_days_episodic", "archive_days_episodic",
+        "stale_days_default", "archive_days_default", "contradicted_archive_days",
+        "never_accessed_candidate_days", "revival_window_days",
+    )
+    for key in _day_keys:
+        if key in rc:
+            _pos_int("rule_curator", key, rc[key])
+    if "promote_injected_threshold" in rc:
+        _pos_int("rule_curator", "promote_injected_threshold", rc["promote_injected_threshold"])
+    for key in ("decay_step", "decay_min_confidence", "promote_importance_threshold",
+                "stale_importance_threshold", "precious_stale_importance",
+                "revival_effectiveness_min", "skill_promote_importance"):
+        if key in rc:
+            val = rc[key]
+            if not (isinstance(val, (int, float)) and 0 <= val <= 1):
+                _warn(f"rule_curator.{key} must be a 0-1 float (got {val!r})")
+    for key in ("stale_feedback_threshold", "precious_stale_feedback",
+                "revival_feedback_min", "skill_promote_feedback_min"):
+        if key in rc:
+            val = rc[key]
+            if not isinstance(val, (int, float)):
+                _warn(f"rule_curator.{key} must be a number (got {val!r})")
+    pt = rc.get("precious_types")
+    if pt is not None:
+        if not isinstance(pt, list):
+            _warn("rule_curator.precious_types must be a list")
+        else:
+            for t in pt:
+                if t not in MEMORY_TYPES:
+                    _warn(f"rule_curator.precious_types: unknown type {t!r}")
+
+    # llm_curator
+    lc = cfg.get("llm_curator", {})
+    if "sim_threshold" in lc:
+        val = lc["sim_threshold"]
+        if not (isinstance(val, (int, float)) and 0 <= val <= 1):
+            _warn(f"llm_curator.sim_threshold must be a 0-1 float (got {val!r})")
+    for key in ("batch_size", "importance_limit", "split_content_threshold",
+                "review_cooldown_seconds", "reviewed_ids_max_age_seconds"):
+        if key in lc:
+            _pos_int("llm_curator", key, lc[key])
+
+    # governance
+    gc = cfg.get("governance", {})
+    for key in ("review_confidence_threshold", "high_importance_threshold",
+                "auto_approve_confidence", "auto_approve_low_risk_confidence"):
+        if key in gc:
+            val = gc[key]
+            if not (isinstance(val, (int, float)) and 0 <= val <= 1):
+                _warn(f"governance.{key} must be a 0-1 float (got {val!r})")
+    review_ct = gc.get("review_confidence_threshold", 0.55)
+    auto_ct = gc.get("auto_approve_confidence", 0.90)
+    if isinstance(review_ct, (int, float)) and isinstance(auto_ct, (int, float)) and review_ct >= auto_ct:
+        _warn("governance: review_confidence_threshold should be less than auto_approve_confidence")
+    gpt = gc.get("precious_types")
+    if gpt is not None:
+        if not isinstance(gpt, list):
+            _warn("governance.precious_types must be a list")
+        else:
+            for t in gpt:
+                if t not in MEMORY_TYPES:
+                    _warn(f"governance.precious_types: unknown type {t!r}")
+
+    # extraction_strategy
+    es = cfg.get("extraction_strategy", {})
+    for key in ("min_importance", "default_confidence", "default_importance"):
+        if key in es:
+            val = es[key]
+            if not (isinstance(val, (int, float)) and 0 <= val <= 1):
+                _warn(f"extraction_strategy.{key} must be a 0-1 float (got {val!r})")
+    if "chinese_detection_ratio" in es:
+        val = es["chinese_detection_ratio"]
+        if not (isinstance(val, (int, float)) and 0.05 <= val <= 0.50):
+            _warn(f"extraction_strategy.chinese_detection_ratio must be 0.05-0.50 (got {val!r})")
+    for key in ("skip_threshold", "update_threshold", "link_threshold"):
+        if key in es:
+            val = es[key]
+            if not (isinstance(val, (int, float)) and 0 < val < 1):
+                _warn(f"extraction_strategy.{key} must be a 0-1 float (got {val!r})")
+    skip_t = es.get("skip_threshold", 0.92)
+    update_t = es.get("update_threshold", 0.78)
+    link_t = es.get("link_threshold", 0.55)
+    if (isinstance(skip_t, (int, float)) and isinstance(update_t, (int, float))
+            and isinstance(link_t, (int, float)) and not (skip_t > update_t > link_t)):
+        _warn("extraction_strategy: skip_threshold must be > update_threshold > link_threshold")
+    for key in ("context_sample_length", "context_memory_limit", "dedup_search_limit",
+                "max_related_ids", "title_max_length"):
+        if key in es:
+            _pos_int("extraction_strategy", key, es[key])
+    if "default_memory_type" in es and es["default_memory_type"] not in MEMORY_TYPES:
+        _warn(f"extraction_strategy.default_memory_type={es['default_memory_type']!r} unknown")
+    if "default_status" in es and es["default_status"] not in {"candidate", "active"}:
+        _warn(f"extraction_strategy.default_status must be 'candidate' or 'active' (got {es['default_status']!r})")
+    if "default_decay_policy" in es and es["default_decay_policy"] not in {"review", "standard", "slow", "never"}:
+        _warn(f"extraction_strategy.default_decay_policy={es['default_decay_policy']!r} unknown")
+    if "default_scope" in es and es["default_scope"] not in {"global", "session", "agent"}:
+        _warn(f"extraction_strategy.default_scope={es['default_scope']!r} unknown")
 
     return warnings
 

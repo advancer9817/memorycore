@@ -19,8 +19,8 @@ export function SplitCandidatePanel({ finding, messages }: SplitCandidatePanelPr
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="rounded-lg border border-violet-800/60 bg-violet-950/20 p-4 space-y-2">
-          <Badge className="border-violet-700 bg-violet-500/10 text-violet-300">
+        <div className="rounded-lg border border-amber-800/60 bg-amber-950/20 p-4 space-y-2">
+          <Badge className="border-amber-700 bg-amber-500/10 text-amber-300">
             {messages.splitCandidate.originalMemory}
           </Badge>
           <h4 className="text-sm font-medium text-white line-clamp-3">

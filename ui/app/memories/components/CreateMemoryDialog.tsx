@@ -15,25 +15,26 @@ import { useState, useRef } from "react";
 import { GoPlusIcon as GoPlus } from "@/components/shared/react-icons";
 import { Loader2 } from "lucide-react";
 import { useMemoriesApi } from "@/hooks/useMemoriesApi";
-import { toast } from "sonner";
+import { useToast } from "@/hooks/use-toast";
 import { Textarea } from "@/components/ui/textarea";
+import { useI18n } from "@/hooks/useI18n";
 
 export function CreateMemoryDialog() {
   const { createMemory, isLoading, fetchMemories } = useMemoriesApi();
   const [open, setOpen] = useState(false);
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const { messages } = useI18n();
+  const { toast } = useToast();
+  const t = messages.memories;
 
   const handleCreateMemory = async (text: string) => {
     try {
       await createMemory(text);
-      toast.success("Memory created successfully");
-      // close the dialog
+      toast({ description: t.createSuccess });
       setOpen(false);
-      // refetch memories
       await fetchMemories();
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to create memory");
+    } catch {
+      toast({ description: t.createFailure, variant: "destructive" });
     }
   };
 
@@ -46,30 +47,30 @@ export function CreateMemoryDialog() {
           className="bg-primary hover:bg-primary/90 text-white"
         >
           <GoPlus />
-          Create Memory
+          {t.createButton}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[525px] bg-zinc-900 border-zinc-800">
         <DialogHeader>
-          <DialogTitle>Create New Memory</DialogTitle>
+          <DialogTitle>{t.createDialogTitle}</DialogTitle>
           <DialogDescription>
-            Add a new memory to your MemoryCore store
+            {t.createDialogDescription}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-4">
           <div className="grid gap-2">
-            <Label htmlFor="memory">Memory</Label>
+            <Label htmlFor="memory">{t.createLabel}</Label>
             <Textarea
               ref={textRef}
               id="memory"
-              placeholder="e.g., Lives in San Francisco"
+              placeholder={t.createPlaceholder}
               className="bg-zinc-950 border-zinc-800 min-h-[150px]"
             />
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>
-            Cancel
+            {t.createCancel}
           </Button>
           <Button
             disabled={isLoading}
@@ -78,7 +79,7 @@ export function CreateMemoryDialog() {
             {isLoading ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
             ) : (
-              "Save Memory"
+              t.createSave
             )}
           </Button>
         </DialogFooter>

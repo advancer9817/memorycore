@@ -46,7 +46,7 @@ export function GovernanceMetricsCards({ metrics, messages }: GovernanceMetricsC
       value: metrics?.policy_version || "n/a",
       detail: metrics?.auto_supersede_enabled ? messages.autoApproved : messages.needsReview,
       icon: <ShieldCheck className="h-4 w-4" />,
-      tone: "text-violet-300",
+      tone: "text-primary/80",
     },
   ];
 

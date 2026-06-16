@@ -23,50 +23,44 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
-from memorycore.models import local_now, normalize_list, normalize_title_key, now
+from memorycore.models import load_config, local_now, normalize_list, normalize_title_key, now
 from memorycore.storage.db import _managed_query, managed_conn, read_conn
 from memorycore.storage.audit import log_audit_event
-
-# Decay: records that were used and then forgotten
-_DECAY_STEP = 0.05
-_DECAY_INTERVAL_DAYS = 30
-_DECAY_MIN_CONFIDENCE = 0.15
-
-# Per-type candidate timeout windows
-_CANDIDATE_TTL_EPISODIC_DAYS = 7
-_CANDIDATE_TTL_PRECIOUS_DAYS = 30
-_CANDIDATE_TTL_DEFAULT_DAYS = 7
-
-# Per-type stale/archive thresholds (days since updated_at)
-_STALE_DAYS_EPISODIC = 14
-_ARCHIVE_DAYS_EPISODIC = 30
-_STALE_DAYS_DEFAULT = 365
-_ARCHIVE_DAYS_DEFAULT = 730
-
-# contradicted auto-archive after no access
-_CONTRADICTED_ARCHIVE_DAYS = 90
-
-# Never-accessed candidate auto-archive
-_NEVER_ACCESSED_CANDIDATE_DAYS = 14
-
-# High-value types — immune to auto-stale unless feedback very negative
-_PRECIOUS_TYPES = {"user_profile", "environment_fact", "decision", "project_memory", "skill_candidate"}
-
-# Auto-promote candidates
-_PROMOTE_IMPORTANCE_THRESHOLD = 0.75
-_PROMOTE_INJECTED_THRESHOLD = 3
-
 
 def curator_report(
     dry_run: bool = True,
     limit: int = 500,
-    stale_after_days: int = _STALE_DAYS_DEFAULT,
-    archive_after_days: int = _ARCHIVE_DAYS_DEFAULT,
+    stale_after_days: int = 365,
+    archive_after_days: int = 730,
     allow_actions: Any = None,
     deny_actions: Any = None,
 ) -> dict[str, Any]:
     now_dt = local_now()
     cap = max(1, min(int(limit), 5000))
+
+    cfg = load_config().get("rule_curator", {})
+    _DECAY_STEP = cfg.get("decay_step", 0.05)
+    _DECAY_INTERVAL_DAYS = cfg.get("decay_interval_days", 30)
+    _DECAY_MIN_CONFIDENCE = cfg.get("decay_min_confidence", 0.15)
+    _CANDIDATE_TTL_EPISODIC_DAYS = cfg.get("candidate_ttl_episodic_days", 7)
+    _CANDIDATE_TTL_PRECIOUS_DAYS = cfg.get("candidate_ttl_precious_days", 30)
+    _CANDIDATE_TTL_DEFAULT_DAYS = cfg.get("candidate_ttl_default_days", 7)
+    _STALE_DAYS_EPISODIC = cfg.get("stale_days_episodic", 14)
+    _ARCHIVE_DAYS_EPISODIC = cfg.get("archive_days_episodic", 30)
+    _CONTRADICTED_ARCHIVE_DAYS = cfg.get("contradicted_archive_days", 90)
+    _NEVER_ACCESSED_CANDIDATE_DAYS = cfg.get("never_accessed_candidate_days", 14)
+    _PROMOTE_IMPORTANCE_THRESHOLD = cfg.get("promote_importance_threshold", 0.75)
+    _PROMOTE_INJECTED_THRESHOLD = cfg.get("promote_injected_threshold", 3)
+    _PRECIOUS_TYPES = set(cfg.get("precious_types", ["user_profile", "environment_fact", "decision", "project_memory", "skill_candidate"]))
+    stale_importance = cfg.get("stale_importance_threshold", 0.45)
+    stale_feedback = cfg.get("stale_feedback_threshold", -0.5)
+    precious_stale_fb = cfg.get("precious_stale_feedback", -2.0)
+    precious_stale_imp = cfg.get("precious_stale_importance", 0.3)
+    revival_window = cfg.get("revival_window_days", 7)
+    revival_eff_min = cfg.get("revival_effectiveness_min", 0.5)
+    revival_fb_min = cfg.get("revival_feedback_min", 0.0)
+    skill_imp = cfg.get("skill_promote_importance", 0.65)
+    skill_fb_min = cfg.get("skill_promote_feedback_min", 0.0)
 
     # Single read — all subsequent categorisation is Python-side filtering.
     with read_conn() as conn:
@@ -87,10 +81,10 @@ def curator_report(
     stale_cutoff            = (now_dt - timedelta(days=max(1, int(stale_after_days)))).isoformat()
     archive_cutoff          = (now_dt - timedelta(days=max(1, int(archive_after_days)))).isoformat()
     contradicted_cutoff     = (now_dt - timedelta(days=_CONTRADICTED_ARCHIVE_DAYS)).isoformat()
-    revival_cutoff          = (now_dt - timedelta(days=7)).isoformat()
+    revival_cutoff          = (now_dt - timedelta(days=revival_window)).isoformat()
     now_ts = now()
 
-    _PRECIOUS = {"user_profile", "environment_fact", "decision", "project_memory", "skill_candidate"}
+    _PRECIOUS = _PRECIOUS_TYPES
 
     def _s(r: dict, key: str, default: Any = None) -> Any:
         v = r.get(key)
@@ -173,13 +167,13 @@ def curator_report(
 
         # default stale: non-precious, non-episodic
         if (status == "active" and typ not in _PRECIOUS and typ != "episodic_memory"
-                and updated < stale_cutoff and importance < 0.45
-                and feedback <= -0.5 and decay not in ("freeze", "stable")):
+                and updated < stale_cutoff and importance < stale_importance
+                and feedback <= stale_feedback and decay not in ("freeze", "stable")):
             stale_candidates.append(r)
 
         # precious stale
         if (status == "active" and typ in _PRECIOUS
-                and feedback < -2.0 and importance < 0.3 and decay not in ("freeze", "stable")):
+                and feedback < precious_stale_fb and importance < precious_stale_imp and decay not in ("freeze", "stable")):
             precious_stale_candidates.append(r)
 
         # archive stale non-episodic
@@ -193,11 +187,11 @@ def curator_report(
         # stale revival
         if (status == "stale" and typ != "episodic_memory"
                 and last_injected is not None and last_injected >= revival_cutoff
-                and effectiveness >= 0.5 and feedback >= 0):
+                and effectiveness >= revival_eff_min and feedback >= revival_fb_min):
             revival_candidates.append(r)
 
         # skill promotions
-        if typ == "skill_candidate" and status in ("active", "candidate") and importance >= 0.65 and feedback >= 0:
+        if typ == "skill_candidate" and status in ("active", "candidate") and importance >= skill_imp and feedback >= skill_fb_min:
             skill_promotion_candidates.append(r)
 
         # evolution / contradiction detection

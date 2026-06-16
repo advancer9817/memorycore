@@ -7,13 +7,18 @@ import { AlertCircle, CheckCircle2 } from "lucide-react"
 import { Alert, AlertDescription } from "./ui/alert"
 import { Button } from "./ui/button"
 import { Textarea } from "./ui/textarea"
+import { useI18n } from "@/hooks/useI18n"
 
 interface JsonEditorProps {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   value: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onChange: (value: any) => void
 }
 
 export function JsonEditor({ value, onChange }: JsonEditorProps) {
+  const { messages } = useI18n()
+  const s = messages.settings
   const [jsonString, setJsonString] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [isValid, setIsValid] = useState(true)
@@ -23,11 +28,11 @@ export function JsonEditor({ value, onChange }: JsonEditorProps) {
       setJsonString(JSON.stringify(value, null, 2))
       setIsValid(true)
       setError(null)
-    } catch (err) {
-      setError("Invalid JSON object")
+    } catch {
+      setError(s.jsonInvalidObject)
       setIsValid(false)
     }
-  }, [value])
+  }, [value, s.jsonInvalidObject])
 
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setJsonString(e.target.value)
@@ -35,8 +40,8 @@ export function JsonEditor({ value, onChange }: JsonEditorProps) {
       JSON.parse(e.target.value)
       setIsValid(true)
       setError(null)
-    } catch (err) {
-      setError("Invalid JSON syntax")
+    } catch {
+      setError(s.jsonInvalidSyntax)
       setIsValid(false)
     }
   }
@@ -47,8 +52,8 @@ export function JsonEditor({ value, onChange }: JsonEditorProps) {
       onChange(parsed)
       setIsValid(true)
       setError(null)
-    } catch (err) {
-      setError("Failed to apply changes: Invalid JSON")
+    } catch {
+      setError(s.jsonApplyFailed)
     }
   }
 
@@ -72,8 +77,8 @@ export function JsonEditor({ value, onChange }: JsonEditorProps) {
       )}
 
       <Button onClick={handleApply} disabled={!isValid} className="w-full">
-        Apply Changes
+        {s.jsonApplyChanges}
       </Button>
     </div>
   )
-} 
+}

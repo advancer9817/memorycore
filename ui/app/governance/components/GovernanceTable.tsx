@@ -32,6 +32,7 @@ interface GovernanceTableProps {
   onRowClick: (decision: GovernanceDecision) => void;
   messages: Messages["governance"];
   isLoading: boolean;
+  locale?: "en" | "zh";
 }
 
 export function GovernanceTable({
@@ -42,6 +43,7 @@ export function GovernanceTable({
   onRowClick,
   messages,
   isLoading,
+  locale = "en",
 }: GovernanceTableProps) {
   const selectableDecisions = decisions.filter(isActionableDecision);
   const isAllSelected = selectableDecisions.length > 0 && selectableDecisions.every((d) => selectedIds.has(d.id));
@@ -107,7 +109,7 @@ export function GovernanceTable({
                   >
                     <div className="flex items-center gap-2 mb-1">
                       <Badge className={reviewStatusTone(decision.review_status)}>
-                        {titleCase(decision.review_status)}
+                        {(messages.statusLabels as Record<string, string>)?.[decision.review_status] ?? titleCase(decision.review_status)}
                       </Badge>
                     </div>
                     <div className="font-medium text-white cursor-pointer line-clamp-2">
@@ -120,7 +122,7 @@ export function GovernanceTable({
                 </TableCell>
                 <TableCell>
                   <Badge className={riskTone(decision.risk_level)}>
-                    {titleCase(decision.risk_level)}
+                    {messages.riskLabels?.[decision.risk_level] ?? titleCase(decision.risk_level)}
                   </Badge>
                 </TableCell>
                 <TableCell>
@@ -132,7 +134,7 @@ export function GovernanceTable({
                   {messages.actionLabels?.[decision.recommended_action] ?? titleCase(decision.recommended_action)}
                 </TableCell>
                 <TableCell className="text-sm text-zinc-500">
-                  {formatGovernanceDate(decision.created_at)}
+                  {formatGovernanceDate(decision.created_at, locale)}
                 </TableCell>
               </TableRow>
               );

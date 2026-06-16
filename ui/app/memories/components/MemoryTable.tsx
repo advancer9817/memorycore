@@ -124,6 +124,7 @@ export function MemoryTable() {
   };
 
   return (
+    <TooltipProvider>
     <div className="rounded-md border">
       <Table className="">
         <TableHeader>
@@ -132,6 +133,7 @@ export function MemoryTable() {
               <Checkbox
                 className="data-[state=checked]:border-primary border-zinc-500/50"
                 checked={isAllSelected}
+                aria-label={messages.common.selectAll}
                 data-state={
                   isPartiallySelected
                     ? "indeterminate"
@@ -163,7 +165,7 @@ export function MemoryTable() {
             <TableHead className="w-[140px] border-zinc-700">
               <button
                 onClick={handleSortByCreatedAt}
-                className="flex items-center w-full justify-center gap-1 hover:text-white transition-colors cursor-pointer"
+                className="flex items-center w-full justify-center gap-1 hover:text-zinc-100 transition-colors cursor-pointer"
               >
                 <CiCalendar className="mr-1" size={16} />
                 {messages.memories.createdOn}
@@ -179,18 +181,21 @@ export function MemoryTable() {
               </button>
             </TableHead>
             <TableHead className="text-right border-zinc-700">
-              <div className="flex justify-center">
+              <span className="sr-only">{messages.common.actions}</span>
+              <div className="flex justify-center" aria-hidden="true">
                 <MoreHorizontal className="h-4 w-4 mr-2" />
               </div>
             </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {memories.map((memory) => (
+          {memories.map((memory) => {
+            const isDisabled = memory.state === "paused" || memory.state === "archived";
+            return (
             <TableRow
               key={memory.id}
               className={`hover:bg-zinc-900/50 ${
-                memory.state === "paused" || memory.state === "archived"
+                isDisabled
                   ? "text-zinc-400"
                   : ""
               } ${isLoading ? "animate-pulse opacity-50" : ""}`}
@@ -199,39 +204,33 @@ export function MemoryTable() {
                 <Checkbox
                   className="data-[state=checked]:border-primary border-zinc-500/50"
                   checked={selectedMemoryIds.includes(memory.id)}
+                  aria-label={messages.common.selectRow(memory.memory.slice(0, 40))}
                   onCheckedChange={(checked) =>
                     handleSelectMemory(memory.id, checked as boolean)
                   }
                 />
               </TableCell>
               <TableCell className="">
-                {memory.state === "paused" || memory.state === "archived" ? (
-                  <TooltipProvider>
-                    <Tooltip delayDuration={0}>
-                      <TooltipTrigger asChild>
-                        <div
-                          onClick={() => handleMemoryClick(memory.id)}
-                          className={`font-medium ${
-                            memory.state === "paused" ||
-                            memory.state === "archived"
-                              ? "text-zinc-400"
-                              : "text-white"
-                          } cursor-pointer`}
-                        >
-                          {memory.memory}
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>
-                          {messages.memories.disabledMemory(memory.state === "paused" ? messages.memories.pausedState : messages.memories.archivedState)}
-                        </p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                {isDisabled ? (
+                  <Tooltip delayDuration={0}>
+                    <TooltipTrigger asChild>
+                      <div
+                        onClick={() => handleMemoryClick(memory.id)}
+                        className="font-medium text-zinc-400 cursor-pointer"
+                      >
+                        {memory.memory}
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>
+                        {messages.memories.disabledMemory(memory.state === "paused" ? messages.memories.pausedState : messages.memories.archivedState)}
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
                 ) : (
                   <div
                     onClick={() => handleMemoryClick(memory.id)}
-                    className={`font-medium text-white cursor-pointer`}
+                    className="font-medium text-white cursor-pointer"
                   >
                     {memory.memory}
                   </div>
@@ -241,9 +240,7 @@ export function MemoryTable() {
                 <div className="flex flex-wrap gap-1">
                   <Categories
                     categories={memory.categories}
-                    isPaused={
-                      memory.state === "paused" || memory.state === "archived"
-                    }
+                    isPaused={isDisabled}
                     concat={true}
                   />
                 </div>
@@ -257,7 +254,12 @@ export function MemoryTable() {
               <TableCell className="text-right flex justify-center">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      aria-label={`${messages.common.actions}: ${memory.memory.slice(0, 40)}`}
+                    >
                       <MoreHorizontal className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -319,9 +321,11 @@ export function MemoryTable() {
                 </DropdownMenu>
               </TableCell>
             </TableRow>
-          ))}
+            );
+          })}
         </TableBody>
       </Table>
     </div>
+    </TooltipProvider>
   );
 }

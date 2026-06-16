@@ -4,27 +4,32 @@ import { PauseIcon, Loader2, PlayIcon } from "lucide-react";
 import { useAppsApi } from "@/hooks/useAppsApi";
 import Image from "next/image";
 import { useDispatch, useSelector } from "react-redux";
-import { setAppDetails } from "@/store/appsSlice";
+import { setAppDetails, AppDetails } from "@/store/appsSlice";
 import { BiEditIcon as BiEdit } from "@/components/shared/react-icons";
 import { constants } from "@/components/shared/source-app";
 import { RootState } from "@/store/store";
+import { useI18n } from "@/hooks/useI18n";
+import { useToast } from "@/hooks/use-toast";
 
-const capitalize = (str: string) => {
-  return str.charAt(0).toUpperCase() + str.slice(1);
-};
+interface SelectedApp {
+  details: AppDetails | null;
+}
 
 const AppDetailCard = ({
   appId,
   selectedApp,
 }: {
   appId: string;
-  selectedApp: any;
+  selectedApp: SelectedApp;
 }) => {
   const { updateAppDetails } = useAppsApi();
   const [isLoading, setIsLoading] = useState(false);
   const dispatch = useDispatch();
+  const { messages, locale } = useI18n();
+  const { toast } = useToast();
+  const t = messages.apps;
   const apps = useSelector((state: RootState) => state.apps.apps);
-  const currentApp = apps.find((app: any) => app.id === appId);
+  const currentApp = apps.find((app) => app.id === appId);
   const appConfig = currentApp
     ? constants[currentApp.name as keyof typeof constants] || constants.default
     : constants.default;
@@ -33,21 +38,33 @@ const AppDetailCard = ({
     setIsLoading(true);
     try {
       await updateAppDetails(appId, {
-        is_active: !selectedApp.details.is_active,
+        is_active: !details.is_active,
       });
       dispatch(
-        setAppDetails({ appId, isActive: !selectedApp.details.is_active })
+        setAppDetails({ appId, isActive: !details.is_active })
       );
-    } catch (error) {
-      console.error("Failed to toggle app pause state:", error);
+    } catch {
+      toast({ title: messages.common.error, description: messages.apps.accessStatus, variant: "destructive" });
     } finally {
       setIsLoading(false);
     }
   };
 
-  const buttonText = selectedApp.details.is_active
-    ? "Pause Access"
-    : "Unpause Access";
+  const formatDate = (dateStr: string | null | undefined) => {
+    if (!dateStr) return t.never;
+    return new Date(dateStr).toLocaleDateString(locale === "zh" ? "zh-CN" : "en-US", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+    });
+  };
+
+  if (!selectedApp.details) return null;
+
+  const details = selectedApp.details;
+  const buttonText = details.is_active ? t.pauseAccess : t.unpauseAccess;
 
   return (
     <div>
@@ -76,66 +93,40 @@ const AppDetailCard = ({
 
         <div className="space-y-4 p-3">
           <div>
-            <p className="text-xs text-zinc-400">Access Status</p>
+            <p className="text-xs text-zinc-400">{t.accessStatus}</p>
             <p
               className={`font-medium ${
-                selectedApp.details.is_active
+                details.is_active
                   ? "text-emerald-500"
                   : "text-red-500"
               }`}
             >
-              {capitalize(
-                selectedApp.details.is_active ? "active" : "inactive"
-              )}
+              {details.is_active ? t.statusActive : t.statusInactive}
             </p>
           </div>
 
           <div>
-            <p className="text-xs text-zinc-400">Total Memories Created</p>
+            <p className="text-xs text-zinc-400">{t.totalMemoriesCreated}</p>
             <p className="font-medium">
-              {selectedApp.details.total_memories_created} Memories
+              {details.total_memories_created} {t.memoriesUnit}
             </p>
           </div>
 
           <div>
-            <p className="text-xs text-zinc-400">Total Memories Accessed</p>
+            <p className="text-xs text-zinc-400">{t.totalMemoriesAccessed}</p>
             <p className="font-medium">
-              {selectedApp.details.total_memories_accessed} Memories
+              {details.total_memories_accessed} {t.memoriesUnit}
             </p>
           </div>
 
           <div>
-            <p className="text-xs text-zinc-400">First Accessed</p>
-            <p className="font-medium">
-              {selectedApp.details.first_accessed
-                ? new Date(
-                    selectedApp.details.first_accessed
-                  ).toLocaleDateString("en-US", {
-                    day: "numeric",
-                    month: "short",
-                    year: "numeric",
-                    hour: "numeric",
-                    minute: "numeric",
-                  })
-                : "Never"}
-            </p>
+            <p className="text-xs text-zinc-400">{t.firstAccessed}</p>
+            <p className="font-medium">{formatDate(details.first_accessed)}</p>
           </div>
 
           <div>
-            <p className="text-xs text-zinc-400">Last Accessed</p>
-            <p className="font-medium">
-              {selectedApp.details.last_accessed
-                ? new Date(
-                    selectedApp.details.last_accessed
-                  ).toLocaleDateString("en-US", {
-                    day: "numeric",
-                    month: "short",
-                    year: "numeric",
-                    hour: "numeric",
-                    minute: "numeric",
-                  })
-                : "Never"}
-            </p>
+            <p className="text-xs text-zinc-400">{t.lastAccessed}</p>
+            <p className="font-medium">{formatDate(details.last_accessed)}</p>
           </div>
 
           <hr className="border-zinc-800" />
@@ -149,7 +140,7 @@ const AppDetailCard = ({
             >
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
-              ) : buttonText === "Pause Access" ? (
+              ) : details.is_active ? (
                 <PauseIcon className="h-4 w-4" />
               ) : (
                 <PlayIcon className="h-4 w-4" />

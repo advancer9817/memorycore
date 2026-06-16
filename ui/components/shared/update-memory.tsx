@@ -13,9 +13,10 @@ import { Label } from "@/components/ui/label";
 import { useRef } from "react";
 import { Loader2 } from "lucide-react";
 import { useMemoriesApi } from "@/hooks/useMemoriesApi";
-import { toast } from "sonner";
+import { useToast } from "@/hooks/use-toast";
 import { Textarea } from "@/components/ui/textarea";
 import { usePathname } from "next/navigation";
+import { useI18n } from "@/hooks/useI18n";
 
 interface UpdateMemoryProps {
   memoryId: string;
@@ -34,20 +35,22 @@ const UpdateMemory = ({
     useMemoriesApi();
   const textRef = useRef<HTMLTextAreaElement>(null);
   const pathname = usePathname();
+  const { messages } = useI18n();
+  const { toast } = useToast();
+  const t = messages.memories;
 
   const handleUpdateMemory = async (text: string) => {
     try {
       await updateMemory(memoryId, text);
-      toast.success("Memory updated successfully");
+      toast({ description: t.updateSuccess });
       onOpenChange(false);
       if (pathname.includes("memories")) {
         await fetchMemories();
       } else {
         await fetchMemoryById(memoryId);
       }
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to update memory");
+    } catch {
+      toast({ description: t.updateFailure, variant: "destructive" });
     }
   };
 
@@ -55,12 +58,12 @@ const UpdateMemory = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[525px] bg-zinc-900 border-zinc-800 z-50">
         <DialogHeader>
-          <DialogTitle>Update Memory</DialogTitle>
-          <DialogDescription>Edit your existing memory</DialogDescription>
+          <DialogTitle>{t.updateDialogTitle}</DialogTitle>
+          <DialogDescription>{t.updateDialogDescription}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-4">
           <div className="grid gap-2">
-            <Label htmlFor="memory">Memory</Label>
+            <Label htmlFor="memory">{t.createLabel}</Label>
             <Textarea
               ref={textRef}
               id="memory"
@@ -71,7 +74,7 @@ const UpdateMemory = ({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t.createCancel}
           </Button>
           <Button
             className="w-[140px]"
@@ -81,7 +84,7 @@ const UpdateMemory = ({
             {isLoading ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
             ) : (
-              "Update Memory"
+              t.updateButton
             )}
           </Button>
         </DialogFooter>

@@ -15,6 +15,7 @@ import { AppDetailCardSkeleton } from "@/skeleton/AppDetailCardSkeleton";
 import { MemoryCardSkeleton } from "@/skeleton/MemoryCardSkeleton";
 import { useUI } from "@/hooks/useUI";
 import UpdateMemory from "@/components/shared/update-memory";
+import { useI18n } from "@/hooks/useI18n";
 
 export default function AppDetailsPage() {
   const params = useParams();
@@ -24,6 +25,7 @@ export default function AppDetailsPage() {
   const { fetchAppDetails, fetchAppMemories, fetchAppAccessedMemories, fetchApps } = useAppsApi();
   const { deleteMemories } = useMemoriesApi();
   const { updateMemoryDialog, handleOpenUpdateMemoryDialog, handleCloseUpdateMemoryDialog } = useUI();
+  const { messages } = useI18n();
   const selectedApp = useSelector((state: RootState) => state.apps.selectedApp);
 
   useEffect(() => { fetchApps({}); }, [fetchApps]);
@@ -50,7 +52,7 @@ export default function AppDetailsPage() {
     }
   };
 
-  if (selectedApp.error) return <NotFound message={selectedApp.error} title="Error loading app details" />;
+  if (selectedApp.error) return <NotFound message={selectedApp.error} title={messages.apps.errorLoadingApp} />;
   if (!selectedApp.details) return (
     <div className="flex-1 py-6 text-white"><div className="container flex justify-between">
       <div className="flex-1 p-4 max-w-4xl animate-fade-slide-down"><div className="mb-6">
@@ -66,8 +68,8 @@ export default function AppDetailsPage() {
       <div className="flex-1 p-4 max-w-4xl animate-fade-slide-down">
         <Tabs defaultValue="created" className="mb-6" onValueChange={setActiveTab}>
           <TabsList className="bg-transparent border-b border-zinc-800 rounded-none w-full justify-start gap-8 p-0">
-            <TabsTrigger value="created" className={`px-0 pb-2 rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none ${activeTab === "created" ? "text-white" : "text-zinc-400"}`}>Created ({selectedApp.memories.created.total})</TabsTrigger>
-            <TabsTrigger value="accessed" className={`px-0 pb-2 rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none ${activeTab === "accessed" ? "text-white" : "text-zinc-400"}`}>Accessed ({selectedApp.memories.accessed.total})</TabsTrigger>
+            <TabsTrigger value="created" className={`px-0 pb-2 rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none ${activeTab === "created" ? "text-white" : "text-zinc-400"}`}>{messages.apps.tabCreated(selectedApp.memories.created.total)}</TabsTrigger>
+            <TabsTrigger value="accessed" className={`px-0 pb-2 rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none ${activeTab === "accessed" ? "text-white" : "text-zinc-400"}`}>{messages.apps.tabAccessed(selectedApp.memories.accessed.total)}</TabsTrigger>
           </TabsList>
           <TabsContent value="created" className="mt-6 space-y-6 animate-fade-slide-down delay-1">
             {selectedApp.memories.created.loading ? <div className="space-y-4">{[...Array(3)].map((_, i) => <MemoryCardSkeleton key={i} />)}</div>

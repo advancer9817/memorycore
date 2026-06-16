@@ -21,6 +21,7 @@ export function MemoryPagination({
         <Button
           variant="outline"
           size="icon"
+          aria-label={messages.common.previousPage}
           onClick={() => setCurrentPage(Math.max(currentPage - 1, 1))}
           disabled={currentPage === 1}
         >
@@ -32,6 +33,7 @@ export function MemoryPagination({
         <Button
           variant="outline"
           size="icon"
+          aria-label={messages.common.nextPage}
           onClick={() => setCurrentPage(Math.min(currentPage + 1, totalPages))}
           disabled={currentPage === totalPages}
         >

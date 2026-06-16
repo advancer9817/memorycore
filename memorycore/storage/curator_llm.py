@@ -35,17 +35,14 @@ from memorycore.storage.mutations import MutationContext, MutationRequest
 
 logger = logging.getLogger(__name__)
 
-# Cooldown registry — persisted to SQLite (curator_review_log table)
-_REVIEW_COOLDOWN_SECONDS = 7200   # 2 hours
-_REVIEWED_IDS_MAX_AGE_SECONDS = 86400  # 24 hours
-
-
 def _cleanup_reviewed_ids() -> None:
     """Remove entries older than 24 hours from the cooldown registry."""
     from memorycore.storage.db import managed_conn
-    from memorycore.models import local_now
+    from memorycore.models import load_config, local_now
     from datetime import timedelta
-    cutoff = (local_now() - timedelta(seconds=_REVIEWED_IDS_MAX_AGE_SECONDS)).isoformat(timespec="seconds")
+    cfg = load_config().get("llm_curator", {})
+    max_age = cfg.get("reviewed_ids_max_age_seconds", 86400)
+    cutoff = (local_now() - timedelta(seconds=max_age)).isoformat(timespec="seconds")
     with managed_conn() as conn:
         conn.execute("DELETE FROM curator_review_log WHERE reviewed_at < ?", (cutoff,))
 
@@ -53,9 +50,11 @@ def _cleanup_reviewed_ids() -> None:
 def _get_recently_reviewed_ids(review_type: str = "llm_curator") -> set[str]:
     """Return set of memory IDs reviewed within the cooldown window."""
     from memorycore.storage.db import read_conn
-    from memorycore.models import local_now
+    from memorycore.models import load_config, local_now
     from datetime import timedelta
-    cutoff = (local_now() - timedelta(seconds=_REVIEW_COOLDOWN_SECONDS)).isoformat(timespec="seconds")
+    cfg = load_config().get("llm_curator", {})
+    cooldown = cfg.get("review_cooldown_seconds", 7200)
+    cutoff = (local_now() - timedelta(seconds=cooldown)).isoformat(timespec="seconds")
     with read_conn() as conn:
         rows = conn.execute(
             "SELECT memory_id FROM curator_review_log WHERE review_type = ? AND reviewed_at >= ?",
@@ -74,15 +73,6 @@ def _mark_reviewed(memory_ids: list[str], review_type: str = "llm_curator") -> N
             "INSERT OR REPLACE INTO curator_review_log(memory_id, review_type, reviewed_at) VALUES (?, ?, ?)",
             [(mid, review_type, ts) for mid in memory_ids],
         )
-
-# Cosine similarity threshold for candidate pairs fed to the LLM
-_SIM_THRESHOLD = 0.60          # 降低：更多相似对送 LLM 判断
-_BATCH_SIZE = 10
-# Max memories evaluated for importance re-assessment per run
-_IMPORTANCE_LIMIT = 1000       # 全库评估
-# Long-content threshold: memories with content > this many chars are candidates for splitting
-_SPLIT_CONTENT_THRESHOLD = 400
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -232,11 +222,12 @@ def _find_semantic_duplicate_candidates(
 def _llm_judge_duplicates(
     pairs: list[tuple[dict, dict, float]],
     llm_config: Any,
+    batch_size: int = 10,
 ) -> list[dict[str, Any]]:
     """Ask LLM to confirm which pairs are true duplicates."""
     results = []
-    for i in range(0, len(pairs), _BATCH_SIZE):
-        batch = pairs[i: i + _BATCH_SIZE]
+    for i in range(0, len(pairs), batch_size):
+        batch = pairs[i: i + batch_size]
         items_text = ""
         for idx, (a, b, score) in enumerate(batch):
             items_text += (
@@ -354,11 +345,12 @@ def _find_contradiction_candidates(
 def _llm_judge_contradictions(
     pairs: list[tuple[dict, dict, float]],
     llm_config: Any,
+    batch_size: int = 10,
 ) -> list[dict[str, Any]]:
     """Ask LLM to detect contradictions in memory pairs."""
     results = []
-    for i in range(0, len(pairs), _BATCH_SIZE):
-        batch = pairs[i: i + _BATCH_SIZE]
+    for i in range(0, len(pairs), batch_size):
+        batch = pairs[i: i + batch_size]
         items_text = ""
         for idx, (a, b, score) in enumerate(batch):
             items_text += (
@@ -410,11 +402,12 @@ def _llm_judge_contradictions(
 def _llm_reassess_importance(
     memories: list[dict[str, Any]],
     llm_config: Any,
+    batch_size: int = 10,
 ) -> list[dict[str, Any]]:
     """Ask LLM to re-score importance for memories that may be stale or over-valued."""
     results = []
-    for i in range(0, len(memories), _BATCH_SIZE):
-        batch = memories[i: i + _BATCH_SIZE]
+    for i in range(0, len(memories), batch_size):
+        batch = memories[i: i + batch_size]
         items_text = ""
         for idx, m in enumerate(batch):
             items_text += (
@@ -470,12 +463,13 @@ def _llm_reassess_importance(
 def _llm_detect_splittable(
     memories: list[dict[str, Any]],
     llm_config: Any,
+    batch_size: int = 10,
 ) -> list[dict[str, Any]]:
     """Ask LLM to identify memories whose content bundles multiple distinct facts
     that would be better stored as separate atomic memories."""
     results = []
-    for i in range(0, len(memories), _BATCH_SIZE):
-        batch = memories[i: i + _BATCH_SIZE]
+    for i in range(0, len(memories), batch_size):
+        batch = memories[i: i + batch_size]
         items_text = ""
         for idx, m in enumerate(batch):
             items_text += (
@@ -522,11 +516,16 @@ def _llm_detect_splittable(
 def llm_curator_report(
     config: dict[str, Any] | None = None,
     limit: int = 10000,
-    sim_threshold: float = _SIM_THRESHOLD,
+    sim_threshold: float | None = None,
 ) -> dict[str, Any]:
     """Run LLM-enhanced curation analysis. Returns structured report (no writes)."""
     from memorycore.models import load_config
-    cfg = load_config() if config is None else config
+    cfg = (config or {}).get("llm_curator", load_config().get("llm_curator", {}))
+
+    batch_size = cfg.get("batch_size", 10)
+    importance_limit = cfg.get("importance_limit", 1000)
+    split_threshold = cfg.get("split_content_threshold", 400)
+    effective_sim = sim_threshold if sim_threshold is not None else cfg.get("sim_threshold", 0.60)
 
     errors: list[str] = []
     diagnostics: dict[str, Any] = {
@@ -569,21 +568,21 @@ def llm_curator_report(
 
     if vs_available:
         try:
-            dup_pairs = _find_semantic_duplicate_candidates(vs, memories, sim_threshold)
+            dup_pairs = _find_semantic_duplicate_candidates(vs, memories, effective_sim)
             diagnostics["dedup_pairs_found"] = len(dup_pairs)
             if dup_pairs:
-                diagnostics["dedup_llm_calls"] = min(len(dup_pairs), 200) // _BATCH_SIZE + (1 if min(len(dup_pairs), 200) % _BATCH_SIZE else 0)
-                semantic_duplicates = _llm_judge_duplicates(dup_pairs[:200], llm_config)
+                diagnostics["dedup_llm_calls"] = min(len(dup_pairs), 200) // batch_size + (1 if min(len(dup_pairs), 200) % batch_size else 0)
+                semantic_duplicates = _llm_judge_duplicates(dup_pairs[:200], llm_config, batch_size=batch_size)
         except Exception as exc:
             errors.append(f"Semantic dedup failed: {exc}")
             logger.warning("semantic dedup error: %s", exc)
 
         try:
-            contra_pairs = _find_contradiction_candidates(vs, memories, sim_threshold)
+            contra_pairs = _find_contradiction_candidates(vs, memories, effective_sim)
             diagnostics["contradiction_pairs_found"] = len(contra_pairs)
             if contra_pairs:
-                diagnostics["contradiction_llm_calls"] = min(len(contra_pairs), 200) // _BATCH_SIZE + (1 if min(len(contra_pairs), 200) % _BATCH_SIZE else 0)
-                contradictions = _llm_judge_contradictions(contra_pairs[:200], llm_config)
+                diagnostics["contradiction_llm_calls"] = min(len(contra_pairs), 200) // batch_size + (1 if min(len(contra_pairs), 200) % batch_size else 0)
+                contradictions = _llm_judge_contradictions(contra_pairs[:200], llm_config, batch_size=batch_size)
         except Exception as exc:
             errors.append(f"Contradiction detection failed: {exc}")
             logger.warning("contradiction detection error: %s", exc)
@@ -599,10 +598,10 @@ def llm_curator_report(
         all_candidates = [m for m in memories if m["id"] not in recently_reviewed]
         diagnostics["memories_after_cooldown_filter"] = len(all_candidates)
         _random.shuffle(all_candidates)
-        candidates = all_candidates[:_IMPORTANCE_LIMIT]
+        candidates = all_candidates[:importance_limit]
         diagnostics["importance_candidates"] = len(candidates)
         if candidates:
-            importance_reassessments = _llm_reassess_importance(candidates, llm_config)
+            importance_reassessments = _llm_reassess_importance(candidates, llm_config, batch_size=batch_size)
             diagnostics["importance_skipped_keep"] = len(candidates) - len(importance_reassessments)
     except Exception as exc:
         errors.append(f"Importance reassessment failed: {exc}")
@@ -613,11 +612,11 @@ def llm_curator_report(
     try:
         long_memories = [
             m for m in memories
-            if len(m.get("content", "")) > _SPLIT_CONTENT_THRESHOLD
+            if len(m.get("content", "")) > split_threshold
         ][:100]  # up to 100 long memories per run
         diagnostics["split_candidates_checked"] = len(long_memories)
         if long_memories:
-            split_candidates = _llm_detect_splittable(long_memories, llm_config)
+            split_candidates = _llm_detect_splittable(long_memories, llm_config, batch_size=batch_size)
     except Exception as exc:
         errors.append(f"Split detection failed: {exc}")
         logger.warning("split detection error: %s", exc)
@@ -659,7 +658,7 @@ def llm_curator_report(
 def run_llm_curator(
     config: dict[str, Any] | None = None,
     limit: int = 200,
-    sim_threshold: float = _SIM_THRESHOLD,
+    sim_threshold: float | None = None,
     apply: bool = False,
     rebuild_vectors: bool = True,
 ) -> dict[str, Any]:

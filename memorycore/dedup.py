@@ -179,6 +179,25 @@ def ingest(
 
     cfg = cfg or {}
 
+    # --- Load extraction strategy config ---
+    es = cfg.get("extraction_strategy", {})
+    base_skip = es.get("skip_threshold", SKIP_THRESHOLD)
+    base_update = es.get("update_threshold", UPDATE_THRESHOLD)
+    base_link = es.get("link_threshold", LINK_THRESHOLD)
+    context_sample_len = es.get("context_sample_length", 200)
+    context_mem_limit = es.get("context_memory_limit", 10)
+    dedup_top_k = es.get("dedup_search_limit", 5)
+    max_related = es.get("max_related_ids", 10)
+    mem_type = es.get("default_memory_type", "episodic_memory")
+    mem_status = es.get("default_status", "candidate")
+    mem_decay = es.get("default_decay_policy", "review")
+    mem_scope = es.get("default_scope", "global")
+    title_max = es.get("title_max_length", 80)
+    default_conf = es.get("default_confidence", 0.65)
+    default_imp = es.get("default_importance", 0.5)
+    min_importance = es.get("min_importance", 0.3)
+    chinese_ratio = es.get("chinese_detection_ratio", 0.15)
+
     # --- 1. Build dependencies ---
     from memorycore.extraction import ExtractionConfig, extraction_config_from_dict
     from memorycore.vector_store import VectorStore, get_vector_store, vector_store_config_from_dict
@@ -198,10 +217,10 @@ def ingest(
     existing_for_prompt: list[dict[str, Any]] = []
     if vs.available:
         # Use a broad query to get recent active memories for the LLM context
-        sample_query = " ".join(m.get("content", "") for m in messages[:2])[:200]
+        sample_query = " ".join(m.get("content", "") for m in messages[:2])[:context_sample_len]
         existing_hits = vs.search(
             sample_query,
-            top_k=10,
+            top_k=context_mem_limit,
             filters={"status": "active"},
         )
         existing_for_prompt = [
@@ -215,6 +234,8 @@ def ingest(
         messages,
         existing_memories=existing_for_prompt,
         config=ext_cfg,
+        min_importance=min_importance,
+        chinese_detection_ratio=chinese_ratio,
     )
     result.extraction_elapsed_s = ext_elapsed
 
@@ -225,14 +246,13 @@ def ingest(
     # --- 4. Dedup each fact ---
     for fact in facts:
         try:
-            # Use per-type link threshold for vector search floor
-            fact_type = "episodic_memory"  # all ingest facts are episodic initially
-            type_link = TYPE_THRESHOLDS.get(fact_type, (SKIP_THRESHOLD, UPDATE_THRESHOLD, LINK_THRESHOLD))[2]
+            fact_type = mem_type
+            type_link = TYPE_THRESHOLDS.get(fact_type, (base_skip, base_update, base_link))[2]
             similar = []
             if vs.available:
                 similar = vs.search(
                     fact.text,
-                    top_k=5,
+                    top_k=dedup_top_k,
                     filters={"status": "active"},
                     score_threshold=type_link,
                 )
@@ -242,6 +262,9 @@ def ingest(
                 similar,
                 linked_memory_ids=fact.linked_memory_ids,
                 memory_type=fact_type,
+                skip_threshold=base_skip,
+                update_threshold=base_update,
+                link_threshold=base_link,
             )
             result.decisions.append(decision)
 
@@ -250,35 +273,32 @@ def ingest(
                 logger.debug("dedup: SKIP  [%.3f] %s", decision.similarity, fact.text[:60])
 
             elif decision.action == "update":
-                # Touch the existing memory to update its updated_at timestamp
                 try:
                     _update_memory_fn(decision.existing_id)
                 except Exception as exc:
                     logger.warning("dedup: failed to touch existing memory %s: %s", decision.existing_id, exc)
 
-                # Write new candidate that supersedes the existing one
                 new_id = str(uuid.uuid4())
                 _add_memory_fn(
                     memory_id=new_id,
-                    memory_type="episodic_memory",
-                    title=fact.text[:80],
+                    memory_type=mem_type,
+                    title=fact.text[:title_max],
                     content=fact.text,
-                    scope="global",
+                    scope=mem_scope,
                     tags=["extracted", f"agent:{agent_id}", "supersedes:" + decision.existing_id],
                     source="extraction",
                     source_agent=agent_id,
-                    confidence=0.65,
-                    importance=fact.importance,
-                    status="candidate",
-                    decay_policy="review",
-                    related_ids=([decision.existing_id] + decision.linked_ids)[:10],
+                    confidence=default_conf,
+                    importance=fact.importance if fact.importance != 0.5 else default_imp,
+                    status=mem_status,
+                    decay_policy=mem_decay,
+                    related_ids=([decision.existing_id] + decision.linked_ids)[:max_related],
                     metadata={"user_id": user_id, "supersedes": decision.existing_id,
                               "similarity": round(decision.similarity, 4)},
                 )
-                # Upsert into vector store
                 if vs.available:
                     vs.upsert(new_id, fact.text, {
-                        "status": "candidate",
+                        "status": mem_status,
                         "user_id": user_id,
                         "agent_id": agent_id,
                     })
@@ -289,24 +309,24 @@ def ingest(
                 new_id = str(uuid.uuid4())
                 _add_memory_fn(
                     memory_id=new_id,
-                    memory_type="episodic_memory",
-                    title=fact.text[:80],
+                    memory_type=mem_type,
+                    title=fact.text[:title_max],
                     content=fact.text,
-                    scope="global",
+                    scope=mem_scope,
                     tags=["extracted", f"agent:{agent_id}"],
                     source="extraction",
                     source_agent=agent_id,
-                    confidence=0.65,
-                    importance=fact.importance,
-                    status="candidate",
-                    decay_policy="review",
-                    related_ids=decision.linked_ids[:10],
+                    confidence=default_conf,
+                    importance=fact.importance if fact.importance != 0.5 else default_imp,
+                    status=mem_status,
+                    decay_policy=mem_decay,
+                    related_ids=decision.linked_ids[:max_related],
                     metadata={"user_id": user_id,
                               "similarity_to_nearest": round(decision.similarity, 4)},
                 )
                 if vs.available:
                     vs.upsert(new_id, fact.text, {
-                        "status": "candidate",
+                        "status": mem_status,
                         "user_id": user_id,
                         "agent_id": agent_id,
                     })

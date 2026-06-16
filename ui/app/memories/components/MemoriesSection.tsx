@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Category, Client } from "../../../components/types";
+import { FileStack } from "lucide-react";
 import { MemoryTable } from "./MemoryTable";
 import { MemoryPagination } from "./MemoryPagination";
 import { CreateMemoryDialog } from "./CreateMemoryDialog";
@@ -10,31 +11,31 @@ import { useSelector } from "react-redux";
 import { RootState } from "@/store/store";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MemoryTableSkeleton } from "@/skeleton/MemoryTableSkeleton";
+import { useI18n } from "@/hooks/useI18n";
 
 export function MemoriesSection() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { fetchMemories } = useMemoriesApi();
+  const { messages } = useI18n();
   const memories = useSelector((state: RootState) => state.memories.memories);
   const refreshKey = useSelector((state: RootState) => state.memories.refreshKey);
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const currentPage = Number(searchParams.get("page")) || 1;
   const itemsPerPage = Number(searchParams.get("size")) || 20;
   const sortColumn = searchParams.get("sort") || "created_at";
   const sortDirection = (searchParams.get("dir") || "desc") as "asc" | "desc";
-  const [selectedCategory, setSelectedCategory] = useState<Category | "all">(
-    "all"
-  );
-  const [selectedClient, setSelectedClient] = useState<Client | "all">("all");
+  const searchQuery = searchParams.get("search") ?? "";
 
   useEffect(() => {
     const loadMemories = async () => {
       setIsLoading(true);
+      setFetchError(null);
       try {
-        const searchQuery = searchParams.get("search") || "";
         const result = await fetchMemories(
           searchQuery,
           currentPage,
@@ -44,14 +45,14 @@ export function MemoriesSection() {
         );
         setTotalItems(result.total);
         setTotalPages(result.pages);
-      } catch (error) {
-        // silently handled
+      } catch {
+        setFetchError(messages.memories.loadFailure);
       }
       setIsLoading(false);
     };
 
     loadMemories();
-  }, [currentPage, itemsPerPage, sortColumn, sortDirection, fetchMemories, refreshKey]);
+  }, [currentPage, itemsPerPage, sortColumn, sortDirection, searchQuery, fetchMemories, refreshKey, messages.memories.loadFailure]);
 
   const setCurrentPage = (page: number) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -62,7 +63,7 @@ export function MemoriesSection() {
 
   const handlePageSizeChange = (size: number) => {
     const params = new URLSearchParams(searchParams.toString());
-    params.set("page", "1"); // Reset to page 1 when changing page size
+    params.set("page", "1");
     params.set("size", size.toString());
     router.push(`?${params.toString()}`);
   };
@@ -82,6 +83,28 @@ export function MemoriesSection() {
 
   return (
     <div className="w-full bg-transparent">
+      {fetchError && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertDescription className="flex items-center justify-between">
+            <span>{fetchError}</span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="ml-4 shrink-0"
+              onClick={() => {
+                setFetchError(null);
+                setIsLoading(true);
+                fetchMemories(searchQuery, currentPage, itemsPerPage, { sortColumn, sortDirection }, true)
+                  .then((r) => { setTotalItems(r.total); setTotalPages(r.pages); })
+                  .catch(() => setFetchError(messages.memories.loadFailure))
+                  .finally(() => setIsLoading(false));
+              }}
+            >
+              {messages.common.retry}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
       <div>
         {memories.length > 0 ? (
           <>
@@ -92,9 +115,11 @@ export function MemoriesSection() {
                 onPageSizeChange={handlePageSizeChange}
               />
               <div className="text-sm text-zinc-500 mr-2">
-                Showing {(currentPage - 1) * itemsPerPage + 1} to{" "}
-                {Math.min(currentPage * itemsPerPage, totalItems)} of{" "}
-                {totalItems} memories
+                {messages.memories.showingRange(
+                  (currentPage - 1) * itemsPerPage + 1,
+                  Math.min(currentPage * itemsPerPage, totalItems),
+                  totalItems
+                )}
               </div>
               <MemoryPagination
                 currentPage={currentPage}
@@ -106,39 +131,24 @@ export function MemoriesSection() {
         ) : (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <div className="rounded-full bg-zinc-800 p-3 mb-4">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-6 w-6 text-zinc-400"
-              >
-                <path d="M21 9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"></path>
-                <path d="M16 2v6h6"></path>
-                <path d="M12 18v-6"></path>
-                <path d="M9 15h6"></path>
-              </svg>
+              <FileStack className="h-6 w-6 text-zinc-400" aria-hidden="true" />
             </div>
-            <h3 className="text-lg font-medium">No memories found</h3>
+            <h3 className="text-lg font-medium">{messages.memories.noMemoriesFound}</h3>
             <p className="text-zinc-400 mt-1 mb-4">
-              {selectedCategory !== "all" || selectedClient !== "all"
-                ? "Try adjusting your filters"
-                : "Create your first memory to see it here"}
+              {searchQuery
+                ? messages.memories.tryAdjustingFilters
+                : messages.memories.createFirstMemory}
             </p>
-            {selectedCategory !== "all" || selectedClient !== "all" ? (
+            {searchQuery ? (
               <Button
                 variant="outline"
                 onClick={() => {
-                  setSelectedCategory("all");
-                  setSelectedClient("all");
+                  const params = new URLSearchParams(searchParams.toString());
+                  params.delete("search");
+                  router.push(`?${params.toString()}`);
                 }}
               >
-                Clear Filters
+                {messages.common.clearFilters}
               </Button>
             ) : (
               <CreateMemoryDialog />

@@ -1,10 +1,10 @@
 import { GovernanceDecision, GovernanceMemorySnapshot } from "./types";
 
-export function formatGovernanceDate(value?: string | number | null): string {
+export function formatGovernanceDate(value?: string | number | null, locale: "en" | "zh" = "en"): string {
   if (!value || value === "n/a") return "n/a";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "n/a";
-  return date.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleString(locale === "zh" ? "zh-CN" : "en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 export function formatPercent(value?: number): string {
@@ -57,7 +57,7 @@ export function reviewStatusTone(status: string): string {
   if (status === "applied") return "border-emerald-800/70 bg-emerald-950/35 text-emerald-200";
   if (status === "auto_approved") return "border-sky-800/70 bg-sky-950/35 text-sky-200";
   if (status === "rejected") return "border-zinc-700 bg-zinc-900 text-zinc-300";
-  if (status === "rolled_back") return "border-violet-800/70 bg-violet-950/35 text-violet-200";
+  if (status === "rolled_back") return "border-zinc-700/70 bg-zinc-800/35 text-zinc-300";
   return "border-amber-800/70 bg-amber-950/35 text-amber-200";
 }
 

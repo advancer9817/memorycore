@@ -201,7 +201,6 @@ export const useAppsApi = (): UseAppsApiReturn => {
       setIsLoading(false);
       return response.data;
     } catch (error) {
-      console.error("Failed to update app details:", error);
       setIsLoading(false);
       throw error;
     }

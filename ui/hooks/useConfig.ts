@@ -14,12 +14,13 @@ import {
   EmbedderProvider,
   LLMBackendConfig,
   MemoryCoreConfig,
+  StrategyConfig,
 } from '@/store/configSlice';
 import { getApiBaseUrl } from '@/lib/api-url';
 
 interface UseConfigApiReturn {
   fetchConfig: () => Promise<void>;
-  saveConfig: (config: { settings?: MemoryCoreConfig; llm?: LLMBackendConfig }) => Promise<void>;
+  saveConfig: (config: { settings?: MemoryCoreConfig; llm?: LLMBackendConfig; strategy?: StrategyConfig }) => Promise<void>;
   saveLLMConfig: (llmConfig: LLMProvider) => Promise<void>;
   saveEmbedderConfig: (embedderConfig: EmbedderProvider) => Promise<void>;
   resetConfig: () => Promise<void>;
@@ -48,7 +49,7 @@ export const useConfig = (): UseConfigApiReturn => {
     }
   };
 
-  const saveConfig = async (config: { settings?: MemoryCoreConfig; llm?: LLMBackendConfig }) => {
+  const saveConfig = async (config: { settings?: MemoryCoreConfig; llm?: LLMBackendConfig; strategy?: StrategyConfig }) => {
     setIsLoading(true);
     setError(null);
     try {

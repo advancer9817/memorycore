@@ -5,6 +5,7 @@ import { constants } from "@/components/shared/source-app";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store/store";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useI18n } from "@/hooks/useI18n";
 
 interface AccessLogEntry {
   id: string;
@@ -22,25 +23,30 @@ export function AccessLog({ memoryId }: AccessLogProps) {
     (state: RootState) => state.memories.accessLogs
   );
   const [isLoading, setIsLoading] = useState(true);
+  const { messages, locale } = useI18n();
+  const t = messages.memoryDetail;
 
   useEffect(() => {
     const loadAccessLogs = async () => {
       try {
         await fetchAccessLogs(memoryId);
-      } catch (error) {
-        console.error("Failed to fetch access logs:", error);
       } finally {
         setIsLoading(false);
       }
     };
 
     loadAccessLogs();
-  }, []);
+  }, [memoryId, fetchAccessLogs]);
 
   if (isLoading) {
     return (
-      <div className="w-full max-w-md mx-auto rounded-3xl overflow-hidden bg-[#1c1c1c] text-white p-6">
-        <p className="text-center text-zinc-500">Loading access logs...</p>
+      <div className="w-full max-w-md mx-auto rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800 text-white pb-1">
+        <div className="px-6 py-4 bg-zinc-800 border-b border-zinc-800">
+          <div className="h-4 w-24 bg-zinc-700 rounded animate-pulse" />
+        </div>
+        <div className="p-6 flex items-center justify-center min-h-[80px]">
+          <p className="text-center text-zinc-500">{t.accessLogLoading}</p>
+        </div>
       </div>
     );
   }
@@ -48,18 +54,14 @@ export function AccessLog({ memoryId }: AccessLogProps) {
   return (
     <div className="w-full max-w-md mx-auto rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800 text-white pb-1">
       <div className="px-6 py-4 flex justify-between items-center bg-zinc-800 border-b border-zinc-800">
-        <h2 className="font-semibold">Access Log</h2>
-        {/* <button className="px-3 py-1 text-sm rounded-lg border border-[#ff5533] text-[#ff5533] flex items-center gap-2 hover:bg-[#ff5533]/10 transition-colors">
-          <PauseIcon size={18} />
-          <span>Pause Access</span>
-        </button> */}
+        <h2 className="font-semibold">{t.accessLogTitle}</h2>
       </div>
 
       <ScrollArea className="p-6 max-h-[450px]">
         {accessEntries.length === 0 && (
-          <div className="w-full max-w-md mx-auto rounded-3xl overflow-hidden min-h-[110px] flex items-center justify-center text-white p-6">
+          <div className="flex items-center justify-center min-h-[80px]">
             <p className="text-center text-zinc-500">
-              No access logs available
+              {t.accessLogEmpty}
             </p>
           </div>
         )}
@@ -95,7 +97,7 @@ export function AccessLog({ memoryId }: AccessLogProps) {
                   <span className="font-medium">{appConfig.name}</span>
                   <span className="text-zinc-400 text-sm">
                     {new Date(entry.accessed_at + "Z").toLocaleDateString(
-                      "en-US",
+                      locale === "zh" ? "zh-CN" : "en-US",
                       {
                         year: "numeric",
                         month: "short",

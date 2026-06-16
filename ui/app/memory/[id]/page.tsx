@@ -11,19 +11,21 @@ import { useUI } from "@/hooks/useUI";
 import { RootState } from "@/store/store";
 import { useSelector } from "react-redux";
 import NotFound from "@/app/not-found";
+import { useI18n } from "@/hooks/useI18n";
 
 function MemoryContent({ id }: { id: string }) {
   const { fetchMemoryById, isLoading, error } = useMemoriesApi();
+  const { messages } = useI18n();
   const memory = useSelector((state: RootState) => state.memories.selectedMemory);
 
   useEffect(() => {
-    fetchMemoryById(id).catch((err) => console.error("Failed to load memory:", err));
-  }, []);
+    fetchMemoryById(id).catch(() => {});
+  }, [id, fetchMemoryById]);
 
   if (isLoading) return <MemorySkeleton />;
   if (error) return <NotFound message={error} />;
-  if (!memory) return <NotFound message="Memory not found" statusCode={404} />;
-  return <MemoryDetails memory_id={memory.id} />;
+  if (!memory) return <NotFound message={messages.memoryDetail.memoryNotFound} statusCode={404} />;
+  return <MemoryDetails />;
 }
 
 export default function MemoryPage({ params }: { params: Promise<{ id: string }> }) {

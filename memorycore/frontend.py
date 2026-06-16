@@ -378,7 +378,7 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
 
     if parts == ["governance", "decisions"] and method == "GET":
         from memorycore.storage.governance import list_governance_decisions
-        return list_governance_decisions(_str_q(query, "review_status", None), _int_q(query, "limit", 100))
+        return list_governance_decisions(_str_q(query, "review_status", None), _int_q(query, "limit", 100), decision_type=_str_q(query, "decision_type", None))
     if len(parts) == 2 and parts[0] == "governance" and parts[1] not in ("decisions", "metrics") and method == "GET":
         from memorycore.storage.governance import get_governance_decision
         decision = get_governance_decision(parts[1])
@@ -644,6 +644,7 @@ def _read_memorycore_config() -> dict[str, Any]:
     cfg = load_config()
     extraction = cfg.get("extraction", {})
     embedding = cfg.get("embedding", {})
+    from memorycore.models import DEFAULT_CONFIG
     return {
         "settings": {
             "custom_instructions": None,
@@ -667,6 +668,12 @@ def _read_memorycore_config() -> dict[str, Any]:
                 "timeout": embedding.get("timeout", 30),
             },
         },
+        "strategy": {
+            "rule_curator": cfg.get("rule_curator", DEFAULT_CONFIG.get("rule_curator", {})),
+            "llm_curator": cfg.get("llm_curator", DEFAULT_CONFIG.get("llm_curator", {})),
+            "governance": cfg.get("governance", DEFAULT_CONFIG.get("governance", {})),
+            "extraction_strategy": cfg.get("extraction_strategy", DEFAULT_CONFIG.get("extraction_strategy", {})),
+        },
     }
 
 
@@ -689,7 +696,17 @@ def _write_memorycore_config(body: dict[str, Any]) -> dict[str, Any]:
             k: v for k, v in embedding_patch.items() if v is not None and v != ""
         })
 
+    strategy_body = body.get("strategy", {})
+    for section in ("rule_curator", "llm_curator", "governance", "extraction_strategy"):
+        patch = strategy_body.get(section)
+        if isinstance(patch, dict) and patch:
+            existing.setdefault(section, {}).update({
+                k: v for k, v in patch.items() if v is not None
+            })
+
     path.write_text(yaml.safe_dump(existing, allow_unicode=True, default_flow_style=False), encoding="utf-8")
+    from memorycore.models import invalidate_config_cache
+    invalidate_config_cache()
     return _read_memorycore_config()
 
 
@@ -1011,8 +1028,7 @@ def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
 
     llm_summary = dict(llm_detail.get("summary", {}) if isinstance(llm_detail, dict) else {})
     for category, decision_type in _CATEGORY_TO_DECISION_TYPE.items():
-        if category in llm_summary:
-            llm_summary[category] = active_counts.get(decision_type, 0)
+        llm_summary[category] = active_counts.get(decision_type, 0)
 
     schedule = {
         "timer": "mcore-curator.timer",

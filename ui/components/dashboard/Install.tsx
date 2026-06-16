@@ -104,11 +104,11 @@ type CuratorRunState = {
   error?: string;
 };
 
-function formatTime(value?: string) {
+function formatTime(value?: string, locale: "en" | "zh" = "en") {
   if (!value || value === "n/a") return "n/a";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("en-US", {
+  return date.toLocaleString(locale === "zh" ? "zh-CN" : "en-US", {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -117,7 +117,7 @@ function formatTime(value?: string) {
 }
 
 export const Install = () => {
-  const { messages: t } = useI18n();
+  const { messages: t, locale } = useI18n();
   const [status, setStatus] = useState<CuratorStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState(false);
@@ -427,14 +427,14 @@ export const Install = () => {
   return (
     <div id="memory-operations">
       <div className="mb-6">
-        <h2 className="text-base font-medium text-zinc-400">Memory Operations</h2>
+        <h2 className="text-base font-medium text-zinc-400">{t.dashboard.operations}</h2>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-zinc-400 flex items-center justify-between">
-              Total Memories <Database className="h-4 w-4 text-zinc-500" />
+              {t.dashboard.totalMemories} <Database className="h-4 w-4 text-zinc-500" />
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -444,7 +444,7 @@ export const Install = () => {
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-zinc-400 flex items-center justify-between">
-              Active <Activity className="h-4 w-4 text-zinc-500" />
+              {t.dashboard.active} <Activity className="h-4 w-4 text-zinc-500" />
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -454,7 +454,7 @@ export const Install = () => {
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-zinc-400 flex items-center justify-between">
-              Candidates <Sparkles className="h-4 w-4 text-zinc-500" />
+              {t.dashboard.candidates} <Sparkles className="h-4 w-4 text-zinc-500" />
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -464,7 +464,7 @@ export const Install = () => {
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-zinc-400 flex items-center justify-between">
-              Archived <Archive className="h-4 w-4 text-zinc-500" />
+              {t.dashboard.archived} <Archive className="h-4 w-4 text-zinc-500" />
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -482,13 +482,13 @@ export const Install = () => {
               {t.dashboard.scheduled} · {status?.timer.ActiveState || t.dashboard.unknown}
             </Badge>
             <span className="text-zinc-500">
-              {t.dashboard.ruleLast} <span className="text-zinc-200">{formatTime(lastRun)}</span>
+              {t.dashboard.ruleLast} <span className="text-zinc-200">{formatTime(lastRun, locale)}</span>
             </span>
             <span className="text-zinc-500">
-              {t.dashboard.llmLast} <span className="text-zinc-200">{formatTime(llmLastRun)}</span>
+              {t.dashboard.llmLast} <span className="text-zinc-200">{formatTime(llmLastRun, locale)}</span>
             </span>
             <span className="text-zinc-500">
-              {t.dashboard.next} <span className="text-zinc-200">{formatTime(nextRun)}</span>
+              {t.dashboard.next} <span className="text-zinc-200">{formatTime(nextRun, locale)}</span>
             </span>
             <span className="text-zinc-500">
               {t.dashboard.result} <span className="text-zinc-200">{lastResult}</span>
@@ -542,7 +542,7 @@ export const Install = () => {
             </Badge>
             {runState.startedAt && (
               <span className="text-zinc-500">
-                {formatTime(runState.startedAt)}
+                {formatTime(runState.startedAt, locale)}
                 {runState.elapsedMs !== undefined && (
                   <span className="ml-2 text-zinc-400">{(runState.elapsedMs / 1000).toFixed(1)}s</span>
                 )}
@@ -651,7 +651,7 @@ export const Install = () => {
                         key={globalIdx}
                         finding={f}
                         applyState={applyFindingStates[globalIdx]}
-                        labels={{ accept: t.dashboard.accept, reject: t.dashboard.reject, thinking: t.dashboard.thinking, raw: t.dashboard.raw, prompt: t.dashboard.prompt, applyError: t.dashboard.applyError }}
+                        labels={{ accept: t.dashboard.accept, reject: t.dashboard.reject, thinking: t.dashboard.thinking, raw: t.dashboard.raw, prompt: t.dashboard.prompt, applyError: t.dashboard.applyError, acceptFindingTitle: t.dashboard.acceptFindingTitle, dismissFindingTitle: t.dashboard.dismissFindingTitle }}
                         onAccept={async () => {
                           if (!f._category || !f._raw) return;
                           const response = await fetch(`${getApiBaseUrl()}/api/curator/llm/apply-single`, {
@@ -694,6 +694,7 @@ export const Install = () => {
 export default Install;
 
 function LlmElapsedTimer({ startedAt }: { startedAt: number }) {
+  const { messages } = useI18n();
   const [elapsed, setElapsed] = React.useState(Date.now() - startedAt);
   useEffect(() => {
     const id = setInterval(() => setElapsed(Date.now() - startedAt), 100);
@@ -701,7 +702,7 @@ function LlmElapsedTimer({ startedAt }: { startedAt: number }) {
   }, [startedAt]);
   return (
     <div className="mt-1 text-sky-400 text-xs animate-pulse">
-      运行中 {(elapsed / 1000).toFixed(1)}s…
+      {messages.dashboard.llmElapsed((elapsed / 1000).toFixed(1))}
     </div>
   );
 }
@@ -709,7 +710,7 @@ function LlmElapsedTimer({ startedAt }: { startedAt: number }) {
 function LlmFinding({ finding, applyState, labels, onAccept, onDismiss }: {
   finding: LlmFindingView;
   applyState?: ApplyFindingState;
-  labels: { accept: string; reject: string; thinking: string; raw: string; prompt: string; applyError: string };
+  labels: { accept: string; reject: string; thinking: string; raw: string; prompt: string; applyError: string; acceptFindingTitle: string; dismissFindingTitle: string };
   onAccept?: () => Promise<void>;
   onDismiss?: () => void;
 }) {
@@ -745,7 +746,7 @@ function LlmFinding({ finding, applyState, labels, onAccept, onDismiss }: {
               onClick={handleAccept}
               disabled={accepting}
               className="rounded px-1.5 py-0.5 text-[10px] transition-colors bg-emerald-800/60 text-emerald-300 hover:bg-emerald-700 disabled:opacity-50"
-              title="Accept and apply this finding"
+              title={labels.acceptFindingTitle}
             >
               {accepting ? "..." : labels.accept}
             </button>
@@ -754,7 +755,7 @@ function LlmFinding({ finding, applyState, labels, onAccept, onDismiss }: {
             <button
               onClick={onDismiss}
               className="rounded px-1.5 py-0.5 text-[10px] transition-colors bg-zinc-700 text-zinc-400 hover:bg-red-900/60 hover:text-red-300"
-              title="Dismiss this finding"
+              title={labels.dismissFindingTitle}
             >
               {labels.reject}
             </button>
@@ -782,7 +783,7 @@ function LlmFinding({ finding, applyState, labels, onAccept, onDismiss }: {
                   onClick={() => setExpanded(expanded === "prompt" ? null : "prompt")}
                   className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${expanded === "prompt" ? "bg-zinc-500 text-zinc-100" : "bg-zinc-700 text-zinc-400 hover:text-zinc-200"}`}
                 >
-                  Prompt
+                  {labels.prompt}
                 </button>
               )}
             </>

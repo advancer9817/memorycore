@@ -18,9 +18,13 @@ import debounce from "lodash/debounce";
 import { useEffect, useRef, useMemo } from "react";
 import FilterComponent from "./FilterComponent";
 import { clearFilters } from "@/store/filtersSlice";
+import { useI18n } from "@/hooks/useI18n";
+import { useToast } from "@/hooks/use-toast";
 
 export function MemoryFilters() {
   const dispatch = useDispatch();
+  const { messages } = useI18n();
+  const { toast } = useToast();
   const selectedMemoryIds = useSelector(
     (state: RootState) => state.memories.selectedMemoryIds
   );
@@ -35,39 +39,49 @@ export function MemoryFilters() {
     try {
       await deleteMemories(selectedMemoryIds);
       dispatch(clearSelection());
-    } catch (error) {
-      console.error("Failed to delete memories:", error);
+    } catch {
+      toast({ title: messages.common.error, description: messages.memories.deleteSelected, variant: "destructive" });
     }
   };
 
   const handleArchiveSelected = async () => {
     try {
       await updateMemoryState(selectedMemoryIds, "archived");
-    } catch (error) {
-      console.error("Failed to archive memories:", error);
+    } catch {
+      toast({ title: messages.common.error, description: messages.memories.archiveSelected, variant: "destructive" });
     }
   };
 
   const handlePauseSelected = async () => {
     try {
       await updateMemoryState(selectedMemoryIds, "paused");
-    } catch (error) {
-      console.error("Failed to pause memories:", error);
+    } catch {
+      toast({ title: messages.common.error, description: messages.memories.pauseSelected, variant: "destructive" });
     }
   };
 
   const handleResumeSelected = async () => {
     try {
       await updateMemoryState(selectedMemoryIds, "active");
-    } catch (error) {
-      console.error("Failed to resume memories:", error);
+    } catch {
+      toast({ title: messages.common.error, description: messages.memories.resumeSelected, variant: "destructive" });
     }
   };
 
   // Stable debounced search — useMemo ensures the debounce timer isn't reset on re-renders
+  const searchParamsRef = useRef(searchParams);
+  searchParamsRef.current = searchParams;
+
   const handleSearch = useMemo(
     () => debounce((query: string) => {
-      router.push(`/memories?search=${query}`);
+      const params = new URLSearchParams(searchParamsRef.current.toString());
+      if (query) {
+        params.set("search", query);
+      } else {
+        params.delete("search");
+      }
+      params.set("page", "1");
+      router.push(`/memories?${params.toString()}`);
     }, 500),
     [router]
   );
@@ -97,7 +111,7 @@ export function MemoryFilters() {
         <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
         <Input
           ref={inputRef}
-          placeholder="Search memories..."
+          placeholder={messages.memories.searchPlaceholder}
           className="pl-8 bg-zinc-950 border-zinc-800 max-w-[500px]"
           onChange={(e) => handleSearch(e.target.value)}
         />
@@ -110,7 +124,7 @@ export function MemoryFilters() {
             className="bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
             onClick={handleClearAllFilters}
           >
-            Clear Filters
+            {messages.memories.clearAll}
           </Button>
         )}
         {selectedMemoryIds.length > 0 && (
@@ -121,7 +135,7 @@ export function MemoryFilters() {
                   variant="outline"
                   className="border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800"
                 >
-                  Actions
+                  {messages.memories.actions}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
@@ -130,22 +144,22 @@ export function MemoryFilters() {
               >
                 <DropdownMenuItem onClick={handleArchiveSelected}>
                   <Archive className="mr-2 h-4 w-4" />
-                  Archive Selected
+                  {messages.memories.archiveSelected}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handlePauseSelected}>
                   <Pause className="mr-2 h-4 w-4" />
-                  Pause Selected
+                  {messages.memories.pauseSelected}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleResumeSelected}>
                   <Play className="mr-2 h-4 w-4" />
-                  Resume Selected
+                  {messages.memories.resumeSelected}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={handleDeleteSelected}
                   className="text-red-500"
                 >
                   <FiTrash2 className="mr-2 h-4 w-4" />
-                  Delete Selected
+                  {messages.memories.deleteSelected}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

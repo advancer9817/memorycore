@@ -171,6 +171,9 @@ def extract_facts(
     messages: list[dict[str, str]],
     existing_memories: list[dict[str, Any]] | None = None,
     config: ExtractionConfig | None = None,
+    *,
+    min_importance: float = 0.3,
+    chinese_detection_ratio: float = 0.15,
 ) -> tuple[list[ExtractedFact], float]:
     """Extract facts from a conversation using an LLM.
 
@@ -203,7 +206,7 @@ def extract_facts(
     # Detect dominant language of input messages; append Chinese instructions if needed
     all_text = " ".join(m.get("content", "") for m in messages)
     chinese_chars = sum(1 for c in all_text if "一" <= c <= "鿿")
-    if len(all_text) > 0 and chinese_chars / max(len(all_text), 1) > 0.15:
+    if len(all_text) > 0 and chinese_chars / max(len(all_text), 1) > chinese_detection_ratio:
         system_prompt += (
             "\n\n# 中文补充说明\n"
             "- 当输入消息主要为中文时，请用中文记录所有事实。\n"
@@ -226,7 +229,7 @@ def extract_facts(
 
     elapsed = time.time() - t0
 
-    facts = _parse_response(raw)
+    facts = _parse_response(raw, min_importance=min_importance)
     logger.info("extraction: extracted %d facts in %.2fs", len(facts), elapsed)
     return facts, elapsed
 
@@ -329,7 +332,7 @@ def _call_llm_urllib(
 # Response parser
 # ---------------------------------------------------------------------------
 
-def _parse_response(raw: str) -> list[ExtractedFact]:
+def _parse_response(raw: str, *, min_importance: float = 0.3) -> list[ExtractedFact]:
     """Parse LLM JSON response into ExtractedFact list."""
     try:
         data = json.loads(raw)
@@ -370,7 +373,7 @@ def _parse_response(raw: str) -> list[ExtractedFact]:
                 imp = max(0.0, min(1.0, float(imp)))
             except (TypeError, ValueError):
                 imp = 0.5
-            if imp < 0.3:
+            if imp < min_importance:
                 continue
             facts.append(ExtractedFact(
                 text=text,

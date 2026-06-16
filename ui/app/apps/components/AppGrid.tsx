@@ -19,18 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { AppCardSkeleton } from "@/skeleton/AppCardSkeleton";
-
-function formatActivity(value?: string) {
-  if (!value) return "Never";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Unknown";
-  return date.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+import { useI18n } from "@/hooks/useI18n";
 
 function statusClass(status?: string) {
   if (status === "online") return "border-emerald-700 bg-emerald-500/10 text-emerald-300";
@@ -45,6 +34,20 @@ export function AppGrid() {
   const apps = useSelector((state: RootState) => state.apps.apps);
   const filters = useSelector((state: RootState) => state.apps.filters);
   const refreshKey = useSelector((state: RootState) => state.apps.refreshKey);
+  const { messages, locale } = useI18n();
+  const t = messages.apps;
+
+  const formatActivity = (value?: string) => {
+    if (!value) return t.never;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return t.unknown;
+    return date.toLocaleString(locale === "zh" ? "zh-CN" : "en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
 
   useEffect(() => {
     fetchApps({
@@ -78,16 +81,16 @@ export function AppGrid() {
     .at(-1);
 
   const summary = [
-    { label: "Connected Agents", value: apps.length, icon: Users },
-    { label: "Active Agents", value: activeAgents, icon: Radio },
-    { label: "Total Memories", value: totalMemories, icon: Database },
-    { label: "Last Activity", value: formatActivity(lastActivity), icon: Activity },
+    { label: t.connectedAgents, value: apps.length, icon: Users },
+    { label: t.activeAgents, value: activeAgents, icon: Radio },
+    { label: t.totalMemories, value: totalMemories, icon: Database },
+    { label: t.lastActivity, value: formatActivity(lastActivity), icon: Activity },
   ];
 
   if (apps.length === 0) {
     return (
       <div className="text-center text-zinc-500 py-8">
-        No agents or clients found matching your filters
+        {t.noAppsFound}
       </div>
     );
   }
@@ -110,17 +113,17 @@ export function AppGrid() {
 
       <Card className="bg-zinc-900 text-white border-zinc-800">
         <CardHeader className="border-b border-zinc-800 px-4 py-3">
-          <CardTitle className="text-base font-semibold">Agent Activity</CardTitle>
+          <CardTitle className="text-base font-semibold">{t.agentActivity}</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow className="border-zinc-800 hover:bg-transparent">
-                <TableHead className="text-zinc-400">Agent / Client</TableHead>
-                <TableHead className="text-zinc-400">Status</TableHead>
-                <TableHead className="text-right text-zinc-400">Memories</TableHead>
-                <TableHead className="text-zinc-400">Last Activity</TableHead>
-                <TableHead className="text-right text-zinc-400">Action</TableHead>
+                <TableHead className="text-zinc-400">{t.colAgentClient}</TableHead>
+                <TableHead className="text-zinc-400">{t.colStatus}</TableHead>
+                <TableHead className="text-right text-zinc-400">{t.colMemories}</TableHead>
+                <TableHead className="text-zinc-400">{t.colLastActivity}</TableHead>
+                <TableHead className="text-right text-zinc-400">{t.colAction}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -157,7 +160,7 @@ export function AppGrid() {
                     </TableCell>
                     <TableCell className="text-right">
                       <span className="inline-flex items-center text-sm text-primary">
-                        Details <ArrowRight className="ml-2 h-4 w-4" />
+                        {t.details} <ArrowRight className="ml-2 h-4 w-4" />
                       </span>
                     </TableCell>
                   </TableRow>

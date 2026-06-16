@@ -35,27 +35,15 @@ import {
   clearFilters,
 } from "@/store/filtersSlice";
 import { useMemoriesApi } from "@/hooks/useMemoriesApi";
-
-const columns = [
-  {
-    label: "Memory",
-    value: "memory",
-  },
-  {
-    label: "App Name",
-    value: "app_name",
-  },
-  {
-    label: "Created On",
-    value: "created_at",
-  },
-];
+import { useI18n } from "@/hooks/useI18n";
 
 export default function FilterComponent() {
   const dispatch = useDispatch();
   const { fetchApps } = useAppsApi();
   const { fetchCategories, updateSort } = useFiltersApi();
   const { fetchMemories } = useMemoriesApi();
+  const { messages } = useI18n();
+  const t = messages.memories;
   const [isOpen, setIsOpen] = useState(false);
   const [tempSelectedApps, setTempSelectedApps] = useState<string[]>([]);
   const [tempSelectedCategories, setTempSelectedCategories] = useState<
@@ -63,6 +51,15 @@ export default function FilterComponent() {
   >([]);
   const [showArchived, setShowArchived] = useState(false);
   const [categoryQuery, setCategoryQuery] = useState("");
+
+  const columns = useMemo(
+    () => [
+      { label: t.columnMemory, value: "memory" },
+      { label: t.columnAppName, value: "app_name" },
+      { label: t.columnCreatedOn, value: "created_at" },
+    ],
+    [t]
+  );
 
   const apps = useSelector((state: RootState) => state.apps.apps);
   const categories = useSelector(
@@ -86,7 +83,6 @@ export default function FilterComponent() {
   }, [fetchApps, fetchCategories]);
 
   useEffect(() => {
-    // Initialize temporary selections with current active filters when dialog opens
     if (isOpen) {
       setTempSelectedApps(filters.selectedApps);
       setTempSelectedCategories(filters.selectedCategories);
@@ -137,17 +133,14 @@ export default function FilterComponent() {
 
   const handleApplyFilters = async () => {
     try {
-      // Get category IDs for selected category names
       const selectedCategoryIds = categories
         .filter((cat) => tempSelectedCategories.includes(cat.name))
         .map((cat) => cat.id);
 
-      // Get app IDs for selected app names
       const selectedAppIds = apps
         .filter((app) => tempSelectedApps.includes(app.id))
         .map((app) => app.id);
 
-      // Update the global state with temporary selections
       dispatch(setSelectedApps(tempSelectedApps));
       dispatch(setSelectedCategories(tempSelectedCategories));
       dispatch({ type: "filters/setShowArchived", payload: showArchived });
@@ -160,15 +153,14 @@ export default function FilterComponent() {
         showArchived: showArchived,
       });
       setIsOpen(false);
-    } catch (error) {
-      console.error("Failed to apply filters:", error);
+    } catch {
+      // filter errors are non-fatal — silently ignored
     }
   };
 
   const handleDialogChange = (open: boolean) => {
     setIsOpen(open);
     if (!open) {
-      // Reset temporary selections to active filters when dialog closes without applying
       setTempSelectedApps(filters.selectedApps);
       setTempSelectedCategories(filters.selectedCategories);
       setShowArchived(filters.showArchived || false);
@@ -182,12 +174,10 @@ export default function FilterComponent() {
         : "asc";
     updateSort(column, newDirection);
 
-    // Get category IDs for selected category names
     const selectedCategoryIds = categories
       .filter((cat) => tempSelectedCategories.includes(cat.name))
       .map((cat) => cat.id);
 
-    // Get app IDs for selected app names
     const selectedAppIds = apps
       .filter((app) => tempSelectedApps.includes(app.id))
       .map((app) => app.id);
@@ -199,8 +189,8 @@ export default function FilterComponent() {
         sortColumn: column,
         sortDirection: newDirection,
       });
-    } catch (error) {
-      console.error("Failed to apply sorting:", error);
+    } catch {
+      // sort errors are non-fatal — silently ignored
     }
   };
 
@@ -227,7 +217,7 @@ export default function FilterComponent() {
             <Filter
               className={`h-4 w-4 ${hasActiveFilters ? "text-primary" : ""}`}
             />
-            Filter
+            {t.filter}
             {hasActiveFilters && (
               <Badge className="ml-2 bg-primary hover:bg-primary/80 text-xs">
                 {filters.selectedApps.length +
@@ -240,7 +230,7 @@ export default function FilterComponent() {
         <DialogContent className="sm:max-w-[425px] bg-zinc-900 border-zinc-800 text-zinc-100">
           <DialogHeader>
             <DialogTitle className="text-zinc-100 flex justify-between items-center">
-              <span>Filters</span>
+              <span>{t.filters}</span>
             </DialogTitle>
           </DialogHeader>
           <Tabs defaultValue="apps" className="w-full">
@@ -249,19 +239,19 @@ export default function FilterComponent() {
                 value="apps"
                 className="data-[state=active]:bg-zinc-700"
               >
-                Apps
+                {t.tabApps}
               </TabsTrigger>
               <TabsTrigger
                 value="categories"
                 className="data-[state=active]:bg-zinc-700"
               >
-                Categories
+                {t.tabCategories}
               </TabsTrigger>
               <TabsTrigger
                 value="archived"
                 className="data-[state=active]:bg-zinc-700"
               >
-                Archived
+                {t.tabArchived}
               </TabsTrigger>
             </TabsList>
             <TabsContent value="apps" className="mt-4">
@@ -281,7 +271,7 @@ export default function FilterComponent() {
                     htmlFor="select-all-apps"
                     className="text-sm font-normal text-zinc-300 cursor-pointer"
                   >
-                    Select All
+                    {t.selectAll}
                   </Label>
                 </div>
                 {apps.map((app) => (
@@ -309,8 +299,8 @@ export default function FilterComponent() {
                   <Input
                     value={categoryQuery}
                     onChange={(event) => setCategoryQuery(event.target.value)}
-                    placeholder="Search categories..."
-                    aria-label="Search categories"
+                    placeholder={t.searchCategoriesPlaceholder}
+                    aria-label={t.searchCategoriesPlaceholder}
                     className="h-9 border-zinc-700 bg-zinc-950 pl-9 text-sm text-zinc-100 placeholder:text-zinc-500"
                   />
                 </div>
@@ -333,11 +323,11 @@ export default function FilterComponent() {
                       htmlFor="select-visible-categories"
                       className="cursor-pointer text-sm font-normal text-zinc-300"
                     >
-                      Select visible
+                      {t.selectVisible}
                     </Label>
                   </div>
                   <span className="text-xs text-zinc-500">
-                    {filteredCategories.length}/{categories.length} shown · {tempSelectedCategories.length} selected
+                    {t.shownCount(filteredCategories.length, categories.length, tempSelectedCategories.length)}
                   </span>
                 </div>
                 <div className="max-h-72 space-y-2 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950/35 p-2 pr-3">
@@ -366,7 +356,7 @@ export default function FilterComponent() {
                     ))
                   ) : (
                     <div className="px-2 py-8 text-center text-sm text-zinc-500">
-                      No categories match this search.
+                      {t.noCategoriesMatch}
                     </div>
                   )}
                 </div>
@@ -387,28 +377,26 @@ export default function FilterComponent() {
                     htmlFor="show-archived"
                     className="text-sm font-normal text-zinc-300 cursor-pointer"
                   >
-                    Show Archived Memories
+                    {t.showArchivedMemories}
                   </Label>
                 </div>
               </div>
             </TabsContent>
           </Tabs>
           <div className="flex justify-end mt-4 gap-3">
-            {/* Clear all button */}
             {hasTempFilters && (
               <Button
                 onClick={handleClearFilters}
                 className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
               >
-                Clear All
+                {t.clearAll}
               </Button>
             )}
-            {/* Apply filters button */}
             <Button
               onClick={handleApplyFilters}
               className="bg-primary hover:bg-primary/80 text-white"
             >
-              Apply Filters
+              {t.applyFilters}
             </Button>
           </div>
         </DialogContent>
@@ -425,12 +413,12 @@ export default function FilterComponent() {
             ) : (
               <SortDesc className="h-4 w-4" />
             )}
-            Sort: {columns.find((c) => c.value === filters.sortColumn)?.label}
+            {t.sortPrefix} {columns.find((c) => c.value === filters.sortColumn)?.label}
             <ChevronDown className="h-4 w-4 ml-2" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent className="w-56 bg-zinc-900 border-zinc-800 text-zinc-100">
-          <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+          <DropdownMenuLabel>{t.sortBy}</DropdownMenuLabel>
           <DropdownMenuSeparator className="bg-zinc-800" />
           <DropdownMenuGroup>
             {columns.map((column) => (
