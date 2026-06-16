@@ -720,11 +720,14 @@ def build_context_pack(
         lexical = _lexical_relevance(task, record)
         if "keyword" in sources and lexical < _MIN_KEYWORD_LEXICAL_RELEVANCE_SCORE:
             continue
+        is_vector_only = sources == ["vector"]
         min_score = (
             mode_settings["min_vector_only_score"]
-            if sources == ["vector"]
+            if is_vector_only
             else mode_settings["min_context_score"]
         )
+        if is_vector_only and vector_hits.get(record["id"], 0.0) < min_score:
+            continue
         if score >= min_score:
             scored_records.append((record, score))
     records = [record for record, _ in sorted(

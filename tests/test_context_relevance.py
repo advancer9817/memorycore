@@ -113,7 +113,7 @@ def test_context_pack_filters_medium_score_vector_only_without_lexical_match(mon
 
     monkeypatch.setattr(
         "memorycore.storage.search._vector_search_ids",
-        lambda task, top_k=20, score_threshold=0.35: [(record["id"], 0.66)],
+        lambda task, top_k=20, score_threshold=0.35: [(record["id"], 0.34)],
     )
 
     pack = lm.build_context_pack("输入提示词后 检索到的记忆相关性不强", agent="pytest")

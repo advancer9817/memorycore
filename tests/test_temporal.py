@@ -85,15 +85,15 @@ def test_superseded_status_is_valid_and_excluded_from_default_search():
 
 
 def test_context_pack_recency_soft_boost_prefers_newer_equally_relevant_memory():
-    old = add_memory_record("feedback", "SharedRecency", "shared recency ranking marker")
-    new = add_memory_record("feedback", "SharedRecency", "shared recency ranking marker")
+    old = add_memory_record("feedback", "SharedRecency Old", "shared recency ranking marker alpha")
+    new = add_memory_record("feedback", "SharedRecency New", "shared recency ranking marker beta")
     with managed_conn() as conn:
         conn.execute(
-            "UPDATE memories SET updated_at=?, importance=0.5, effectiveness_score=0.5, feedback_score=0 WHERE id=?",
+            "UPDATE memories SET updated_at=?, importance=0.5, effectiveness_score=0.5, feedback_score=0, status='active' WHERE id=?",
             (_past(400), old["id"]),
         )
         conn.execute(
-            "UPDATE memories SET updated_at=?, importance=0.5, effectiveness_score=0.5, feedback_score=0 WHERE id=?",
+            "UPDATE memories SET updated_at=?, importance=0.5, effectiveness_score=0.5, feedback_score=0, status='active' WHERE id=?",
             (_future(0), new["id"]),
         )
 
@@ -194,15 +194,15 @@ def test_context_pack_recency_weight_is_configurable(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCAL_MEMORY_CONFIG", str(cfg))
     invalidate_config_cache()
 
-    old = add_memory_record("feedback", "SharedRecency", "shared recency config marker")
-    new = add_memory_record("feedback", "SharedRecency", "shared recency config marker")
+    old = add_memory_record("feedback", "SharedRecency ConfigOld", "shared recency config marker alpha")
+    new = add_memory_record("feedback", "SharedRecency ConfigNew", "shared recency config marker beta")
     with managed_conn() as conn:
         conn.execute(
-            "UPDATE memories SET updated_at=?, importance=0.5, effectiveness_score=0.5, feedback_score=0 WHERE id=?",
+            "UPDATE memories SET updated_at=?, importance=0.5, effectiveness_score=0.5, feedback_score=0, status='active' WHERE id=?",
             (_past(400), old["id"]),
         )
         conn.execute(
-            "UPDATE memories SET updated_at=?, importance=0.5, effectiveness_score=0.5, feedback_score=0 WHERE id=?",
+            "UPDATE memories SET updated_at=?, importance=0.5, effectiveness_score=0.5, feedback_score=0, status='active' WHERE id=?",
             (_future(0), new["id"]),
         )
 
