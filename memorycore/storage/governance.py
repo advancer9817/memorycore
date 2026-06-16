@@ -165,16 +165,6 @@ def policy_gate(
     project_path: str = "",
 ) -> dict[str, Any]:
     """Classify a governance recommendation as auto-approved, review, or rejected."""
-    from memorycore.models import load_config
-    gc = load_config().get("governance", {})
-    precious = set(gc.get("precious_types", list(PRECIOUS_TYPES)))
-    high_imp = gc.get("high_importance_threshold", HIGH_IMPORTANCE_THRESHOLD)
-    auto_conf = gc.get("auto_approve_confidence", AUTO_CONFIDENCE_THRESHOLD)
-    auto_conf_low = gc.get("auto_approve_low_risk_confidence", 0.70)
-    review_conf = gc.get("review_confidence_threshold", REVIEW_CONFIDENCE_THRESHOLD)
-    manual_actions = set(gc.get("manual_only_actions", list(MANUAL_ONLY_ACTIONS)))
-    merge_actions_cfg = set(gc.get("merge_actions", list(MERGE_ACTIONS)))
-
     memories = memories or []
     reasons: list[str] = []
     normalized_risk = (risk_level or "medium").lower()
@@ -200,7 +190,7 @@ def policy_gate(
             "policy_reasons": ["unsupported_action"],
             "policy_version": POLICY_VERSION,
         }
-    if confidence < review_conf:
+    if confidence < REVIEW_CONFIDENCE_THRESHOLD:
         return {
             "review_status": "rejected",
             "policy_reason": "LLM confidence below review threshold",
@@ -210,8 +200,8 @@ def policy_gate(
     if normalized_risk == "high":
         reasons.append("high_risk_action")
 
-    is_precious = any(m.get("type") in precious for m in memories)
-    is_high_importance = any(float(m.get("importance") or 0.0) >= high_imp for m in memories)
+    is_precious = any(m.get("type") in PRECIOUS_TYPES for m in memories)
+    is_high_importance = any(float(m.get("importance") or 0.0) >= HIGH_IMPORTANCE_THRESHOLD for m in memories)
     has_positive_feedback = any(float(m.get("feedback_score") or 0.0) > 0 for m in memories)
     is_destructive = action in DESTRUCTIVE_ACTIONS or "delete" in action or "merge" in action
 
@@ -219,9 +209,9 @@ def policy_gate(
         reasons.append("precious_memory_type")
     if is_high_importance:
         reasons.append("high_importance_memory")
-    if action in merge_actions_cfg:
+    if action in MERGE_ACTIONS:
         reasons.append("merge_requires_review")
-    if action in manual_actions:
+    if action in MANUAL_ONLY_ACTIONS:
         reasons.append("split_requires_manual_action")
     if has_positive_feedback and is_destructive:
         reasons.append("positive_feedback_requires_review")
@@ -233,7 +223,7 @@ def policy_gate(
         and not is_precious
         and not is_high_importance
     )
-    effective_auto_threshold = auto_conf_low if is_low_risk_importance_adjustment else auto_conf
+    effective_auto_threshold = 0.70 if is_low_risk_importance_adjustment else AUTO_CONFIDENCE_THRESHOLD
     if confidence < effective_auto_threshold:
         reasons.append("confidence_below_auto_threshold")
 
@@ -327,19 +317,19 @@ def _decision_row_to_dict(row: Any) -> dict[str, Any]:
     return data
 
 
-def list_governance_decisions(review_status: str | None = None, limit: int = 100, decision_type: str | None = None) -> list[dict[str, Any]]:
+def list_governance_decisions(review_status: str | None = None, decision_type: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
     cap = max(1, min(int(limit), 500))
-    where_clauses: list[str] = []
+    conditions: list[str] = []
     params: list[Any] = []
     if review_status == "actionable":
-        where_clauses.append("review_status IN ('needs_review', 'auto_approved') AND recommended_action != 'keep'")
+        conditions.append("review_status IN ('needs_review', 'auto_approved') AND recommended_action != 'keep'")
     elif review_status and review_status != "all":
-        where_clauses.append("review_status=?")
+        conditions.append("review_status=?")
         params.append(review_status)
-    if decision_type:
-        where_clauses.append("decision_type=?")
-        params.append(decision_type)
-    where = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    if decision_type and decision_type.strip():
+        conditions.append("decision_type=?")
+        params.append(decision_type.strip())
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     params.append(cap)
     order_by = """
         ORDER BY
@@ -442,6 +432,20 @@ def apply_governance_decision(decision_id: str, source_agent: str = "agent") -> 
         decision_id=decision_id,
         correlation_id=decision_id,
     )
+
+    if decision.get("recommended_action") == "keep":
+        ts = now()
+        legacy_approval_kind = "auto" if decision["review_status"] == "auto_approved" else "human_accept"
+        with managed_conn() as conn:
+            conn.execute(
+                "UPDATE governance_decisions SET review_status='applied', applied_at=?, updated_at=?, applied_by=?, approval_kind=? WHERE id=?",
+                (ts, ts, source_agent or "agent", legacy_approval_kind, decision_id),
+            )
+            updated = conn.execute("SELECT * FROM governance_decisions WHERE id=?", (decision_id,)).fetchone()
+        updated_decision = _decision_row_to_dict(updated)
+        _audit.log_audit_event("governance_decision_apply", memory_id=(decision["source_ids"][0] if decision["source_ids"] else None), agent=source_agent, detail={"decision_id": decision_id, "action": "keep", "approval_kind": legacy_approval_kind})
+        return {"decision": updated_decision, "applied": {"action": "keep"}, "execution": None}
+
     requests = _mutation_requests_for_decision(decision)
     execution_id = str(uuid.uuid4())
     execution = execute_batch(

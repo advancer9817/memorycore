@@ -38,12 +38,12 @@ interface GovernanceCockpitState {
   actionPendingId: string | null;
   error: string | null;
   reviewStatus: GovernanceReviewStatus;
-  decisionType: string | null;
+  decisionType: string;
 }
 
 interface UseGovernanceCockpitReturn extends GovernanceCockpitState {
   setReviewStatus: (status: GovernanceReviewStatus) => void;
-  setDecisionType: (type: string | null) => void;
+  setDecisionType: (decisionType: string) => void;
   selectDecision: (decision: GovernanceDecision | null) => void;
   refresh: () => Promise<void>;
   applyDecision: (decisionId: string) => Promise<void>;
@@ -158,7 +158,7 @@ function reconcileSelection(current: GovernanceDecision | null, decisions: Gover
   return null;
 }
 
-export function useGovernanceCockpit(initialDecisionType?: string | null): UseGovernanceCockpitReturn {
+export function useGovernanceCockpit(): UseGovernanceCockpitReturn {
   const { toast } = useToast();
   const governanceRefreshKey = useSelector((rootState: RootState) => rootState.ui.governanceRefreshKey);
   const [state, setState] = useState<GovernanceCockpitState>({
@@ -171,8 +171,8 @@ export function useGovernanceCockpit(initialDecisionType?: string | null): UseGo
     isDetailLoading: false,
     actionPendingId: null,
     error: null,
-    reviewStatus: "actionable",
-    decisionType: initialDecisionType ?? null,
+    reviewStatus: "needs_review",
+    decisionType: "",
   });
 
   const baseUrl = useMemo(() => getApiBaseUrl(), []);
@@ -182,7 +182,7 @@ export function useGovernanceCockpit(initialDecisionType?: string | null): UseGo
     try {
       const decisionUrl = appendQuery(`${baseUrl}/api/governance/decisions`, {
         review_status: state.reviewStatus,
-        decision_type: state.decisionType ?? undefined,
+        decision_type: state.decisionType || undefined,
         limit: 500,
       });
       const [metrics, decisions] = await Promise.all([
@@ -254,7 +254,7 @@ export function useGovernanceCockpit(initialDecisionType?: string | null): UseGo
     setState((current) => ({ ...current, reviewStatus, selectedDecision: null }));
   }, []);
 
-  const setDecisionType = useCallback((decisionType: string | null): void => {
+  const setDecisionType = useCallback((decisionType: string): void => {
     setState((current) => ({ ...current, decisionType, selectedDecision: null }));
   }, []);
 

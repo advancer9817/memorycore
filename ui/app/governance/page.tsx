@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
-import { CheckCheck, RefreshCcw, Loader2 } from "lucide-react";
+import { useState, useCallback, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import { CheckCheck, Loader2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,49 +27,47 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useGovernanceCockpit } from "@/hooks/useGovernanceCockpit";
 import { useI18n } from "@/hooks/useI18n";
 import { useToast } from "@/hooks/use-toast";
-import { useSearchParams, useRouter } from "next/navigation";
-import type { GovernanceDecisionType, GovernanceReviewStatus } from "@/components/dashboard/intelligence/types";
+import type { GovernanceReviewStatus } from "@/components/dashboard/intelligence/types";
 import { isActionableDecision } from "@/components/dashboard/intelligence/utils";
 import { GovernanceDecisionSheet } from "./components/GovernanceDecisionSheet";
 import { GovernanceTable } from "./components/GovernanceTable";
 import { GovernanceMetricsCards } from "./components/GovernanceMetricsCards";
 
 const REVIEW_STATUSES: GovernanceReviewStatus[] = [
-  "actionable", "needs_review", "auto_approved", "all", "applied", "rejected", "rolled_back",
+  "all", "needs_review", "actionable", "auto_approved", "applied", "rejected", "rolled_back",
 ];
 
-const DECISION_TYPES: GovernanceDecisionType[] = [
-  "contradiction", "semantic_duplicate", "importance_reassessment", "split_candidate",
+interface DecisionTypeFilter {
+  value: string;
+  labelKey: "filterAll" | "filterContradictions" | "filterDuplicates" | "filterReassessments" | "filterSplits";
+}
+
+const DECISION_TYPE_FILTERS: DecisionTypeFilter[] = [
+  { value: "", labelKey: "filterAll" },
+  { value: "contradiction", labelKey: "filterContradictions" },
+  { value: "semantic_duplicate", labelKey: "filterDuplicates" },
+  { value: "importance_reassessment", labelKey: "filterReassessments" },
+  { value: "split_candidate", labelKey: "filterSplits" },
 ];
 
 const PAGE_SIZE = 20;
 
-export default function GovernancePage() {
-  const { messages, locale } = useI18n();
+function GovernancePageInner() {
+  const { messages } = useI18n();
   const { toast } = useToast();
+  const cockpit = useGovernanceCockpit();
   const searchParams = useSearchParams();
-  const router = useRouter();
-  const initialDecisionType = searchParams.get("decision_type");
-  const cockpit = useGovernanceCockpit(initialDecisionType);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
   const [batchPending, setBatchPending] = useState(false);
   const [jumpValue, setJumpValue] = useState("1");
 
-  const handleDecisionTypeChange = useCallback((value: string) => {
-    const type = value === "all" ? null : value;
-    cockpit.setDecisionType(type);
-    const params = new URLSearchParams(searchParams.toString());
-    if (type) {
-      params.set("decision_type", type);
-    } else {
-      params.delete("decision_type");
-    }
-    router.replace(`?${params.toString()}`);
-    setPage(0);
-    setSelectedIds(new Set());
-  }, [cockpit, searchParams, router]);
+  useEffect(() => {
+    const initialType = searchParams.get("type") ?? "";
+    cockpit.setDecisionType(initialType);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const totalPages = Math.max(1, Math.ceil(cockpit.decisions.length / PAGE_SIZE));
   const paginated = cockpit.decisions.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -122,11 +121,10 @@ export default function GovernancePage() {
       try {
         return await cockpit.applyBatchDecisions(ids);
       } catch {
-        return 0; // The hook already shows a toast on error
+        return 0;
       }
     }
 
-    // Reject doesn't have a batch endpoint yet, process sequentially
     let successCount = 0;
     const reason = messages.governance.defaultRejectReason;
     for (const id of ids) {
@@ -173,10 +171,10 @@ export default function GovernancePage() {
         {/* Header */}
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-1">
-            <p className="text-xs font-medium uppercase tracking-[0.3em] text-primary/80">
+            <p className="text-xs font-medium uppercase tracking-[0.3em] text-violet-300">
               {messages.nav.governance}
             </p>
-            <h1 className="text-3xl font-bold tracking-tight">{messages.governance.title}</h1>
+            <h1 className="text-2xl font-semibold">{messages.governance.title}</h1>
             <p className="text-sm text-zinc-500">{messages.governance.description}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -213,7 +211,7 @@ export default function GovernancePage() {
                   <Button
                     variant="outline"
                     disabled={batchPending}
-                    className="border-amber-700/50 bg-amber-950/40 text-amber-200 hover:bg-amber-900/50"
+                    className="border-violet-700/50 bg-violet-950/40 text-violet-200 hover:bg-violet-900/50"
                   >
                     <CheckCheck className="mr-2 h-4 w-4" />
                     {messages.governance.approveAll(allActionableCount)}
@@ -239,20 +237,28 @@ export default function GovernancePage() {
               </AlertDialog>
             )}
 
-            <Select
-              value={cockpit.decisionType ?? "all"}
-              onValueChange={handleDecisionTypeChange}
-            >
-              <SelectTrigger className="w-[150px] border-zinc-700/50 bg-zinc-900 text-zinc-200">
-                <SelectValue aria-label={messages.governance.filterByDecisionType} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{messages.governance.allTypes}</SelectItem>
-                {DECISION_TYPES.map((dt) => (
-                  <SelectItem key={dt} value={dt}>{(messages.governance.decisionTypeLabels as Record<string, string>)[dt]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/* Decision type filter pills */}
+            <div className="flex items-center gap-1 rounded-lg border border-zinc-800 p-1">
+              {DECISION_TYPE_FILTERS.map((filter) => (
+                <button
+                  key={filter.value}
+                  type="button"
+                  onClick={() => {
+                    cockpit.setDecisionType(filter.value);
+                    setPage(0);
+                    setSelectedIds(new Set());
+                  }}
+                  className={`rounded-md px-2 py-1 text-xs transition-colors ${
+                    cockpit.decisionType === filter.value
+                      ? "bg-zinc-700 text-white"
+                      : "bg-zinc-900 text-zinc-400 hover:bg-zinc-800"
+                  }`}
+                >
+                  {messages.governance[filter.labelKey]}
+                </button>
+              ))}
+            </div>
+
             <Select
               value={cockpit.reviewStatus}
               onValueChange={(v) => {
@@ -270,15 +276,6 @@ export default function GovernancePage() {
                 ))}
               </SelectContent>
             </Select>
-            <Button
-              variant="outline"
-              onClick={() => void cockpit.refresh()}
-              disabled={cockpit.isLoading}
-              className="border-zinc-700/50 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
-            >
-              <RefreshCcw className={`mr-2 h-4 w-4 ${cockpit.isLoading ? "animate-spin" : ""}`} />
-              {messages.nav.refresh}
-            </Button>
           </div>
         </div>
 
@@ -303,7 +300,6 @@ export default function GovernancePage() {
             onRowClick={cockpit.selectDecision}
             messages={messages.governance}
             isLoading={cockpit.isLoading}
-            locale={locale}
           />
         </div>
 
@@ -366,9 +362,16 @@ export default function GovernancePage() {
           onClose={() => cockpit.selectDecision(null)}
           onApply={cockpit.applyDecision}
           onReject={cockpit.rejectDecision}
-          locale={locale}
         />
       </div>
     </div>
+  );
+}
+
+export default function GovernancePage() {
+  return (
+    <Suspense>
+      <GovernancePageInner />
+    </Suspense>
   );
 }

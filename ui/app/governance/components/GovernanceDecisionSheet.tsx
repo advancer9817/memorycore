@@ -77,20 +77,38 @@ function LineagePanel({ lineage, messages }: { lineage: LineagePayload | null; m
               <span>{messages.root}: {lineage.root_id || messages.notAvailable}</span>
               <span>{messages.currentHead}: {lineage.current_head_id || messages.notAvailable}</span>
             </div>
-            <div className="space-y-2">
-              {chain.map((record) => (
-                <div key={record.id} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-medium text-white">{record.title || record.id}</span>
-                    {record.status ? (
-                      <Badge className={reviewStatusTone(record.status)}>{titleCase(record.status)}</Badge>
-                    ) : null}
+            <div className="flex flex-col">
+              {chain.map((record, index) => {
+                const isRoot = index === 0 || record.id === lineage.root_id;
+                const isHead = record.id === lineage.current_head_id;
+                const isSuperseded = !!record.superseded_by;
+                return (
+                  <div key={record.id} className="flex flex-col">
+                    <div className={`rounded-lg border p-3 ${isHead ? "border-emerald-700 bg-emerald-950/30" : "border-zinc-800 bg-zinc-950"}`}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {isRoot && (
+                          <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Root</span>
+                        )}
+                        {isHead && (
+                          <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wide">Head</span>
+                        )}
+                        <span className={`text-sm font-medium truncate ${isSuperseded ? "text-zinc-500" : "text-white"}`}>
+                          {record.title || record.id}
+                        </span>
+                        {record.status ? (
+                          <Badge className={reviewStatusTone(record.status)}>{titleCase(record.status)}</Badge>
+                        ) : null}
+                      </div>
+                      {record.superseded_by ? (
+                        <p className="mt-1 text-xs text-zinc-500">{messages.supersededBy} {record.superseded_by}</p>
+                      ) : null}
+                    </div>
+                    {index < chain.length - 1 && (
+                      <div className="flex justify-center py-1 text-zinc-600 text-xs select-none">↓</div>
+                    )}
                   </div>
-                  {record.superseded_by ? (
-                    <p className="mt-1 text-xs text-zinc-500">{messages.supersededBy} {record.superseded_by}</p>
-                  ) : null}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </>
         ) : (
