@@ -25,7 +25,7 @@ function MemoryContent({ id }: { id: string }) {
   if (isLoading) return <MemorySkeleton />;
   if (error) return <NotFound message={error} />;
   if (!memory) return <NotFound message={messages.memoryDetail.memoryNotFound} statusCode={404} />;
-  return <MemoryDetails />;
+  return <MemoryDetails memory_id={id} />;
 }
 
 export default function MemoryPage({ params }: { params: Promise<{ id: string }> }) {

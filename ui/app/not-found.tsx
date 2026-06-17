@@ -11,7 +11,8 @@ interface NotFoundProps {
   title?: string;
 }
 
-const getStatusCode = (message: string) => {
+const getStatusCode = (message: string | undefined) => {
+  if (!message) return undefined;
   const possibleStatusCodes = ["404", "403", "500", "422"];
   const potentialStatusCode = possibleStatusCodes.find((code) =>
     message.includes(code)

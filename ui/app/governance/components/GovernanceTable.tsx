@@ -122,7 +122,7 @@ export function GovernanceTable({
                 </TableCell>
                 <TableCell>
                   <Badge className={riskTone(decision.risk_level)}>
-                    {messages.riskLabels?.[decision.risk_level] ?? titleCase(decision.risk_level)}
+                    {(messages.riskLabels as Record<string, string>)?.[decision.risk_level] ?? titleCase(decision.risk_level)}
                   </Badge>
                 </TableCell>
                 <TableCell>

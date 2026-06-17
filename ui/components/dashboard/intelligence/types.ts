@@ -93,7 +93,7 @@ export type GovernanceDecisionType =
   | "importance_reassessment"
   | "split_candidate";
 
-export type GovernanceReviewStatus = "actionable" | "all" | "needs_review" | "auto_approved" | "applied" | "rejected" | "rolled_back";
+export type GovernanceReviewStatus = "actionable" | "all" | "auto_approved" | "applied" | "rejected" | "rolled_back";
 
 export type GovernanceAction = "accept" | "skip" | "swap" | "keepBoth" | "rollback";
 

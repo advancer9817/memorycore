@@ -34,7 +34,7 @@ import { GovernanceTable } from "./components/GovernanceTable";
 import { GovernanceMetricsCards } from "./components/GovernanceMetricsCards";
 
 const REVIEW_STATUSES: GovernanceReviewStatus[] = [
-  "all", "needs_review", "actionable", "auto_approved", "applied", "rejected", "rolled_back",
+  "actionable", "auto_approved", "all", "applied", "rejected", "rolled_back",
 ];
 
 interface DecisionTypeFilter {

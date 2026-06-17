@@ -4049,3 +4049,30 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 - `memorycore/storage/curator_llm.py`：四个 LLM 分析函数签名扩展，新增 `content_max_chars`、`prompt_style`、`keep_threshold` 参数
 - `ui/app/governance/page.tsx`：治理页面 UI 重构，metrics cards 提取独立组件
 - `config.yaml`：写入完整 strategy 配置（rule_curator, llm_curator, governance, extraction_strategy）
+
+---
+
+## [2026-06-17] i18n 补全 + 治理筛选优化
+
+### 修复
+
+- **i18n 运行时崩溃**：补全 `en.ts` / `zh.ts` 大量缺失 key，解决多处 `t.xxx is not a function` 崩溃：
+  - `memories`：新增 `updateSuccess`、`updateFailure`、`updateDialogTitle`、`updateDialogDescription`、`updateButton`
+  - `settings`：新增 `jsonInvalidObject`、`jsonInvalidSyntax`、`jsonApplyFailed`、`jsonApplyChanges`
+  - `graph`：新增完整 section（29 keys），修复 `/graph` 页面预渲染崩溃
+  - `memoryDetail`：新增完整 section（25 keys）
+  - `governance.cockpit`：新增完整 section（含 `autoSupersede`、`riskLabels`、Snapshot/Trace 相关 keys）
+  - `memories.shownCount`、`common.selectRow`、`common.pageNotFound`、`common.goHome`、`nav.menu` 等零散 key
+- **`graph.importance`**：从字符串改为函数 `(v: number): string => ...`，匹配组件调用方式
+- **`governance.cockpit.autoSupersede`**：显式返回类型 `: string`，解决 `zh.ts satisfies Messages` TS1360
+- **`GovernanceTable.tsx`**：riskLabels 动态索引加 `as Record<string, string>` 消除 TS7053
+- **`memory/[id]/page.tsx`**：`<MemoryDetails />` 补传 `memory_id={id}` prop，修复 TS2741
+- **`not-found.tsx`**：`getStatusCode` 参数类型改为 `string | undefined`，防御 SSR 阶段 messages 为 undefined
+
+### 变更
+
+- **治理页筛选 dropdown**：删除"待审查"（`needs_review`）选项——该视图含 280 条 `recommended_action='keep'` 噪音，与"待处理"（`actionable`）高度重叠
+  - `GovernanceReviewStatus` 类型移除 `"needs_review"`
+  - "优先结果"重命名为"待处理"（zh）/ "Actionable"（en）
+  - "全部状态"重命名为"全部记录"（zh）/ "All records"（en）
+  - Dropdown 选项顺序：待处理 → 自动批准 → 全部记录 → 已应用 → 已拒绝 → 已回滚
