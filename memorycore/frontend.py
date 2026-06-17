@@ -680,6 +680,7 @@ def _read_memorycore_config() -> dict[str, Any]:
     return {
         "settings": {
             "custom_instructions": None,
+            "output_language": cfg.get("output_language", "auto"),
         },
         "llm": {
             "extraction": {
@@ -729,6 +730,11 @@ def _write_memorycore_config(body: dict[str, Any]) -> dict[str, Any]:
         })
 
     strategy_patch = body.get("strategy", {})
+
+    settings_patch = body.get("settings", {})
+    if "output_language" in settings_patch and settings_patch["output_language"] in ("zh", "en", "auto"):
+        existing["output_language"] = settings_patch["output_language"]
+
     for section in ("rule_curator", "llm_curator", "governance", "extraction_strategy"):
         patch = strategy_patch.get(section, {})
         if patch:

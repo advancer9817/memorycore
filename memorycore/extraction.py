@@ -17,21 +17,43 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from memorycore.models import local_now
+from memorycore.models import load_config, local_now
 
 logger = logging.getLogger(__name__)
+
+
+def _language_instruction(output_language: str) -> str:
+    if output_language == "zh":
+        return (
+            "\n\n# Language Constraint\n"
+            "You MUST output all memory content (title, content, tags) in Chinese (中文). "
+            "Keep technical terms, proper nouns, version numbers untranslated. "
+            "Output format remains JSON.\n"
+        )
+    if output_language == "en":
+        return (
+            "\n\n# Language Constraint\n"
+            "You MUST output all memory content (title, content, tags) in English. "
+            "Output format remains JSON.\n"
+        )
+    return ""
+
 
 # ---------------------------------------------------------------------------
 # Prompt (ported from mem0/configs/prompts.py — Apache-2.0)
 # ---------------------------------------------------------------------------
 
 ADDITIVE_EXTRACTION_PROMPT = """\
-You are a Personal Information Organizer, specialized in accurately storing facts, \
-user memories, and preferences. Your primary role is to extract relevant pieces of \
-information from conversations and organize them into distinct, manageable facts.
+You are a Personal Information Organizer specialized in accurately storing facts, \
+user memories, and preferences from developer/engineering conversations. \
+Your primary role is to extract relevant pieces of information from conversations \
+and organize them into distinct, manageable facts.
 
-# [IMPORTANT]: GENERATE FACTS SOLELY BASED ON THE USER'S MESSAGES. \
-DO NOT INCLUDE INFORMATION FROM ASSISTANT OR SYSTEM MESSAGES.
+# [IMPORTANT]: ANALYZE THE FULL CONVERSATION (both user and assistant messages). \
+Extract facts revealed by the USER's intent, decisions, and requests — \
+but also extract technical facts confirmed in ASSISTANT responses: \
+bug root causes, code changes made, fixes applied, architectural decisions, \
+and project context. Do NOT extract filler, greetings, or generic assistant prose.
 
 Types of Information to Remember:
 1. Personal Preferences: likes, dislikes, specific preferences.
@@ -40,7 +62,9 @@ Types of Information to Remember:
 4. Professional Details: job titles, work habits, career goals.
 5. Environment & Tools: OS, editors, languages, frameworks, workflows.
 6. Decisions: choices made, approaches adopted, things rejected.
-7. Miscellaneous: any other stable facts worth remembering.
+7. Bug Fixes & Root Causes: what broke, why it broke, how it was fixed.
+8. Code Changes: files modified, logic changed, new features added.
+9. Miscellaneous: any other stable facts worth remembering.
 
 Few-shot examples:
 Input: Hi.
@@ -203,16 +227,20 @@ def extract_facts(
     today = local_now().date().isoformat()
     system_prompt = ADDITIVE_EXTRACTION_PROMPT.replace("{today}", today)
 
-    # Detect dominant language of input messages; append Chinese instructions if needed
-    all_text = " ".join(m.get("content", "") for m in messages)
-    chinese_chars = sum(1 for c in all_text if "一" <= c <= "鿿")
-    if len(all_text) > 0 and chinese_chars / max(len(all_text), 1) > chinese_detection_ratio:
-        system_prompt += (
-            "\n\n# 中文补充说明\n"
-            "- 当输入消息主要为中文时，请用中文记录所有事实。\n"
-            "- 标题和内容均使用中文，保持具体细节（版本号、人名、工具名等）不翻译。\n"
-            "- 输出格式不变，仍为 JSON。\n"
-        )
+    output_language = load_config().get("output_language", "auto")
+    lang_suffix = _language_instruction(output_language)
+    if lang_suffix:
+        system_prompt += lang_suffix
+    elif output_language == "auto":
+        all_text = " ".join(m.get("content", "") for m in messages)
+        chinese_chars = sum(1 for c in all_text if "一" <= c <= "鿿")
+        if len(all_text) > 0 and chinese_chars / max(len(all_text), 1) > chinese_detection_ratio:
+            system_prompt += (
+                "\n\n# 中文补充说明\n"
+                "- 当输入消息主要为中文时，请用中文记录所有事实。\n"
+                "- 标题和内容均使用中文，保持具体细节（版本号、人名、工具名等）不翻译。\n"
+                "- 输出格式不变，仍为 JSON。\n"
+            )
     user_prompt = _build_user_prompt(
         messages,
         existing_memories or [],

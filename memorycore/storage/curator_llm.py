@@ -33,6 +33,8 @@ from memorycore.models import as_json, row_to_dict
 from memorycore.storage.mutation_executor import execute_batch, query_ledger
 from memorycore.storage.mutations import MutationContext, MutationRequest
 
+from memorycore.extraction import _language_instruction
+
 logger = logging.getLogger(__name__)
 
 _PROMPT_STYLES = {
@@ -334,6 +336,11 @@ def _llm_judge_duplicates(
                 "that should be merged into the kept memory; empty string if nothing needs merging)."
             )
         prompt = f"Evaluate these memory pairs for semantic duplication:{items_text}"
+        from memorycore.models import load_config
+        output_language = load_config().get("output_language", "auto")
+        lang_suffix = _language_instruction(output_language)
+        if lang_suffix:
+            system += lang_suffix
         try:
             raw, thinking = _call_llm_with_thinking(prompt, system, llm_config)
             data = json.loads(raw)
@@ -612,6 +619,11 @@ def _llm_detect_splittable(
                 "If a memory is already atomic or splitting would lose context, set splittable=false."
             )
         prompt = f"Analyse these memories for split opportunities:{items_text}"
+        from memorycore.models import load_config
+        output_language = load_config().get("output_language", "auto")
+        lang_suffix = _language_instruction(output_language)
+        if lang_suffix:
+            system += lang_suffix
         try:
             raw, thinking = _call_llm_with_thinking(prompt, system, llm_config)
             data = json.loads(raw)
@@ -752,17 +764,18 @@ def llm_curator_report(
         logger.error("split detection error: %s", exc, exc_info=True)
 
     # Only mark memories that LLM actually analyzed with findings in the cooldown registry
+    # Use `or ""` to coerce None values (LLM may return null for optional id fields)
     found_ids: set[str] = set()
     for dup in semantic_duplicates:
-        found_ids.add(dup.get("keep_id", ""))
-        found_ids.add(dup.get("drop_id", ""))
+        found_ids.add(dup.get("keep_id") or "")
+        found_ids.add(dup.get("drop_id") or "")
     for contra in contradictions:
-        found_ids.add(contra.get("newer_id", ""))
-        found_ids.add(contra.get("older_id", ""))
+        found_ids.add(contra.get("newer_id") or "")
+        found_ids.add(contra.get("older_id") or "")
     for reassess in importance_reassessments:
-        found_ids.add(reassess.get("id", ""))
+        found_ids.add(reassess.get("id") or "")
     for split in split_candidates:
-        found_ids.add(split.get("id", ""))
+        found_ids.add(split.get("id") or "")
     found_ids.discard("")
     if found_ids:
         _mark_reviewed(list(found_ids))

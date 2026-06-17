@@ -55,6 +55,7 @@ _INITIALIZED_DB_PATHS: set[str] = set()
 LOCAL_TZ = timezone(timedelta(hours=8), "CST")
 
 DEFAULT_CONFIG: dict[str, Any] = {
+    "output_language": "auto",  # "zh" | "en" | "auto"
     "backend": {"primary": "sqlite", "fallback": "sqlite"},
     "qdrant": {"url": "http://127.0.0.1:6333", "collection": "agent_memory", "timeout": 30},
     "embedding": {

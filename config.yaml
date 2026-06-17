@@ -40,7 +40,7 @@ extraction_strategy:
   title_max_length: 80
   update_threshold: 0.78
 governance:
-  auto_approve_confidence: 0.95
+  auto_approve_confidence: 0.85
   auto_approve_low_risk_confidence: 0.7
   high_importance_threshold: 0.85
   manual_only_actions:
@@ -53,17 +53,18 @@ governance:
   - project_memory
   review_confidence_threshold: 0.55
 llm_curator:
-  batch_size: 20
-  content_max_chars: 800
-  importance_limit: 200
-  keep_threshold: 0.1
-  preset: economy
-  prompt_style: conservative
-  review_cooldown_seconds: 7200
-  reviewed_ids_max_age_seconds: 172800
-  sim_threshold: 0.75
-  split_content_threshold: 800
-  temperature: 0.2
+  batch_size: 8
+  content_max_chars: 3000
+  importance_limit: 1500
+  keep_threshold: 0.03
+  preset: knowledge_graph
+  prompt_style: balanced
+  review_cooldown_seconds: 1200
+  reviewed_ids_max_age_seconds: 64800
+  sim_threshold: 0.45
+  split_content_threshold: 300
+  temperature: 0.5
+output_language: zh
 qdrant:
   collection: agent_memory
   timeout: 30

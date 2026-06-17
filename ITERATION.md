@@ -4076,3 +4076,33 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
   - "优先结果"重命名为"待处理"（zh）/ "Actionable"（en）
   - "全部状态"重命名为"全部记录"（zh）/ "All records"（en）
   - Dropdown 选项顺序：待处理 → 自动批准 → 全部记录 → 已应用 → 已拒绝 → 已回滚
+
+---
+
+## 2026-06-17 LLM Curator 调谐面板增强 + Stop hook 记忆提取质量修复
+
+### 新增
+
+- **知识图谱预设**（`knowledge_graph`）：新增第六个调谐预设，专为"增加知识图谱链接"场景优化
+  - `sim_threshold: 0.45`（更低阈值，发现更多关联候选对）
+  - `importance_limit: 1500`（更高上限，覆盖更多记忆的链接机会）
+  - `review_cooldown_seconds: 1200`（更短冷却，记忆更频繁重评）
+  - `content_max_chars: 3000`，`prompt_style: "balanced"`
+  - i18n：中文"知识图谱"，英文"Knowledge Graph"
+
+- **提示词风格选择器**（`prompt_style`）：CuratorTuningPanel 新增下拉控件
+  - 三档：保守（conservative）/ 平衡（balanced）/ 激进（aggressive）
+  - 切换预设时自动同步；手动调整后标记为"自定义"
+  - 保存时明确写入配置，不再隐含在预设里
+
+### 修复
+
+- **`NOT NULL constraint failed: curator_review_log.memory_id`**（`storage/curator_llm.py`）
+  - 根因：LLM 返回 `null` 的可选字段（`keep_id`、`newer_id` 等）时，`dict.get("key", "")` 在 key 存在但值为 `None` 时仍返回 `None`，绕过了 `discard("")` 过滤，最终触发 SQLite NOT NULL 约束
+  - 修复：全部改为 `dup.get("key") or ""`，无论缺失还是 null 均转为空字符串
+
+- **Stop hook 记忆提取质量低**（`extraction.py` + `mcore-ingest.py`）
+  - 根因 1：Extraction prompt 含 `GENERATE FACTS SOLELY BASED ON THE USER'S MESSAGES`，导致 assistant 消息里的 bug 修复、代码改动、技术决策全被忽略，只提取到用户的只言片语
+  - 修复 1：改为分析完整对话（user + assistant），新增 Bug Fixes/Root Causes 和 Code Changes 两类提取类型
+  - 根因 2：每条消息截断到 `[:800]` 字符，代码内容被截断丢失上下文
+  - 修复 2：截断上限提升至 `[:2000]`，覆盖 6 处截断点

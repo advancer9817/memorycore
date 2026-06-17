@@ -183,6 +183,23 @@ export function FormView({ settings, onChange }: FormViewProps) {
             />
             <p className="text-xs text-muted-foreground mt-1">{s.customInstructionsHint}</p>
           </div>
+          <div className="space-y-2">
+            <Label htmlFor="output-language">{s.outputLanguage}</Label>
+            <Select
+              value={(settingsSection?.output_language as string) || "auto"}
+              onValueChange={(v) => handleMemoryCoreChange("output_language", v)}
+            >
+              <SelectTrigger id="output-language">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">{s.outputLanguageAuto}</SelectItem>
+                <SelectItem value="zh">{s.outputLanguageChinese}</SelectItem>
+                <SelectItem value="en">{s.outputLanguageEnglish}</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground mt-1">{s.outputLanguageHint}</p>
+          </div>
         </CardContent>
       </Card>
 

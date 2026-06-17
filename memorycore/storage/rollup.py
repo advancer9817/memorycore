@@ -6,7 +6,7 @@ import logging
 import time
 from typing import Any, Callable
 
-from memorycore.extraction import extraction_config_from_dict, _call_llm
+from memorycore.extraction import extraction_config_from_dict, _call_llm, _language_instruction
 from memorycore.models import finite_float, load_config, local_now, normalize_list, now, parse_ts, validate_type
 from memorycore.storage.audit import log_audit_event
 from memorycore.storage.crud import add_memory_record, update_status, update_status_batch as _usb
@@ -114,7 +114,9 @@ def _call_rollup_llm(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for row in rows
     ]
     user_prompt = "## Episodic records to roll up\n" + json.dumps(payload, ensure_ascii=False)
-    raw = _call_llm(_ROLLUP_SYSTEM_PROMPT, user_prompt, cfg)
+    output_language = load_config().get("output_language", "auto")
+    system_prompt = _ROLLUP_SYSTEM_PROMPT + _language_instruction(output_language)
+    raw = _call_llm(system_prompt, user_prompt, cfg)
     data = _parse_llm_json(raw)
     memories = data.get("memories", data.get("memory", []))
     return memories if isinstance(memories, list) else []

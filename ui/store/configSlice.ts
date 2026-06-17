@@ -31,6 +31,7 @@ export interface LLMBackendConfig {
 
 export interface MemoryCoreConfig {
   custom_instructions?: string | null;
+  output_language?: "zh" | "en" | "auto";
 }
 
 export interface RuleCuratorConfig {

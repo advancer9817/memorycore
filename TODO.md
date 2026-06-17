@@ -249,3 +249,77 @@
 - [x] 增加 Undo / rollback UI：`AutoAppliedStrip` 每条 auto-applied action 显示 Undo 按钮（`canRollbackDecision()` 判断），调用 `POST /api/governance/{id}/rollback`，成功后移除条目。
 - [x] 保持 Claude 设计语言与 i18n：新增文案进入 typed dictionary，确保中英文 key 完整一致。
 - [x] 补 Phase 4 验证：`pnpm exec tsc --noEmit` 零错误，`pnpm build` 9/9 路由通过，后端 `test_governance` / `test_governance_foundation` / `test_frontend` / `test_docs_consistency` 42 passed。
+
+## 向量相似度召回增强 — Context Pack Hybrid Retrieval V2
+
+> 背景：`build_context_pack` 已有三路并发召回（FTS5 + Qdrant vector + entity），但向量分数在排序阶段被弱化——FTS 命中的记录直接用 lexical score 替代了向量分数，向量只对 vector-only 记录生效。需要让向量相似度作为独立且贯穿的召回信号，提升语义近似但词法不匹配的记忆召回率。
+
+### Step 1：向量分数贯穿排序（核心改动）
+
+- [ ] **`_rank_score` 融合向量分数为独立信号**：当前第 688 行 `vscore = lexical if text_matched else vector_hits.get(...)` 把 FTS 命中记录的向量分数完全丢弃了。改为：所有记录都取 `vector_score = vector_hits.get(r["id"], 0.0)`，与 `lexical` 分开参与加权。新公式：`vector_score * W_vec + lexical * W_lex + entity_boost + source_bonus + ...`，其中 `W_vec` 和 `W_lex` 需要调参（建议初始 `W_vec=0.30, W_lex=0.35`，留 `0.35` 给其余信号）。
+  - 文件：`memorycore/storage/search.py` `_rank_score()` 函数
+  - 影响：排序逻辑变更，需回归测试 `tests/test_context_relevance.py`
+
+- [ ] **交叉验证加成（cross-retrieval boost）**：同时被 FTS 和 vector 两路命中的记录，说明词法和语义都匹配，应获得额外加成。当前 `source_bonus` 只按来源类型给固定 0.08/0.06，改为：`multi_source_bonus = 0.12 if ("fts" in sources and "vector" in sources) else 0.0`，叠加在现有 source_bonus 上。
+  - 文件：`memorycore/storage/search.py` `_rank_score()` 函数
+
+- [ ] **向量召回阈值跟随 retrieval_mode 变化**：当前 `_VECTOR_SEARCH_THRESHOLD = 0.35` 是硬编码常量，`_fetch_vector` 调用时不区分 mode。改为：`mode_settings` 中增加 `vector_search_threshold` 字段（strict=0.40, balanced=0.35, recall=0.25），传入 `_vector_search_ids(task, top_k=..., score_threshold=mode_settings["vector_search_threshold"])`。
+  - 文件：`memorycore/storage/search.py` `build_context_pack()` 的 mode_settings 和 `_fetch_vector` lambda
+
+### Step 2：向量分数透出与可观测性
+
+- [ ] **trace 中增加向量召回质量指标**：在返回的 `trace` dict 中新增 `vector_avg_score`（向量命中的平均分）、`vector_max_score`（最高分）、`cross_retrieval_count`（FTS+vector 交叉命中数）、`vector_only_count`（仅向量命中数）、`fts_only_count`（仅 FTS 命中数）。
+  - 文件：`memorycore/storage/search.py` `build_context_pack()` 返回值 trace 部分
+
+- [ ] **slim_records 中保留 `_retrieval_sources` 和 `_vector_score`**：让调用方（hook、前端）能看到每条记忆是从哪条通道召回的、向量分数是多少。
+  - 文件：`memorycore/storage/search.py` slim_records 构造部分
+
+- [ ] **context_quality_events 表增加向量维度字段**：`_record_context_quality_event` 新增 `vector_avg_score`、`cross_retrieval_rate`，写入 `context_quality_events` 表。需要 schema migration。
+  - 文件：`memorycore/storage/search.py`、`memorycore/storage/db.py`（schema migration）
+
+### Step 3：向量相似度聚合（去重展示）
+
+- [ ] **高相似度记忆聚类展示**：在 context pack 输出阶段，对同 group 内向量相似度 > 0.85 的记忆做聚合：只展示分数最高的一条，其余折叠为 `[+N related]` 计数。节省 token budget，避免重复信息占满上下文窗口。
+  - 实现方式：在 `build_context_pack` 的分组输出循环（第 776-803 行）前，增加一个 `_cluster_similar_records(records, vector_hits, threshold=0.85)` 步骤，返回 `[(primary_record, [clustered_ids])]`。
+  - 聚类算法：简单贪心——按分数降序遍历，每条记录查 `vector_hits` 中与已选 primary 的余弦相似度，超过阈值则归入该 cluster。不需要完整 N×N 矩阵（太贵），只需对 vector_hits 中的 ID 对做 Qdrant point-to-point 查询或用嵌入缓存比较。
+  - 文件：`memorycore/storage/search.py` 新增 `_cluster_similar_records()` 函数
+
+- [ ] **聚合阈值可配置**：在 `config.yaml` 的 `context_pack` 部分新增 `cluster_similarity_threshold`（默认 0.85）和 `cluster_enabled`（默认 true）。
+  - 文件：`memorycore/models.py`（config 校验）、`memorycore/storage/search.py`（读取配置）
+
+- [ ] **聚合结果透出到 trace**：trace 新增 `clustered_count`（被折叠的记忆数）、`cluster_groups`（聚类组数）。
+  - 文件：`memorycore/storage/search.py` trace 部分
+
+### Step 4：向量召回扩展能力
+
+- [ ] **支持 embedding 缓存避免重复嵌入**：`_vector_search_ids` 每次调用都对 task 做一次嵌入。增加 LRU 缓存（`functools.lru_cache` 或手动 dict，maxsize=128，TTL=300s），对相同或高度相似的 task 文本复用嵌入向量。
+  - 文件：`memorycore/vector_store.py` 或 `memorycore/storage/search.py`
+
+- [ ] **向量召回 fallback 策略优化**：当 Qdrant 不可用时，当前直接返回空列表。增加降级日志 + trace 标记 `vector_fallback: true`，让调用方知道本次召回缺少语义通道。
+  - 文件：`memorycore/storage/search.py` `_vector_search_ids()` 和 trace
+
+- [ ] **支持 task 拆分多轮向量查询**：对长 task 文本（>200 字符），拆分为 2-3 个语义片段分别做向量查询，合并去重。提升长 prompt 的召回覆盖面。
+  - 文件：`memorycore/storage/search.py` `_vector_search_ids()` 或新增 `_multi_segment_vector_search()`
+
+### Step 5：测试与验证
+
+- [ ] **更新 `tests/test_context_relevance.py` 回归用例**：覆盖新权重公式、交叉验证加成、mode 阈值变化
+- [ ] **新增 `tests/test_vector_context_integration.py`**：专项测试向量召回在 context pack 中的端到端行为，包括：
+  - 向量-only 记忆能通过新阈值被召回
+  - FTS+vector 交叉命中获得更高排名
+  - 高相似度记忆被正确聚合
+  - Qdrant 不可用时降级不报错
+  - retrieval_mode 切换影响向量阈值
+- [ ] **新增 `tests/test_vector_clustering.py`**：测试 `_cluster_similar_records` 的聚类正确性、边界条件（空记录、单条记录、全部相似、全部不同）
+- [ ] **真实 prompt 对比测试**：用现有评测集 `tests/fixtures/context_relevance_cases.json` 在改动前后运行，对比 `hit_rate`、`vector_avg_score`、`cross_retrieval_count` 变化
+
+### 优先级与依赖关系
+
+```
+Step 1（核心排序改动）→ Step 2（可观测性）→ Step 5（测试）
+                                              ↑
+Step 3（聚合展示）────────────────────────────┘
+Step 4（扩展能力）— 独立，可与 Step 1-3 并行
+```
+
+建议执行顺序：**Step 1 → Step 2 → Step 5（前三步的测试）→ Step 3 → Step 5（聚合测试）→ Step 4**

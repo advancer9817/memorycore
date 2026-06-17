@@ -6,12 +6,15 @@ import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { SaveIcon, RotateCcw, ChevronDown, ChevronUp, SlidersHorizontal } from "lucide-react"
 import { useSelector } from "react-redux"
 import { RootState } from "@/store/store"
 import { useConfig } from "@/hooks/useConfig"
 import { useI18n } from "@/hooks/useI18n"
 import { useToast } from "@/hooks/use-toast"
+
+type PromptStyle = "conservative" | "balanced" | "aggressive"
 
 const PRESETS = {
   economy: {
@@ -25,7 +28,7 @@ const PRESETS = {
     review_cooldown_seconds: 7200,
     keep_threshold: 0.1,
     auto_approve_confidence: 0.95,
-    prompt_style: "conservative",
+    prompt_style: "conservative" as PromptStyle,
     reviewed_ids_max_age_seconds: 172800,
   },
   balanced: {
@@ -39,7 +42,7 @@ const PRESETS = {
     review_cooldown_seconds: 3600,
     keep_threshold: 0.05,
     auto_approve_confidence: 0.85,
-    prompt_style: "balanced",
+    prompt_style: "balanced" as PromptStyle,
     reviewed_ids_max_age_seconds: 86400,
   },
   precision: {
@@ -53,7 +56,7 @@ const PRESETS = {
     review_cooldown_seconds: 1800,
     keep_threshold: 0.01,
     auto_approve_confidence: 0.95,
-    prompt_style: "balanced",
+    prompt_style: "balanced" as PromptStyle,
     reviewed_ids_max_age_seconds: 86400,
   },
   aggressive: {
@@ -67,7 +70,7 @@ const PRESETS = {
     review_cooldown_seconds: 1800,
     keep_threshold: 0.02,
     auto_approve_confidence: 0.90,
-    prompt_style: "aggressive",
+    prompt_style: "aggressive" as PromptStyle,
     reviewed_ids_max_age_seconds: 86400,
   },
   deep: {
@@ -81,12 +84,31 @@ const PRESETS = {
     review_cooldown_seconds: 900,
     keep_threshold: 0.01,
     auto_approve_confidence: 0.80,
-    prompt_style: "aggressive",
+    prompt_style: "aggressive" as PromptStyle,
     reviewed_ids_max_age_seconds: 43200,
+  },
+  knowledge_graph: {
+    label: "knowledge_graph",
+    // Lower similarity threshold to surface more candidate pairs for linking
+    temperature: 0.5,
+    sim_threshold: 0.45,
+    split_content_threshold: 300,
+    // Higher importance limit to review more memories for link opportunities
+    importance_limit: 1500,
+    content_max_chars: 3000,
+    batch_size: 8,
+    // Shorter cooldown so memories are re-evaluated more frequently for new links
+    review_cooldown_seconds: 1200,
+    keep_threshold: 0.03,
+    auto_approve_confidence: 0.85,
+    prompt_style: "balanced" as PromptStyle,
+    reviewed_ids_max_age_seconds: 64800,
   },
 } as const;
 
 type PresetKey = keyof typeof PRESETS;
+
+const PROMPT_STYLE_OPTIONS: PromptStyle[] = ["conservative", "balanced", "aggressive"]
 
 const DIMENSIONS = [
   { key: "temperature", min: 0, max: 1, step: 0.05, section: "llm_curator" },
@@ -111,6 +133,7 @@ export function CuratorTuningPanel() {
   const [expanded, setExpanded] = useState(false)
   const [activePreset, setActivePreset] = useState<PresetKey | "custom">("aggressive")
   const [values, setValues] = useState<Record<string, number | string>>({})
+  const [promptStyle, setPromptStyle] = useState<PromptStyle>("aggressive")
   const [isSaving, setIsSaving] = useState(false)
 
   // Initialize values from config store
@@ -129,6 +152,10 @@ export function CuratorTuningPanel() {
     if (presetName && presetName in PRESETS) {
       setActivePreset(presetName as PresetKey)
     }
+    const savedStyle = (llmCurator as Record<string, unknown>).prompt_style as string | undefined
+    if (savedStyle && PROMPT_STYLE_OPTIONS.includes(savedStyle as PromptStyle)) {
+      setPromptStyle(savedStyle as PromptStyle)
+    }
     setValues(merged)
   }, [configState.strategy])
 
@@ -139,6 +166,7 @@ export function CuratorTuningPanel() {
       newValues[dim.key] = preset[dim.key as keyof typeof preset]
     }
     setValues(newValues)
+    setPromptStyle(preset.prompt_style)
     setActivePreset(key)
   }, [])
 
@@ -147,10 +175,15 @@ export function CuratorTuningPanel() {
     setActivePreset("custom")
   }, [])
 
+  const handlePromptStyleChange = useCallback((style: PromptStyle) => {
+    setPromptStyle(style)
+    setActivePreset("custom")
+  }, [])
+
   const handleSave = useCallback(async () => {
     setIsSaving(true)
     try {
-      const llmCuratorPatch: Record<string, unknown> = { preset: activePreset }
+      const llmCuratorPatch: Record<string, unknown> = { preset: activePreset, prompt_style: promptStyle }
       const governancePatch: Record<string, unknown> = {}
       for (const dim of DIMENSIONS) {
         if (dim.section === "governance") {
@@ -158,10 +191,6 @@ export function CuratorTuningPanel() {
         } else {
           llmCuratorPatch[dim.key] = values[dim.key]
         }
-      }
-      // Also set prompt_style from the preset
-      if (activePreset !== "custom" && activePreset in PRESETS) {
-        llmCuratorPatch.prompt_style = PRESETS[activePreset].prompt_style
       }
       await saveConfig({
         strategy: {
@@ -182,7 +211,7 @@ export function CuratorTuningPanel() {
     } finally {
       setIsSaving(false)
     }
-  }, [values, activePreset, configState.strategy, saveConfig, toast, t, messages])
+  }, [values, activePreset, promptStyle, configState.strategy, saveConfig, toast, t, messages])
 
   const handleReset = useCallback(() => {
     if (activePreset !== "custom" && activePreset in PRESETS) {
@@ -205,7 +234,7 @@ export function CuratorTuningPanel() {
     return val.toFixed(2)
   }
 
-  const presetKeys: PresetKey[] = ["economy", "balanced", "precision", "aggressive", "deep"]
+  const presetKeys: PresetKey[] = ["economy", "balanced", "precision", "aggressive", "deep", "knowledge_graph"]
 
   return (
     <Card>
@@ -258,6 +287,26 @@ export function CuratorTuningPanel() {
                 {(t as Record<string, unknown>)[`preset${key.charAt(0).toUpperCase() + key.slice(1)}`] as string ?? key}
               </Button>
             ))}
+          </div>
+
+          {/* Prompt style selector */}
+          <div className="flex items-center gap-3">
+            <Label className="text-sm text-zinc-300 shrink-0">{t.prompt_style}</Label>
+            <Select value={promptStyle} onValueChange={(v) => handlePromptStyleChange(v as PromptStyle)}>
+              <SelectTrigger className="w-44 h-8 border-zinc-700 bg-zinc-900 text-zinc-200 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PROMPT_STYLE_OPTIONS.map((style) => (
+                  <SelectItem key={style} value={style}>
+                    {(t as Record<string, unknown>)[`promptStyle${style.charAt(0).toUpperCase() + style.slice(1)}`] as string ?? style}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-xs text-zinc-500">
+              {(t as Record<string, unknown>)[`promptStyle${promptStyle.charAt(0).toUpperCase() + promptStyle.slice(1)}Hint`] as string ?? ""}
+            </span>
           </div>
 
           {/* Sliders grid - 2 columns on desktop */}

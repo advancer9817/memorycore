@@ -214,7 +214,7 @@ def _extract_claude(path: Path) -> list[dict[str, str]]:
         text = _text_from_blocks(msg.get("content", ""))
         text = text.strip()
         if text:
-            messages.append({"role": role, "content": text[:800]})
+            messages.append({"role": role, "content": text[:2000]})
     return messages[-500:]
 
 
@@ -255,7 +255,7 @@ def _extract_codex(path: Path) -> list[dict[str, str]]:
         text = text.strip()
         if not (role in ("user", "assistant") and text):
             continue
-        msg = {"role": role, "content": text[:800]}
+        msg = {"role": role, "content": text[:2000]}
         if item.get("type") == "event_msg":
             messages.append(msg)
         else:
@@ -301,7 +301,7 @@ def _extract_hermes_from_state_db(session_id: str) -> list[dict[str, str]]:
         role = str(row["role"])
         text = str(row["content"] or "").strip()
         if text:
-            messages.append({"role": role, "content": text[:800]})
+            messages.append({"role": role, "content": text[:2000]})
     if messages:
         _log(f"hermes_state_db_transcript session={session_id} messages={len(messages)}")
     return messages[-500:]
@@ -323,7 +323,7 @@ def _extract_jsonl_messages(path: Path) -> list[dict[str, str]]:
         content = item.get("displayContent") or item.get("content", item.get("text", item.get("message", "")))
         text = _text_from_blocks(content).strip() if isinstance(content, list) else str(content or "").strip()
         if text:
-            messages.append({"role": "assistant" if role in ("model", "gemini") else role, "content": text[:800]})
+            messages.append({"role": "assistant" if role in ("model", "gemini") else role, "content": text[:2000]})
     return messages[-500:]
 
 
@@ -380,7 +380,7 @@ def _messages_from_json_obj(obj: object) -> list[dict[str, str]]:
             continue
         text = _message_text_from_obj(item)
         if text:
-            messages.append({"role": "assistant" if role in ("model", "gemini") else role, "content": text[:800]})
+            messages.append({"role": "assistant" if role in ("model", "gemini") else role, "content": text[:2000]})
     return messages[-500:]
 
 
@@ -471,7 +471,7 @@ def _extract_opencode_from_db(session_id: str = "") -> list[dict[str, str]]:
         parts = message.get("parts", [])
         text = " ".join(str(part) for part in parts if str(part).strip()).strip()
         if text:
-            messages.append({"role": role, "content": text[:800]})
+            messages.append({"role": role, "content": text[:2000]})
     if messages:
         _log(f"opencode_transcript session={session_id} messages={len(messages)}")
     return messages[-500:]
