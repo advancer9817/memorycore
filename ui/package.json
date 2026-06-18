@@ -4,8 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev --port 18318",
+    "dev:turbo": "next dev --turbo --port 18318",
     "build": "next build",
-    "start": "PORT=18318 HOSTNAME=127.0.0.1 node .next/standalone/server.js",
+    "postbuild": "node scripts/copy-standalone-assets.mjs",
+    "start": "PORT=18318 HOSTNAME=0.0.0.0 node .next/standalone/server.js",
+    "prod": "pnpm build && pnpm start",
     "lint": "next lint",
     "test:e2e": "playwright test"
   },
