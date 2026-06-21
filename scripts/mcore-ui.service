@@ -6,7 +6,11 @@ Wants=mcore.service
 [Service]
 Type=simple
 WorkingDirectory=__ROOT__/ui
-ExecStart=__NODE__ __ROOT__/ui/node_modules/next/dist/bin/next dev --port __UI_PORT__
+Environment=PORT=__UI_PORT__
+Environment=HOSTNAME=127.0.0.1
+Environment=MCORE_API_URL=http://__MCORE_HOST__:__MCORE_PORT__
+ExecStartPre=/bin/bash -c "cp -r __ROOT__/ui/.next/static __ROOT__/ui/.next/standalone/.next/static && cp -r __ROOT__/ui/public __ROOT__/ui/.next/standalone/public 2>/dev/null || true"
+ExecStart=__NODE__ __ROOT__/ui/.next/standalone/server.js
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

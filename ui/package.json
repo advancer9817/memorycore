@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --port 18318",
     "build": "next build",
+    "postbuild": "cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public 2>/dev/null || true",
     "start": "PORT=18318 HOSTNAME=127.0.0.1 node .next/standalone/server.js",
     "lint": "next lint",
     "test:e2e": "playwright test"
