@@ -4140,3 +4140,22 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 - `mcore restart` 执行后无任何输出 → 加 `show_status` 打印状态确认
 - Dashboard Active/Candidate/Archived 全显示 0 → 补充 `/api/curator/*`、`/api/governance/*` 代理规则
 - 生产模式前端页面样式/JS 全部 404 → `postbuild` + `ExecStartPre` 双保险自动同步静态资源
+
+---
+
+## [迭代] 2026-06-22 — mcore restart 自动构建前端
+
+### 变更
+
+- **restart 时自动 build UI**（`scripts/mcore`）
+  - `mcore restart all/ui/frontend/web` 触发时，先执行 `pnpm build` 构建 standalone 产物再重启服务
+  - fallback 模式同样自动构建
+  - 新增 `build_ui()` 函数，校验 node 和 package.json 后执行构建
+
+- **install_services.sh 自动构建**（`scripts/install_services.sh`）
+  - 安装 systemd 服务时自动 `pnpm install --frozen-lockfile` + `pnpm build`
+  - 确保安装完即可直接启动，无需手动构建
+
+### 原因
+
+此前 `mcore restart` 不会自动构建前端代码。修改 UI 后需要手动 `pnpm build` 再 `mcore restart`，容易遗漏导致运行旧版本。现在 `restart` 命令自动执行构建，简化部署流程。

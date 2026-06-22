@@ -51,6 +51,14 @@ DAEMON_SCRIPT="$ROOT/scripts/mcore-daemon.sh"
 log() { echo "[mcore] $*"; }
 die() { echo "[mcore] ERROR: $*" >&2; exit 1; }
 
+build_ui() {
+  [[ -x "$NODE_BIN" ]] || die "node not found; cannot build frontend"
+  [[ -f "$ROOT/ui/package.json" ]] || die "ui/package.json not found at $ROOT/ui"
+  log "Building frontend (pnpm build)..."
+  (cd "$ROOT/ui" && pnpm build)
+  log "Frontend build complete."
+}
+
 has_systemd_user() {
   systemctl --user show-environment >/dev/null 2>&1
 }
@@ -100,6 +108,9 @@ systemd_action() {
       log "${action} OK"; show_status "${units[@]}"
       ;;
     restart)
+      case "$target" in
+        all|ui|frontend|web) build_ui ;;
+      esac
       systemctl --user restart "${units[@]}"
       log "${action} OK"; show_status "${units[@]}"
       ;;
@@ -211,6 +222,7 @@ fallback_action() {
         restart)
           ui_stop_fallback || true
           "$DAEMON_SCRIPT" restart
+          build_ui
           ui_start_fallback
           ;;
         status)
@@ -233,7 +245,7 @@ fallback_action() {
       case "$action" in
         start) ui_start_fallback ;;
         stop) ui_stop_fallback ;;
-        restart) ui_stop_fallback || true; ui_start_fallback ;;
+        restart) ui_stop_fallback || true; build_ui; ui_start_fallback ;;
         status) ui_status_fallback ;;
       esac
       ;;

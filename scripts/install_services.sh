@@ -59,6 +59,14 @@ install_systemd() {
     "$ROOT/scripts/mcore.service" \
     > "$SYSTEMD_USER_DIR/mcore.service"
 
+  # --- frontend build ---
+  if [[ -n "$NODE_BIN" && -f "$ROOT/ui/package.json" ]]; then
+    _log "Installing frontend dependencies..."
+    (cd "$ROOT/ui" && pnpm install --frozen-lockfile)
+    _log "Building frontend (standalone)..."
+    (cd "$ROOT/ui" && pnpm build)
+  fi
+
   # --- mcore-ui.service ---
   if [[ -z "$NODE_BIN" ]]; then
     _log "WARNING: node not found — skipping mcore-ui.service install"
