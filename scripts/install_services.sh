@@ -70,6 +70,7 @@ install_systemd() {
       -e "s|__ROOT__|$ROOT|g" \
       -e "s|__NODE__|$NODE_BIN|g" \
       -e "s|__MCORE_HOST__|$HOST|g" \
+      -e "s|__MCORE_PORT__|$PORT|g" \
       -e "s|__UI_PORT__|$UI_PORT|g" \
       "$ROOT/scripts/mcore-ui.service" \
       > "$SYSTEMD_USER_DIR/mcore-ui.service"

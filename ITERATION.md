@@ -4106,3 +4106,37 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
   - 修复 1：改为分析完整对话（user + assistant），新增 Bug Fixes/Root Causes 和 Code Changes 两类提取类型
   - 根因 2：每条消息截断到 `[:800]` 字符，代码内容被截断丢失上下文
   - 修复 2：截断上限提升至 `[:2000]`，覆盖 6 处截断点
+
+## [迭代 138] 2026-06-22 — 生产模式前端 + 服务管理修复 + 代理路由完善
+
+### 变更
+
+- **前端切换为生产模式**（`scripts/mcore-ui.service`）
+  - `ExecStart` 由 `next dev` 改为 `node .next/standalone/server.js`
+  - 新增 `PORT`、`HOSTNAME`、`MCORE_API_URL` 环境变量
+  - 新增 `ExecStartPre` 自动同步静态资源（`.next/static` / `public` → standalone 目录）
+  - 启动时间从 ~3.3s 降至 ~200ms，内存从 297MB 降至 ~65MB
+
+- **API 代理规则补全**（`ui/next.config.mjs` + `ui/next.config.dev.mjs`）
+  - 原仅代理 `/api/v1/*`；补充 `/api/curator/*` 和 `/api/governance/*`
+  - 修复 Dashboard 数据全显示 0 的问题（root cause：两条路径未被代理，Next.js 返回 HTML 页面）
+
+- **postbuild 自动化**（`ui/package.json`）
+  - 新增 `postbuild` 钩子：`next build` 完成后自动复制静态资源到 standalone 目录
+  - 消除每次 build 后需手动复制的操作
+
+- **mcore CLI restart 反馈**（`scripts/mcore`）
+  - 新增 `show_status()` 函数，`start/stop/restart` 完成后打印简洁服务状态
+  - 简化 `systemd_action` 冗余分支
+
+- **install_services.sh 变量修复**（`scripts/install_services.sh`）
+  - mcore-ui.service 渲染时补加 `__MCORE_PORT__` 替换，防止模板变量残留
+
+- **start.sh 自动安装 mcore CLI**（`start.sh`）
+  - 新增步骤 4.6：每次 `start.sh` 运行后自动将 mcore 命令安装到 `~/.local/bin/mcore`
+
+### 修复
+
+- `mcore restart` 执行后无任何输出 → 加 `show_status` 打印状态确认
+- Dashboard Active/Candidate/Archived 全显示 0 → 补充 `/api/curator/*`、`/api/governance/*` 代理规则
+- 生产模式前端页面样式/JS 全部 404 → `postbuild` + `ExecStartPre` 双保险自动同步静态资源

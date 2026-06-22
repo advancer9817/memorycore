@@ -118,6 +118,28 @@ fi
 _log "Configuring agent hooks and memory rules ..."
 bash "$SCRIPT_DIR/scripts/setup-hooks.sh" || _warn "Hook setup failed (non-fatal)"
 
+# ── 4.6 安装 mcore CLI 命令（幂等）──────────────────────────────────────────
+_log "Installing mcore CLI command ..."
+_install_mcore_cmd() {
+  local bin_dir="$HOME/.local/bin"
+  local target="$bin_dir/mcore"
+  mkdir -p "$bin_dir"
+  local tmp
+  tmp="$(mktemp /tmp/mcore.XXXXXX)"
+  sed \
+    -e "s|__ROOT__|$SCRIPT_DIR|g" \
+    -e "s|__PYTHON__|$PY|g" \
+    "$SCRIPT_DIR/scripts/mcore" \
+    > "$tmp"
+  chmod +x "$tmp"
+  mv -f "$tmp" "$target"
+  _log "  mcore command installed at $target"
+  if [[ ":$PATH:" != *":$bin_dir:"* ]]; then
+    _warn "  $bin_dir is not in PATH — add it to your shell profile"
+  fi
+}
+_install_mcore_cmd || _warn "mcore CLI install failed (non-fatal)"
+
 # ── 5. 启动 MCP 服务 ──────────────────────────────────────────────────────────
 _log "Starting MCP service on http://$HOST:$PORT ..."
 _log "  MCP endpoint : http://$HOST:$PORT/mcp"

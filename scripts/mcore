@@ -72,6 +72,13 @@ resolve_targets() {
   esac
 }
 
+show_status() {
+  local -a units=("$@")
+  echo ""
+  systemctl --user status --no-pager "${units[@]}" 2>&1 \
+    | grep -E "●|Active:|Main PID:|CPU:|Memory:" || true
+}
+
 systemd_action() {
   local action="$1"
   local target="$2"
@@ -80,32 +87,24 @@ systemd_action() {
 
   case "$action" in
     start)
-      if [[ "$target" == "all" ]]; then
-        systemctl --user start "${units[@]}"
-      else
-        systemctl --user start "${units[@]}"
-      fi
+      systemctl --user start "${units[@]}"
+      log "${action} OK"; show_status "${units[@]}"
       ;;
     stop)
+      # stop UI before backend
       if [[ "$target" == "all" ]]; then
         systemctl --user stop "$UI_UNIT" "$MCORE_UNIT"
       else
         systemctl --user stop "${units[@]}"
       fi
+      log "${action} OK"; show_status "${units[@]}"
       ;;
     restart)
-      if [[ "$target" == "all" ]]; then
-        systemctl --user restart "$MCORE_UNIT" "$UI_UNIT"
-      else
-        systemctl --user restart "${units[@]}"
-      fi
+      systemctl --user restart "${units[@]}"
+      log "${action} OK"; show_status "${units[@]}"
       ;;
     status)
-      if [[ "$target" == "all" ]]; then
-        systemctl --user status --no-pager "$MCORE_UNIT" "$UI_UNIT"
-      else
-        systemctl --user status --no-pager "${units[@]}"
-      fi
+      systemctl --user status --no-pager "${units[@]}"
       ;;
     *) die "Unsupported action: $action" ;;
   esac
