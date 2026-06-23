@@ -87,8 +87,8 @@ const PRESETS = {
     prompt_style: "aggressive" as PromptStyle,
     reviewed_ids_max_age_seconds: 43200,
   },
-  knowledge_graph: {
-    label: "knowledge_graph",
+  knowledgeGraph: {
+    label: "knowledgeGraph",
     temperature: 0.6,
     sim_threshold: 0.55,
     split_content_threshold: 400,
@@ -231,7 +231,7 @@ export function CuratorTuningPanel() {
     return val.toFixed(2)
   }
 
-  const presetKeys: PresetKey[] = ["economy", "balanced", "precision", "aggressive", "deep", "knowledge_graph"]
+  const presetKeys: PresetKey[] = ["economy", "balanced", "precision", "aggressive", "deep", "knowledgeGraph"]
 
   return (
     <Card>

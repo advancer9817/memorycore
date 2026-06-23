@@ -689,7 +689,7 @@ export const en = {
     presetPrecision: "Precision",
     presetAggressive: "Aggressive",
     presetDeep: "Deep",
-    presetKnowledge_graph: "Knowledge Graph",
+    presetKnowledgeGraph: "Knowledge Graph",
     temperature: "Intelligence",
     sim_threshold: "Accuracy",
     split_content_threshold: "Split Precision",

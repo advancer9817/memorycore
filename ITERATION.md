@@ -2119,6 +2119,9 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 - UI 构建: Next.js 15.5 build 成功，postbuild standalone 资产就绪
 - 服务重启: mcore.service (8318) + mcore-ui.service (18318) 均已 active (running)
 
+### 已知问题
+- 本次也顺带修复了图谱预设在前端 UI 的显示名称（`knowledge_graph` 驼峰不一致问题），以符合整体命名风格。
+
 ### 回滚
 `git revert HEAD`
 
