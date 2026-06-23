@@ -4217,3 +4217,51 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 - `_temporal_tag` 输出格式：`[时间: 创建=2026-01-15, 更新=2026-06-20, 距今=3天]` ✓
 - `_context_recency_weight` temporal on → 0.15 ✓
 - `_recency_score` @90天 → 0.5（半衰期验证）✓
+
+---
+
+## [迭代 8] 2026-06-23 — Phase 7: 前端时间增强
+
+### Phase 7: 前端时间增强
+
+#### 7.1 FilterComponent 日期范围筛选
+
+**文件**: `ui/app/memories/components/FilterComponent.tsx`
+
+- 新增 `dateFrom`/`dateTo` state
+- TabsList 从 3 列扩展到 4 列，新增 `daterange` tab
+- 新增 `TabsContent value="daterange"` — 两个日期 Input 输入框
+- `handleApplyFilters` 传递 `dateFrom`/`dateTo` 到 `fetchMemories`
+- `handleClearFilters` 重置日期
+- `hasActiveFilters`/`hasTempFilters` 包含日期条件
+
+#### 7.2 useMemoriesApi 扩展
+
+**文件**: `ui/hooks/useMemoriesApi.ts`
+
+- `fetchMemories` filters 新增 `dateFrom?`/`dateTo?` 可选参数，映射到请求体 `date_from`/`date_to`
+- 新增 `updateValidityRange(memoryId, validFrom, validUntil)` — 调用 `PATCH /memories/:id`
+- `UseMemoriesApiReturn` 接口同步更新
+
+#### 7.3 MemoryDetails valid_from/valid_until 编辑
+
+**文件**: `ui/app/memory/[id]/components/MemoryDetails.tsx`
+
+- 引入 `Input`、`Label` 组件
+- 新增 `validFrom`/`validUntil`/`validitySaved` state
+- `handleSaveValidity` 调用 `updateValidityRange`
+- 记忆详情底部新增"Validity Range"区块 — 两个日期输入框 + Save 按钮
+
+#### 7.4 i18n 键（已在 Phase 7 启动时完成）
+
+**文件**: `ui/lib/i18n/dictionaries/zh.ts`, `en.ts`
+
+- 新增：`tabDateRange`, `dateFrom`, `dateTo`, `dateFromPlaceholder`, `dateToPlaceholder`, `validFrom`, `validUntil`
+
+### 验证结果
+
+- TypeScript 编译通过（`tsc --noEmit` 无错误）
+- 后端 `search_memory_records` 已支持 `date_from`/`date_to` WHERE 条件（Phase 7 后端，已在前一 commit 提交）
+- 后端 `update_memory_content` 已支持 `valid_from`/`valid_until` 更新（Phase 7 后端）
+- 前端 `GET /memories` 路由已映射 `date_from`/`date_to` 查询参数
+- 前端 `PATCH /memories/:id` 路由已映射 `valid_from`/`valid_until` body 字段

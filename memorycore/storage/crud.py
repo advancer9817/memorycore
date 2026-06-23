@@ -293,6 +293,8 @@ def update_memory_content(
     new_status: str | None = None,
     new_confidence: float | None = None,
     new_importance: float | None = None,
+    new_valid_from: str | None = None,
+    new_valid_until: str | None = None,
 ) -> dict[str, Any]:
     rows = _managed_query("SELECT id FROM memories WHERE id=? LIMIT 1", (memory_id,))
     if not rows:
@@ -322,6 +324,14 @@ def update_memory_content(
     if new_importance is not None:
         updates.append("importance=?")
         params.append(finite_float(new_importance, "importance", 0.0, 1.0))
+    if new_valid_from is not None:
+        _validate_iso(new_valid_from, "valid_from")
+        updates.append("valid_from=?")
+        params.append(new_valid_from or None)
+    if new_valid_until is not None:
+        _validate_iso(new_valid_until, "valid_until")
+        updates.append("valid_until=?")
+        params.append(new_valid_until or None)
     params.append(memory_id)
     with managed_conn() as conn:
         conn.execute(f"UPDATE memories SET {', '.join(updates)} WHERE id=?", params)

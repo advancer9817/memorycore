@@ -51,6 +51,8 @@ export default function FilterComponent() {
   >([]);
   const [showArchived, setShowArchived] = useState(false);
   const [categoryQuery, setCategoryQuery] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const columns = useMemo(
     () => [
@@ -87,6 +89,8 @@ export default function FilterComponent() {
       setTempSelectedApps(filters.selectedApps);
       setTempSelectedCategories(filters.selectedCategories);
       setShowArchived(filters.showArchived || false);
+      setDateFrom((filters as any).dateFrom || "");
+      setDateTo((filters as any).dateTo || "");
     }
   }, [isOpen, filters]);
 
@@ -127,6 +131,8 @@ export default function FilterComponent() {
     setTempSelectedApps([]);
     setTempSelectedCategories([]);
     setShowArchived(false);
+    setDateFrom("");
+    setDateTo("");
     dispatch(clearFilters());
     await fetchMemories();
   };
@@ -151,6 +157,8 @@ export default function FilterComponent() {
         sortColumn: filters.sortColumn,
         sortDirection: filters.sortDirection,
         showArchived: showArchived,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
       });
       setIsOpen(false);
     } catch {
@@ -197,12 +205,16 @@ export default function FilterComponent() {
   const hasActiveFilters =
     filters.selectedApps.length > 0 ||
     filters.selectedCategories.length > 0 ||
-    filters.showArchived;
+    filters.showArchived ||
+    !!dateFrom ||
+    !!dateTo;
 
   const hasTempFilters =
     tempSelectedApps.length > 0 ||
     tempSelectedCategories.length > 0 ||
-    showArchived;
+    showArchived ||
+    !!dateFrom ||
+    !!dateTo;
 
   return (
     <div className="flex items-center gap-2">
@@ -234,7 +246,7 @@ export default function FilterComponent() {
             </DialogTitle>
           </DialogHeader>
           <Tabs defaultValue="apps" className="w-full">
-            <TabsList className="grid grid-cols-3 bg-zinc-800">
+            <TabsList className="grid grid-cols-4 bg-zinc-800">
               <TabsTrigger
                 value="apps"
                 className="data-[state=active]:bg-zinc-700"
@@ -252,6 +264,12 @@ export default function FilterComponent() {
                 className="data-[state=active]:bg-zinc-700"
               >
                 {t.tabArchived}
+              </TabsTrigger>
+              <TabsTrigger
+                value="daterange"
+                className="data-[state=active]:bg-zinc-700"
+              >
+                {t.tabDateRange}
               </TabsTrigger>
             </TabsList>
             <TabsContent value="apps" className="mt-4">
@@ -379,6 +397,30 @@ export default function FilterComponent() {
                   >
                     {t.showArchivedMemories}
                   </Label>
+                </div>
+              </div>
+            </TabsContent>
+            <TabsContent value="daterange" className="mt-4">
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <Label className="text-xs text-zinc-400">{t.dateFrom}</Label>
+                  <Input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    placeholder={t.dateFromPlaceholder}
+                    className="h-9 border-zinc-700 bg-zinc-950 text-sm text-zinc-100"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-zinc-400">{t.dateTo}</Label>
+                  <Input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    placeholder={t.dateToPlaceholder}
+                    className="h-9 border-zinc-700 bg-zinc-950 text-sm text-zinc-100"
+                  />
                 </div>
               </div>
             </TabsContent>

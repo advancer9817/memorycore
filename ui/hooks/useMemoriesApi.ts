@@ -82,6 +82,8 @@ interface UseMemoriesApiReturn {
       sortColumn?: string;
       sortDirection?: 'asc' | 'desc';
       showArchived?: boolean;
+      dateFrom?: string;
+      dateTo?: string;
     },
     forceRefresh?: boolean
   ) => Promise<{ memories: Memory[]; total: number; pages: number }>;
@@ -92,6 +94,7 @@ interface UseMemoriesApiReturn {
   deleteMemories: (memoryIds: string[]) => Promise<void>;
   updateMemory: (memoryId: string, content: string) => Promise<void>;
   updateMemoryState: (memoryIds: string[], state: string) => Promise<void>;
+  updateValidityRange: (memoryId: string, validFrom: string, validUntil: string) => Promise<void>;
   isLoading: boolean;
   error: string | null;
   hasUpdates: number;
@@ -129,6 +132,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
       sortColumn?: string;
       sortDirection?: 'asc' | 'desc';
       showArchived?: boolean;
+      dateFrom?: string;
+      dateTo?: string;
     },
     forceRefresh: boolean = false
   ): Promise<{ memories: Memory[], total: number, pages: number }> => {
@@ -140,7 +145,9 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
       !filters?.categories?.length &&
       !filters?.sortColumn &&
       !filters?.sortDirection &&
-      filters?.showArchived === undefined;
+      filters?.showArchived === undefined &&
+      !filters?.dateFrom &&
+      !filters?.dateTo;
     const cachedMemories = memoriesRef.current;
     const cachedAt = lastFetchedAtRef.current;
     if (!forceRefresh && isDefaultLoad && cachedAt && Date.now() - cachedAt < CACHE_TTL_MS && cachedMemories.length > 0) {
@@ -160,7 +167,9 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
           category_ids: filters?.categories,
           sort_column: filters?.sortColumn?.toLowerCase(),
           sort_direction: filters?.sortDirection,
-          show_archived: filters?.showArchived
+          show_archived: filters?.showArchived,
+          date_from: filters?.dateFrom || undefined,
+          date_to: filters?.dateTo || undefined,
         }
       );
 
@@ -354,6 +363,28 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
     }
   };
 
+  const updateValidityRange = async (memoryId: string, validFrom: string, validUntil: string): Promise<void> => {
+    if (memoryId === "") return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const body: Record<string, string> = {};
+      if (validFrom) body.valid_from = validFrom;
+      if (validUntil) body.valid_until = validUntil;
+      await axios.patch(`${getApiBaseUrl()}/memories/${memoryId}`, body);
+      if (selectedMemory?.id === memoryId) {
+        dispatch(setSelectedMemory({ ...selectedMemory, valid_from: validFrom, valid_until: validUntil } as any));
+      }
+      setIsLoading(false);
+      setHasUpdates(hasUpdates + 1);
+    } catch (err: any) {
+      const errorMessage = err.message || 'Failed to update validity range';
+      setError(errorMessage);
+      setIsLoading(false);
+      throw new Error(errorMessage);
+    }
+  };
+
   return {
     fetchMemories,
     fetchMemoryById,
@@ -363,6 +394,7 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
     deleteMemories,
     updateMemory,
     updateMemoryState,
+    updateValidityRange,
     isLoading,
     error,
     hasUpdates,

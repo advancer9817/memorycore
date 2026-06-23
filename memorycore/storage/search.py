@@ -373,6 +373,8 @@ def search_memory_records(
     tags: Any = None,
     status: str = "active",
     limit: int = 10,
+    date_from: str = "",
+    date_to: str = "",
 ) -> list[dict[str, Any]]:
     types_list = normalize_list(types)
     tags_list = [t.lower() for t in normalize_list(tags)]
@@ -409,6 +411,12 @@ def search_memory_records(
     if status:
         clauses.append("m.status = ?")
         params.append(status)
+    if date_from:
+        clauses.append("m.created_at >= ?")
+        params.append(date_from)
+    if date_to:
+        clauses.append("m.created_at <= ?")
+        params.append(date_to)
     clauses.append("(m.valid_until IS NULL OR m.valid_until > ?)")
     params.append(now())
     sql = base

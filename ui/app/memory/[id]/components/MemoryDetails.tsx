@@ -3,6 +3,8 @@ import { useMemoriesApi } from "@/hooks/useMemoriesApi";
 import { MemoryActions } from "./MemoryActions";
 import { ArrowLeft, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useRouter } from "next/navigation";
 import { AccessLog } from "./AccessLog";
 import Image from "next/image";
@@ -20,11 +22,14 @@ interface MemoryDetailsProps {
 
 export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
   const router = useRouter();
-  const { fetchMemoryById, hasUpdates } = useMemoriesApi();
+  const { fetchMemoryById, hasUpdates, updateValidityRange, isLoading } = useMemoriesApi();
   const memory = useSelector(
     (state: RootState) => state.memories.selectedMemory
   );
   const [copied, setCopied] = useState(false);
+  const [validFrom, setValidFrom] = useState("");
+  const [validUntil, setValidUntil] = useState("");
+  const [validitySaved, setValiditySaved] = useState(false);
   const appConfig =
     constants[memory?.app_name as keyof typeof constants] || constants.default;
   const appLabel =
@@ -40,9 +45,23 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
     }
   };
 
+  const handleSaveValidity = async () => {
+    if (!memory?.id) return;
+    await updateValidityRange(memory.id, validFrom, validUntil);
+    setValiditySaved(true);
+    setTimeout(() => setValiditySaved(false), 2000);
+  };
+
   useEffect(() => {
     fetchMemoryById(memory_id);
   }, []);
+
+  useEffect(() => {
+    if (memory) {
+      setValidFrom((memory as any).valid_from ? (memory as any).valid_from.slice(0, 10) : "");
+      setValidUntil((memory as any).valid_until ? (memory as any).valid_until.slice(0, 10) : "");
+    }
+  }, [memory?.id]);
 
   return (
     <div className="container mx-auto py-6 px-4">
@@ -128,6 +147,38 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                         </p>
                       </div>
                     </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-4 border-t border-zinc-800">
+                  <p className="text-xs text-zinc-500 mb-3">Validity Range</p>
+                  <div className="flex gap-3 items-end">
+                    <div className="flex-1 space-y-1">
+                      <Label className="text-xs text-zinc-400">Valid From</Label>
+                      <Input
+                        type="date"
+                        value={validFrom}
+                        onChange={(e) => setValidFrom(e.target.value)}
+                        className="h-8 border-zinc-700 bg-zinc-950 text-sm text-zinc-100"
+                      />
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <Label className="text-xs text-zinc-400">Valid Until</Label>
+                      <Input
+                        type="date"
+                        value={validUntil}
+                        onChange={(e) => setValidUntil(e.target.value)}
+                        className="h-8 border-zinc-700 bg-zinc-950 text-sm text-zinc-100"
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      disabled={isLoading}
+                      onClick={handleSaveValidity}
+                      className="h-8 bg-primary hover:bg-primary/80 text-white text-xs"
+                    >
+                      {validitySaved ? <Check className="h-3 w-3" /> : "Save"}
+                    </Button>
                   </div>
                 </div>
 

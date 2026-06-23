@@ -248,6 +248,8 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
             tags=_list_q(query, "tag") or _list_q(query, "tags"),
             status=_str_q(query, "status", "active"),
             limit=_int_q(query, "limit", 50),
+            date_from=_str_q(query, "date_from", ""),
+            date_to=_str_q(query, "date_to", ""),
         )
     if parts == ["memories", "recent"] and method == "GET":
         return list_recent(_int_q(query, "limit", 50), cap=500)
@@ -269,7 +271,7 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
             atomize=body.get("atomize", "auto"),
         )
     if len(parts) == 2 and parts[0] == "memories" and method == "PATCH":
-        return update_memory_content(parts[1], body.get("content"), body.get("title"), body.get("status"), body.get("confidence"), body.get("importance"))
+        return update_memory_content(parts[1], body.get("content"), body.get("title"), body.get("status"), body.get("confidence"), body.get("importance"), body.get("valid_from"), body.get("valid_until"))
     if len(parts) == 3 and parts[0] == "memories" and parts[2] == "status" and method == "PATCH":
         return update_status(parts[1], body.get("status", ""))
     if len(parts) == 3 and parts[0] == "memories" and parts[2] == "feedback" and method == "POST":
