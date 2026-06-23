@@ -4265,3 +4265,33 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 - 后端 `update_memory_content` 已支持 `valid_from`/`valid_until` 更新（Phase 7 后端）
 - 前端 `GET /memories` 路由已映射 `date_from`/`date_to` 查询参数
 - 前端 `PATCH /memories/:id` 路由已映射 `valid_from`/`valid_until` body 字段
+
+---
+
+## 2026-06-23 记忆详情页修复与 Validity Range UI 重设计
+
+### 问题修复
+
+#### 记忆详情页 404 闪烁
+
+**根因**：
+1. `page.tsx` 和 `MemoryDetails.tsx` 各自独立调用 `fetchMemoryById`，两个 `useEffect` 并发触发，`isLoading`/`error`/`memory` 状态反复翻转，页面在 NotFound ↔ 正常内容之间闪烁。
+2. `page.tsx` 将非 `useCallback` 包裹的 `fetchMemoryById`（每次 render 产生新引用）放入 `useEffect` 依赖数组，导致无限 re-fetch 循环。
+
+**修复**：
+- `page.tsx`：依赖数组从 `[id, fetchMemoryById]` 改为 `[id]`
+- `MemoryDetails.tsx`：删除重复的 `fetchMemoryById` 调用，由父组件统一负责数据加载
+
+**文件**: `ui/app/memory/[id]/page.tsx`, `ui/app/memory/[id]/components/MemoryDetails.tsx`
+
+### UI 重设计
+
+#### Validity Range 折叠式展示
+
+- 原：Validity Range 区块始终展示在页面，原生 `<input type="date">` 弹出系统日历遮挡正文
+- 改：默认折叠为一行摘要（有值时显示 `dateFrom → dateUntil`，无值时显示"未设置"），点击展开才显示输入控件
+
+#### 日期选择器替换
+
+- 原：原生 `<input type="date">`，样式与暗色主题不符，弹出日历位置不可控
+- 改：shadcn `Popover` + `Calendar` 组件，样式 `bg-zinc-900 border-zinc-700`，与整体项目暗色主题一致

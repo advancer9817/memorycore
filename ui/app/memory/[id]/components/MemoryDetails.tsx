@@ -1,10 +1,11 @@
 "use client";
 import { useMemoriesApi } from "@/hooks/useMemoriesApi";
 import { MemoryActions } from "./MemoryActions";
-import { ArrowLeft, Copy, Check } from "lucide-react";
+import { ArrowLeft, Copy, Check, ChevronDown, ChevronUp, CalendarClock, Calendar as CalendarIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 import { useRouter } from "next/navigation";
 import { AccessLog } from "./AccessLog";
 import Image from "next/image";
@@ -15,6 +16,23 @@ import { RootState } from "@/store/store";
 import { constants } from "@/components/shared/source-app";
 import { RelatedMemories } from "./RelatedMemories";
 import { MemoryLineage } from "./MemoryLineage";
+import { cn } from "@/lib/utils";
+
+function parseDateStr(s: string): Date | undefined {
+  if (!s) return undefined;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? undefined : d;
+}
+
+function formatDateStr(d: Date | undefined): string {
+  if (!d) return "";
+  return d.toISOString().slice(0, 10);
+}
+
+function formatDisplay(s: string): string {
+  if (!s) return "未设置";
+  return s;
+}
 
 interface MemoryDetailsProps {
   memory_id: string;
@@ -22,7 +40,7 @@ interface MemoryDetailsProps {
 
 export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
   const router = useRouter();
-  const { fetchMemoryById, hasUpdates, updateValidityRange, isLoading } = useMemoriesApi();
+  const { hasUpdates, updateValidityRange, isLoading } = useMemoriesApi();
   const memory = useSelector(
     (state: RootState) => state.memories.selectedMemory
   );
@@ -30,6 +48,7 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
   const [validFrom, setValidFrom] = useState("");
   const [validUntil, setValidUntil] = useState("");
   const [validitySaved, setValiditySaved] = useState(false);
+  const [validityExpanded, setValidityExpanded] = useState(false);
   const appConfig =
     constants[memory?.app_name as keyof typeof constants] || constants.default;
   const appLabel =
@@ -52,9 +71,6 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
     setTimeout(() => setValiditySaved(false), 2000);
   };
 
-  useEffect(() => {
-    fetchMemoryById(memory_id);
-  }, []);
 
   useEffect(() => {
     if (memory) {
@@ -151,35 +167,85 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                 </div>
 
                 <div className="mt-4 pt-4 border-t border-zinc-800">
-                  <p className="text-xs text-zinc-500 mb-3">Validity Range</p>
-                  <div className="flex gap-3 items-end">
-                    <div className="flex-1 space-y-1">
-                      <Label className="text-xs text-zinc-400">Valid From</Label>
-                      <Input
-                        type="date"
-                        value={validFrom}
-                        onChange={(e) => setValidFrom(e.target.value)}
-                        className="h-8 border-zinc-700 bg-zinc-950 text-sm text-zinc-100"
-                      />
+                  <button
+                    className="flex items-center gap-2 w-full text-left group"
+                    onClick={() => setValidityExpanded((v) => !v)}
+                  >
+                    <CalendarClock className="h-3.5 w-3.5 text-zinc-500" />
+                    <span className="text-xs text-zinc-500 flex-1">Validity Range</span>
+                    {(validFrom || validUntil) && (
+                      <span className="text-xs text-zinc-400 mr-2">
+                        {validFrom || "∞"} → {validUntil || "∞"}
+                      </span>
+                    )}
+                    {validityExpanded ? (
+                      <ChevronUp className="h-3.5 w-3.5 text-zinc-500" />
+                    ) : (
+                      <ChevronDown className="h-3.5 w-3.5 text-zinc-500" />
+                    )}
+                  </button>
+                  {validityExpanded && (
+                    <div className="flex gap-3 items-end mt-3">
+                      <div className="flex-1 space-y-1">
+                        <Label className="text-xs text-zinc-400">Valid From</Label>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              className={cn(
+                                "w-full h-8 justify-start text-left text-sm font-normal border-zinc-700 bg-zinc-950 hover:bg-zinc-900",
+                                !validFrom && "text-zinc-500"
+                              )}
+                            >
+                              <CalendarIcon className="mr-2 h-3.5 w-3.5 text-zinc-400" />
+                              {validFrom || "选择日期"}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0 border-zinc-700 bg-zinc-900" align="start">
+                            <Calendar
+                              mode="single"
+                              selected={parseDateStr(validFrom)}
+                              onSelect={(d) => setValidFrom(formatDateStr(d))}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                      <div className="flex-1 space-y-1">
+                        <Label className="text-xs text-zinc-400">Valid Until</Label>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              className={cn(
+                                "w-full h-8 justify-start text-left text-sm font-normal border-zinc-700 bg-zinc-950 hover:bg-zinc-900",
+                                !validUntil && "text-zinc-500"
+                              )}
+                            >
+                              <CalendarIcon className="mr-2 h-3.5 w-3.5 text-zinc-400" />
+                              {validUntil || "选择日期"}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0 border-zinc-700 bg-zinc-900" align="start">
+                            <Calendar
+                              mode="single"
+                              selected={parseDateStr(validUntil)}
+                              onSelect={(d) => setValidUntil(formatDateStr(d))}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                      <Button
+                        size="sm"
+                        disabled={isLoading}
+                        onClick={handleSaveValidity}
+                        className="h-8 bg-primary hover:bg-primary/80 text-white text-xs"
+                      >
+                        {validitySaved ? <Check className="h-3 w-3" /> : "Save"}
+                      </Button>
                     </div>
-                    <div className="flex-1 space-y-1">
-                      <Label className="text-xs text-zinc-400">Valid Until</Label>
-                      <Input
-                        type="date"
-                        value={validUntil}
-                        onChange={(e) => setValidUntil(e.target.value)}
-                        className="h-8 border-zinc-700 bg-zinc-950 text-sm text-zinc-100"
-                      />
-                    </div>
-                    <Button
-                      size="sm"
-                      disabled={isLoading}
-                      onClick={handleSaveValidity}
-                      className="h-8 bg-primary hover:bg-primary/80 text-white text-xs"
-                    >
-                      {validitySaved ? <Check className="h-3 w-3" /> : "Save"}
-                    </Button>
-                  </div>
+                  )}
                 </div>
 
                 {/* <div className="flex justify-end gap-2 w-full mt-2">

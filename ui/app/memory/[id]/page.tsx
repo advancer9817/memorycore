@@ -20,7 +20,7 @@ function MemoryContent({ id }: { id: string }) {
 
   useEffect(() => {
     fetchMemoryById(id).catch(() => {});
-  }, [id, fetchMemoryById]);
+  }, [id]);
 
   if (isLoading) return <MemorySkeleton />;
   if (error) return <NotFound message={error} />;
