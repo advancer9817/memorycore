@@ -45,7 +45,7 @@ _PROMPT_STYLES = {
             "Partial overlap or related topics are NOT duplicates. "
             "Return a JSON object with key 'results': a list where each element has "
             "'index' (int), 'is_duplicate' (bool), 'reason' (str, ≤30 words), "
-            "'keep_id' (the id of the memory to keep, or null if unsure), and "
+            "'keep' (str, \"A\" or \"B\" — the memory to keep, or null if unsure), and "
             "'merge_info' (str, ≤40 words; empty string if nothing needs merging)."
         ),
         "contradiction": (
@@ -54,11 +54,13 @@ _PROMPT_STYLES = {
             "Different perspectives or supplementary information are NOT contradictions. "
             "Return JSON with key 'results': list of objects with "
             "'index' (int), 'contradicts' (bool), 'reason' (str ≤30 words), "
-            "'newer_id' (id of the more recent/correct memory, or null)."
+            "'newer' (str, \"A\" or \"B\" — the more recent/correct memory, or null)."
         ),
         "importance": (
             "You are a careful memory curator. Evaluate each memory's importance conservatively. "
             "Only change importance if there is a clear reason. Prefer 'keep' when uncertain. "
+            "Memories with positive feedback_score (> 0) have been validated by the user — "
+            "do NOT archive or downgrade these unless the content is demonstrably outdated. "
             "Actions: 'keep', 'promote', 'downgrade', 'archive'. "
             "Return JSON with key 'results': list of "
             "{'index': int, 'new_importance': float, 'action': str, 'reason': str ≤20 words}."
@@ -80,7 +82,7 @@ _PROMPT_STYLES = {
             "even if worded differently. Partial overlaps where one adds significant new detail are NOT duplicates. "
             "Return a JSON object with key 'results': a list where each element has "
             "'index' (int), 'is_duplicate' (bool), 'reason' (str, ≤30 words), "
-            "'keep_id' (the id of the memory to keep, or null if unsure), and "
+            "'keep' (str, \"A\" or \"B\" — the memory to keep, or null if unsure), and "
             "'merge_info' (str, ≤40 words; empty string if nothing needs merging)."
         ),
         "contradiction": (
@@ -90,12 +92,14 @@ _PROMPT_STYLES = {
             "Different but compatible perspectives are NOT contradictions. "
             "Return JSON with key 'results': list of objects with "
             "'index' (int), 'contradicts' (bool), 'reason' (str ≤30 words), "
-            "'newer_id' (id of the more recent/correct memory, or null)."
+            "'newer' (str, \"A\" or \"B\" — the more recent/correct memory, or null)."
         ),
         "importance": (
             "You are a memory curator optimizing knowledge base quality. "
             "Reassess each memory's importance based on its current relevance and utility. "
             "Consider recency, actionability, and uniqueness. Make changes when justified. "
+            "Memories with positive feedback_score (> 0) have been validated by the user — "
+            "do NOT archive or downgrade these unless the content is demonstrably outdated. "
             "Actions: 'keep', 'promote', 'downgrade', 'archive'. "
             "Return JSON with key 'results': list of "
             "{'index': int, 'new_importance': float, 'action': str, 'reason': str ≤20 words}."
@@ -110,7 +114,70 @@ _PROMPT_STYLES = {
             "If not splittable, set splittable=false."
         ),
     },
-    "aggressive": {},  # Will use the existing hardcoded prompts as fallback
+    "aggressive": {
+        "duplicate": (
+            "You are an aggressive memory curator whose primary goal is to eliminate redundancy. "
+            "Analyse each pair of memories and determine whether they are duplicates. "
+            "Consider ALL of the following as duplicates:\n"
+            "- Exact same fact stated differently\n"
+            "- One memory is a subset of the other (the shorter adds nothing new)\n"
+            "- Both memories describe the same decision, preference, or configuration\n"
+            "- Overlapping information where merging into one would lose nothing\n"
+            "- Same topic with trivially different wording or formatting\n"
+            "When in doubt, mark as duplicate — redundancy hurts retrieval quality.\n"
+            "Return a JSON object with key 'results': a list where each element has "
+            "'index' (int), 'is_duplicate' (bool), 'reason' (str, ≤30 words), "
+            "'keep' (str, \"A\" or \"B\" — the memory to keep, or null if unsure), and "
+            "'merge_info' (str, ≤40 words describing information from the discarded memory "
+            "that should be merged into the kept memory; empty string if nothing needs merging)."
+        ),
+        "contradiction": (
+            "You are an aggressive memory curator focused on detecting contradictions. "
+            "Check each memory pair for ANY form of conflict:\n"
+            "- Direct contradiction: one states X, the other states NOT X\n"
+            "- Temporal supersession: one is an outdated version of the same decision/preference\n"
+            "- Conditional conflict: they give different answers for overlapping conditions\n"
+            "- Implicit contradiction: their logical implications are incompatible\n"
+            "- Stale vs current: one reflects an old state that has been updated by the other\n"
+            "When memories describe the same topic with different conclusions, that IS a contradiction. "
+            "Return JSON with key 'results': list of objects with "
+            "'index' (int), 'contradicts' (bool), 'reason' (str ≤30 words), "
+            "'newer' (str, \"A\" or \"B\" — the more recent/correct memory, or null)."
+        ),
+        "importance": (
+            "You are an aggressive memory curator optimizing a knowledge base for maximum utility. "
+            "For each memory, critically evaluate its long-term value and output a revised importance score 0.0–1.0. "
+            "Be decisive — most memories decay in value over time. Consider:\n"
+            "- Is this still actionable or relevant, or is it historical noise?\n"
+            "- Does it contain a unique insight, or is it generic/obvious?\n"
+            "- Would losing this memory actually harm future conversations?\n"
+            "- Is the current importance score justified by the content quality?\n"
+            "- Memories with 0 injections and 0 feedback are likely unused — downgrade aggressively.\n"
+            "- Memories with positive feedback_score (> 0) have been validated by the user — "
+            "do NOT archive or downgrade these unless the content is demonstrably outdated.\n"
+            "Actions: 'keep' (no change needed), 'promote' (raise importance, make active), "
+            "'downgrade' (lower importance), 'archive' (low value, should be archived). "
+            "Default to action rather than 'keep' — if you can justify any change, make it.\n"
+            "Return JSON with key 'results': list of "
+            "{'index': int, 'new_importance': float, 'action': str, 'reason': str ≤20 words}."
+        ),
+        "split": (
+            "You are a memory curator focused on atomizing compound memories for better retrieval. "
+            "Identify memories that contain multiple distinct, separable facts. "
+            "A memory is splittable if:\n"
+            "- It lists multiple independent decisions, preferences, or facts\n"
+            "- It covers multiple topics that could each stand alone\n"
+            "- It contains both a rule AND its context/reasoning as separable units\n"
+            "- It bundles configuration details with behavioral preferences\n"
+            "For each splittable memory, propose 2-4 concise atomic sub-memories. "
+            "Each sub-memory should be self-contained and useful in isolation.\n"
+            "Return JSON with key 'results': list of "
+            "{'index': int, 'splittable': bool, 'reason': str ≤20 words, "
+            "'sub_memories': [{'title': str, 'content': str, 'importance': float}]}. "
+            "The 'importance' field (0.0-1.0) reflects the long-term value of each sub-memory independently. "
+            "If a memory is already atomic or splitting would lose context, set splittable=false."
+        ),
+    },
 }
 
 def _cleanup_reviewed_ids() -> None:
@@ -293,35 +360,35 @@ def _fetch_memories_by_ids(ids: list[str]) -> dict[str, dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# 1. Semantic deduplication
+# 1. Unified vector scan (dedup + contradiction share one pass)
 # ---------------------------------------------------------------------------
 
-def _find_semantic_duplicate_candidates(
+def _find_candidate_pairs(
     vs: Any,
     memories: list[dict[str, Any]],
     sim_threshold: float,
 ) -> list[tuple[dict, dict, float]]:
-    """Return (mem_a, mem_b, score) pairs above sim_threshold, deduplicated."""
+    """One vector scan returning all pairs >= sim_threshold*0.8.
+
+    Callers split by score:
+    - >= sim_threshold       → dedup candidates
+    - >= sim_threshold * 0.8 → contradiction candidates
+    """
     recently_reviewed = _get_recently_reviewed_ids()
-    original_count = len(memories)
     memories = [m for m in memories if m["id"] not in recently_reviewed]
-    if original_count > 500:
-        logger.warning(
-            "Large LLM duplicate candidate pool (%d memories); scanning all eligible memories may be slow",
-            original_count,
-        )
 
     seen: set[frozenset[str]] = set()
     pairs: list[tuple[dict, dict, float]] = []
     by_id = {m["id"]: m for m in memories}
     missing_ids: set[str] = set()
+    effective_floor = sim_threshold * 0.8
 
     for mem in memories:
         text = f"{mem.get('title', '')} {mem.get('content', '')}".strip()
         if not text:
             continue
         try:
-            results = vs.search(text, top_k=6, score_threshold=sim_threshold)
+            results = vs.search(text, top_k=6, score_threshold=effective_floor)
         except Exception as exc:
             logger.debug("vector search failed for %s: %s", mem["id"], exc)
             continue
@@ -339,7 +406,6 @@ def _find_semantic_duplicate_candidates(
             else:
                 pairs.append((mem, by_id[other_id], r.score))
 
-    # Fetch any missing memories from DB
     if missing_ids:
         fetched = _fetch_memories_by_ids(list(missing_ids))
         resolved = []
@@ -348,7 +414,6 @@ def _find_semantic_duplicate_candidates(
                 b_full = fetched.get(b["id"])
                 if b_full:
                     resolved.append((a, b_full, score))
-                # Skip if not found in DB (deleted/archived since index)
             else:
                 resolved.append((a, b, score))
         pairs = resolved
@@ -362,135 +427,390 @@ def _llm_judge_duplicates(
     batch_size: int = 10,
     content_max_chars: int = 2000,
     prompt_style: str = "aggressive",
-) -> list[dict[str, Any]]:
+    config: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], set[str]]:
     """Ask LLM to confirm which pairs are true duplicates."""
+    full_config = config or {}
     results = []
+    evaluated_ids: set[str] = set()
     for i in range(0, len(pairs), batch_size):
         batch = pairs[i: i + batch_size]
         items_text = ""
         for idx, (a, b, score) in enumerate(batch):
+            evaluated_ids.add(a["id"])
+            evaluated_ids.add(b["id"])
             items_text += (
                 f"\n[{idx}]\n"
-                f"A (id={a['id'][:8]}): title={a.get('title')!r} {_temporal_tag(a)}\n"
+                f"A: title={a.get('title')!r} {_temporal_tag(a)}\n"
                 f"  content={a.get('content', '')[:content_max_chars]!r}\n"
-                f"B (id={b['id'][:8]}): title={b.get('title')!r} {_temporal_tag(b)}\n"
+                f"B: title={b.get('title')!r} {_temporal_tag(b)}\n"
                 f"  content={b.get('content', '')[:content_max_chars]!r}\n"
                 f"vector_similarity={score:.3f}\n"
             )
-        style_prompts = _PROMPT_STYLES.get(prompt_style, {})
-        system = style_prompts.get("duplicate")
-        if not system:
-            system = (
-                "You are an aggressive memory curator whose primary goal is to eliminate redundancy. "
-                "Analyse each pair of memories and determine whether they are duplicates. "
-                "Consider ALL of the following as duplicates:\n"
-                "- Exact same fact stated differently\n"
-                "- One memory is a subset of the other (the shorter adds nothing new)\n"
-                "- Both memories describe the same decision, preference, or configuration\n"
-                "- Overlapping information where merging into one would lose nothing\n"
-                "- Same topic with trivially different wording or formatting\n"
-                "When in doubt, mark as duplicate — redundancy hurts retrieval quality.\n"
-                "Return a JSON object with key 'results': a list where each element has "
-                "'index' (int), 'is_duplicate' (bool), 'reason' (str, ≤30 words), "
-                "'keep_id' (the id of the memory to keep, or null if unsure), and "
-                "'merge_info' (str, ≤40 words describing information from the discarded memory "
-                "that should be merged into the kept memory; empty string if nothing needs merging)."
-            )
+        system = _PROMPT_STYLES.get(prompt_style, {}).get("duplicate") or _PROMPT_STYLES["balanced"]["duplicate"]
         prompt = f"Evaluate these memory pairs for semantic duplication:{items_text}"
-        from memorycore.models import load_config
-        output_language = load_config().get("output_language", "auto")
+        output_language = full_config.get("output_language", "auto")
         lang_suffix = _language_instruction(output_language)
         if lang_suffix:
             system += lang_suffix
-        full_config_for_temporal = load_config()
-        if full_config_for_temporal.get("temporal", {}).get("llm_temporal_prompts", False):
+        if full_config.get("temporal", {}).get("llm_temporal_prompts", False):
             system += (
                 "\n\n# 时间推理规则\n"
                 "- 每条记忆的[时间:]标签显示创建和更新日期，请务必参考\n"
-                "- 当两条记忆重复时，优先保留(keep_id)更新日期更近的那条\n"
+                "- 当两条记忆重复时，优先保留(keep=A或B)更新日期更近的那条\n"
                 "- 若更新日期相差超过30天，更新日期更近的记忆很可能是事实演变后的最新版本，而非真正重复\n"
             )
         try:
             raw, thinking = _call_llm_with_thinking(prompt, system, llm_config)
-            data = json.loads(raw)
-            for item in data.get("results", []):
-                idx = item.get("index", 0)
-                if not isinstance(idx, int) or idx >= len(batch):
-                    continue
-                a, b, score = batch[idx]
-                if item.get("is_duplicate"):
-                    llm_keep_id = item.get("keep_id")
-                    if llm_keep_id in (a["id"], b["id"]):
-                        keep_id = llm_keep_id
-                        drop_id = b["id"] if keep_id == a["id"] else a["id"]
-                    else:
-                        # 时间优先: temporal 启用时保留 updated_at 更新的记忆，importance 作为 tiebreaker
-                        from memorycore.models import load_config
-                        use_temporal = load_config().get("temporal", {}).get("enabled", False)
-                        if use_temporal and (a.get("updated_at") or b.get("updated_at")):
-                            a_ts = a.get("updated_at") or a.get("created_at") or ""
-                            b_ts = b.get("updated_at") or b.get("created_at") or ""
-                            keep_id = a["id"] if a_ts >= b_ts else b["id"]
-                        else:
-                            keep_id = a["id"] if a.get("importance", 0) >= b.get("importance", 0) else b["id"]
-                        drop_id = b["id"] if keep_id == a["id"] else a["id"]
-                    merge_info = item.get("merge_info", "")
-                    action = "archive_and_merge_duplicate" if merge_info else "archive_duplicate"
-                    results.append({
-                        "action": action,
-                        "keep_id": keep_id,
-                        "drop_id": drop_id,
-                        "score": score,
-                        "reason": item.get("reason", "semantic duplicate"),
-                        "keep_title": a["title"] if keep_id == a["id"] else b["title"],
-                        "drop_title": b["title"] if drop_id == b["id"] else a["title"],
-                        "merge_info": merge_info,
-                        "llm_thinking": thinking,
-                        "llm_raw": raw,
-                        "llm_prompt": prompt,
-                    })
         except Exception as exc:
-            logger.error("LLM duplicate judgement failed: %s\nraw=%s", exc, locals().get("raw", "N/A"), exc_info=True)
+            logger.error("LLM duplicate call failed (batch %d): %s\n", i, exc, exc_info=True)
             raise
-    return results
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, ValueError) as exc:
+            logger.warning("LLM duplicate JSON parse failed (batch %d), skipping: %s\nraw=%s", i, exc, raw[:200])
+            continue
+        for item in data.get("results", []):
+            idx = item.get("index", 0)
+            if not isinstance(idx, int) or idx >= len(batch):
+                continue
+            a, b, score = batch[idx]
+            if item.get("is_duplicate"):
+                keep_label = str(item.get("keep") or item.get("keep_id") or "").upper().strip()
+                if keep_label == "A":
+                    keep_id, drop_id = a["id"], b["id"]
+                elif keep_label == "B":
+                    keep_id, drop_id = b["id"], a["id"]
+                else:
+                    use_temporal = full_config.get("temporal", {}).get("enabled", False)
+                    if use_temporal and (a.get("updated_at") or b.get("updated_at")):
+                        a_ts = a.get("updated_at") or a.get("created_at") or ""
+                        b_ts = b.get("updated_at") or b.get("created_at") or ""
+                        keep_id = a["id"] if a_ts >= b_ts else b["id"]
+                    else:
+                        keep_id = a["id"] if a.get("importance", 0) >= b.get("importance", 0) else b["id"]
+                    drop_id = b["id"] if keep_id == a["id"] else a["id"]
+                merge_info = item.get("merge_info", "")
+                action = "archive_and_merge_duplicate" if merge_info else "archive_duplicate"
+                results.append({
+                    "action": action,
+                    "keep_id": keep_id,
+                    "drop_id": drop_id,
+                    "score": score,
+                    "reason": item.get("reason", "semantic duplicate"),
+                    "keep_title": a["title"] if keep_id == a["id"] else b["title"],
+                    "drop_title": b["title"] if drop_id == b["id"] else a["title"],
+                    "merge_info": merge_info,
+                    "llm_thinking": thinking,
+                    "llm_raw": raw,
+                    "llm_prompt": prompt,
+                })
+    return results, evaluated_ids
 
 
 # ---------------------------------------------------------------------------
 # 2. Contradiction detection
 # ---------------------------------------------------------------------------
 
-def _find_contradiction_candidates(
+def _llm_judge_contradictions(
+    pairs: list[tuple[dict, dict, float]],
+    llm_config: Any,
+    batch_size: int = 10,
+    content_max_chars: int = 2000,
+    prompt_style: str = "aggressive",
+    config: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], set[str]]:
+    """Ask LLM to detect contradictions in memory pairs."""
+    full_config = config or {}
+    results = []
+    evaluated_ids: set[str] = set()
+    for i in range(0, len(pairs), batch_size):
+        batch = pairs[i: i + batch_size]
+        items_text = ""
+        for idx, (a, b, score) in enumerate(batch):
+            evaluated_ids.add(a["id"])
+            evaluated_ids.add(b["id"])
+            items_text += (
+                f"\n[{idx}]\n"
+                f"A: {a.get('title')!r} {_temporal_tag(a)}\n"
+                f"  — {a.get('content', '')[:content_max_chars]!r}\n"
+                f"B: {b.get('title')!r} {_temporal_tag(b)}\n"
+                f"  — {b.get('content', '')[:content_max_chars]!r}\n"
+            )
+        system = _PROMPT_STYLES.get(prompt_style, {}).get("contradiction") or _PROMPT_STYLES["balanced"]["contradiction"]
+        prompt = f"Check these memory pairs for contradictions:{items_text}"
+        output_language = full_config.get("output_language", "auto")
+        lang_suffix = _language_instruction(output_language)
+        if lang_suffix:
+            system += lang_suffix
+        if full_config.get("temporal", {}).get("llm_temporal_prompts", False):
+            system += (
+                "\n\n# 时间推理规则\n"
+                "- 每条记忆的[时间:]标签显示创建和更新日期，请务必参考\n"
+                "- 更新日期更近的记忆更可能正确，newer 应指向 A 或 B 中 updated 字段更新的那条\n"
+                "- 时间相差超过30天的相同主题记忆很可能是时间演变（temporal supersession），而非真正的矛盾\n"
+                "- 若时间差超过180天，优先标记为 supersession 而非 contradiction\n"
+            )
+        try:
+            raw, thinking = _call_llm_with_thinking(prompt, system, llm_config)
+        except Exception as exc:
+            logger.error("LLM contradiction call failed (batch %d): %s\n", i, exc, exc_info=True)
+            raise
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, ValueError) as exc:
+            logger.warning("LLM contradiction JSON parse failed (batch %d), skipping: %s\nraw=%s", i, exc, raw[:200])
+            continue
+        for item in data.get("results", []):
+            idx = item.get("index", 0)
+            if not isinstance(idx, int) or idx >= len(batch):
+                continue
+            a, b, score = batch[idx]
+            if item.get("contradicts"):
+                newer_label = str(item.get("newer") or item.get("newer_id") or "").upper().strip()
+                if newer_label == "A":
+                    newer_id, older_id = a["id"], b["id"]
+                elif newer_label == "B":
+                    newer_id, older_id = b["id"], a["id"]
+                else:
+                    a_ts = a.get("updated_at") or a.get("created_at") or ""
+                    b_ts = b.get("updated_at") or b.get("created_at") or ""
+                    newer_id = a["id"] if a_ts >= b_ts else b["id"]
+                    older_id = b["id"] if newer_id == a["id"] else a["id"]
+                results.append({
+                    "action": "mark_contradicted",
+                    "newer_id": newer_id,
+                    "older_id": older_id,
+                    "score": score,
+                    "reason": item.get("reason", "semantic contradiction"),
+                    "newer_title": a["title"] if newer_id == a["id"] else b["title"],
+                    "older_title": b["title"] if older_id == b["id"] else a["title"],
+                    "llm_thinking": thinking,
+                    "llm_raw": raw,
+                    "llm_prompt": prompt,
+                })
+    return results, evaluated_ids
+
+
+# ---------------------------------------------------------------------------
+# 3. Importance re-evaluation
+# ---------------------------------------------------------------------------
+
+def _llm_reassess_importance(
+    memories: list[dict[str, Any]],
+    llm_config: Any,
+    batch_size: int = 10,
+    content_max_chars: int = 2000,
+    prompt_style: str = "aggressive",
+    keep_threshold: float = 0.02,
+    config: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], set[str]]:
+    """Ask LLM to re-score importance for memories that may be stale or over-valued."""
+    full_config = config or {}
+    results = []
+    evaluated_ids: set[str] = set()
+    for i in range(0, len(memories), batch_size):
+        batch = memories[i: i + batch_size]
+        items_text = ""
+        for idx, m in enumerate(batch):
+            evaluated_ids.add(m["id"])
+            items_text += (
+                f"[{idx}] id={m['id'][:8]} type={m.get('type')} "
+                f"importance={m.get('importance', 0.5):.2f} "
+                f"injected={m.get('injected_count', 0)} "
+                f"feedback={m.get('feedback_score', 0):.1f} "
+                f"{_temporal_tag(m)}\n"
+                f"  title: {m.get('title')!r}\n"
+                f"  content: {m.get('content', '')[:content_max_chars]!r}\n"
+            )
+        system = _PROMPT_STYLES.get(prompt_style, {}).get("importance") or _PROMPT_STYLES["balanced"]["importance"]
+        prompt = f"Re-evaluate the long-term importance of these memories:\n{items_text}"
+        output_language = full_config.get("output_language", "auto")
+        lang_suffix = _language_instruction(output_language)
+        if lang_suffix:
+            system += lang_suffix
+        if full_config.get("temporal", {}).get("llm_temporal_prompts", False):
+            system += (
+                "\n\n# 时间推理规则\n"
+                "- 每条记忆的[时间:]标签显示创建、更新日期及距今天数，请务必参考\n"
+                "- 距今超过180天且从未被访问(injected=0)的记忆应大幅降低重要性(downgrade或archive)\n"
+                "- 最近30天内更新的记忆不应轻易降级，即使注入次数为0\n"
+                "- 有最后访问记录的记忆说明仍在被使用，应维持或提升重要性\n"
+            )
+        try:
+            raw, thinking = _call_llm_with_thinking(prompt, system, llm_config)
+        except Exception as exc:
+            logger.error("LLM importance call failed (batch %d): %s\n", i, exc, exc_info=True)
+            raise
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, ValueError) as exc:
+            logger.warning("LLM importance JSON parse failed (batch %d), skipping: %s\nraw=%s", i, exc, raw[:200])
+            continue
+        for item in data.get("results", []):
+            idx = item.get("index", 0)
+            if not isinstance(idx, int) or idx >= len(batch):
+                continue
+            m = batch[idx]
+            action = item.get("action", "keep")
+            new_imp = float(item.get("new_importance", m.get("importance", 0.5)))
+            new_imp = max(0.0, min(1.0, new_imp))
+            if action == "keep" and abs(new_imp - m.get("importance", 0.5)) < keep_threshold:
+                continue
+            results.append({
+                "action": action,
+                "id": m["id"],
+                "title": m.get("title"),
+                "old_importance": m.get("importance", 0.5),
+                "new_importance": new_imp,
+                "reason": item.get("reason", ""),
+                "llm_thinking": thinking,
+                "llm_raw": raw,
+                "llm_prompt": prompt,
+            })
+    return results, evaluated_ids
+
+
+# ---------------------------------------------------------------------------
+# 4. Long-content split detection
+# ---------------------------------------------------------------------------
+
+def _llm_detect_splittable(
+    memories: list[dict[str, Any]],
+    llm_config: Any,
+    batch_size: int = 10,
+    content_max_chars: int = 2000,
+    prompt_style: str = "aggressive",
+    config: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Ask LLM to identify memories whose content bundles multiple distinct facts
+    that would be better stored as separate atomic memories."""
+    full_config = config or {}
+    results = []
+    for i in range(0, len(memories), batch_size):
+        batch = memories[i: i + batch_size]
+        items_text = ""
+        for idx, m in enumerate(batch):
+            items_text += (
+                f"\n[{idx}] id={m['id'][:8]} type={m.get('type')} {_temporal_tag(m)}\n"
+                f"  title: {m.get('title')!r}\n"
+                f"  content ({len(m.get('content',''))} chars): {m.get('content', '')[:content_max_chars]!r}\n"
+            )
+        system = _PROMPT_STYLES.get(prompt_style, {}).get("split") or _PROMPT_STYLES["balanced"]["split"]
+        prompt = f"Analyse these memories for split opportunities:{items_text}"
+        output_language = full_config.get("output_language", "auto")
+        lang_suffix = _language_instruction(output_language)
+        if lang_suffix:
+            system += lang_suffix
+        try:
+            raw, thinking = _call_llm_with_thinking(prompt, system, llm_config)
+        except Exception as exc:
+            logger.error("LLM split call failed (batch %d): %s\n", i, exc, exc_info=True)
+            raise
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, ValueError) as exc:
+            logger.warning("LLM split JSON parse failed (batch %d), skipping: %s\nraw=%s", i, exc, raw[:200])
+            continue
+        for item in data.get("results", []):
+            idx = item.get("index", 0)
+            if not isinstance(idx, int) or idx >= len(batch):
+                continue
+            if not item.get("splittable"):
+                continue
+            m = batch[idx]
+            results.append({
+                "action": "split",
+                "id": m["id"],
+                "title": m.get("title"),
+                "reason": item.get("reason", "compound memory"),
+                "sub_memories": item.get("sub_memories", []),
+                "llm_thinking": thinking,
+                "llm_raw": raw,
+                "llm_prompt": prompt,
+            })
+    return results
+
+
+# ---------------------------------------------------------------------------
+# 5. Knowledge graph link discovery
+# ---------------------------------------------------------------------------
+
+_LINK_DISCOVERY_PROMPTS: dict[str, str] = {
+    "conservative": (
+        "You are a careful knowledge graph curator. Only establish links when there is "
+        "a clear, direct semantic relationship between two memories. "
+        "Allowed relations: 'related_to' (same topic area), 'supports' (A provides evidence for B). "
+        "If uncertain, set relation to 'none'. "
+        "Return JSON with key 'results': list of "
+        "{'index': int, 'relation': str, 'direction': 'A->B' or 'B->A', 'reason': str ≤20 words}. "
+        "Set relation='none' if no meaningful relationship exists."
+    ),
+    "balanced": (
+        "You are a knowledge graph curator building a useful relationship network. "
+        "Establish links when two memories share meaningful semantic connections. "
+        "Allowed relations: 'related_to', 'supports', 'part_of', 'supersedes', 'none'. "
+        "Return JSON with key 'results': list of "
+        "{'index': int, 'relation': str, 'direction': 'A->B' or 'B->A', 'reason': str ≤20 words}."
+    ),
+    "aggressive": (
+        "You are an aggressive knowledge graph curator. Your goal is to maximize useful connections. "
+        "Err on the side of linking — an extra link is cheaper than a missing one. "
+        "Allowed relations: 'related_to' (any topical overlap), 'supports', 'part_of', 'supersedes', 'none' (truly unrelated). "
+        "When in doubt, use 'related_to'. Only use 'none' for clearly unrelated pairs.\n"
+        "Return JSON with key 'results': list of "
+        "{'index': int, 'relation': str, 'direction': 'A->B' or 'B->A', 'reason': str ≤20 words}."
+    ),
+}
+
+
+def _find_link_candidates(
     vs: Any,
     memories: list[dict[str, Any]],
     sim_threshold: float,
+    link_upper: float = 0.75,
+    max_pairs: int = 100,
 ) -> list[tuple[dict, dict, float]]:
-    """Same as duplicate search but focused on same-type pairs for contradiction check."""
-    recently_reviewed = _get_recently_reviewed_ids()
-    memories = [m for m in memories if m["id"] not in recently_reviewed]
+    """Find memory pairs suitable for graph linking: similarity in [sim_threshold, link_upper],
+    no existing link, orphan memories prioritized."""
+    from memorycore.storage.db import read_conn
+
+    with read_conn() as conn:
+        existing_links: set[frozenset[str]] = set()
+        for row in conn.execute("SELECT source_id, target_id FROM memory_links").fetchall():
+            existing_links.add(frozenset([row["source_id"], row["target_id"]]))
+        orphan_ids: set[str] = set()
+        for row in conn.execute(
+            "SELECT m.id FROM memories m WHERE m.status IN ('active','candidate') "
+            "AND NOT EXISTS (SELECT 1 FROM memory_links ml WHERE ml.source_id = m.id OR ml.target_id = m.id)"
+        ).fetchall():
+            orphan_ids.add(row["id"])
+
+    recently_reviewed = _get_recently_reviewed_ids("llm_link_discovery")
+    eligible = [m for m in memories if m["id"] not in recently_reviewed]
+    orphans_first = sorted(eligible, key=lambda m: m["id"] not in orphan_ids)
 
     seen: set[frozenset[str]] = set()
     pairs: list[tuple[dict, dict, float]] = []
-    by_id = {m["id"]: m for m in memories}
+    by_id = {m["id"]: m for m in eligible}
     missing_ids: set[str] = set()
 
-    for mem in memories:
+    for mem in orphans_first:
+        if len(pairs) >= max_pairs * 3:
+            break
         text = f"{mem.get('title', '')} {mem.get('content', '')}".strip()
         if not text:
             continue
         try:
-            results = vs.search(
-                text, top_k=5,
-                score_threshold=max(0.60, sim_threshold - 0.12),
-            )
-        except Exception as exc:
-            logger.debug("vector search failed: %s", exc)
+            results = vs.search(text, top_k=6, score_threshold=sim_threshold)
+        except Exception:
             continue
         for r in results:
             other_id = r.id
-            if other_id == mem["id"]:
+            if other_id == mem["id"] or r.score > link_upper:
                 continue
             key = frozenset([mem["id"], other_id])
-            if key in seen:
+            if key in seen or key in existing_links:
                 continue
             seen.add(key)
             if other_id not in by_id:
@@ -511,241 +831,80 @@ def _find_contradiction_candidates(
                 resolved.append((a, b, score))
         pairs = resolved
 
-    return pairs
+    return sorted(pairs, key=lambda x: x[2], reverse=True)[:max_pairs]
 
 
-def _llm_judge_contradictions(
+def _llm_discover_links(
     pairs: list[tuple[dict, dict, float]],
     llm_config: Any,
     batch_size: int = 10,
     content_max_chars: int = 2000,
     prompt_style: str = "aggressive",
-) -> list[dict[str, Any]]:
-    """Ask LLM to detect contradictions in memory pairs."""
+    config: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], set[str]]:
+    """Ask LLM to classify semantic relationships between memory pairs for graph linking."""
+    full_config = config or {}
     results = []
+    evaluated_ids: set[str] = set()
+    valid_relations = {"related_to", "supports", "part_of", "supersedes"}
+
     for i in range(0, len(pairs), batch_size):
         batch = pairs[i: i + batch_size]
         items_text = ""
         for idx, (a, b, score) in enumerate(batch):
+            evaluated_ids.add(a["id"])
+            evaluated_ids.add(b["id"])
             items_text += (
                 f"\n[{idx}]\n"
-                f"A (id={a['id'][:8]}): {a.get('title')!r} {_temporal_tag(a)}\n"
-                f"  — {a.get('content', '')[:content_max_chars]!r}\n"
-                f"B (id={b['id'][:8]}): {b.get('title')!r} {_temporal_tag(b)}\n"
-                f"  — {b.get('content', '')[:content_max_chars]!r}\n"
+                f"A: title={a.get('title')!r} {_temporal_tag(a)}\n"
+                f"  content={a.get('content', '')[:content_max_chars]!r}\n"
+                f"B: title={b.get('title')!r} {_temporal_tag(b)}\n"
+                f"  content={b.get('content', '')[:content_max_chars]!r}\n"
+                f"similarity={score:.3f}\n"
             )
-        style_prompts = _PROMPT_STYLES.get(prompt_style, {})
-        system = style_prompts.get("contradiction")
-        if not system:
-            system = (
-                "You are an aggressive memory curator focused on detecting contradictions. "
-                "Check each memory pair for ANY form of conflict:\n"
-                "- Direct contradiction: one states X, the other states NOT X\n"
-                "- Temporal supersession: one is an outdated version of the same decision/preference\n"
-                "- Conditional conflict: they give different answers for overlapping conditions\n"
-                "- Implicit contradiction: their logical implications are incompatible\n"
-                "- Stale vs current: one reflects an old state that has been updated by the other\n"
-                "When memories describe the same topic with different conclusions, that IS a contradiction. "
-                "Return JSON with key 'results': list of objects with "
-                "'index' (int), 'contradicts' (bool), 'reason' (str ≤30 words), "
-                "'newer_id' (id of the more recent/correct memory, or null)."
-            )
-        prompt = f"Check these memory pairs for contradictions:{items_text}"
-        from memorycore.models import load_config as _lc2
-        if _lc2().get("temporal", {}).get("llm_temporal_prompts", False):
-            system += (
-                "\n\n# 时间推理规则\n"
-                "- 每条记忆的[时间:]标签显示创建和更新日期，请务必参考\n"
-                "- 更新日期更近的记忆更可能正确，newer_id 应指向 updated 字段更新的那条\n"
-                "- 时间相差超过30天的相同主题记忆很可能是时间演变（temporal supersession），而非真正的矛盾\n"
-                "- 若时间差超过180天，优先标记为 supersession 而非 contradiction\n"
-            )
-        try:
-            raw, thinking = _call_llm_with_thinking(prompt, system, llm_config)
-            data = json.loads(raw)
-            for item in data.get("results", []):
-                idx = item.get("index", 0)
-                if not isinstance(idx, int) or idx >= len(batch):
-                    continue
-                a, b, score = batch[idx]
-                if item.get("contradicts"):
-                    newer_id = item.get("newer_id")
-                    older_id = b["id"] if newer_id == a["id"] else a["id"]
-                    results.append({
-                        "action": "mark_contradicted",
-                        "newer_id": newer_id,
-                        "older_id": older_id,
-                        "score": score,
-                        "reason": item.get("reason", "semantic contradiction"),
-                        "newer_title": a["title"] if newer_id == a["id"] else b["title"],
-                        "older_title": b["title"] if older_id == b["id"] else a["title"],
-                        "llm_thinking": thinking,
-                        "llm_raw": raw,
-                        "llm_prompt": prompt,
-                    })
-        except Exception as exc:
-            logger.error("LLM contradiction judgement failed: %s\nraw=%s", exc, locals().get("raw", "N/A"), exc_info=True)
-            raise
-    return results
-
-
-# ---------------------------------------------------------------------------
-# 3. Importance re-evaluation
-# ---------------------------------------------------------------------------
-
-def _llm_reassess_importance(
-    memories: list[dict[str, Any]],
-    llm_config: Any,
-    batch_size: int = 10,
-    content_max_chars: int = 2000,
-    prompt_style: str = "aggressive",
-    keep_threshold: float = 0.02,
-) -> list[dict[str, Any]]:
-    """Ask LLM to re-score importance for memories that may be stale or over-valued."""
-    results = []
-    for i in range(0, len(memories), batch_size):
-        batch = memories[i: i + batch_size]
-        items_text = ""
-        for idx, m in enumerate(batch):
-            items_text += (
-                f"[{idx}] id={m['id'][:8]} type={m.get('type')} "
-                f"importance={m.get('importance', 0.5):.2f} "
-                f"injected={m.get('injected_count', 0)} "
-                f"feedback={m.get('feedback_score', 0):.1f} "
-                f"{_temporal_tag(m)}\n"
-                f"  title: {m.get('title')!r}\n"
-                f"  content: {m.get('content', '')[:content_max_chars]!r}\n"
-            )
-        style_prompts = _PROMPT_STYLES.get(prompt_style, {})
-        system = style_prompts.get("importance")
-        if not system:
-            system = (
-                "You are an aggressive memory curator optimizing a knowledge base for maximum utility. "
-                "For each memory, critically evaluate its long-term value and output a revised importance score 0.0–1.0. "
-                "Be decisive — most memories decay in value over time. Consider:\n"
-                "- Is this still actionable or relevant, or is it historical noise?\n"
-                "- Does it contain a unique insight, or is it generic/obvious?\n"
-                "- Would losing this memory actually harm future conversations?\n"
-                "- Is the current importance score justified by the content quality?\n"
-                "- Memories with 0 injections and 0 feedback are likely unused — downgrade aggressively.\n"
-                "Actions: 'keep' (no change needed), 'promote' (raise importance, make active), "
-                "'downgrade' (lower importance), 'archive' (low value, should be archived). "
-                "Default to action rather than 'keep' — if you can justify any change, make it.\n"
-                "Return JSON with key 'results': list of "
-                "{'index': int, 'new_importance': float, 'action': str, 'reason': str ≤20 words}."
-            )
-        prompt = f"Re-evaluate the long-term importance of these memories:\n{items_text}"
-        from memorycore.models import load_config as _lc3
-        if _lc3().get("temporal", {}).get("llm_temporal_prompts", False):
-            system += (
-                "\n\n# 时间推理规则\n"
-                "- 每条记忆的[时间:]标签显示创建、更新日期及距今天数，请务必参考\n"
-                "- 距今超过180天且从未被访问(injected=0)的记忆应大幅降低重要性(downgrade或archive)\n"
-                "- 最近30天内更新的记忆不应轻易降级，即使注入次数为0\n"
-                "- 有最后访问记录的记忆说明仍在被使用，应维持或提升重要性\n"
-            )
-        try:
-            raw, thinking = _call_llm_with_thinking(prompt, system, llm_config)
-            data = json.loads(raw)
-            for item in data.get("results", []):
-                idx = item.get("index", 0)
-                if not isinstance(idx, int) or idx >= len(batch):
-                    continue
-                m = batch[idx]
-                action = item.get("action", "keep")
-                new_imp = float(item.get("new_importance", m.get("importance", 0.5)))
-                new_imp = max(0.0, min(1.0, new_imp))
-                if action == "keep" and abs(new_imp - m.get("importance", 0.5)) < keep_threshold:
-                    continue
-                results.append({
-                    "action": action,
-                    "id": m["id"],
-                    "title": m.get("title"),
-                    "old_importance": m.get("importance", 0.5),
-                    "new_importance": new_imp,
-                    "reason": item.get("reason", ""),
-                    "llm_thinking": thinking,
-                    "llm_raw": raw,
-                    "llm_prompt": prompt,
-                })
-        except Exception as exc:
-            logger.error("LLM importance reassessment failed: %s\nraw=%s", exc, locals().get("raw", "N/A"), exc_info=True)
-            raise
-    return results
-
-
-# ---------------------------------------------------------------------------
-# 4. Long-content split detection
-# ---------------------------------------------------------------------------
-
-def _llm_detect_splittable(
-    memories: list[dict[str, Any]],
-    llm_config: Any,
-    batch_size: int = 10,
-    content_max_chars: int = 2000,
-    prompt_style: str = "aggressive",
-) -> list[dict[str, Any]]:
-    """Ask LLM to identify memories whose content bundles multiple distinct facts
-    that would be better stored as separate atomic memories."""
-    results = []
-    for i in range(0, len(memories), batch_size):
-        batch = memories[i: i + batch_size]
-        items_text = ""
-        for idx, m in enumerate(batch):
-            items_text += (
-                f"\n[{idx}] id={m['id'][:8]} type={m.get('type')} {_temporal_tag(m)}\n"
-                f"  title: {m.get('title')!r}\n"
-                f"  content ({len(m.get('content',''))} chars): {m.get('content', '')[:content_max_chars]!r}\n"
-            )
-        style_prompts = _PROMPT_STYLES.get(prompt_style, {})
-        system = style_prompts.get("split")
-        if not system:
-            system = (
-                "You are a memory curator focused on atomizing compound memories for better retrieval. "
-                "Identify memories that contain multiple distinct, separable facts. "
-                "A memory is splittable if:\n"
-                "- It lists multiple independent decisions, preferences, or facts\n"
-                "- It covers multiple topics that could each stand alone\n"
-                "- It contains both a rule AND its context/reasoning as separable units\n"
-                "- It bundles configuration details with behavioral preferences\n"
-                "For each splittable memory, propose 2-4 concise atomic sub-memories. "
-                "Each sub-memory should be self-contained and useful in isolation.\n"
-                "Return JSON with key 'results': list of "
-                "{'index': int, 'splittable': bool, 'reason': str ≤20 words, "
-                "'sub_memories': [{'title': str, 'content': str, 'importance': float}]}. "
-                "The 'importance' field (0.0-1.0) reflects the long-term value of each sub-memory independently. "
-                "If a memory is already atomic or splitting would lose context, set splittable=false."
-            )
-        prompt = f"Analyse these memories for split opportunities:{items_text}"
-        from memorycore.models import load_config
-        output_language = load_config().get("output_language", "auto")
+        system = _LINK_DISCOVERY_PROMPTS.get(prompt_style) or _LINK_DISCOVERY_PROMPTS["balanced"]
+        prompt = f"Analyze these memory pairs for semantic relationships:\n{items_text}"
+        output_language = full_config.get("output_language", "auto")
         lang_suffix = _language_instruction(output_language)
         if lang_suffix:
             system += lang_suffix
         try:
             raw, thinking = _call_llm_with_thinking(prompt, system, llm_config)
-            data = json.loads(raw)
-            for item in data.get("results", []):
-                idx = item.get("index", 0)
-                if not isinstance(idx, int) or idx >= len(batch):
-                    continue
-                if not item.get("splittable"):
-                    continue
-                m = batch[idx]
-                results.append({
-                    "action": "split",
-                    "id": m["id"],
-                    "title": m.get("title"),
-                    "reason": item.get("reason", "compound memory"),
-                    "sub_memories": item.get("sub_memories", []),
-                    "llm_thinking": thinking,
-                    "llm_raw": raw,
-                    "llm_prompt": prompt,
-                })
         except Exception as exc:
-            logger.error("LLM split detection failed: %s\nraw=%s", exc, locals().get("raw", "N/A"), exc_info=True)
+            logger.error("LLM link discovery call failed (batch %d): %s", i, exc, exc_info=True)
             raise
-    return results
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, ValueError) as exc:
+            logger.warning("LLM link discovery JSON parse failed (batch %d), skipping: %s\nraw=%s", i, exc, raw[:200])
+            continue
+        for item in data.get("results", []):
+            idx = item.get("index", 0)
+            if not isinstance(idx, int) or idx >= len(batch):
+                continue
+            relation = str(item.get("relation") or "none").lower().strip()
+            if relation not in valid_relations:
+                continue
+            a, b, score = batch[idx]
+            direction = str(item.get("direction") or "A->B").upper()
+            if direction.startswith("B"):
+                source_id, target_id = b["id"], a["id"]
+            else:
+                source_id, target_id = a["id"], b["id"]
+            results.append({
+                "action": "create_link",
+                "source_id": source_id,
+                "target_id": target_id,
+                "relation_type": relation,
+                "score": score,
+                "reason": item.get("reason", ""),
+                "llm_thinking": thinking,
+                "llm_raw": raw,
+                "llm_prompt": prompt,
+            })
+
+    return results, evaluated_ids
+
 
 def llm_curator_report(
     config: dict[str, Any] | None = None,
@@ -753,6 +912,7 @@ def llm_curator_report(
     sim_threshold: float | None = None,
 ) -> dict[str, Any]:
     """Run LLM-enhanced curation analysis. Returns structured report (no writes)."""
+    t_start = _time.monotonic()
     from memorycore.models import load_config
     full_config = config or load_config()
     cfg = full_config.get("llm_curator", {})
@@ -764,8 +924,12 @@ def llm_curator_report(
     prompt_style = cfg.get("prompt_style", "aggressive")
     keep_threshold = cfg.get("keep_threshold", 0.02)
     effective_sim = sim_threshold if sim_threshold is not None else cfg.get("sim_threshold", 0.60)
+    max_dedup = cfg.get("max_dedup_pairs", 200)
+    max_contra = cfg.get("max_contradiction_pairs", 200)
+    max_split = cfg.get("max_split_candidates", 100)
 
     errors: list[str] = []
+    timing: dict[str, int] = {}
     diagnostics: dict[str, Any] = {
         "total_memories_fetched": 0,
         "memories_after_cooldown_filter": 0,
@@ -799,40 +963,63 @@ def llm_curator_report(
         return {"errors": errors, "diagnostics": diagnostics, "semantic_duplicates": [], "contradictions": [],
                 "importance_reassessments": []}
 
-    # Cleanup expired cooldown entries
     _cleanup_reviewed_ids()
 
-    # --- Semantic deduplication ---
+    all_evaluated_ids: set[str] = set()
+
+    # --- Unified vector scan → dedup + contradiction ---
     semantic_duplicates: list[dict] = []
     contradictions: list[dict] = []
 
     if vs_available:
         try:
-            dup_pairs = _find_semantic_duplicate_candidates(vs, memories, effective_sim)
-            diagnostics["dedup_pairs_found"] = len(dup_pairs)
-            if dup_pairs:
-                diagnostics["dedup_llm_calls"] = min(len(dup_pairs), 200) // batch_size + (1 if min(len(dup_pairs), 200) % batch_size else 0)
-                semantic_duplicates = _llm_judge_duplicates(dup_pairs[:200], llm_config, batch_size=batch_size, content_max_chars=content_max_chars, prompt_style=prompt_style)
-        except Exception as exc:
-            errors.append(f"Semantic dedup failed: {exc}")
-            logger.error("semantic dedup error: %s", exc, exc_info=True)
+            t0 = _time.monotonic()
+            all_pairs = _find_candidate_pairs(vs, memories, effective_sim)
+            timing["vector_search_ms"] = int((_time.monotonic() - t0) * 1000)
 
-        try:
-            contra_pairs = _find_contradiction_candidates(vs, memories, effective_sim)
+            dup_pairs = [p for p in all_pairs if p[2] >= effective_sim][:max_dedup]
+            contra_pairs = [p for p in all_pairs if p[2] >= effective_sim * 0.8][:max_contra]
+            diagnostics["dedup_pairs_found"] = len(dup_pairs)
             diagnostics["contradiction_pairs_found"] = len(contra_pairs)
-            if contra_pairs:
-                diagnostics["contradiction_llm_calls"] = min(len(contra_pairs), 200) // batch_size + (1 if min(len(contra_pairs), 200) % batch_size else 0)
-                contradictions = _llm_judge_contradictions(contra_pairs[:200], llm_config, batch_size=batch_size, content_max_chars=content_max_chars, prompt_style=prompt_style)
         except Exception as exc:
-            errors.append(f"Contradiction detection failed: {exc}")
-            logger.error("contradiction detection error: %s", exc, exc_info=True)
+            dup_pairs = []
+            contra_pairs = []
+            errors.append(f"Vector scan failed: {exc}")
+            logger.error("vector scan error: %s", exc, exc_info=True)
+
+        if dup_pairs:
+            try:
+                t0 = _time.monotonic()
+                diagnostics["dedup_llm_calls"] = len(dup_pairs) // batch_size + (1 if len(dup_pairs) % batch_size else 0)
+                semantic_duplicates, dedup_ids = _llm_judge_duplicates(
+                    dup_pairs, llm_config, batch_size=batch_size,
+                    content_max_chars=content_max_chars, prompt_style=prompt_style,
+                    config=full_config)
+                all_evaluated_ids.update(dedup_ids)
+                timing["dedup_llm_ms"] = int((_time.monotonic() - t0) * 1000)
+            except Exception as exc:
+                errors.append(f"Semantic dedup failed: {exc}")
+                logger.error("semantic dedup error: %s", exc, exc_info=True)
+
+        if contra_pairs:
+            try:
+                t0 = _time.monotonic()
+                diagnostics["contradiction_llm_calls"] = len(contra_pairs) // batch_size + (1 if len(contra_pairs) % batch_size else 0)
+                contradictions, contra_ids = _llm_judge_contradictions(
+                    contra_pairs, llm_config, batch_size=batch_size,
+                    content_max_chars=content_max_chars, prompt_style=prompt_style,
+                    config=full_config)
+                all_evaluated_ids.update(contra_ids)
+                timing["contradiction_llm_ms"] = int((_time.monotonic() - t0) * 1000)
+            except Exception as exc:
+                errors.append(f"Contradiction detection failed: {exc}")
+                logger.error("contradiction detection error: %s", exc, exc_info=True)
     else:
         errors.append("Vector store not available — skipping semantic dedup and contradiction detection")
 
-    # --- Importance re-evaluation — ALL active memories sampled, not just edge cases ---
+    # --- Importance re-evaluation ---
     importance_reassessments: list[dict] = []
     try:
-        # Sample broadly: rotate through all memories so every memory gets reviewed over time
         import random as _random
         recently_reviewed = _get_recently_reviewed_ids()
         all_candidates = [m for m in memories if m["id"] not in recently_reviewed]
@@ -841,11 +1028,36 @@ def llm_curator_report(
         candidates = all_candidates[:importance_limit]
         diagnostics["importance_candidates"] = len(candidates)
         if candidates:
-            importance_reassessments = _llm_reassess_importance(candidates, llm_config, batch_size=batch_size, content_max_chars=content_max_chars, prompt_style=prompt_style, keep_threshold=keep_threshold)
+            t0 = _time.monotonic()
+            importance_reassessments, imp_ids = _llm_reassess_importance(
+                candidates, llm_config, batch_size=batch_size,
+                content_max_chars=content_max_chars, prompt_style=prompt_style,
+                keep_threshold=keep_threshold, config=full_config)
+            all_evaluated_ids.update(imp_ids)
             diagnostics["importance_skipped_keep"] = len(candidates) - len(importance_reassessments)
+            timing["importance_llm_ms"] = int((_time.monotonic() - t0) * 1000)
     except Exception as exc:
         errors.append(f"Importance reassessment failed: {exc}")
         logger.error("importance reassessment error: %s", exc, exc_info=True)
+
+    # --- Link discovery (knowledge graph) ---
+    link_discoveries: list[dict] = []
+    if vs_available:
+        max_link = cfg.get("max_link_pairs", 100)
+        try:
+            t0 = _time.monotonic()
+            link_pairs = _find_link_candidates(vs, memories, effective_sim, max_pairs=max_link)
+            if link_pairs:
+                link_discoveries, link_ids = _llm_discover_links(
+                    link_pairs, llm_config, batch_size=batch_size,
+                    content_max_chars=content_max_chars, prompt_style=prompt_style,
+                    config=full_config)
+                all_evaluated_ids.update(link_ids)
+                _mark_reviewed(list(link_ids), review_type="llm_link_discovery")
+            timing["link_discovery_ms"] = int((_time.monotonic() - t0) * 1000)
+        except Exception as exc:
+            errors.append(f"Link discovery failed: {exc}")
+            logger.error("link discovery error: %s", exc, exc_info=True)
 
     # --- Long-content split detection ---
     split_candidates: list[dict] = []
@@ -853,45 +1065,45 @@ def llm_curator_report(
         long_memories = [
             m for m in memories
             if len(m.get("content", "")) > split_threshold
-        ][:100]  # up to 100 long memories per run
+        ][:max_split]
         diagnostics["split_candidates_checked"] = len(long_memories)
         if long_memories:
-            split_candidates = _llm_detect_splittable(long_memories, llm_config, batch_size=batch_size, content_max_chars=content_max_chars, prompt_style=prompt_style)
+            t0 = _time.monotonic()
+            split_candidates = _llm_detect_splittable(
+                long_memories, llm_config, batch_size=batch_size,
+                content_max_chars=content_max_chars, prompt_style=prompt_style,
+                config=full_config)
+            timing["split_llm_ms"] = int((_time.monotonic() - t0) * 1000)
     except Exception as exc:
         errors.append(f"Split detection failed: {exc}")
         logger.error("split detection error: %s", exc, exc_info=True)
 
-    # Only mark memories that LLM actually analyzed with findings in the cooldown registry
-    # Use `or ""` to coerce None values (LLM may return null for optional id fields)
-    found_ids: set[str] = set()
-    for dup in semantic_duplicates:
-        found_ids.add(dup.get("keep_id") or "")
-        found_ids.add(dup.get("drop_id") or "")
-    for contra in contradictions:
-        found_ids.add(contra.get("newer_id") or "")
-        found_ids.add(contra.get("older_id") or "")
-    for reassess in importance_reassessments:
-        found_ids.add(reassess.get("id") or "")
-    for split in split_candidates:
-        found_ids.add(split.get("id") or "")
-    found_ids.discard("")
-    if found_ids:
-        _mark_reviewed(list(found_ids))
+    # Full cooldown: mark ALL evaluated memories, not just those with findings
+    all_evaluated_ids.discard("")
+    diagnostics["cooldown_registered"] = len(all_evaluated_ids)
+    if all_evaluated_ids:
+        _mark_reviewed(list(all_evaluated_ids))
+
+    timing["total_ms"] = int((_time.monotonic() - t_start) * 1000)
+    diagnostics["timing"] = timing
 
     logger.info(
-        "[llm-curator] report: memories=%d dedup_pairs=%d contradictions=%d importance=%d splits=%d errors=%d",
+        "[llm-curator] report: memories=%d dedup_pairs=%d contradictions=%d importance=%d links=%d splits=%d errors=%d total_ms=%d",
         diagnostics["total_memories_fetched"],
         diagnostics["dedup_pairs_found"],
         len(contradictions),
         len(importance_reassessments),
+        len(link_discoveries),
         len(split_candidates),
         len(errors),
+        timing["total_ms"],
     )
 
     return {
         "semantic_duplicates": semantic_duplicates,
         "contradictions": contradictions,
         "importance_reassessments": importance_reassessments,
+        "link_discoveries": link_discoveries,
         "split_candidates": split_candidates,
         "errors": errors,
         "diagnostics": diagnostics,
@@ -900,6 +1112,7 @@ def llm_curator_report(
             "semantic_duplicates": len(semantic_duplicates),
             "contradictions": len(contradictions),
             "importance_reassessments": len(importance_reassessments),
+            "link_discoveries": len(link_discoveries),
             "split_candidates": len(split_candidates),
             "dedup_pairs_found": diagnostics["dedup_pairs_found"],
             "contradiction_pairs_found": diagnostics["contradiction_pairs_found"],
@@ -977,6 +1190,7 @@ def apply_llm_curator(report: dict[str, Any], dry_run: bool = True) -> dict[str,
         "split": 0,
         "split_children_created": 0,
         "split_children_skipped": 0,
+        "links_created": 0,
     }
     duplicate_merge_audits: list[dict[str, Any]] = []
     duplicate_atomic_fact_audits: list[dict[str, Any]] = []
@@ -985,6 +1199,7 @@ def apply_llm_curator(report: dict[str, Any], dry_run: bool = True) -> dict[str,
     _append_duplicate_requests(report, requests, applied, duplicate_merge_audits)
     _append_contradiction_requests(report, requests)
     _append_importance_requests(report, requests)
+    _append_link_discovery_requests(report, requests)
     _append_split_requests(report, requests, applied)
     _append_duplicate_atomic_fact_requests(requests, duplicate_atomic_fact_audits)
 
@@ -1079,6 +1294,29 @@ def _append_importance_requests(report: dict[str, Any], requests: list[MutationR
                 confidence=confidence,
                 idempotency_key=f"llm-curator:importance:{mem_id}:{action}",
             ))
+
+
+def _append_link_discovery_requests(report: dict[str, Any], requests: list[MutationRequest]) -> None:
+    for link in report.get("link_discoveries", []) or []:
+        source_id = link.get("source_id")
+        target_id = link.get("target_id")
+        relation = link.get("relation_type", "related_to")
+        if not source_id or not target_id:
+            continue
+        requests.append(MutationRequest(
+            action_type="memory_link_insert",
+            target_type="memory_link",
+            payload={
+                "source_id": source_id,
+                "target_id": target_id,
+                "relation_type": relation,
+                "weight": 0.8,
+                "note": f"LLM curator link discovery: {link.get('reason', '')}",
+            },
+            risk_level="low",
+            confidence=0.85,
+            idempotency_key=f"llm-curator:link-discovery:{source_id}:{target_id}:{relation}",
+        ))
 
 
 def _append_split_requests(report: dict[str, Any], requests: list[MutationRequest], applied: dict[str, int]) -> None:
@@ -1266,11 +1504,15 @@ def _request_from_result(result: dict[str, Any]) -> dict[str, Any]:
     log_id = result.get("log_id")
     if not log_id:
         return {}
-    rows = query_ledger(limit=500)
-    for row in rows:
-        if row.get("id") == log_id:
-            try:
-                return json.loads(row.get("request_json") or "{}")
-            except Exception:
-                return {}
+    from memorycore.storage.db import read_conn
+    with read_conn() as conn:
+        row = conn.execute(
+            "SELECT request_json FROM governance_ledger WHERE id = ? LIMIT 1",
+            (log_id,),
+        ).fetchone()
+    if row:
+        try:
+            return json.loads(row["request_json"] or "{}")
+        except Exception:
+            return {}
     return {}

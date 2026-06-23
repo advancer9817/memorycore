@@ -2094,6 +2094,36 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
+## [迭代 29] 2026-06-23 — LLM Curator 全面重构 (Phase A-F)
+
+### 变更
+
+- `memorycore/storage/curator_llm.py`:
+  - **Phase A (P0) — 修复数据损坏**: `_PROMPT_STYLES` 所有样式的 `keep_id` → `keep ("A"/"B")`，`newer_id` → `newer ("A"/"B")`；填充原空的 `aggressive` 字典（含 4 能力：duplicate/contradiction/importance/split）；conservative/balanced/aggressive importance prompt 追加 feedback 保护规则；`_llm_judge_duplicates`/`_llm_judge_contradictions` 结果解析改为 A/B 标签映射，fallback 改为时间戳优先；所有 4 个 `_llm_judge_*` 函数拆分 JSON 容错（LLM 调用失败 raise，JSON 解析失败 skip+warn）
+  - **Phase B (P0) — 消除性能浪费**: 新增 `_find_candidate_pairs()`（单次向量扫描，score_threshold=sim_threshold×0.8，去重和矛盾按分数区间分流）；删除旧的 `_find_semantic_duplicate_candidates` 和 `_find_contradiction_candidates`；所有 judge 函数添加 `config` 参数替代内部 `load_config()` 调用，返回 `tuple[list, set[str]]` 并 track `evaluated_ids`；`llm_curator_report` 全量冷却：所有经 LLM 评判的记忆均进入 cooldown，非仅有发现的；新增 timing 诊断指标
+  - **Phase C (P1) — Prompt 质量**: 所有 judge 函数通过参数接收 `full_config`；`_llm_judge_contradictions`/`_llm_reassess_importance` 添加 `_language_instruction()` 支持
+  - **Phase D (P1) — 图谱建链**: 新增 `_LINK_DISCOVERY_PROMPTS`、`_find_link_candidates()`、`_llm_discover_links()`、`_append_link_discovery_requests()`；`llm_curator_report` 集成 link discovery 阶段（importance 之后、split 之前）；`apply_llm_curator` 调用 `_append_link_discovery_requests`；return dict 和 summary 追加 `link_discoveries` 字段
+  - **Phase F (P2) — 收尾优化**: `_request_from_result` 替换全表遍历为直接 `SELECT ... WHERE id = ?`；`llm_curator_report` 使用 `max_dedup_pairs`/`max_contradiction_pairs`/`max_split_candidates` 配置上限
+- `memorycore/models.py`: `DEFAULT_CONFIG["llm_curator"]` 新增 `max_dedup_pairs=200`、`max_contradiction_pairs=200`、`max_split_candidates=100`、`max_link_pairs=100`
+- `memorycore/server.py` (Phase E): `_start_auto_curator()` 后台线程移除 `curator_report(dry_run=False)` 调用，消除与 systemd timer 的双重执行冲突
+- `ui/components/dashboard/CuratorTuningPanel.tsx`: `knowledge_graph` 预设参数更新（temperature 0.5→0.6，sim_threshold 0.45→0.55，importance_limit 1500→100，batch_size 8→10，review_cooldown 1200→900，keep_threshold 0.03→0.02，prompt_style balanced→aggressive，reviewed_ids_max_age 64800→43200）
+
+### 修复
+
+- `memorycore/storage/curator.py`: 将 `_DECAY_STEP`/`_DECAY_MIN_CONFIDENCE` 作为模块级常量暴露，修复 `tests/test_temporal.py` 导入失败
+- `tests/test_curator_llm_jobs.py`: `test_large_pool_sampling_limit` 从引用已删除的 `_find_semantic_duplicate_candidates` 改为 `_find_candidate_pairs`
+
+### 验证
+
+- 测试: 472/472 pass（另有 3 skip 为功能未实现占位，2 deselect 为预存在 Qdrant UUID 格式问题与本次无关）
+- UI 构建: Next.js 15.5 build 成功，postbuild standalone 资产就绪
+- 服务重启: mcore.service (8318) + mcore-ui.service (18318) 均已 active (running)
+
+### 回滚
+`git revert HEAD`
+
+---
+
 ## 日志格式规范
 
 每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：

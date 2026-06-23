@@ -89,20 +89,17 @@ const PRESETS = {
   },
   knowledge_graph: {
     label: "knowledge_graph",
-    // Lower similarity threshold to surface more candidate pairs for linking
-    temperature: 0.5,
-    sim_threshold: 0.45,
-    split_content_threshold: 300,
-    // Higher importance limit to review more memories for link opportunities
-    importance_limit: 1500,
+    temperature: 0.6,
+    sim_threshold: 0.55,
+    split_content_threshold: 400,
+    importance_limit: 100,
     content_max_chars: 3000,
-    batch_size: 8,
-    // Shorter cooldown so memories are re-evaluated more frequently for new links
-    review_cooldown_seconds: 1200,
-    keep_threshold: 0.03,
+    batch_size: 10,
+    review_cooldown_seconds: 900,
+    keep_threshold: 0.02,
     auto_approve_confidence: 0.85,
-    prompt_style: "balanced" as PromptStyle,
-    reviewed_ids_max_age_seconds: 64800,
+    prompt_style: "aggressive" as PromptStyle,
+    reviewed_ids_max_age_seconds: 43200,
   },
 } as const;
 

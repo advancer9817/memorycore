@@ -125,6 +125,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "prompt_style": "aggressive",
         "keep_threshold": 0.02,
         "preset": "aggressive",
+        "max_dedup_pairs": 200,
+        "max_contradiction_pairs": 200,
+        "max_split_candidates": 100,
+        "max_link_pairs": 100,
     },
     "governance": {
         "review_confidence_threshold": 0.55,

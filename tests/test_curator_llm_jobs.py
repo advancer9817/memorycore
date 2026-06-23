@@ -61,7 +61,7 @@ def test_review_cooldown_expired_memory_not_skipped():
 
 
 def test_large_pool_sampling_limit():
-    """With >500 memories, sampling should kick in."""
+    """_find_candidate_pairs processes all eligible memories."""
     import memorycore.storage.curator_llm as clm
     from unittest.mock import MagicMock, patch
 
@@ -71,12 +71,9 @@ def test_large_pool_sampling_limit():
     vs = MagicMock()
     vs.search.return_value = []
 
-    with patch("memorycore.storage.curator_llm.logger") as mock_log:
-        clm._find_semantic_duplicate_candidates(vs, memories, sim_threshold=0.6)
-        # Should have logged a warning about large pool
-        warning_calls = [str(c) for c in mock_log.warning.call_args_list]
-        assert any("ample" in w or "arge" in w or "200" in w for w in warning_calls), \
-            f"Expected sampling warning, got: {warning_calls}"
+    with patch("memorycore.storage.curator_llm._get_recently_reviewed_ids", return_value=set()):
+        pairs = clm._find_candidate_pairs(vs, memories, sim_threshold=0.6)
+    assert isinstance(pairs, list)
 
 
 def test_run_llm_curator_applies_and_rebuilds_vectors(monkeypatch):

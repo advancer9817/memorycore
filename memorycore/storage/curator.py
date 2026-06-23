@@ -27,6 +27,10 @@ from memorycore.models import load_config, local_now, normalize_list, normalize_
 from memorycore.storage.db import _managed_query, managed_conn, read_conn
 from memorycore.storage.audit import log_audit_event
 
+# Module-level defaults — tests and external code can import these
+_DECAY_STEP: float = 0.05
+_DECAY_MIN_CONFIDENCE: float = 0.15
+
 def curator_report(
     dry_run: bool = True,
     limit: int = 500,

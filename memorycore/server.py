@@ -858,19 +858,13 @@ def _start_auto_curator(interval_hours: float = 6.0) -> None:
                 sync_result = _drain_vector_sync_queue()
                 rollup = rollup_report(dry_run=False)
                 rollup_summary = rollup.get("summary", {})
-                result = curator_report(dry_run=False)
-                summary = result.get("summary", {})
                 logger.info(
-                    "[auto-curator] handoff_cleaned=%s sync_retried=%s/%s rollup_created=%s rollup_archived=%s stale=%s archived=%s promoted=%s decayed=%s",
+                    "[auto-curator] handoff_cleaned=%s sync_retried=%s/%s rollup_created=%s rollup_archived=%s",
                     handoff_cleanup.get("cleaned", 0),
                     sync_result.get("succeeded", 0),
                     sync_result.get("failed", 0),
                     rollup_summary.get("created", 0),
                     rollup_summary.get("archived_sources", 0),
-                    summary.get("stale", 0),
-                    summary.get("archive", 0),
-                    summary.get("promote_candidates", 0),
-                    summary.get("auto_decay_candidates", 0),
                 )
             except Exception as exc:
                 logger.warning("[auto-curator] error: %s", exc)
