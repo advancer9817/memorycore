@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useI18n } from "@/hooks/useI18n";
 import Link from "next/link";
 import { GitBranch } from "lucide-react";
 import { getApiBaseUrl } from "@/lib/api-url";
@@ -103,6 +104,8 @@ function ChainEntry({ record, isRoot, isHead, isCurrent, isLast }: ChainEntryPro
 export function MemoryLineage({ memoryId }: MemoryLineageProps) {
   const [lineage, setLineage] = useState<LineagePayload | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const { messages } = useI18n();
+  const t = messages.memoryDetail;
 
   useEffect(() => {
     const load = async () => {
@@ -130,7 +133,7 @@ export function MemoryLineage({ memoryId }: MemoryLineageProps) {
       <div className="w-full max-w-md mx-auto rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800 text-white p-6">
         <div className="flex items-center gap-2 mb-4">
           <GitBranch className="h-4 w-4 text-zinc-400" />
-          <h2 className="font-semibold">Fact Lineage</h2>
+          <h2 className="font-semibold">{t.factLineage}</h2>
         </div>
         <div className="space-y-3">
           {[1, 2, 3].map((i) => (
@@ -152,10 +155,10 @@ export function MemoryLineage({ memoryId }: MemoryLineageProps) {
       <div className="w-full max-w-md mx-auto rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800 text-white">
         <div className="px-6 py-4 flex items-center gap-2 bg-zinc-800 border-b border-zinc-800">
           <GitBranch className="h-4 w-4 text-zinc-400" />
-          <h2 className="font-semibold">Fact Lineage</h2>
+          <h2 className="font-semibold">{t.factLineage}</h2>
         </div>
         <div className="p-6">
-          <p className="text-center text-zinc-500 text-sm">No lineage data</p>
+          <p className="text-center text-zinc-500 text-sm">{t.noLineageData}</p>
         </div>
       </div>
     );
@@ -165,7 +168,7 @@ export function MemoryLineage({ memoryId }: MemoryLineageProps) {
     <div className="w-full max-w-md mx-auto rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800 text-white">
       <div className="px-6 py-4 flex items-center gap-2 bg-zinc-800 border-b border-zinc-800">
         <GitBranch className="h-4 w-4 text-zinc-400" />
-        <h2 className="font-semibold">Fact Lineage</h2>
+        <h2 className="font-semibold">{t.factLineage}</h2>
       </div>
       <div className="p-6">
         {chain.map((record, index) => (

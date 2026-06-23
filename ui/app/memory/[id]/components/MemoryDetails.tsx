@@ -17,6 +17,7 @@ import { constants } from "@/components/shared/source-app";
 import { RelatedMemories } from "./RelatedMemories";
 import { MemoryLineage } from "./MemoryLineage";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/hooks/useI18n";
 
 function parseDateStr(s: string): Date | undefined {
   if (!s) return undefined;
@@ -41,6 +42,8 @@ interface MemoryDetailsProps {
 export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
   const router = useRouter();
   const { hasUpdates, updateValidityRange, isLoading } = useMemoriesApi();
+  const { messages } = useI18n();
+  const t = messages.memoryDetail;
   const memory = useSelector(
     (state: RootState) => state.memories.selectedMemory
   );
@@ -87,16 +90,14 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
         onClick={() => router.back()}
       >
         <ArrowLeft className="h-4 w-4 mr-2" />
-        Back to Memories
-      </Button>
+        {t.backToMemories}</Button>
       <div className="flex gap-4 w-full">
         <div className="rounded-lg w-2/3 border h-fit pb-2 border-zinc-800 bg-zinc-900 overflow-hidden">
           <div className="">
             <div className="flex px-6 py-3 justify-between items-center mb-6 bg-zinc-800 border-b border-zinc-800">
               <div className="flex items-center gap-2">
                 <h1 className="font-semibold text-white">
-                  Memory{" "}
-                  <span className="ml-1 text-zinc-400 text-sm font-normal">
+                  {t.memoryLabel}{" "}                  <span className="ml-1 text-zinc-400 text-sm font-normal">
                     #{memory?.id?.slice(0, 6)}
                   </span>
                 </h1>
@@ -172,7 +173,7 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                     onClick={() => setValidityExpanded((v) => !v)}
                   >
                     <CalendarClock className="h-3.5 w-3.5 text-zinc-500" />
-                    <span className="text-xs text-zinc-500 flex-1">Validity Range</span>
+                    <span className="text-xs text-zinc-500 flex-1">{t.validityRange}</span>
                     {(validFrom || validUntil) && (
                       <span className="text-xs text-zinc-400 mr-2">
                         {validFrom || "∞"} → {validUntil || "∞"}
@@ -187,7 +188,7 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                   {validityExpanded && (
                     <div className="flex gap-3 items-end mt-3">
                       <div className="flex-1 space-y-1">
-                        <Label className="text-xs text-zinc-400">Valid From</Label>
+                        <Label className="text-xs text-zinc-400">{t.validFrom}</Label>
                         <Popover>
                           <PopoverTrigger asChild>
                             <Button
@@ -198,7 +199,7 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                               )}
                             >
                               <CalendarIcon className="mr-2 h-3.5 w-3.5 text-zinc-400" />
-                              {validFrom || "选择日期"}
+                              {validFrom || t.selectDate}
                             </Button>
                           </PopoverTrigger>
                           <PopoverContent className="w-auto p-0 border-zinc-700 bg-zinc-900" align="start">
@@ -212,7 +213,7 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                         </Popover>
                       </div>
                       <div className="flex-1 space-y-1">
-                        <Label className="text-xs text-zinc-400">Valid Until</Label>
+                        <Label className="text-xs text-zinc-400">{t.validUntil}</Label>
                         <Popover>
                           <PopoverTrigger asChild>
                             <Button
@@ -223,7 +224,7 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                               )}
                             >
                               <CalendarIcon className="mr-2 h-3.5 w-3.5 text-zinc-400" />
-                              {validUntil || "选择日期"}
+                              {validUntil || t.selectDate}
                             </Button>
                           </PopoverTrigger>
                           <PopoverContent className="w-auto p-0 border-zinc-700 bg-zinc-900" align="start">
@@ -242,7 +243,7 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                         onClick={handleSaveValidity}
                         className="h-8 bg-primary hover:bg-primary/80 text-white text-xs"
                       >
-                        {validitySaved ? <Check className="h-3 w-3" /> : "Save"}
+                        {validitySaved ? <Check className="h-3 w-3" /> : t.save}
                       </Button>
                     </div>
                   )}
