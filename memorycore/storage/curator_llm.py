@@ -160,6 +160,63 @@ def _normalize_fact_text(text: str) -> str:
     return " ".join((text or "").strip().lower().split())
 
 
+def _temporal_tag(record: dict[str, Any]) -> str:
+    """生成紧凑的时间标签供 LLM 消费。
+
+    示例: [时间: 创建=2026-01-15, 更新=2026-06-20, 距今=154天]
+    当 temporal.enabled=False 时返回空字符串。
+    """
+    from memorycore.models import load_config, local_now
+    cfg = load_config()
+    if not cfg.get("temporal", {}).get("enabled", False):
+        return ""
+    try:
+        from datetime import datetime
+        now_dt = local_now()
+
+        def _fmt(ts: str | None) -> str:
+            if not ts:
+                return "未知"
+            try:
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                return dt.strftime("%Y-%m-%d")
+            except Exception:
+                return str(ts)[:10]
+
+        def _days_ago(ts: str | None) -> str:
+            if not ts:
+                return "?"
+            try:
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    from datetime import timezone
+                    dt = dt.replace(tzinfo=timezone.utc)
+                delta = now_dt - dt
+                return str(max(0, delta.days))
+            except Exception:
+                return "?"
+
+        created = _fmt(record.get("created_at"))
+        updated = _fmt(record.get("updated_at"))
+        days_ago = _days_ago(record.get("updated_at") or record.get("created_at"))
+
+        tag = f"[时间: 创建={created}, 更新={updated}, 距今={days_ago}天"
+
+        last_access = _fmt(record.get("last_accessed_at"))
+        if last_access != "未知":
+            tag += f", 最后访问={last_access}"
+
+        vf = record.get("valid_from")
+        vu = record.get("valid_until")
+        if vf or vu:
+            tag += f", 有效期={_fmt(vf)}~{_fmt(vu)}"
+
+        tag += "]"
+        return tag
+    except Exception:
+        return ""
+
+
 def _llm_split_fact_hash(parent_id: str, content: str) -> str:
     return hashlib.sha256(f"{parent_id}:{_normalize_fact_text(content)}".encode()).hexdigest()
 
@@ -213,7 +270,8 @@ def _fetch_active_memories(limit: int) -> list[dict[str, Any]]:
     from memorycore.storage.db import _managed_query
     return _managed_query(
         "SELECT id, title, content, type, importance, confidence, feedback_score, "
-        "injected_count, updated_at FROM memories "
+        "injected_count, updated_at, created_at, valid_from, valid_until, "
+        "last_accessed_at, last_injected_at FROM memories "
         "WHERE status IN ('active', 'candidate') "
         "ORDER BY updated_at DESC LIMIT ?",
         (limit,),
@@ -227,7 +285,8 @@ def _fetch_memories_by_ids(ids: list[str]) -> dict[str, dict[str, Any]]:
     placeholders = ",".join("?" * len(ids))
     rows = _managed_query(
         f"SELECT id, title, content, type, importance, confidence, feedback_score, "
-        f"injected_count, updated_at FROM memories WHERE id IN ({placeholders})",
+        f"injected_count, updated_at, created_at, valid_from, valid_until, "
+        f"last_accessed_at, last_injected_at FROM memories WHERE id IN ({placeholders})",
         tuple(ids),
     )
     return {r["id"]: r for r in rows}
@@ -312,8 +371,10 @@ def _llm_judge_duplicates(
         for idx, (a, b, score) in enumerate(batch):
             items_text += (
                 f"\n[{idx}]\n"
-                f"A: title={a.get('title')!r} content={a.get('content', '')[:content_max_chars]!r}\n"
-                f"B: title={b.get('title')!r} content={b.get('content', '')[:content_max_chars]!r}\n"
+                f"A (id={a['id'][:8]}): title={a.get('title')!r} {_temporal_tag(a)}\n"
+                f"  content={a.get('content', '')[:content_max_chars]!r}\n"
+                f"B (id={b['id'][:8]}): title={b.get('title')!r} {_temporal_tag(b)}\n"
+                f"  content={b.get('content', '')[:content_max_chars]!r}\n"
                 f"vector_similarity={score:.3f}\n"
             )
         style_prompts = _PROMPT_STYLES.get(prompt_style, {})
@@ -341,6 +402,14 @@ def _llm_judge_duplicates(
         lang_suffix = _language_instruction(output_language)
         if lang_suffix:
             system += lang_suffix
+        full_config_for_temporal = load_config()
+        if full_config_for_temporal.get("temporal", {}).get("llm_temporal_prompts", False):
+            system += (
+                "\n\n# 时间推理规则\n"
+                "- 每条记忆的[时间:]标签显示创建和更新日期，请务必参考\n"
+                "- 当两条记忆重复时，优先保留(keep_id)更新日期更近的那条\n"
+                "- 若更新日期相差超过30天，更新日期更近的记忆很可能是事实演变后的最新版本，而非真正重复\n"
+            )
         try:
             raw, thinking = _call_llm_with_thinking(prompt, system, llm_config)
             data = json.loads(raw)
@@ -355,7 +424,15 @@ def _llm_judge_duplicates(
                         keep_id = llm_keep_id
                         drop_id = b["id"] if keep_id == a["id"] else a["id"]
                     else:
-                        keep_id = a["id"] if a.get("importance", 0) >= b.get("importance", 0) else b["id"]
+                        # 时间优先: temporal 启用时保留 updated_at 更新的记忆，importance 作为 tiebreaker
+                        from memorycore.models import load_config
+                        use_temporal = load_config().get("temporal", {}).get("enabled", False)
+                        if use_temporal and (a.get("updated_at") or b.get("updated_at")):
+                            a_ts = a.get("updated_at") or a.get("created_at") or ""
+                            b_ts = b.get("updated_at") or b.get("created_at") or ""
+                            keep_id = a["id"] if a_ts >= b_ts else b["id"]
+                        else:
+                            keep_id = a["id"] if a.get("importance", 0) >= b.get("importance", 0) else b["id"]
                         drop_id = b["id"] if keep_id == a["id"] else a["id"]
                     merge_info = item.get("merge_info", "")
                     action = "archive_and_merge_duplicate" if merge_info else "archive_duplicate"
@@ -452,8 +529,10 @@ def _llm_judge_contradictions(
         for idx, (a, b, score) in enumerate(batch):
             items_text += (
                 f"\n[{idx}]\n"
-                f"A (id={a['id'][:8]}): {a.get('title')!r} — {a.get('content', '')[:content_max_chars]!r}\n"
-                f"B (id={b['id'][:8]}): {b.get('title')!r} — {b.get('content', '')[:content_max_chars]!r}\n"
+                f"A (id={a['id'][:8]}): {a.get('title')!r} {_temporal_tag(a)}\n"
+                f"  — {a.get('content', '')[:content_max_chars]!r}\n"
+                f"B (id={b['id'][:8]}): {b.get('title')!r} {_temporal_tag(b)}\n"
+                f"  — {b.get('content', '')[:content_max_chars]!r}\n"
             )
         style_prompts = _PROMPT_STYLES.get(prompt_style, {})
         system = style_prompts.get("contradiction")
@@ -472,6 +551,15 @@ def _llm_judge_contradictions(
                 "'newer_id' (id of the more recent/correct memory, or null)."
             )
         prompt = f"Check these memory pairs for contradictions:{items_text}"
+        from memorycore.models import load_config as _lc2
+        if _lc2().get("temporal", {}).get("llm_temporal_prompts", False):
+            system += (
+                "\n\n# 时间推理规则\n"
+                "- 每条记忆的[时间:]标签显示创建和更新日期，请务必参考\n"
+                "- 更新日期更近的记忆更可能正确，newer_id 应指向 updated 字段更新的那条\n"
+                "- 时间相差超过30天的相同主题记忆很可能是时间演变（temporal supersession），而非真正的矛盾\n"
+                "- 若时间差超过180天，优先标记为 supersession 而非 contradiction\n"
+            )
         try:
             raw, thinking = _call_llm_with_thinking(prompt, system, llm_config)
             data = json.loads(raw)
@@ -523,7 +611,8 @@ def _llm_reassess_importance(
                 f"[{idx}] id={m['id'][:8]} type={m.get('type')} "
                 f"importance={m.get('importance', 0.5):.2f} "
                 f"injected={m.get('injected_count', 0)} "
-                f"feedback={m.get('feedback_score', 0):.1f}\n"
+                f"feedback={m.get('feedback_score', 0):.1f} "
+                f"{_temporal_tag(m)}\n"
                 f"  title: {m.get('title')!r}\n"
                 f"  content: {m.get('content', '')[:content_max_chars]!r}\n"
             )
@@ -546,6 +635,15 @@ def _llm_reassess_importance(
                 "{'index': int, 'new_importance': float, 'action': str, 'reason': str ≤20 words}."
             )
         prompt = f"Re-evaluate the long-term importance of these memories:\n{items_text}"
+        from memorycore.models import load_config as _lc3
+        if _lc3().get("temporal", {}).get("llm_temporal_prompts", False):
+            system += (
+                "\n\n# 时间推理规则\n"
+                "- 每条记忆的[时间:]标签显示创建、更新日期及距今天数，请务必参考\n"
+                "- 距今超过180天且从未被访问(injected=0)的记忆应大幅降低重要性(downgrade或archive)\n"
+                "- 最近30天内更新的记忆不应轻易降级，即使注入次数为0\n"
+                "- 有最后访问记录的记忆说明仍在被使用，应维持或提升重要性\n"
+            )
         try:
             raw, thinking = _call_llm_with_thinking(prompt, system, llm_config)
             data = json.loads(raw)
@@ -595,7 +693,7 @@ def _llm_detect_splittable(
         items_text = ""
         for idx, m in enumerate(batch):
             items_text += (
-                f"\n[{idx}] id={m['id'][:8]} type={m.get('type')}\n"
+                f"\n[{idx}] id={m['id'][:8]} type={m.get('type')} {_temporal_tag(m)}\n"
                 f"  title: {m.get('title')!r}\n"
                 f"  content ({len(m.get('content',''))} chars): {m.get('content', '')[:content_max_chars]!r}\n"
             )

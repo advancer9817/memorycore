@@ -82,6 +82,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "auto_supersede_enabled": True,
         "auto_supersede_threshold": 0.96,
         "review_similarity_threshold": 0.82,
+        "recency_half_life_days": 90,
+        "llm_temporal_prompts": True,
+        "dedup_temporal_guard": True,
+        "governance_age_risk_days": 7,
     },
     "rule_curator": {
         "decay_step": 0.05,

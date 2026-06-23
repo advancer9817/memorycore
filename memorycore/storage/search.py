@@ -540,10 +540,15 @@ def _is_atomic_fact(record: dict[str, Any]) -> bool:
 
 
 def _recency_score(record: dict[str, Any]) -> float:
-    """Soft freshness signal for ranking: updated now=1.0, 1+ year old=0.0."""
+    """Soft freshness signal for ranking: updated now=1.0, older=decreasing."""
+    from memorycore.models import load_config as _lc_s
     updated_at = record.get("updated_at") or record.get("created_at")
     updated = parse_ts(str(updated_at) if updated_at else None)
     age_days = max(0.0, (local_now() - updated.astimezone(local_now().tzinfo)).total_seconds() / 86400)
+    if _lc_s().get("temporal", {}).get("enabled", False):
+        half_life = float(_lc_s().get("temporal", {}).get("recency_half_life_days", 90))
+        import math
+        return max(0.0, min(1.0, math.exp(-age_days * math.log(2) / half_life)))
     return max(0.0, min(1.0, 1.0 - age_days / 365.0))
 
 
@@ -552,7 +557,14 @@ def _parent_id(record: dict[str, Any]) -> str:
 
 
 def _context_recency_weight() -> float:
-    value = (load_config().get("context_pack", {}) or {}).get("recency_weight", 0.05)
+    from memorycore.models import load_config as _lc_w
+    cfg = _lc_w()
+    value = (cfg.get("context_pack", {}) or {}).get("recency_weight", 0.05)
+    if cfg.get("temporal", {}).get("enabled", False):
+        try:
+            return max(0.0, min(0.30, float(value) if float(value) > 0.05 else 0.15))
+        except Exception:
+            return 0.15
     try:
         return max(0.0, min(0.1, float(value)))
     except Exception:

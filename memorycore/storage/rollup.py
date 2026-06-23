@@ -116,6 +116,14 @@ def _call_rollup_llm(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     user_prompt = "## Episodic records to roll up\n" + json.dumps(payload, ensure_ascii=False)
     output_language = load_config().get("output_language", "auto")
     system_prompt = _ROLLUP_SYSTEM_PROMPT + _language_instruction(output_language)
+    from memorycore.models import load_config as _lc_r
+    if _lc_r().get("temporal", {}).get("llm_temporal_prompts", False):
+        system_prompt += (
+            "\n\n# 时间推理规则\n"
+            "- 当多条记录描述同一事实的不同版本时，以 created_at 最晚的为准\n"
+            "- 在合并后的记忆中保留变化历程（如「从X改为Y」而非仅记录最终状态）\n"
+            "- 删除明显过时且已被后续记录取代的信息\n"
+        )
     raw = _call_llm(system_prompt, user_prompt, cfg)
     data = _parse_llm_json(raw)
     memories = data.get("memories", data.get("memory", []))

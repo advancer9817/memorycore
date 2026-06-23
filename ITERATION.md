@@ -4159,3 +4159,61 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 ### 原因
 
 此前 `mcore restart` 不会自动构建前端代码。修改 UI 后需要手动 `pnpm build` 再 `mcore restart`，容易遗漏导致运行旧版本。现在 `restart` 命令自动执行构建，简化部署流程。
+
+## 2026-06-23 时间感知架构全链路实施（Phase 1-6）
+
+### 改动摘要
+
+将时间（temporal）概念注入 mcore 记忆系统的每一个决策点，通过 `temporal.enabled` 总开关控制。
+
+### Phase 1: 激活时间配置
+
+- `memorycore/models.py` — `DEFAULT_CONFIG["temporal"]` 新增 4 个配置键：
+  - `recency_half_life_days: 90` — 指数衰减半衰期
+  - `llm_temporal_prompts: true` — LLM prompt 时间注入开关
+  - `dedup_temporal_guard: true` — dedup 时间守卫开关
+  - `governance_age_risk_days: 7` — 治理年龄风险阈值
+- `config.yaml` — `temporal.enabled: true`（从 false 改为 true）
+
+### Phase 2: LLM Curator 时间注入（核心）
+
+**文件**: `memorycore/storage/curator_llm.py`
+
+- 新增 `_temporal_tag(record)` — 生成紧凑中文时间标签 `[时间: 创建=YYYY-MM-DD, 更新=YYYY-MM-DD, 距今=N天]`，`temporal.enabled=False` 时返回空字符串
+- `_fetch_active_memories()` / `_fetch_memories_by_ids()` — SQL SELECT 追加 `created_at, valid_from, valid_until, last_accessed_at, last_injected_at`
+- `_llm_judge_duplicates` — items_text 注入 `_temporal_tag`，追加中文时间推理 prompt；fallback keep 逻辑改为时间优先（`updated_at` 更新的为准，importance 作 tiebreaker）
+- `_llm_judge_contradictions` — items_text 注入 `_temporal_tag`，追加矛盾判定时间推理指令
+- `_llm_reassess_importance` — items_text 注入 `_temporal_tag`，追加重要性评估时间规则（180天未访问降级，30天内不降级）
+- `_llm_detect_splittable` — items_text 注入 `_temporal_tag`
+
+### Phase 3: Rollup 时间推理指令
+
+**文件**: `memorycore/storage/rollup.py`
+
+- `_call_rollup_llm()` system_prompt 追加中文时间推理规则：以最晚 `created_at` 为准、保留变化历程、删除已被取代的信息
+
+### Phase 4: Context Pack 检索时间权重提升
+
+**文件**: `memorycore/storage/search.py`
+
+- `_recency_score()` — temporal 启用时改用指数衰减（半衰期 90 天，@90天=0.5），非 temporal 保留线性衰减（365天到零）
+- `_context_recency_weight()` — temporal 启用时默认 0.15（上限 0.30），原为默认 0.05（上限 0.10）
+
+### Phase 5: Dedup 时间守卫
+
+**文件**: `memorycore/dedup.py`
+
+- update 分支：`dedup_temporal_guard` 启用时，若已有记录在 1 小时内更新过，降级为 ADD+link，防止弱事实覆盖刚写入的强事实
+
+### Phase 6: 治理时间信号
+
+**文件**: `memorycore/storage/governance.py`
+
+- `policy_gate()` — 破坏性操作时，若目标记忆创建/更新不足 `governance_age_risk_days`（默认 7 天），追加 `recently_created_memory` 到 reasons，强制进入人工审核
+
+### 验证结果
+
+- 所有模块导入正常
+- `_temporal_tag` 输出格式：`[时间: 创建=2026-01-15, 更新=2026-06-20, 距今=3天]` ✓
+- `_context_recency_weight` temporal on → 0.15 ✓
+- `_recency_score` @90天 → 0.5（半衰期验证）✓

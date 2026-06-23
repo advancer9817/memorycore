@@ -220,6 +220,21 @@ def policy_gate(
         reasons.append("positive_feedback_requires_review")
     if is_destructive and normalized_risk != "low":
         reasons.append("destructive_action_not_low_risk")
+
+    # Phase 6 时间信号: 针对7天内创建/更新的记忆的破坏性操作强制进入人工审核
+    if is_destructive:
+        from memorycore.models import load_config as _lc_g, local_now as _now_g
+        _tcfg = _lc_g().get("temporal", {})
+        if _tcfg.get("enabled", False):
+            _age_days = int(_tcfg.get("governance_age_risk_days", 7))
+            from datetime import timedelta
+            _cutoff = (_now_g() - timedelta(days=_age_days)).isoformat(timespec="seconds")
+            _recently_created = any(
+                (m.get("created_at") or "") >= _cutoff or (m.get("updated_at") or "") >= _cutoff
+                for m in memories
+            )
+            if _recently_created:
+                reasons.append("recently_created_memory")
     is_low_risk_importance_adjustment = (
         action in {"promote", "downgrade"}
         and normalized_risk == "low"

@@ -102,4 +102,8 @@ rule_curator:
 temporal:
   auto_supersede_user_corrections: true
   contradiction_detection: heuristic
-  enabled: false
+  enabled: true
+  recency_half_life_days: 90
+  llm_temporal_prompts: true
+  dedup_temporal_guard: true
+  governance_age_risk_days: 7

@@ -323,3 +323,53 @@ Step 4（扩展能力）— 独立，可与 Step 1-3 并行
 ```
 
 建议执行顺序：**Step 1 → Step 2 → Step 5（前三步的测试）→ Step 3 → Step 5（聚合测试）→ Step 4**
+
+## 全链路时间感知增强
+
+> 背景：LLM curator 的去重/矛盾/重要性/拆分四个能力虽然 prompt 提到 recency 和 temporal supersession，但实际不传 `created_at`/`updated_at` 给 LLM，时间维度名存实亡。Context pack recency 权重仅 0.05（上限 0.10），时间几乎只是 tiebreaker。前端不暴露 `valid_from`/`valid_until` 编辑能力。本方案通过 `temporal.enabled` 总开关，分阶段将时间意识注入系统的每一个决策点。
+
+### Phase 1: 激活时间配置（前置条件）
+
+- [ ] 扩展 `models.py` `DEFAULT_CONFIG["temporal"]`：新增 `recency_half_life_days`(90)、`llm_temporal_prompts`(true)、`dedup_temporal_guard`(true)、`governance_age_risk_days`(7) 配置项
+- [ ] `config.yaml` 启用 `temporal.enabled: true`
+
+### Phase 2: LLM Curator 时间注入（最高优先级）
+
+- [ ] `curator_llm.py` 新增 `_temporal_tag()` 共享时间标签格式化器，输出格式 `[时间: 创建=YYYY-MM-DD, 更新=YYYY-MM-DD, 距今=N天]`，由 `temporal.enabled` 开关控制
+- [ ] `_fetch_active_memories()` 和 `_fetch_memories_by_ids()` SELECT 追加 `created_at, valid_from, valid_until, last_accessed_at, last_injected_at`
+- [ ] `_llm_judge_duplicates` 注入 `_temporal_tag` + 中文时间推理 prompt（优先保留更新日期更近的记忆）
+- [ ] `_llm_judge_contradictions` 注入 `_temporal_tag` + 时间推理 prompt（更新日期更近的记忆更可能正确）
+- [ ] `_llm_reassess_importance` 注入 `_temporal_tag` + 时间推理 prompt（距今>180天未访问应降级，近30天不应轻易降级）
+- [ ] `_llm_detect_splittable` 注入 `_temporal_tag`（仅数据可见性，不加额外 prompt）
+- [ ] 去重 fallback 逻辑：LLM 未指定 `keep_id` 时，temporal 启用下按 `updated_at` 选保留而非 importance
+
+### Phase 3: Rollup 时间推理指令
+
+- [ ] `rollup.py` `_call_rollup_llm()` 构建 system_prompt 后追加中文时间推理规则：多版本以 `created_at` 最晚为准，保留变化历程（"从X改为Y"），删除已被取代的过时信息
+
+### Phase 4: Context Pack 检索时间权重提升
+
+- [ ] `search.py` `_context_recency_weight()` temporal 启用时默认 0.15（上限 0.30），保留非 temporal 模式原有 0.05/0.10
+- [ ] `search.py` `_recency_score()` temporal 启用时改为指数衰减（半衰期可配 `temporal.recency_half_life_days`，默认 90 天），非 temporal 保留线性衰减
+
+### Phase 5: Dedup 时间守卫
+
+- [ ] `dedup.py` `ingest()` update 分支：temporal 启用时检查已有记录 `updated_at`，若 1 小时内刚更新则降级为 "add with link" 而非覆盖
+
+### Phase 6: 治理时间信号
+
+- [ ] `governance.py` `policy_gate()` temporal 启用时：目标记忆创建/更新不足 `governance_age_risk_days`（默认 7 天）且操作为破坏性，追加 `recently_created_memory` reason 强制人工审核
+
+### Phase 7: 前端时间增强
+
+- [ ] 后端 `frontend.py` `GET /memories` 追加 `date_from`/`date_to` 参数，映射到 SQL `WHERE created_at >= ? AND created_at <= ?`
+- [ ] 前端记忆列表 `FilterComponent` 增加日期范围选择器
+- [ ] 后端 `crud.py` `update_memory_content()` 追加 `valid_from`/`valid_until` 可选参数；`frontend.py` PATCH handler 传递
+- [ ] 前端记忆详情面板追加 `valid_from`/`valid_until` 日期输入框
+- [ ] i18n 字典补充时间相关国际化键
+
+### 验证
+
+- [ ] Phase 2 验证：`run_llm_curator(apply=False)` dry run，检查 `llm_prompt` 包含 `[时间:]` 标签，`keep_id` 指向更新的记忆
+- [ ] Phase 4 验证：`memory_context` 对比前后排序，近期更新的记忆应明显靠前
+- [ ] 全链路回归：`python -m pytest tests/` 确保无回归

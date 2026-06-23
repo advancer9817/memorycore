@@ -273,10 +273,36 @@ def ingest(
                 logger.debug("dedup: SKIP  [%.3f] %s", decision.similarity, fact.text[:60])
 
             elif decision.action == "update":
-                try:
-                    _update_memory_fn(decision.existing_id)
-                except Exception as exc:
-                    logger.warning("dedup: failed to touch existing memory %s: %s", decision.existing_id, exc)
+                # Phase 5 时间守卫: temporal 启用时，若已有记录在1小时内刚更新，降级为 add+link
+                _guarded = False
+                if cfg.get("temporal", {}).get("dedup_temporal_guard", False):
+                    from memorycore.storage.db import _managed_query as _mq
+                    from memorycore.models import local_now as _now
+                    from datetime import timedelta
+                    _existing_rows = _mq(
+                        "SELECT updated_at FROM memories WHERE id = ?",
+                        (decision.existing_id,),
+                    )
+                    if _existing_rows:
+                        _upd = _existing_rows[0].get("updated_at") or ""
+                        try:
+                            from datetime import datetime, timezone
+                            _upd_dt = datetime.fromisoformat(_upd.replace("Z", "+00:00"))
+                            if _upd_dt.tzinfo is None:
+                                _upd_dt = _upd_dt.replace(tzinfo=timezone.utc)
+                            if (_now() - _upd_dt) < timedelta(hours=1):
+                                _guarded = True
+                                logger.debug(
+                                    "dedup: temporal guard — existing %s updated <1h ago, downgrade UPDATE→ADD+link",
+                                    decision.existing_id,
+                                )
+                        except Exception:
+                            pass
+                if not _guarded:
+                    try:
+                        _update_memory_fn(decision.existing_id)
+                    except Exception as exc:
+                        logger.warning("dedup: failed to touch existing memory %s: %s", decision.existing_id, exc)
 
                 new_id = str(uuid.uuid4())
                 _add_memory_fn(
