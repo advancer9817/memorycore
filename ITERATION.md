@@ -2120,7 +2120,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 - 服务重启: mcore.service (8318) + mcore-ui.service (18318) 均已 active (running)
 
 ### 已知问题
-- 本次也顺带修复了图谱预设在前端 UI 的显示名称（`knowledge_graph` 驼峰不一致问题），以符合整体命名风格。
+- 本次也一并处理了前一个 commit 中的“图谱预设命名不一致”问题。最终决定：由于“知识图谱”作为使用场景命名与其他 5 个按强度排列的预设风格格格不入，已将其完全删除，并将图谱建链职责直接融合进“深度(deep)”预设（deep 预设的参数原本就已覆盖并优于知识图谱预设）。
 
 ### 回滚
 `git revert HEAD`

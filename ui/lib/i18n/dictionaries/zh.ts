@@ -691,7 +691,6 @@ export const zh = {
     presetPrecision: "精准",
     presetAggressive: "激进",
     presetDeep: "深度",
-    presetKnowledgeGraph: "知识图谱",
     temperature: "智能程度",
     sim_threshold: "记忆准确性",
     split_content_threshold: "分片精度",
