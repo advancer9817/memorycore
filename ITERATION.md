@@ -4295,3 +4295,46 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 - 原：原生 `<input type="date">`，样式与暗色主题不符，弹出日历位置不可控
 - 改：shadcn `Popover` + `Calendar` 组件，样式 `bg-zinc-900 border-zinc-700`，与整体项目暗色主题一致
+
+---
+
+## [迭代 9] 2026-06-23 — LLM Curator 全面审计与优化方案设计
+
+### 背景
+
+用户对 LLM Curator 整体效果不满意，要求全面深度审计并设计优化方案。
+
+### 审计过程
+
+使用 3 个 Opus agent 并行审计：
+1. Rule Curator (`curator.py`) 全部逻辑、触发条件、硬编码阈值
+2. LLM Curator (`curator_llm.py`) 全链路质量（prompt、候选生成、cooldown、JSON 容错、执行链路）
+3. Curator 调度机制（systemd timer + 进程内后台线程 + 前端/MCP 入口）
+
+### 核心发现
+
+- **6 个系统性问题、18 个具体缺陷**
+- 334 条活跃记忆中 **71%（238 条）零图谱链接**
+- 651 条链接中 **98.5% 是机械性 split 副产物**，仅 11 条 `related_to`
+- **keep_id/newer_id 因 ID 截断完全无效**（prompt 传 8 字符截断 ID，代码比对 36 字符 UUID，永远不匹配）
+- **无发现的记忆不进 cooldown**，每次运行重复扫描烧 token
+- **去重和矛盾检测做两轮独立全量向量扫描**，搜索量翻倍
+- **两套调度机制重叠**（systemd timer 每小时 + 后台线程每 6 小时），参数冲突
+
+### 产出
+
+1. **方案设计文档**: `docs/plans/2026-06-23-llm-curator-full-overhaul.md`（363 行）— 6 Phase 诊断与方案
+2. **逐步实施文档**: `docs/plans/2026-06-23-llm-curator-implementation-steps.md`（1338 行）— 21 步精确到行号的 diff 指南
+3. **TODO.md**: 追加 28 条实施步骤（Phase A-F 分组）
+4. **记忆中枢**: 2 条记忆写入（decision + project_memory）
+
+### 优化方案 6 Phase 概要
+
+| Phase | 优先级 | 核心内容 |
+|-------|--------|---------|
+| A | P0 | 修复 keep_id/newer_id 数据损坏 — prompt 改为 A/B 标签；填充 aggressive 空字典；batch 级 JSON 容错 |
+| B | P0 | 合并去重+矛盾为一轮向量扫描；全量冷却；load_config 统一调用 |
+| C | P1 | importance 保护正面 feedback 记忆；统一 _language_instruction；_temporal_tag 双语 |
+| D | P1 | 新增第 5 能力 _llm_discover_links — 图谱建链引擎；知识图谱预设参数修正 |
+| E | P2 | 移除后台线程 rule curator 调用，统一由 systemd timer 执行 |
+| F | P2 | _request_from_result 查询优化；硬编码上限配置化；diagnostics 追加耗时 |

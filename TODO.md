@@ -373,3 +373,60 @@ Step 4（扩展能力）— 独立，可与 Step 1-3 并行
 - [ ] Phase 2 验证：`run_llm_curator(apply=False)` dry run，检查 `llm_prompt` 包含 `[时间:]` 标签，`keep_id` 指向更新的记忆
 - [ ] Phase 4 验证：`memory_context` 对比前后排序，近期更新的记忆应明显靠前
 - [ ] 全链路回归：`python -m pytest tests/` 确保无回归
+
+## LLM Curator 全面优化 — 2026-06-23
+
+> 背景：深度审计发现 6 个系统性问题、18 个具体缺陷。71% 记忆零图谱链接，keep_id/newer_id 因 ID 截断完全无效，cooldown 只覆盖有发现的记忆导致反复扫描烧 token，去重和矛盾检测两轮独立向量扫描。详细方案见 `docs/plans/2026-06-23-llm-curator-full-overhaul.md`，逐步实施见 `docs/plans/2026-06-23-llm-curator-implementation-steps.md`。
+
+### Phase A: 修复数据损坏风险（P0）
+
+- [ ] **[A1]** 修改 `_PROMPT_STYLES` 全部三套 duplicate prompt：`keep_id` → `keep ("A"/"B")`
+- [ ] **[A1]** 修改 `_PROMPT_STYLES` 全部三套 contradiction prompt：`newer_id` → `newer ("A"/"B")`
+- [ ] **[A2]** 填充 `_PROMPT_STYLES["aggressive"]`：把四个函数的硬编码 fallback prompt 移入，消除 `if not system:` 分支
+- [ ] **[A3]** `_llm_judge_duplicates` items_text：移除 `id=xxx[:8]` 截断，改为 `A:` / `B:` 标签
+- [ ] **[A3]** `_llm_judge_duplicates` 结果解析：`keep_id` → `keep` label 映射（"A"→a["id"], "B"→b["id"]），保留时间/importance fallback
+- [ ] **[A4]** `_llm_judge_contradictions` items_text：同理移除 ID 截断
+- [ ] **[A4]** `_llm_judge_contradictions` 结果解析：`newer_id` → `newer` label 映射，无法识别时用 `updated_at` fallback
+- [ ] **[A5]** 全部四个 `_llm_judge_*` 函数：batch 循环内 JSON 解析从 raise 改为 warning + continue
+
+### Phase B: 消除性能浪费（P0）
+
+- [ ] **[B1]** 新增 `_find_candidate_pairs(vs, memories, sim_threshold)` 合并函数，一次向量扫描，按分数区间分流去重/矛盾候选
+- [ ] **[B1]** 删除旧的 `_find_semantic_duplicate_candidates` 和 `_find_contradiction_candidates`
+- [ ] **[B1]** 移除矛盾检测 `max(0.60, sim_threshold - 0.12)` 硬编码下限
+- [ ] **[B2]** `llm_curator_report` 主流程改用合并扫描，增加 `timing` 字典跟踪各阶段耗时
+- [ ] **[B3]** 全部四个 `_llm_judge_*` 函数增加 `config` 参数，返回 `(results, evaluated_ids)` 元组
+- [ ] **[B3]** 移除函数内部所有 `from memorycore.models import load_config` 重复调用，统一用传入的 `config`
+- [ ] **[B4]** 全量冷却：所有经 LLM 评判的记忆（含无发现的）都写入 `curator_review_log`
+
+### Phase C: Prompt 质量提升（P1）
+
+- [ ] **[C1]** conservative 和 balanced 的 importance prompt 追加 feedback 保护规则（feedback_score > 0 不应 archive/downgrade）
+- [ ] **[C2]** `_llm_judge_contradictions` 和 `_llm_reassess_importance` 追加 `_language_instruction()` 后缀（当前只有 duplicate 和 split 有）
+- [ ] **[C3]** `_temporal_tag()` 支持双语：根据 `output_language` 生成中文或英文标签
+
+### Phase D: 新增图谱建链能力（P1）
+
+- [ ] **[D1]** 新增 `_find_link_candidates(vs, memories, sim_threshold, link_upper=0.75, max_pairs=100)`：取 [sim_threshold, link_upper] 区间的对，排除已有链接，优先孤立记忆
+- [ ] **[D2]** 新增 `_LINK_DISCOVERY_PROMPTS`（三套 prompt_style）和 `_llm_discover_links()` 函数：LLM 判断 related_to/supports/part_of/supersedes/none
+- [ ] **[D3]** 新增 `_append_link_discovery_requests()`：复用 `memory_link_insert` MutationRequest 建链
+- [ ] **[D4]** `llm_curator_report()` 主流程集成 link discovery 阶段（去重矛盾之后、split 之前）
+- [ ] **[D4]** `apply_llm_curator()` 新增 `_append_link_discovery_requests` 调用，`applied` 追加 `link_discoveries_created`
+- [ ] **[D5]** `CuratorTuningPanel.tsx` 知识图谱预设参数修正：sim_threshold 0.45→0.55, importance_limit 1500→100, temperature 0.5→0.6, prompt_style balanced→aggressive 等
+
+### Phase E: 调度协调（P2）
+
+- [ ] **[E1]** `server.py` `_start_auto_curator()` 后台线程移除 `curator_report(dry_run=False)` 调用，rule curator 执行统一由 systemd timer 负责
+
+### Phase F: 收尾优化（P2）
+
+- [ ] **[F1]** `_request_from_result()` 从全表遍历 `query_ledger(limit=500)` 改为 `WHERE id = ?` 单条查询
+- [ ] **[F2]** 硬编码上限配置化：`max_dedup_pairs`(200)、`max_contradiction_pairs`(200)、`max_split_candidates`(100)、`max_link_pairs`(100) 提取到 `llm_curator` 配置段
+- [ ] **[F3]** `llm_curator_report` diagnostics 追加 `timing`（各阶段耗时 ms）、`cooldown_registered`、`json_parse_failures`
+
+### 验证
+
+- [ ] Phase A 验证：`_PROMPT_STYLES` 三套 style 无 `keep_id`/`newer_id`，aggressive 非空字典
+- [ ] Phase B 验证：`_find_candidate_pairs` 存在，旧函数已删除，`_llm_judge_*` 签名含 `config` 参数
+- [ ] Phase D 验证：LLM curator 运行后 `link_discoveries > 0`，孤立记忆比例从 71% 下降
+- [ ] 全量回归：`.venv/bin/python -m pytest tests/ -x -q` + `cd ui && npx tsc --noEmit`
