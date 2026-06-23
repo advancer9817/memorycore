@@ -2127,6 +2127,26 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
+## [迭代 30] 2026-06-23 — 优化 Dashboard Curator 执行日志 UI
+
+### 变更
+
+- `ui/components/dashboard/Install.tsx`: 优化了 Curator 执行结果（LLM findings 和规则 actions）的呈现方式。将 `finding.title` 和 `finding.reason` 的单行强制截断改为 `line-clamp-2 break-words`（最多显示两行并带有 `...` 缩略），从而避免文本生硬截断且丢失信息。
+- `ui/components/dashboard/Install.tsx`: 解析底层数据中的 `id`、`older_id`、`drop_id` 或 `source_id` 作为 `targetId`，在每个 Finding 行的右侧新增了直达对应记忆的 "详情" (Details) 按钮跳转链接（`/memory/[id]`）。
+- `ui/lib/i18n/dictionaries/`: 在 `common` 下增加 `details` 字典键支持中英双语。
+
+### 修复
+- (无)
+
+### 验证
+- UI 构建: Next.js 15.5 build 成功。
+- 服务重启: mcore.service 与 mcore-ui.service 运行正常。
+
+### 回滚
+`git revert HEAD`
+
+---
+
 ## 日志格式规范
 
 每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：

@@ -24,6 +24,7 @@ export const en = {
     filters: "Filters",
     clearFilters: "Clear Filters",
     actions: "Actions",
+    details: "Details",
     page: "Page",
     of: "of",
     show: "Show",

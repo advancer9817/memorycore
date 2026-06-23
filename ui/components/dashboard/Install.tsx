@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -561,9 +562,18 @@ export const Install = () => {
           <div className="flex flex-col gap-1 border-t border-zinc-800 pt-2">
             {(runActionsShowAll ? runState.actions : runState.actions.slice(0, 3)).map((action, i) => (
               <div key={action.id ?? i} className="rounded bg-zinc-800 px-2 py-1.5 text-xs flex items-start gap-2">
-                <span className="text-emerald-300 font-medium shrink-0">{action.action}</span>
-                {action.title && <span className="text-zinc-400">· {action.title}</span>}
-                {action.reason && <span className="text-zinc-500 ml-auto">{action.reason}</span>}
+                <div className="min-w-0 flex-1">
+                  <div className="line-clamp-2 break-words">
+                    <span className="text-emerald-300 font-medium shrink-0">{action.action}</span>
+                    {action.title && <span className="text-zinc-400"> · {action.title}</span>}
+                  </div>
+                  {action.reason && <div className="text-zinc-500 line-clamp-2 mt-0.5">{action.reason}</div>}
+                </div>
+                {action.id && (
+                  <Link href={`/memory/${action.id}`} target="_blank" className="rounded px-1.5 py-0.5 text-[10px] transition-colors bg-zinc-700/50 text-zinc-400 hover:text-zinc-200 shrink-0">
+                    {t.common?.details ?? "详情"}
+                  </Link>
+                )}
               </div>
             ))}
             {!runActionsShowAll && runState.actions.length > 3 && (
@@ -650,7 +660,7 @@ export const Install = () => {
                         key={globalIdx}
                         finding={f}
                         applyState={applyFindingStates[globalIdx]}
-                        labels={{ accept: t.dashboard.accept, reject: t.dashboard.reject, thinking: t.dashboard.thinking, raw: t.dashboard.raw, prompt: t.dashboard.prompt, applyError: t.dashboard.applyError, acceptFindingTitle: t.dashboard.acceptFindingTitle, dismissFindingTitle: t.dashboard.dismissFindingTitle }}
+                        labels={{ accept: t.dashboard.accept, reject: t.dashboard.reject, thinking: t.dashboard.thinking, raw: t.dashboard.raw, prompt: t.dashboard.prompt, applyError: t.dashboard.applyError, acceptFindingTitle: t.dashboard.acceptFindingTitle, dismissFindingTitle: t.dashboard.dismissFindingTitle, details: t.common.details }}
                         onAccept={async () => {
                           if (!f._category || !f._raw) return;
                           const response = await fetch(`${getApiBaseUrl()}/api/curator/llm/apply-single`, {
@@ -709,7 +719,7 @@ function LlmElapsedTimer({ startedAt }: { startedAt: number }) {
 function LlmFinding({ finding, applyState, labels, onAccept, onDismiss }: {
   finding: LlmFindingView;
   applyState?: ApplyFindingState;
-  labels: { accept: string; reject: string; thinking: string; raw: string; prompt: string; applyError: string; acceptFindingTitle: string; dismissFindingTitle: string };
+  labels: { accept: string; reject: string; thinking: string; raw: string; prompt: string; applyError: string; acceptFindingTitle: string; dismissFindingTitle: string; details: string };
   onAccept?: () => Promise<void>;
   onDismiss?: () => void;
 }) {
@@ -731,15 +741,27 @@ function LlmFinding({ finding, applyState, labels, onAccept, onDismiss }: {
     }
   };
 
+  let targetId: string | undefined;
+  if (finding._raw) {
+    targetId = (finding._raw.id || finding._raw.drop_id || finding._raw.older_id || finding._raw.source_id) as string | undefined;
+  }
+
   return (
     <div className="rounded bg-zinc-800 px-2 py-2 text-xs">
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <span className="text-violet-300 font-medium">{finding.action}</span>
-          {finding.title && <span className="text-zinc-400"> · {finding.title}</span>}
-          {finding.reason && <div className="text-zinc-500 mt-0.5">{finding.reason}</div>}
+        <div className="min-w-0 flex-1">
+          <div className="line-clamp-2 break-words">
+            <span className="text-violet-300 font-medium">{finding.action}</span>
+            {finding.title && <span className="text-zinc-400"> · {finding.title}</span>}
+          </div>
+          {finding.reason && <div className="text-zinc-500 line-clamp-2 mt-0.5">{finding.reason}</div>}
         </div>
         <div className="flex gap-1 shrink-0 mt-0.5 items-center">
+          {targetId && (
+            <Link href={`/memory/${targetId}`} target="_blank" className="rounded px-1.5 py-0.5 text-[10px] transition-colors bg-zinc-700/50 text-zinc-400 hover:text-zinc-200">
+              {labels.details}
+            </Link>
+          )}
           {onAccept && (
             <button
               onClick={handleAccept}

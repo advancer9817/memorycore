@@ -26,6 +26,7 @@ export const zh = {
     filters: "筛选条件",
     clearFilters: "清除筛选",
     actions: "操作",
+    details: "详情",
     page: "页",
     of: "共",
     show: "显示",
