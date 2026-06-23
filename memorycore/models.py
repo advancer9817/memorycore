@@ -74,6 +74,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "include_stale_warnings": True,
         "max_records_per_group": 6,
         "recency_weight": 0.05,
+        "cluster_similarity_threshold": 0.85,
+        "cluster_enabled": True,
     },
     "temporal": {
         "enabled": False,

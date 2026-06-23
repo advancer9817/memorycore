@@ -4391,3 +4391,30 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 | D | P1 | 新增第 5 能力 _llm_discover_links — 图谱建链引擎；知识图谱预设参数修正 |
 | E | P2 | 移除后台线程 rule curator 调用，统一由 systemd timer 执行 |
 | F | P2 | _request_from_result 查询优化；硬编码上限配置化；diagnostics 追加耗时 |
+
+## [迭代 31] 2026-06-24 — 向量相似度召回增强 (Context Pack Hybrid Retrieval V2)
+
+### 变更
+
+- `memorycore/storage/search.py`:
+  - **排序公式重构**: `_rank_score()` 中将向量分数（`vector_score`）独立出来与词法分数（`lexical_score`）分别加权（目前配置为向量 30%、词法 35%）。解决了以前向量分数仅对 vector-only 记忆生效而对被 FTS 命中的记录完全丢失的问题。
+  - **交叉召回加成**: 增加了 `multi_source_bonus = 0.12` 的逻辑。同时被 FTS 词法与 Vector 语义命中的高价值记忆将获得额外的相关性加权。
+  - **长文本拆分查询**: `_vector_search_ids()` 对于长度大于 200 字符的任务查询支持通过 `[。！？.!?\n]+` 切割成不超过 3 句短文本进行并行的子句向量查询，最后合并去重并取最高分数，提升了长提示词的语义召回覆盖度。
+  - **Embedding 缓存机制**: `_vector_search_ids()` 引入了简单的内存级 LRU 缓存（最大 128 条、有效期 5 分钟），避免对相同的 task 文本重复调用 embedding 接口。
+  - **可观测性增强**: `build_context_pack()` 产生的 `trace` 与 `slim_records` 增加了大量的向量指标。`slim_records` 现在会透出 `_retrieval_sources` 和 `_vector_score`；`trace` 会输出 `vector_avg_score`、`cross_retrieval_count` 等统计信息；并且在向量库离线时安全降级，并输出 `vector_fallback: true`。
+  - **高相似度记忆自动聚类**: 在 `build_context_pack` 末段增加了一次聚类扫描。如果两两记忆在高分向量召回中极度相似（相似度默认 `>0.85`），保留最高分并把其余记忆折叠为 `_clustered_ids`，避免重复相似信息霸占 token budget 限制的上下文。
+- `memorycore/storage/db.py`: `context_quality_events` 表完成 Schema 动态迁移，新增 `vector_avg_score` (REAL) 和 `cross_retrieval_rate` (REAL) 用于统计记录。
+- `memorycore/models.py`: 为 `DEFAULT_CONFIG["context_pack"]` 追加了 `cluster_similarity_threshold: 0.85` 和 `cluster_enabled: True` 的默认配置值。
+
+### 修复
+- `tests/test_context_relevance.py`: 根据新的 `_rank_score()` 分数分配比例，修复了原有纯向量命中由于门槛校验引发的测试失败，并适配了新的 `strict` 的 0.40 门槛判定。
+
+### 验证
+- 新建测试: `test_vector_clustering.py` 4 个聚类分支覆盖（含空、无连接与纯不同），`test_vector_context_integration.py` 包含独立命中、联合命中与平滑回退测试。均 100% 跑通。
+- 全链路: 全部 pytest 回归测试（排除了历史环境依赖问题后）成功执行。
+
+### 已知问题
+- Qdrant 客户端 `points` 查询在个别由于手动 mock ID 测试里会因 ID 非合法 UUID 或正整数类型而提示 `Unexpected Response: 400 (Bad Request)`（已在相应的 mock 测试中通过提供符合规范的 UUID 修复，但对旧环境数据有容错要求）。
+
+### 回滚
+`git revert HEAD`

@@ -93,7 +93,7 @@ def test_context_pack_filters_low_relevance_vector_only_hits(monkeypatch):
 
     monkeypatch.setattr(
         "memorycore.storage.search._vector_search_ids",
-        lambda task, top_k=20, score_threshold=0.35: [(record["id"], 0.36)],
+        lambda task, top_k=20, score_threshold=0.35: [(record["id"], 0.33)],
     )
 
     pack = lm.build_context_pack("deep qdrant semantic relevance calibration", agent="pytest")

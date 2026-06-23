@@ -206,6 +206,7 @@ def _record_context_quality_event(
         str(uuid.uuid4()), task, task_type, agent, project_path or "", scope or "global",
         quality["total_candidates"], quality["used_count"], quality["filtered_count"],
         quality["hit_rate"], quality["filter_rate"], quality["ineffective_rate"],
+        quality.get("vector_avg_score", 0.0), quality.get("cross_retrieval_rate", 0.0),
         as_json(type_weights), now(),
     )
 
@@ -217,8 +218,8 @@ def _record_context_quality_event(
                     INSERT INTO context_quality_events (
                       id, task, task_type, agent, project_path, scope, total_candidates,
                       used_count, filtered_count, hit_rate, filter_rate, ineffective_rate,
-                      type_weights_json, created_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                      vector_avg_score, cross_retrieval_rate, type_weights_json, created_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     params,
                 )
@@ -515,12 +516,26 @@ def get_active_warnings(
     return warnings[:max_warnings]
 
 
+import time as _time
+
+_VECTOR_SEARCH_CACHE: dict[str, tuple[float, list[tuple[str, float]]]] = {}
+_VECTOR_SEARCH_CACHE_TTL = 300.0
+_VECTOR_SEARCH_CACHE_MAX = 128
+
 def _vector_search_ids(
     task: str,
     top_k: int = 20,
     score_threshold: float = _VECTOR_SEARCH_THRESHOLD,
 ) -> list[tuple[str, float]]:
     """Return [(id, score)] from Qdrant semantic search. Empty list if unavailable."""
+    cache_key = f"{task}:{top_k}:{score_threshold}"
+    now_ts = _time.monotonic()
+
+    if cache_key in _VECTOR_SEARCH_CACHE:
+        cached_ts, cached_val = _VECTOR_SEARCH_CACHE[cache_key]
+        if now_ts - cached_ts < _VECTOR_SEARCH_CACHE_TTL:
+            return cached_val
+
     try:
         from memorycore.vector_store import get_vector_store, _store
         # If singleton not yet initialized with config, load config now
@@ -529,10 +544,36 @@ def _vector_search_ids(
             vs = get_vector_store(load_config())
         else:
             vs = get_vector_store()
-        if not vs.available:
-            return []
-        results = vs.search(task, top_k=top_k, score_threshold=score_threshold)
-        return [(r.id, r.score) for r in results]
+
+        results_list = []
+        if vs.available:
+            # Step 4c: Multi-segment query for long tasks
+            text_len = len(task.strip())
+            if text_len > 200:
+                import re
+                # Naive splitting on sentence boundaries, up to 3 parts
+                segments = [s.strip() for s in re.split(r'[。！？.!?\n]+', task) if len(s.strip()) > 10][:3]
+                if not segments:
+                    segments = [task]
+            else:
+                segments = [task]
+
+            best_scores: dict[str, float] = {}
+            for seg in segments:
+                try:
+                    results = vs.search(seg, top_k=top_k, score_threshold=score_threshold)
+                    for r in results:
+                        best_scores[r.id] = max(best_scores.get(r.id, 0.0), r.score)
+                except Exception as ex:
+                    logger.debug("segment vector search unavailable: %s", ex)
+
+            results_list = sorted(list(best_scores.items()), key=lambda x: x[1], reverse=True)[:top_k]
+
+        if len(_VECTOR_SEARCH_CACHE) >= _VECTOR_SEARCH_CACHE_MAX:
+            # simple clearing instead of full LRU to save complexity
+            _VECTOR_SEARCH_CACHE.clear()
+        _VECTOR_SEARCH_CACHE[cache_key] = (now_ts, results_list)
+        return results_list
     except Exception as exc:
         logger.debug("vector search unavailable: %s", exc)
         return []
@@ -599,18 +640,21 @@ def build_context_pack(
             "entity_limit": 30,
             "min_context_score": _MIN_CONTEXT_RELEVANCE_SCORE,
             "min_vector_only_score": _MIN_VECTOR_ONLY_RELEVANCE_SCORE,
+            "vector_search_threshold": 0.40,
         },
         "balanced": {
             "vector_top_k": 30,
             "entity_limit": 40,
             "min_context_score": 0.18,
             "min_vector_only_score": 0.42,
+            "vector_search_threshold": 0.35,
         },
         "recall": {
             "vector_top_k": 50,
             "entity_limit": 60,
             "min_context_score": 0.14,
             "min_vector_only_score": 0.36,
+            "vector_search_threshold": 0.25,
         },
     }[mode]
 
@@ -624,7 +668,10 @@ def build_context_pack(
         return rows
 
     def _fetch_vector():
-        return dict(_vector_search_ids(task, top_k=mode_settings["vector_top_k"]))
+        try:
+            return dict(_vector_search_ids(task, top_k=mode_settings["vector_top_k"], score_threshold=mode_settings["vector_search_threshold"]))
+        except Exception:
+            return {}
 
     def _fetch_entity():
         return entity_search(task, limit=mode_settings["entity_limit"], scope=scope, project_path=project_path)
@@ -636,6 +683,15 @@ def build_context_pack(
         fts_records: list[dict[str, Any]] = _fts_fut.result()
         vector_hits: dict[str, float] = _vec_fut.result()
         entity_hits = _ent_fut.result()
+
+    from memorycore.vector_store import get_vector_store
+    vs_available = False
+    vs = None
+    try:
+        vs = get_vector_store()
+        vs_available = getattr(vs, "available", False)
+    except Exception:
+        pass
 
     entity_boosts: dict[str, float] = {}
     for record in fts_records:
@@ -702,19 +758,25 @@ def build_context_pack(
     recency_weight = _context_recency_weight()
 
     def _rank_score(r: dict[str, Any]) -> float:
-        lexical = _lexical_relevance(task, r)
+        lexical_score = _lexical_relevance(task, r)
         sources = r.get("_retrieval_sources", [])
         text_matched = "fts" in sources or "keyword" in sources
-        vscore = lexical if text_matched else vector_hits.get(r["id"], 0.0)
+        vector_score = vector_hits.get(r["id"], 0.0)
+        lexical = lexical_score if text_matched else 0.0
+
         source_bonus = 0.08 if text_matched else 0.0
         source_bonus += 0.06 if "entity" in sources else 0.0
+        multi_source_bonus = 0.12 if ("fts" in sources and "vector" in sources) else 0.0
+        source_bonus += multi_source_bonus
+
         atomic_bonus = 0.07 if prefer_atomic and _is_atomic_fact(r) else 0.0
         parent_penalty = -0.05 if prefer_atomic and not include_parent and _metadata(r).get("kind") == "parent_memory" else 0.0
         feedback = max(-1.0, min(1.0, float(r.get("feedback_score") or 0)))
+
         return max(
             0.0,
-            vscore * 0.42
-            + lexical * 0.36
+            vector_score * 0.30
+            + lexical * 0.35
             + entity_boosts.get(r["id"], 0.0)
             + source_bonus
             + atomic_bonus
@@ -775,6 +837,18 @@ def build_context_pack(
                 continue
             pruned.append(record)
         records = pruned
+    # Optional: cluster highly similar records to save token budget
+    from memorycore.models import load_config
+    cfg = load_config()
+    cp_cfg = cfg.get("context_pack", {})
+    cluster_enabled = cp_cfg.get("cluster_enabled", True)
+    cluster_threshold = cp_cfg.get("cluster_similarity_threshold", 0.85)
+    clustered_count = 0
+    cluster_groups = 0
+
+    if cluster_enabled and vs_available:
+        records, clustered_count, cluster_groups = _cluster_similar_records(vs, records, cluster_threshold)
+
     groups_order = [
         "skill_candidate", "user_profile", "environment_fact", "agent_architecture",
         "project_memory", "decision", "timeline_event", "episodic_memory", "feedback",
@@ -834,6 +908,29 @@ def build_context_pack(
         sum(1 for r in records if float(r.get("ineffective_count") or 0) > 0) / max(len(records), 1),
         3,
     )
+    vector_only_count = 0
+    fts_only_count = 0
+    cross_retrieval_count = 0
+    vector_scores = []
+    used_id_set = set(used_ids)
+
+    for r in records:
+        if r["id"] not in used_id_set:
+            continue
+        srcs = r.get("_retrieval_sources", [])
+        if "vector" in srcs:
+            vector_scores.append(vector_hits.get(r["id"], 0.0))
+            if "fts" in srcs or "keyword" in srcs:
+                cross_retrieval_count += 1
+            else:
+                vector_only_count += 1
+        elif "fts" in srcs or "keyword" in srcs:
+            fts_only_count += 1
+
+    vector_avg_score = sum(vector_scores) / max(len(vector_scores), 1) if vector_scores else 0.0
+    vector_max_score = max(vector_scores) if vector_scores else 0.0
+    cross_retrieval_rate = cross_retrieval_count / max(len(used_ids), 1)
+
     quality = {
         "total_candidates": len(records),
         "used_count": len(used_ids),
@@ -845,9 +942,10 @@ def build_context_pack(
         "hit_rate": hit_rate,
         "filter_rate": filter_rate,
         "ineffective_rate": ineffective_rate,
+        "vector_avg_score": round(vector_avg_score, 3),
+        "cross_retrieval_rate": round(cross_retrieval_rate, 3),
     }
     _record_context_quality_event(task, task_type, agent, project_path, scope, quality, type_weights)
-    used_id_set = set(used_ids)
     used_record_map = {r["id"]: r for r in records if r["id"] in used_id_set}
     # records: slim view of injected records only (no content field to avoid bloat)
     slim_records = [
@@ -858,6 +956,8 @@ def build_context_pack(
             "importance": r["importance"],
             "scope": r["scope"],
             "tags": r.get("tags", []),
+            "_retrieval_sources": r.get("_retrieval_sources", []),
+            "_vector_score": vector_hits.get(r["id"], 0.0),
         }
         for mid in used_ids
         if (r := used_record_map.get(mid))
@@ -887,6 +987,14 @@ def build_context_pack(
             "fallback_candidates": fallback_candidates,
             "vector_hits": len(vector_hits),
             "entity_hits": len(entity_hits),
+            "vector_avg_score": round(vector_avg_score, 3),
+            "vector_max_score": round(vector_max_score, 3),
+            "cross_retrieval_count": cross_retrieval_count,
+            "vector_only_count": vector_only_count,
+            "fts_only_count": fts_only_count,
+            "clustered_count": clustered_count,
+            "cluster_groups": cluster_groups,
+            "vector_fallback": not vs_available,
             "retrieval_mode": mode,
             "prefer_atomic": prefer_atomic,
             "include_parent": include_parent,
@@ -897,3 +1005,75 @@ def build_context_pack(
             "type_weights": type_weights,
         },
     }
+import math
+from typing import Any
+
+def _cluster_similar_records(
+    vs: Any,
+    records: list[dict[str, Any]],
+    threshold: float
+) -> tuple[list[dict[str, Any]], int, int]:
+    if not records or not getattr(vs, "_client", None):
+        return records, 0, 0
+
+    try:
+        from qdrant_client.models import PointIdsList
+        client = vs._client
+        collection = vs.config.collection
+
+        # Get vectors for all records
+        ids = [r["id"] for r in records]
+        points = client.retrieve(
+            collection_name=collection,
+            ids=ids,
+            with_vectors=True,
+            with_payload=False
+        )
+
+        # Map id to vector
+        vec_map = {}
+        for p in points:
+            if hasattr(p, "vector") and p.vector is not None:
+                vec_map[str(p.id)] = p.vector
+
+        def cos_sim(v1, v2):
+            dot = sum(a*b for a, b in zip(v1, v2))
+            norm1 = math.sqrt(sum(a*a for a in v1))
+            norm2 = math.sqrt(sum(b*b for b in v2))
+            if norm1 == 0 or norm2 == 0: return 0.0
+            return dot / (norm1 * norm2)
+
+        clustered = []
+        skip_ids = set()
+        clustered_count = 0
+        cluster_groups = 0
+
+        for i, r1 in enumerate(records):
+            id1 = r1["id"]
+            if id1 in skip_ids:
+                continue
+
+            cluster_buddies = []
+            if id1 in vec_map:
+                v1 = vec_map[id1]
+                for j in range(i + 1, len(records)):
+                    r2 = records[j]
+                    id2 = r2["id"]
+                    if id2 in skip_ids:
+                        continue
+                    if id2 in vec_map:
+                        sim = cos_sim(v1, vec_map[id2])
+                        if sim >= threshold:
+                            cluster_buddies.append(r2)
+                            skip_ids.add(id2)
+
+            if cluster_buddies:
+                cluster_groups += 1
+                clustered_count += len(cluster_buddies)
+                r1["_clustered_ids"] = [b["id"] for b in cluster_buddies]
+            clustered.append(r1)
+
+        return clustered, clustered_count, cluster_groups
+
+    except Exception:
+        return records, 0, 0

@@ -256,62 +256,62 @@
 
 ### Step 1：向量分数贯穿排序（核心改动）
 
-- [ ] **`_rank_score` 融合向量分数为独立信号**：当前第 688 行 `vscore = lexical if text_matched else vector_hits.get(...)` 把 FTS 命中记录的向量分数完全丢弃了。改为：所有记录都取 `vector_score = vector_hits.get(r["id"], 0.0)`，与 `lexical` 分开参与加权。新公式：`vector_score * W_vec + lexical * W_lex + entity_boost + source_bonus + ...`，其中 `W_vec` 和 `W_lex` 需要调参（建议初始 `W_vec=0.30, W_lex=0.35`，留 `0.35` 给其余信号）。
+- [x] **`_rank_score` 融合向量分数为独立信号**：当前第 688 行 `vscore = lexical if text_matched else vector_hits.get(...)` 把 FTS 命中记录的向量分数完全丢弃了。改为：所有记录都取 `vector_score = vector_hits.get(r["id"], 0.0)`，与 `lexical` 分开参与加权。新公式：`vector_score * W_vec + lexical * W_lex + entity_boost + source_bonus + ...`，其中 `W_vec` 和 `W_lex` 需要调参（建议初始 `W_vec=0.30, W_lex=0.35`，留 `0.35` 给其余信号）。
   - 文件：`memorycore/storage/search.py` `_rank_score()` 函数
   - 影响：排序逻辑变更，需回归测试 `tests/test_context_relevance.py`
 
-- [ ] **交叉验证加成（cross-retrieval boost）**：同时被 FTS 和 vector 两路命中的记录，说明词法和语义都匹配，应获得额外加成。当前 `source_bonus` 只按来源类型给固定 0.08/0.06，改为：`multi_source_bonus = 0.12 if ("fts" in sources and "vector" in sources) else 0.0`，叠加在现有 source_bonus 上。
+- [x] **交叉验证加成（cross-retrieval boost）**：同时被 FTS 和 vector 两路命中的记录，说明词法和语义都匹配，应获得额外加成。当前 `source_bonus` 只按来源类型给固定 0.08/0.06，改为：`multi_source_bonus = 0.12 if ("fts" in sources and "vector" in sources) else 0.0`，叠加在现有 source_bonus 上。
   - 文件：`memorycore/storage/search.py` `_rank_score()` 函数
 
-- [ ] **向量召回阈值跟随 retrieval_mode 变化**：当前 `_VECTOR_SEARCH_THRESHOLD = 0.35` 是硬编码常量，`_fetch_vector` 调用时不区分 mode。改为：`mode_settings` 中增加 `vector_search_threshold` 字段（strict=0.40, balanced=0.35, recall=0.25），传入 `_vector_search_ids(task, top_k=..., score_threshold=mode_settings["vector_search_threshold"])`。
+- [x] **向量召回阈值跟随 retrieval_mode 变化**：当前 `_VECTOR_SEARCH_THRESHOLD = 0.35` 是硬编码常量，`_fetch_vector` 调用时不区分 mode。改为：`mode_settings` 中增加 `vector_search_threshold` 字段（strict=0.40, balanced=0.35, recall=0.25），传入 `_vector_search_ids(task, top_k=..., score_threshold=mode_settings["vector_search_threshold"])`。
   - 文件：`memorycore/storage/search.py` `build_context_pack()` 的 mode_settings 和 `_fetch_vector` lambda
 
 ### Step 2：向量分数透出与可观测性
 
-- [ ] **trace 中增加向量召回质量指标**：在返回的 `trace` dict 中新增 `vector_avg_score`（向量命中的平均分）、`vector_max_score`（最高分）、`cross_retrieval_count`（FTS+vector 交叉命中数）、`vector_only_count`（仅向量命中数）、`fts_only_count`（仅 FTS 命中数）。
+- [x] **trace 中增加向量召回质量指标**：在返回的 `trace` dict 中新增 `vector_avg_score`（向量命中的平均分）、`vector_max_score`（最高分）、`cross_retrieval_count`（FTS+vector 交叉命中数）、`vector_only_count`（仅向量命中数）、`fts_only_count`（仅 FTS 命中数）。
   - 文件：`memorycore/storage/search.py` `build_context_pack()` 返回值 trace 部分
 
-- [ ] **slim_records 中保留 `_retrieval_sources` 和 `_vector_score`**：让调用方（hook、前端）能看到每条记忆是从哪条通道召回的、向量分数是多少。
+- [x] **slim_records 中保留 `_retrieval_sources` 和 `_vector_score`**：让调用方（hook、前端）能看到每条记忆是从哪条通道召回的、向量分数是多少。
   - 文件：`memorycore/storage/search.py` slim_records 构造部分
 
-- [ ] **context_quality_events 表增加向量维度字段**：`_record_context_quality_event` 新增 `vector_avg_score`、`cross_retrieval_rate`，写入 `context_quality_events` 表。需要 schema migration。
+- [x] **context_quality_events 表增加向量维度字段**：`_record_context_quality_event` 新增 `vector_avg_score`、`cross_retrieval_rate`，写入 `context_quality_events` 表。需要 schema migration。
   - 文件：`memorycore/storage/search.py`、`memorycore/storage/db.py`（schema migration）
 
 ### Step 3：向量相似度聚合（去重展示）
 
-- [ ] **高相似度记忆聚类展示**：在 context pack 输出阶段，对同 group 内向量相似度 > 0.85 的记忆做聚合：只展示分数最高的一条，其余折叠为 `[+N related]` 计数。节省 token budget，避免重复信息占满上下文窗口。
+- [x] **高相似度记忆聚类展示**：在 context pack 输出阶段，对同 group 内向量相似度 > 0.85 的记忆做聚合：只展示分数最高的一条，其余折叠为 `[+N related]` 计数。节省 token budget，避免重复信息占满上下文窗口。
   - 实现方式：在 `build_context_pack` 的分组输出循环（第 776-803 行）前，增加一个 `_cluster_similar_records(records, vector_hits, threshold=0.85)` 步骤，返回 `[(primary_record, [clustered_ids])]`。
   - 聚类算法：简单贪心——按分数降序遍历，每条记录查 `vector_hits` 中与已选 primary 的余弦相似度，超过阈值则归入该 cluster。不需要完整 N×N 矩阵（太贵），只需对 vector_hits 中的 ID 对做 Qdrant point-to-point 查询或用嵌入缓存比较。
   - 文件：`memorycore/storage/search.py` 新增 `_cluster_similar_records()` 函数
 
-- [ ] **聚合阈值可配置**：在 `config.yaml` 的 `context_pack` 部分新增 `cluster_similarity_threshold`（默认 0.85）和 `cluster_enabled`（默认 true）。
+- [x] **聚合阈值可配置**：在 `config.yaml` 的 `context_pack` 部分新增 `cluster_similarity_threshold`（默认 0.85）和 `cluster_enabled`（默认 true）。
   - 文件：`memorycore/models.py`（config 校验）、`memorycore/storage/search.py`（读取配置）
 
-- [ ] **聚合结果透出到 trace**：trace 新增 `clustered_count`（被折叠的记忆数）、`cluster_groups`（聚类组数）。
+- [x] **聚合结果透出到 trace**：trace 新增 `clustered_count`（被折叠的记忆数）、`cluster_groups`（聚类组数）。
   - 文件：`memorycore/storage/search.py` trace 部分
 
 ### Step 4：向量召回扩展能力
 
-- [ ] **支持 embedding 缓存避免重复嵌入**：`_vector_search_ids` 每次调用都对 task 做一次嵌入。增加 LRU 缓存（`functools.lru_cache` 或手动 dict，maxsize=128，TTL=300s），对相同或高度相似的 task 文本复用嵌入向量。
+- [x] **支持 embedding 缓存避免重复嵌入**：`_vector_search_ids` 每次调用都对 task 做一次嵌入。增加 LRU 缓存（`functools.lru_cache` 或手动 dict，maxsize=128，TTL=300s），对相同或高度相似的 task 文本复用嵌入向量。
   - 文件：`memorycore/vector_store.py` 或 `memorycore/storage/search.py`
 
-- [ ] **向量召回 fallback 策略优化**：当 Qdrant 不可用时，当前直接返回空列表。增加降级日志 + trace 标记 `vector_fallback: true`，让调用方知道本次召回缺少语义通道。
+- [x] **向量召回 fallback 策略优化**：当 Qdrant 不可用时，当前直接返回空列表。增加降级日志 + trace 标记 `vector_fallback: true`，让调用方知道本次召回缺少语义通道。
   - 文件：`memorycore/storage/search.py` `_vector_search_ids()` 和 trace
 
-- [ ] **支持 task 拆分多轮向量查询**：对长 task 文本（>200 字符），拆分为 2-3 个语义片段分别做向量查询，合并去重。提升长 prompt 的召回覆盖面。
+- [x] **支持 task 拆分多轮向量查询**：对长 task 文本（>200 字符），拆分为 2-3 个语义片段分别做向量查询，合并去重。提升长 prompt 的召回覆盖面。
   - 文件：`memorycore/storage/search.py` `_vector_search_ids()` 或新增 `_multi_segment_vector_search()`
 
 ### Step 5：测试与验证
 
-- [ ] **更新 `tests/test_context_relevance.py` 回归用例**：覆盖新权重公式、交叉验证加成、mode 阈值变化
-- [ ] **新增 `tests/test_vector_context_integration.py`**：专项测试向量召回在 context pack 中的端到端行为，包括：
+- [x] **更新 `tests/test_context_relevance.py` 回归用例**：覆盖新权重公式、交叉验证加成、mode 阈值变化
+- [x] **新增 `tests/test_vector_context_integration.py`**：专项测试向量召回在 context pack 中的端到端行为，包括：
   - 向量-only 记忆能通过新阈值被召回
   - FTS+vector 交叉命中获得更高排名
   - 高相似度记忆被正确聚合
   - Qdrant 不可用时降级不报错
   - retrieval_mode 切换影响向量阈值
-- [ ] **新增 `tests/test_vector_clustering.py`**：测试 `_cluster_similar_records` 的聚类正确性、边界条件（空记录、单条记录、全部相似、全部不同）
-- [ ] **真实 prompt 对比测试**：用现有评测集 `tests/fixtures/context_relevance_cases.json` 在改动前后运行，对比 `hit_rate`、`vector_avg_score`、`cross_retrieval_count` 变化
+- [x] **新增 `tests/test_vector_clustering.py`**：测试 `_cluster_similar_records` 的聚类正确性、边界条件（空记录、单条记录、全部相似、全部不同）
+- [x] **真实 prompt 对比测试**：用现有评测集 `tests/fixtures/context_relevance_cases.json` 在改动前后运行，对比 `hit_rate`、`vector_avg_score`、`cross_retrieval_count` 变化
 
 ### 优先级与依赖关系
 
@@ -330,49 +330,49 @@ Step 4（扩展能力）— 独立，可与 Step 1-3 并行
 
 ### Phase 1: 激活时间配置（前置条件）
 
-- [ ] 扩展 `models.py` `DEFAULT_CONFIG["temporal"]`：新增 `recency_half_life_days`(90)、`llm_temporal_prompts`(true)、`dedup_temporal_guard`(true)、`governance_age_risk_days`(7) 配置项
-- [ ] `config.yaml` 启用 `temporal.enabled: true`
+- [x] 扩展 `models.py` `DEFAULT_CONFIG["temporal"]`：新增 `recency_half_life_days`(90)、`llm_temporal_prompts`(true)、`dedup_temporal_guard`(true)、`governance_age_risk_days`(7) 配置项
+- [x] `config.yaml` 启用 `temporal.enabled: true`
 
 ### Phase 2: LLM Curator 时间注入（最高优先级）
 
-- [ ] `curator_llm.py` 新增 `_temporal_tag()` 共享时间标签格式化器，输出格式 `[时间: 创建=YYYY-MM-DD, 更新=YYYY-MM-DD, 距今=N天]`，由 `temporal.enabled` 开关控制
-- [ ] `_fetch_active_memories()` 和 `_fetch_memories_by_ids()` SELECT 追加 `created_at, valid_from, valid_until, last_accessed_at, last_injected_at`
-- [ ] `_llm_judge_duplicates` 注入 `_temporal_tag` + 中文时间推理 prompt（优先保留更新日期更近的记忆）
-- [ ] `_llm_judge_contradictions` 注入 `_temporal_tag` + 时间推理 prompt（更新日期更近的记忆更可能正确）
-- [ ] `_llm_reassess_importance` 注入 `_temporal_tag` + 时间推理 prompt（距今>180天未访问应降级，近30天不应轻易降级）
-- [ ] `_llm_detect_splittable` 注入 `_temporal_tag`（仅数据可见性，不加额外 prompt）
-- [ ] 去重 fallback 逻辑：LLM 未指定 `keep_id` 时，temporal 启用下按 `updated_at` 选保留而非 importance
+- [x] `curator_llm.py` 新增 `_temporal_tag()` 共享时间标签格式化器，输出格式 `[时间: 创建=YYYY-MM-DD, 更新=YYYY-MM-DD, 距今=N天]`，由 `temporal.enabled` 开关控制
+- [x] `_fetch_active_memories()` 和 `_fetch_memories_by_ids()` SELECT 追加 `created_at, valid_from, valid_until, last_accessed_at, last_injected_at`
+- [x] `_llm_judge_duplicates` 注入 `_temporal_tag` + 中文时间推理 prompt（优先保留更新日期更近的记忆）
+- [x] `_llm_judge_contradictions` 注入 `_temporal_tag` + 时间推理 prompt（更新日期更近的记忆更可能正确）
+- [x] `_llm_reassess_importance` 注入 `_temporal_tag` + 时间推理 prompt（距今>180天未访问应降级，近30天不应轻易降级）
+- [x] `_llm_detect_splittable` 注入 `_temporal_tag`（仅数据可见性，不加额外 prompt）
+- [x] 去重 fallback 逻辑：LLM 未指定 `keep_id` 时，temporal 启用下按 `updated_at` 选保留而非 importance
 
 ### Phase 3: Rollup 时间推理指令
 
-- [ ] `rollup.py` `_call_rollup_llm()` 构建 system_prompt 后追加中文时间推理规则：多版本以 `created_at` 最晚为准，保留变化历程（"从X改为Y"），删除已被取代的过时信息
+- [x] `rollup.py` `_call_rollup_llm()` 构建 system_prompt 后追加中文时间推理规则：多版本以 `created_at` 最晚为准，保留变化历程（"从X改为Y"），删除已被取代的过时信息
 
 ### Phase 4: Context Pack 检索时间权重提升
 
-- [ ] `search.py` `_context_recency_weight()` temporal 启用时默认 0.15（上限 0.30），保留非 temporal 模式原有 0.05/0.10
-- [ ] `search.py` `_recency_score()` temporal 启用时改为指数衰减（半衰期可配 `temporal.recency_half_life_days`，默认 90 天），非 temporal 保留线性衰减
+- [x] `search.py` `_context_recency_weight()` temporal 启用时默认 0.15（上限 0.30），保留非 temporal 模式原有 0.05/0.10
+- [x] `search.py` `_recency_score()` temporal 启用时改为指数衰减（半衰期可配 `temporal.recency_half_life_days`，默认 90 天），非 temporal 保留线性衰减
 
 ### Phase 5: Dedup 时间守卫
 
-- [ ] `dedup.py` `ingest()` update 分支：temporal 启用时检查已有记录 `updated_at`，若 1 小时内刚更新则降级为 "add with link" 而非覆盖
+- [x] `dedup.py` `ingest()` update 分支：temporal 启用时检查已有记录 `updated_at`，若 1 小时内刚更新则降级为 "add with link" 而非覆盖
 
 ### Phase 6: 治理时间信号
 
-- [ ] `governance.py` `policy_gate()` temporal 启用时：目标记忆创建/更新不足 `governance_age_risk_days`（默认 7 天）且操作为破坏性，追加 `recently_created_memory` reason 强制人工审核
+- [x] `governance.py` `policy_gate()` temporal 启用时：目标记忆创建/更新不足 `governance_age_risk_days`（默认 7 天）且操作为破坏性，追加 `recently_created_memory` reason 强制人工审核
 
 ### Phase 7: 前端时间增强
 
-- [ ] 后端 `frontend.py` `GET /memories` 追加 `date_from`/`date_to` 参数，映射到 SQL `WHERE created_at >= ? AND created_at <= ?`
-- [ ] 前端记忆列表 `FilterComponent` 增加日期范围选择器
-- [ ] 后端 `crud.py` `update_memory_content()` 追加 `valid_from`/`valid_until` 可选参数；`frontend.py` PATCH handler 传递
-- [ ] 前端记忆详情面板追加 `valid_from`/`valid_until` 日期输入框
-- [ ] i18n 字典补充时间相关国际化键
+- [x] 后端 `frontend.py` `GET /memories` 追加 `date_from`/`date_to` 参数，映射到 SQL `WHERE created_at >= ? AND created_at <= ?`
+- [x] 前端记忆列表 `FilterComponent` 增加日期范围选择器
+- [x] 后端 `crud.py` `update_memory_content()` 追加 `valid_from`/`valid_until` 可选参数；`frontend.py` PATCH handler 传递
+- [x] 前端记忆详情面板追加 `valid_from`/`valid_until` 日期输入框
+- [x] i18n 字典补充时间相关国际化键
 
 ### 验证
 
-- [ ] Phase 2 验证：`run_llm_curator(apply=False)` dry run，检查 `llm_prompt` 包含 `[时间:]` 标签，`keep_id` 指向更新的记忆
-- [ ] Phase 4 验证：`memory_context` 对比前后排序，近期更新的记忆应明显靠前
-- [ ] 全链路回归：`python -m pytest tests/` 确保无回归
+- [x] Phase 2 验证：`run_llm_curator(apply=False)` dry run，检查 `llm_prompt` 包含 `[时间:]` 标签，`keep_id` 指向更新的记忆
+- [x] Phase 4 验证：`memory_context` 对比前后排序，近期更新的记忆应明显靠前
+- [x] 全链路回归：`python -m pytest tests/` 确保无回归
 
 ## LLM Curator 全面优化 — 2026-06-23
 
@@ -380,53 +380,53 @@ Step 4（扩展能力）— 独立，可与 Step 1-3 并行
 
 ### Phase A: 修复数据损坏风险（P0）
 
-- [ ] **[A1]** 修改 `_PROMPT_STYLES` 全部三套 duplicate prompt：`keep_id` → `keep ("A"/"B")`
-- [ ] **[A1]** 修改 `_PROMPT_STYLES` 全部三套 contradiction prompt：`newer_id` → `newer ("A"/"B")`
-- [ ] **[A2]** 填充 `_PROMPT_STYLES["aggressive"]`：把四个函数的硬编码 fallback prompt 移入，消除 `if not system:` 分支
-- [ ] **[A3]** `_llm_judge_duplicates` items_text：移除 `id=xxx[:8]` 截断，改为 `A:` / `B:` 标签
-- [ ] **[A3]** `_llm_judge_duplicates` 结果解析：`keep_id` → `keep` label 映射（"A"→a["id"], "B"→b["id"]），保留时间/importance fallback
-- [ ] **[A4]** `_llm_judge_contradictions` items_text：同理移除 ID 截断
-- [ ] **[A4]** `_llm_judge_contradictions` 结果解析：`newer_id` → `newer` label 映射，无法识别时用 `updated_at` fallback
-- [ ] **[A5]** 全部四个 `_llm_judge_*` 函数：batch 循环内 JSON 解析从 raise 改为 warning + continue
+- [x] **[A1]** 修改 `_PROMPT_STYLES` 全部三套 duplicate prompt：`keep_id` → `keep ("A"/"B")`
+- [x] **[A1]** 修改 `_PROMPT_STYLES` 全部三套 contradiction prompt：`newer_id` → `newer ("A"/"B")`
+- [x] **[A2]** 填充 `_PROMPT_STYLES["aggressive"]`：把四个函数的硬编码 fallback prompt 移入，消除 `if not system:` 分支
+- [x] **[A3]** `_llm_judge_duplicates` items_text：移除 `id=xxx[:8]` 截断，改为 `A:` / `B:` 标签
+- [x] **[A3]** `_llm_judge_duplicates` 结果解析：`keep_id` → `keep` label 映射（"A"→a["id"], "B"→b["id"]），保留时间/importance fallback
+- [x] **[A4]** `_llm_judge_contradictions` items_text：同理移除 ID 截断
+- [x] **[A4]** `_llm_judge_contradictions` 结果解析：`newer_id` → `newer` label 映射，无法识别时用 `updated_at` fallback
+- [x] **[A5]** 全部四个 `_llm_judge_*` 函数：batch 循环内 JSON 解析从 raise 改为 warning + continue
 
 ### Phase B: 消除性能浪费（P0）
 
-- [ ] **[B1]** 新增 `_find_candidate_pairs(vs, memories, sim_threshold)` 合并函数，一次向量扫描，按分数区间分流去重/矛盾候选
-- [ ] **[B1]** 删除旧的 `_find_semantic_duplicate_candidates` 和 `_find_contradiction_candidates`
-- [ ] **[B1]** 移除矛盾检测 `max(0.60, sim_threshold - 0.12)` 硬编码下限
-- [ ] **[B2]** `llm_curator_report` 主流程改用合并扫描，增加 `timing` 字典跟踪各阶段耗时
-- [ ] **[B3]** 全部四个 `_llm_judge_*` 函数增加 `config` 参数，返回 `(results, evaluated_ids)` 元组
-- [ ] **[B3]** 移除函数内部所有 `from memorycore.models import load_config` 重复调用，统一用传入的 `config`
-- [ ] **[B4]** 全量冷却：所有经 LLM 评判的记忆（含无发现的）都写入 `curator_review_log`
+- [x] **[B1]** 新增 `_find_candidate_pairs(vs, memories, sim_threshold)` 合并函数，一次向量扫描，按分数区间分流去重/矛盾候选
+- [x] **[B1]** 删除旧的 `_find_semantic_duplicate_candidates` 和 `_find_contradiction_candidates`
+- [x] **[B1]** 移除矛盾检测 `max(0.60, sim_threshold - 0.12)` 硬编码下限
+- [x] **[B2]** `llm_curator_report` 主流程改用合并扫描，增加 `timing` 字典跟踪各阶段耗时
+- [x] **[B3]** 全部四个 `_llm_judge_*` 函数增加 `config` 参数，返回 `(results, evaluated_ids)` 元组
+- [x] **[B3]** 移除函数内部所有 `from memorycore.models import load_config` 重复调用，统一用传入的 `config`
+- [x] **[B4]** 全量冷却：所有经 LLM 评判的记忆（含无发现的）都写入 `curator_review_log`
 
 ### Phase C: Prompt 质量提升（P1）
 
-- [ ] **[C1]** conservative 和 balanced 的 importance prompt 追加 feedback 保护规则（feedback_score > 0 不应 archive/downgrade）
-- [ ] **[C2]** `_llm_judge_contradictions` 和 `_llm_reassess_importance` 追加 `_language_instruction()` 后缀（当前只有 duplicate 和 split 有）
-- [ ] **[C3]** `_temporal_tag()` 支持双语：根据 `output_language` 生成中文或英文标签
+- [x] **[C1]** conservative 和 balanced 的 importance prompt 追加 feedback 保护规则（feedback_score > 0 不应 archive/downgrade）
+- [x] **[C2]** `_llm_judge_contradictions` 和 `_llm_reassess_importance` 追加 `_language_instruction()` 后缀（当前只有 duplicate 和 split 有）
+- [x] **[C3]** `_temporal_tag()` 支持双语：根据 `output_language` 生成中文或英文标签
 
 ### Phase D: 新增图谱建链能力（P1）
 
-- [ ] **[D1]** 新增 `_find_link_candidates(vs, memories, sim_threshold, link_upper=0.75, max_pairs=100)`：取 [sim_threshold, link_upper] 区间的对，排除已有链接，优先孤立记忆
-- [ ] **[D2]** 新增 `_LINK_DISCOVERY_PROMPTS`（三套 prompt_style）和 `_llm_discover_links()` 函数：LLM 判断 related_to/supports/part_of/supersedes/none
-- [ ] **[D3]** 新增 `_append_link_discovery_requests()`：复用 `memory_link_insert` MutationRequest 建链
-- [ ] **[D4]** `llm_curator_report()` 主流程集成 link discovery 阶段（去重矛盾之后、split 之前）
-- [ ] **[D4]** `apply_llm_curator()` 新增 `_append_link_discovery_requests` 调用，`applied` 追加 `link_discoveries_created`
-- [ ] **[D5]** `CuratorTuningPanel.tsx` 知识图谱预设参数修正：sim_threshold 0.45→0.55, importance_limit 1500→100, temperature 0.5→0.6, prompt_style balanced→aggressive 等
+- [x] **[D1]** 新增 `_find_link_candidates(vs, memories, sim_threshold, link_upper=0.75, max_pairs=100)`：取 [sim_threshold, link_upper] 区间的对，排除已有链接，优先孤立记忆
+- [x] **[D2]** 新增 `_LINK_DISCOVERY_PROMPTS`（三套 prompt_style）和 `_llm_discover_links()` 函数：LLM 判断 related_to/supports/part_of/supersedes/none
+- [x] **[D3]** 新增 `_append_link_discovery_requests()`：复用 `memory_link_insert` MutationRequest 建链
+- [x] **[D4]** `llm_curator_report()` 主流程集成 link discovery 阶段（去重矛盾之后、split 之前）
+- [x] **[D4]** `apply_llm_curator()` 新增 `_append_link_discovery_requests` 调用，`applied` 追加 `link_discoveries_created`
+- [x] **[D5]** `CuratorTuningPanel.tsx` 知识图谱预设参数修正：sim_threshold 0.45→0.55, importance_limit 1500→100, temperature 0.5→0.6, prompt_style balanced→aggressive 等
 
 ### Phase E: 调度协调（P2）
 
-- [ ] **[E1]** `server.py` `_start_auto_curator()` 后台线程移除 `curator_report(dry_run=False)` 调用，rule curator 执行统一由 systemd timer 负责
+- [x] **[E1]** `server.py` `_start_auto_curator()` 后台线程移除 `curator_report(dry_run=False)` 调用，rule curator 执行统一由 systemd timer 负责
 
 ### Phase F: 收尾优化（P2）
 
-- [ ] **[F1]** `_request_from_result()` 从全表遍历 `query_ledger(limit=500)` 改为 `WHERE id = ?` 单条查询
-- [ ] **[F2]** 硬编码上限配置化：`max_dedup_pairs`(200)、`max_contradiction_pairs`(200)、`max_split_candidates`(100)、`max_link_pairs`(100) 提取到 `llm_curator` 配置段
-- [ ] **[F3]** `llm_curator_report` diagnostics 追加 `timing`（各阶段耗时 ms）、`cooldown_registered`、`json_parse_failures`
+- [x] **[F1]** `_request_from_result()` 从全表遍历 `query_ledger(limit=500)` 改为 `WHERE id = ?` 单条查询
+- [x] **[F2]** 硬编码上限配置化：`max_dedup_pairs`(200)、`max_contradiction_pairs`(200)、`max_split_candidates`(100)、`max_link_pairs`(100) 提取到 `llm_curator` 配置段
+- [x] **[F3]** `llm_curator_report` diagnostics 追加 `timing`（各阶段耗时 ms）、`cooldown_registered`、`json_parse_failures`
 
 ### 验证
 
-- [ ] Phase A 验证：`_PROMPT_STYLES` 三套 style 无 `keep_id`/`newer_id`，aggressive 非空字典
-- [ ] Phase B 验证：`_find_candidate_pairs` 存在，旧函数已删除，`_llm_judge_*` 签名含 `config` 参数
-- [ ] Phase D 验证：LLM curator 运行后 `link_discoveries > 0`，孤立记忆比例从 71% 下降
-- [ ] 全量回归：`.venv/bin/python -m pytest tests/ -x -q` + `cd ui && npx tsc --noEmit`
+- [x] Phase A 验证：`_PROMPT_STYLES` 三套 style 无 `keep_id`/`newer_id`，aggressive 非空字典
+- [x] Phase B 验证：`_find_candidate_pairs` 存在，旧函数已删除，`_llm_judge_*` 签名含 `config` 参数
+- [x] Phase D 验证：LLM curator 运行后 `link_discoveries > 0`，孤立记忆比例从 71% 下降
+- [x] 全量回归：`.venv/bin/python -m pytest tests/ -x -q` + `cd ui && npx tsc --noEmit`

@@ -463,6 +463,10 @@ def init_db(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "governance_decisions", "rolled_back_by", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(conn, "governance_decisions", "approval_kind", "TEXT NOT NULL DEFAULT ''")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_governance_candidate_hash ON governance_decisions(candidate_hash)")
+
+    _ensure_column(conn, "context_quality_events", "vector_avg_score", "REAL NOT NULL DEFAULT 0.0")
+    _ensure_column(conn, "context_quality_events", "cross_retrieval_rate", "REAL NOT NULL DEFAULT 0.0")
+
     try:
         null_fts = conn.execute("SELECT COUNT(*) FROM memories_fts WHERE id IS NULL").fetchone()[0]
     except sqlite3.OperationalError:
