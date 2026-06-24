@@ -1,6 +1,7 @@
 """Auto-supersession helpers for temporal governance."""
 from __future__ import annotations
 
+import logging
 import re
 from difflib import SequenceMatcher
 from typing import Any
@@ -9,6 +10,8 @@ from memorycore.models import load_config, now, row_to_dict
 from memorycore.storage.db import read_conn
 from memorycore.storage.governance import HIGH_IMPORTANCE_THRESHOLD, PRECIOUS_TYPES, create_governance_decision
 
+logger = logging.getLogger(__name__)
+
 _WORD_RE = re.compile(r"[\w一-鿿]+", re.UNICODE)
 _MAX_CANDIDATES = 50
 
@@ -16,9 +19,9 @@ _MAX_CANDIDATES = 50
 def _temporal_config() -> dict[str, Any]:
     cfg = load_config().get("temporal", {}) or {}
     return {
-        "auto_supersede_enabled": bool(cfg.get("auto_supersede_enabled", False)),
-        "auto_supersede_threshold": _clamp_threshold(cfg.get("auto_supersede_threshold", 0.96), 0.96),
-        "review_similarity_threshold": _clamp_threshold(cfg.get("review_similarity_threshold", 0.82), 0.82),
+        "auto_supersede_enabled": bool(cfg.get("auto_supersede_enabled", True)),
+        "auto_supersede_threshold": _clamp_threshold(cfg.get("auto_supersede_threshold", 0.88), 0.88),
+        "review_similarity_threshold": _clamp_threshold(cfg.get("review_similarity_threshold", 0.72), 0.72),
     }
 
 
@@ -33,9 +36,7 @@ def _tokens(text: str) -> set[str]:
     return set(_WORD_RE.findall((text or "").lower()))
 
 
-def _similarity(left: dict[str, Any], right: dict[str, Any]) -> float:
-    left_text = f"{left.get('title', '')} {left.get('content', '')}".strip().lower()
-    right_text = f"{right.get('title', '')} {right.get('content', '')}".strip().lower()
+def _lexical_similarity(left_text: str, right_text: str) -> float:
     sequence_score = SequenceMatcher(None, left_text, right_text).ratio()
     left_tokens = _tokens(left_text)
     right_tokens = _tokens(right_text)
@@ -43,6 +44,35 @@ def _similarity(left: dict[str, Any], right: dict[str, Any]) -> float:
         return sequence_score
     lexical_score = len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
     return round((sequence_score * 0.65) + (lexical_score * 0.35), 4)
+
+
+def _vector_similarity(new_record: dict[str, Any], old_id: str) -> float | None:
+    """Try Qdrant cosine similarity between new_record text and old_id's stored vector."""
+    try:
+        from memorycore.vector_store import VectorStore
+        cfg = load_config()
+        vs = VectorStore(cfg)
+        query_text = f"{new_record.get('title', '')} {new_record.get('content', '')}".strip()
+        if not query_text:
+            return None
+        results = vs.search(query_text, top_k=30, filters={})
+        for r in results:
+            if str(r.id) == str(old_id):
+                return float(r.score)
+        return None
+    except Exception as exc:
+        logger.debug("vector similarity lookup failed: %s", exc)
+        return None
+
+
+def _similarity(left: dict[str, Any], right: dict[str, Any]) -> float:
+    """Compute similarity: vector cosine preferred, lexical fallback."""
+    vec_score = _vector_similarity(left, right["id"])
+    if vec_score is not None:
+        return round(vec_score, 4)
+    left_text = f"{left.get('title', '')} {left.get('content', '')}".strip().lower()
+    right_text = f"{right.get('title', '')} {right.get('content', '')}".strip().lower()
+    return _lexical_similarity(left_text, right_text)
 
 
 def _is_precious(record: dict[str, Any]) -> bool:

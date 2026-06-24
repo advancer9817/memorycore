@@ -62,7 +62,10 @@ def should_atomize(record: dict[str, Any], atomize: str | bool = "auto", min_cha
     if len(content) >= int(min_chars):
         return True
     lines = [line for line in content.splitlines() if line.strip()]
-    return len(lines) >= 6 and sum(1 for line in lines if _SIGNAL_RE.search(line)) >= 2
+    if len(lines) >= 6:
+        return True
+    sentences = [s for s in re.split(r"[。.!?\n]", content) if len(s.strip()) > 20]
+    return len(sentences) >= 3
 
 
 def _candidate_spans(content: str) -> list[tuple[str, int, int]]:
@@ -96,7 +99,7 @@ def plan_child_facts(
         text = re.sub(r"\s+", " ", text).strip(" -\t")
         if len(text) < 24 or len(text) > 520:
             continue
-        if not _SIGNAL_RE.search(text):
+        if not re.search(r"[一-鿿\w]{4,}", text):
             continue
         h = fact_hash(parent_id, text)
         if h in seen_hashes:

@@ -355,6 +355,15 @@ def memory_ingest(
             "reason": f"ingest pipeline unavailable: {type(exc).__name__}: {exc}",
         }
     result = result_box[0]
+    cfg = load_config()
+    ext_api_key = (
+        cfg.get("extraction", {}).get("api_key", "")
+        or cfg.get("llm", {}).get("api_key", "")
+        or ""
+    )
+    warning = None
+    if result.added == 0 and result.updated == 0 and result.errors == 0 and not ext_api_key:
+        warning = "extraction skipped: no LLM API key configured (set extraction.api_key in config.yaml)"
     return {
         "added": result.added,
         "updated": result.updated,
@@ -363,6 +372,7 @@ def memory_ingest(
         "elapsed_s": result.elapsed_s,
         "extraction_elapsed_s": result.extraction_elapsed_s,
         "degraded": False,
+        **({"warning": warning} if warning else {}),
     }
 
 

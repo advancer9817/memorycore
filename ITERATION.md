@@ -4422,3 +4422,9 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 - [2026-06-24] 拉取 origin/main 最新代码，并将更新部署至本地环境，通过 mcore restart 重启相关 systemd 服务。
 
 - [2026-06-24] Governance 页面取消总条数 500 上限：后端 list_governance_decisions 去掉 min(limit, 500) 硬限，不传 limit 时查询全量；前端 useGovernanceCockpit 去掉 limit: 500 参数；分页数改为用户可调（10/20/50/100 条/页下拉选择器，切换后自动回到第一页）。
+
+- [2026-06-24] 三项核心功能缺陷修复：
+  1. **Temporal Governance 默认开启**（`models.py`）：`temporal.enabled` 改为 `True`，`auto_supersede_threshold` 从 0.96 降至 0.88，`review_similarity_threshold` 从 0.82 降至 0.72，使时间感知记忆系统在默认配置下真正生效。
+  2. **Temporal auto-supersession 改用向量相似度**（`temporal_governance.py`）：新增 `_vector_similarity()` 和 `_lexical_similarity()`，`_similarity()` 优先用 Qdrant cosine 向量相似度，词法（SequenceMatcher+Jaccard）作 fallback，彻底解决词法相似度对语义等价记忆失效的问题。
+  3. **Atomization 覆盖叙述型记忆**（`atomization.py`）：`should_atomize()` 新增"≥3 个独立长句"触发条件（原仅靠 SIGNAL_RE 技术信号）；`plan_child_facts()` 去掉 span 级 `_SIGNAL_RE` 过滤，改为基于内容长度的最小实质性检测，使叙述型长记忆（决策、用户偏好、架构分析）能被正确拆分为 atomic facts。
+  4. **LLM ingest 无 API key 时返回可见 warning**（`server.py`）：`memory_ingest` 工具在无结果且无 API key 时，返回值追加 `warning` 字段，用户无需看日志即可诊断原因。
