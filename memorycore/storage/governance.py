@@ -335,8 +335,8 @@ def _decision_row_to_dict(row: Any) -> dict[str, Any]:
     return data
 
 
-def list_governance_decisions(review_status: str | None = None, decision_type: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
-    cap = max(1, min(int(limit), 500))
+def list_governance_decisions(review_status: str | None = None, decision_type: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+    cap = max(1, int(limit)) if limit is not None else None
     conditions: list[str] = []
     params: list[Any] = []
     if review_status == "actionable":
@@ -348,7 +348,6 @@ def list_governance_decisions(review_status: str | None = None, decision_type: s
         conditions.append("decision_type=?")
         params.append(decision_type.strip())
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-    params.append(cap)
     order_by = """
         ORDER BY
           CASE risk_level WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 1 END,
@@ -367,7 +366,11 @@ def list_governance_decisions(review_status: str | None = None, decision_type: s
           created_at DESC
     """
     with read_conn() as conn:
-        rows = conn.execute(f"SELECT * FROM governance_decisions {where} {order_by} LIMIT ?", tuple(params)).fetchall()
+        if cap is not None:
+            params.append(cap)
+            rows = conn.execute(f"SELECT * FROM governance_decisions {where} {order_by} LIMIT ?", tuple(params)).fetchall()
+        else:
+            rows = conn.execute(f"SELECT * FROM governance_decisions {where} {order_by}", tuple(params)).fetchall()
     return [_decision_row_to_dict(row) for row in rows]
 
 

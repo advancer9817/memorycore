@@ -183,7 +183,6 @@ export function useGovernanceCockpit(): UseGovernanceCockpitReturn {
       const decisionUrl = appendQuery(`${baseUrl}/api/governance/decisions`, {
         review_status: state.reviewStatus,
         decision_type: state.decisionType || undefined,
-        limit: 500,
       });
       const [metrics, decisions] = await Promise.all([
         fetchJson<GovernanceMetrics>(`${baseUrl}/api/governance/metrics`, { signal }),

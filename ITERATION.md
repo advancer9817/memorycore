@@ -4420,3 +4420,5 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 `git revert HEAD`
 
 - [2026-06-24] 拉取 origin/main 最新代码，并将更新部署至本地环境，通过 mcore restart 重启相关 systemd 服务。
+
+- [2026-06-24] Governance 页面取消总条数 500 上限：后端 list_governance_decisions 去掉 min(limit, 500) 硬限，不传 limit 时查询全量；前端 useGovernanceCockpit 去掉 limit: 500 参数；分页数改为用户可调（10/20/50/100 条/页下拉选择器，切换后自动回到第一页）。

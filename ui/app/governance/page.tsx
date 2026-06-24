@@ -50,7 +50,7 @@ const DECISION_TYPE_FILTERS: DecisionTypeFilter[] = [
   { value: "split_candidate", labelKey: "filterSplits" },
 ];
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 
 function GovernancePageInner() {
   const { messages } = useI18n();
@@ -60,6 +60,7 @@ function GovernancePageInner() {
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
   const [batchPending, setBatchPending] = useState(false);
   const [jumpValue, setJumpValue] = useState("1");
 
@@ -69,8 +70,8 @@ function GovernancePageInner() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const totalPages = Math.max(1, Math.ceil(cockpit.decisions.length / PAGE_SIZE));
-  const paginated = cockpit.decisions.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(cockpit.decisions.length / pageSize));
+  const paginated = cockpit.decisions.slice(page * pageSize, (page + 1) * pageSize);
 
   useEffect(() => {
     const clampedPage = Math.min(page, Math.max(0, totalPages - 1));
@@ -311,8 +312,20 @@ function GovernancePageInner() {
         {/* Pagination */}
         {totalPages > 1 && (
           <div className="mt-4 flex items-center justify-between">
-            <div className="text-sm text-zinc-500">
-              {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, cockpit.decisions.length)} / {cockpit.decisions.length}
+            <div className="flex items-center gap-3">
+              <div className="text-sm text-zinc-500">
+                {page * pageSize + 1}–{Math.min((page + 1) * pageSize, cockpit.decisions.length)} / {cockpit.decisions.length}
+              </div>
+              <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(0); }}>
+                <SelectTrigger className="h-8 w-[90px] border-zinc-700 bg-zinc-900 text-xs text-zinc-200">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="border-zinc-700 bg-zinc-900">
+                  {PAGE_SIZE_OPTIONS.map((n) => (
+                    <SelectItem key={n} value={String(n)} className="text-xs text-zinc-200">{n} 条/页</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex items-center gap-2">
               <Button
