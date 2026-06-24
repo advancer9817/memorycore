@@ -222,7 +222,13 @@ def _set_last_accessed(memory_id: str, days_ago: int) -> None:
         )
 
 
-def test_curator_reports_supersession_candidates_for_newer_same_fact():
+def test_curator_reports_supersession_candidates_for_newer_same_fact(monkeypatch):
+    # Disable write-path auto-supersession so curator_report gets to see both active records.
+    # With temporal.enabled=True, process_auto_supersession would otherwise run in the write
+    # path and consume the supersession before curator_report can report it.
+    import memorycore.storage.temporal_governance as _tg
+    monkeypatch.setattr(_tg, "process_auto_supersession", lambda *a, **kw: {"checked": False, "reason": "disabled_for_test"})
+
     old = add_memory_record("feedback", "Same Fact", "old same fact content", importance=0.4)
     new = add_memory_record("feedback", "Same Fact", "new same fact content", importance=0.4)
     with managed_conn() as conn:

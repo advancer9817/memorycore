@@ -4428,3 +4428,9 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
   2. **Temporal auto-supersession 改用向量相似度**（`temporal_governance.py`）：新增 `_vector_similarity()` 和 `_lexical_similarity()`，`_similarity()` 优先用 Qdrant cosine 向量相似度，词法（SequenceMatcher+Jaccard）作 fallback，彻底解决词法相似度对语义等价记忆失效的问题。
   3. **Atomization 覆盖叙述型记忆**（`atomization.py`）：`should_atomize()` 新增"≥3 个独立长句"触发条件（原仅靠 SIGNAL_RE 技术信号）；`plan_child_facts()` 去掉 span 级 `_SIGNAL_RE` 过滤，改为基于内容长度的最小实质性检测，使叙述型长记忆（决策、用户偏好、架构分析）能被正确拆分为 atomic facts。
   4. **LLM ingest 无 API key 时返回可见 warning**（`server.py`）：`memory_ingest` 工具在无结果且无 API key 时，返回值追加 `warning` 字段，用户无需看日志即可诊断原因。
+
+- [2026-06-24] Phase 1 backend P0 bug 修复（audit-remediation-plan Phase 1.1 + 1.2）：
+  1. **temporal_governance VectorStore 构造 bug**（`temporal_governance.py`）：`VectorStore(cfg)` → `get_vector_store(load_config())`，消除 `'dict' object has no attribute 'url'` 报错，向量相似度路径正式生效。同时优化 `_similarity()` 为向量+词法 blended score（60/40），防止 content 相同但 title 不同的记忆被误 auto-supersede；`_vector_similarity` 增加 `candidate_ids` 参数，只信任 SQLite 候选集内的 UUID，防止跨 DB 误判。
+  2. **curator_llm governance_ledger 表名错误**（`curator_llm.py:1510`）：`governance_ledger` → `governance_mutation_log`，修复 LLM curator mutation 审计回滚链断裂（`sqlite3.OperationalError: no such table: governance_ledger`）。
+  3. **test_temporal.py 测试适配**：`test_curator_reports_supersession_candidates_for_newer_same_fact` 增加 monkeypatch 禁用写路径 auto-supersession，避免测试与功能逻辑互相干扰。
+  4. **测试结果**：4 failed → 3 failed（剩余 3 个均为 pre-existing，与本次无关）；`test_curator_apply.py` 2 个失败 → 全通过；`test_graph_enhanced::TestWarningsForNewTypes` 2 个新增失败 → 已修复并全通过。

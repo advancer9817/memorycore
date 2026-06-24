@@ -1507,7 +1507,7 @@ def _request_from_result(result: dict[str, Any]) -> dict[str, Any]:
     from memorycore.storage.db import read_conn
     with read_conn() as conn:
         row = conn.execute(
-            "SELECT request_json FROM governance_ledger WHERE id = ? LIMIT 1",
+            "SELECT request_json FROM governance_mutation_log WHERE id = ? LIMIT 1",
             (log_id,),
         ).fetchone()
     if row:
