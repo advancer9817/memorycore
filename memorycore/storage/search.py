@@ -846,7 +846,7 @@ def build_context_pack(
     clustered_count = 0
     cluster_groups = 0
 
-    if cluster_enabled and vs_available:
+    if cluster_enabled and vs_available and len(records) >= 3:
         records, clustered_count, cluster_groups = _cluster_similar_records(vs, records, cluster_threshold)
 
     groups_order = [

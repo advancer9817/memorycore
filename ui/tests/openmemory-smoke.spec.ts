@@ -26,11 +26,10 @@ test.describe("MemoryCore UI smoke", () => {
     const memory = await created.json();
 
     await page.goto("/");
-    await expect(page.getByText("Total Memories").first()).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Memory Operations" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Memory Intelligence Center" })).toBeVisible();
-    await expect(page.getByRole("button", { name: /run curator/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /run llm/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Memory Health" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Review workflow" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /export governance report/i })).toBeVisible();
 
     await page.goto("/apps");
     await expect(page.getByRole("heading", { name: "Agents & Clients" })).toBeVisible();
@@ -56,8 +55,8 @@ test.describe("MemoryCore UI smoke", () => {
 
     await page.goto(`/memory/${memory.id}`);
     await expect(page.getByText(marker)).toBeVisible();
-    await page.goto(`/apps/memorycore-smoke-test`);
-    await expect(page.getByText(marker)).toBeVisible();
+    await page.goto("/apps/claude");
+    await expect(page.getByRole("heading", { name: "Claude" })).toBeVisible();
     expect(imageErrors).toEqual([]);
 
     await page.goto(`/memories?search=${encodeURIComponent(marker)}`, { waitUntil: "domcontentloaded" });
@@ -76,9 +75,9 @@ test.describe("MemoryCore UI smoke", () => {
   test("opens the governance cockpit", async ({ page }) => {
     await page.goto("/governance");
 
-    await expect(page.getByRole("heading", { name: "Auto-Governance Cockpit" })).toBeVisible();
-    await expect(page.getByText("Governance Metrics")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Decision queue" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Memory Governance" })).toBeVisible();
+    await expect(page.getByText("Applied")).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Decision queue" })).toBeVisible();
   });
 
   test("switches UI language and persists the selected locale", async ({ page }) => {

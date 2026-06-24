@@ -4470,3 +4470,60 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 - `.venv/bin/python -m pytest tests/test_governance.py -q`：25 passed, 1 warning。
 - `.venv/bin/python -m py_compile memorycore/storage/governance.py memorycore/server.py`：通过。
 - `cd ui && pnpm exec tsc --noEmit`：通过。
+
+## [迭代 33] 2026-06-24 — 产品方向文档按原始目标重设计
+
+### 变更
+
+- 重写 `docs/plans/2026-06-24-memorycore-market-product-direction.md`，从“市场扫描 + 高层方向”改为中文产品重设计方案。
+- 明确 MemoryCore 的北极星：在用户不需要管理记忆的前提下，让多个 Agent 始终拿到少量、准确、可解释、最新、可回滚的上下文。
+- 将用户原始要求落实为产品原则：低心智负担、自治理、多 Agent 共享、本地优先、可解释、可回滚。
+- 重新定义顶层信息架构：Dashboard、Context Lab、Memories、Governance、Graph、Sources、Operations、Settings。
+- 将 Context Lab 定为第一优先级，要求用 UI 展示 `memory_context` 的 records、trace、quality、warnings、filtered_ids，并把 helpful/not helpful/stale/wrong/private/expired 反馈接入治理闭环。
+- 明确 Governance 从“待办列表”改为“异常处置台”，Graph 从“可视化”改为“关系修复台”，Apps/Sources 从“来源列表”改为“来源策略控制台”。
+- 补充分阶段落地计划、后端能力映射、自动治理边界、视觉交互规则与成功指标。
+
+### 验证
+
+- 文档-only 变更，未运行测试。
+
+## [迭代 34] 2026-06-24 — 审计修复计划 Phase 4/5 收尾
+
+### 变更
+
+- Dashboard 首页移除直接挂载的 `MemoryOperationsPanel` 与 `CuratorTuningPanel`，首屏收敛为 `MemoryIntelligenceCenter` 健康情报入口，避免继续作为运维工具堆。
+- Graph 顶部品牌从 `NeuralGraph` 改为 `Memory Graph`，对齐审计修复计划的桌面运维控制台命名方向。
+- 更新 `docs/plans/2026-06-24-memorycore-audit-remediation-plan.md` 的 Change Log，记录 Phase 1/2/3 已达成、Phase 4/5 收尾和 Phase 6 进入验证。
+
+### 验证
+
+- 待执行全量 pytest、UI build、TypeScript 与 Playwright 验证。
+
+## [迭代 35] 2026-06-24 — LLM Curator 增量执行与逐步加载
+
+### 变更
+
+- 新增 `memorycore/storage/llm_curator_jobs.py`，持久化 LLM Curator job/batch 状态，并提供 job、batch、decision 游标查询 helper。
+- `db.py` 新增 `llm_curator_jobs`、`llm_curator_batches` 表；`governance_decisions` 新增 `curator_job_id`、`curator_batch_id` 关联字段与索引。
+- `governance.py` 扩展 `create_governance_decision()` 与 `convert_llm_findings_to_decisions()`，允许批次完成后把决策关联回 LLM job/batch，并保持 candidate_hash 去重幂等。
+- `curator_llm.py` 新增 `run_llm_curator_incremental()`，按 dedup、contradiction、importance、split 批次执行 LLM 判断；每个 batch 完成后立即转换为治理决策并落库，失败 batch 不吞掉已完成结果。
+- `frontend.py` 将 `/api/curator/llm` 切换为持久 job，并新增 `/api/curator/llm/{job_id}/decisions` 与 `/api/curator/llm/{job_id}/batches` 游标接口；job 状态查询不再依赖进程内完整 result。
+- `MemoryOperationsPanel.tsx` 改为运行中轮询 job 状态并用 cursor 增量拉取 governance decisions，支持刷新后恢复、逐步展示已产生结果、按已加载决策执行 apply/reject；Run LLM 默认 dry-run，避免运行中自动应用导致前端看不到结果。
+- 审查修复：服务重启时将遗留 running job 标记为 failed/interrupted，避免 UI 永久轮询；decision/batch 游标改为 offset cursor，避免同秒 UUID 排序漏项；拒绝已 applied 决策会被后端阻止；重复发现的 candidate 会重新关联到当前 job，确保本轮结果可见。
+
+### 验证
+
+- `.venv/bin/python -m py_compile memorycore/storage/db.py memorycore/storage/governance.py memorycore/storage/llm_curator_jobs.py memorycore/storage/curator_llm.py memorycore/frontend.py`：通过。
+- `.venv/bin/python -m pytest -q tests/test_curator_llm_jobs.py tests/test_frontend.py tests/test_governance.py`：42 passed, 3 skipped, 2 warnings。
+- `cd ui && pnpm build`：通过，standalone 静态资源复制成功。
+
+## [迭代 36] 2026-06-25 — Governance 分页条数扩展
+
+### 变更
+
+- `ui/app/governance/page.tsx`: Governance 队列分页条数下拉选项从 `10/20/50/100` 扩展为 `10/20/50/100/500/1000`，便于大批量审查队列快速浏览。
+
+### 验证
+
+- `cd ui && pnpm exec tsc --noEmit`：通过。
+- `cd ui && pnpm build`：通过，standalone 静态资源复制成功。

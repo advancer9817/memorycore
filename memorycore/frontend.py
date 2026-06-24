@@ -55,6 +55,12 @@ from memorycore.storage import (
 )
 
 logger = logging.getLogger(__name__)
+try:
+    from memorycore.storage.llm_curator_jobs import mark_stale_running_jobs_failed
+    mark_stale_running_jobs_failed()
+except Exception:
+    logger.debug("failed to mark stale llm curator jobs", exc_info=True)
+
 _START_TIME = time.time()
 _MUTATING_METHODS = {"POST", "PATCH", "PUT", "DELETE"}
 
@@ -84,36 +90,29 @@ def _cleanup_stale_llm_jobs() -> None:
 
 
 def _run_llm_curator_job(job_id: str, cfg: Any, limit: int, sim_threshold: float, apply: bool) -> None:
-    """Runs in a daemon thread; updates _llm_curator_jobs on completion."""
-    from memorycore.storage.curator_llm import run_llm_curator
+    """Runs in a daemon thread; persists incremental job state to SQLite."""
+    from memorycore.storage.curator_llm import run_llm_curator_incremental
+    from memorycore.storage.llm_curator_jobs import update_llm_curator_job
 
     try:
-        report = run_llm_curator(config=cfg, limit=limit, sim_threshold=sim_threshold, apply=apply)
-        summary = report.get("summary", {})
-        has_findings = (
-            summary.get("semantic_duplicates", 0) > 0
-            or summary.get("contradictions", 0) > 0
-            or summary.get("importance_reassessments", 0) > 0
-            or summary.get("split_candidates", 0) > 0
+        report = run_llm_curator_incremental(
+            job_id=job_id,
+            config=cfg,
+            limit=limit,
+            sim_threshold=sim_threshold,
+            apply=apply,
         )
-        report_errors = report.get("errors", [])
-        if report_errors and not has_findings:
-            status = "error"
-            error_msg = "; ".join(report_errors)
-        else:
-            status = "succeeded" if has_findings else "done"
-            error_msg = None
         with _llm_curator_lock:
-            job_entry = {
-                "status": status, "result": report,
+            _llm_curator_jobs[job_id] = {
+                "status": report.get("status", "done"),
+                "summary": report.get("summary", {}),
+                "errors": report.get("errors", []),
                 "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
             }
-            if error_msg:
-                job_entry["error"] = error_msg
-            _llm_curator_jobs[job_id] = job_entry
         _clear_curator_status_cache()
     except Exception as exc:
         logger.warning("[llm-curator job %s] failed: %s", job_id, exc)
+        update_llm_curator_job(job_id, status="failed", errors=[str(exc)], finished=True)
         with _llm_curator_lock:
             _llm_curator_jobs[job_id] = {
                 "status": "error", "error": str(exc),
@@ -307,9 +306,20 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
         _clear_curator_status_cache()
         return result
     if parts == ["curator", "llm"] and method == "POST":
+        from memorycore.storage.llm_curator_jobs import create_llm_curator_job
         cfg = load_config()
         apply = not body.get("dry_run", True)
         job_id = str(uuid.uuid4())
+        create_llm_curator_job(
+            job_id,
+            params={
+                "limit": int(body.get("limit", 10000)),
+                "sim_threshold": float(body.get("sim_threshold", 0.55)),
+                "apply": apply,
+                "dry_run": not apply,
+            },
+            created_by=body.get("source_agent", "frontend"),
+        )
         with _llm_curator_lock:
             _cleanup_stale_llm_jobs()
             _llm_curator_jobs[job_id] = {"status": "running", "job_id": job_id}
@@ -348,27 +358,49 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
             return {"decision": decision, "applied": {"already_applied": True}}
         return apply_governance_decision(decision["id"], source_agent="frontend")
     if parts == ["curator", "llm", "latest"] and method == "GET":
-        with _llm_curator_lock:
-            job_id = _latest_llm_job_id[0] if _latest_llm_job_id else None
-            job = _llm_curator_jobs.get(job_id) if job_id else None
+        from memorycore.storage.llm_curator_jobs import get_latest_llm_curator_job
+        job = get_latest_llm_curator_job()
         if job is None:
             return {"status": "idle", "job_id": None}
-        filtered_job = dict(job)
-        if "result" in filtered_job:
-            from memorycore.storage.governance import filter_applied_or_rejected_findings
-            filtered_job["result"] = filter_applied_or_rejected_findings(filtered_job["result"])
-        return {**filtered_job, "job_id": job_id}
-    if len(parts) == 3 and parts[:2] == ["curator", "llm"] and method == "GET":
+        return {**job, "job_id": job["id"]}
+    if len(parts) == 4 and parts[:2] == ["curator", "llm"] and parts[3] == "decisions" and method == "GET":
+        from memorycore.storage.llm_curator_jobs import get_llm_curator_job, list_llm_curator_decisions
         job_id = parts[2]
-        with _llm_curator_lock:
-            job = _llm_curator_jobs.get(job_id)
+        job = get_llm_curator_job(job_id)
         if job is None:
             raise LookupError(f"job {job_id} not found")
-        filtered_job = dict(job)
-        if "result" in filtered_job:
-            from memorycore.storage.governance import filter_applied_or_rejected_findings
-            filtered_job["result"] = filter_applied_or_rejected_findings(filtered_job["result"])
-        return filtered_job
+        return {
+            **list_llm_curator_decisions(
+                job_id,
+                after=_str_q(query, "after", None),
+                limit=_int_q(query, "limit", 50),
+                review_status=_str_q(query, "review_status", "actionable"),
+                decision_type=_str_q(query, "decision_type", None),
+            ),
+            "job": {**job, "job_id": job["id"]},
+        }
+    if len(parts) == 4 and parts[:2] == ["curator", "llm"] and parts[3] == "batches" and method == "GET":
+        from memorycore.storage.llm_curator_jobs import get_llm_curator_job, list_llm_curator_batches
+        job_id = parts[2]
+        job = get_llm_curator_job(job_id)
+        if job is None:
+            raise LookupError(f"job {job_id} not found")
+        return {**list_llm_curator_batches(job_id, after=_str_q(query, "after", None), limit=_int_q(query, "limit", 50)), "job": {**job, "job_id": job["id"]}}
+    if len(parts) == 3 and parts[:2] == ["curator", "llm"] and method == "GET":
+        from memorycore.storage.llm_curator_jobs import get_llm_curator_job
+        job_id = parts[2]
+        job = get_llm_curator_job(job_id)
+        if job is None:
+            with _llm_curator_lock:
+                legacy_job = _llm_curator_jobs.get(job_id)
+            if legacy_job is None:
+                raise LookupError(f"job {job_id} not found")
+            filtered_job = dict(legacy_job)
+            if "result" in filtered_job:
+                from memorycore.storage.governance import filter_applied_or_rejected_findings
+                filtered_job["result"] = filter_applied_or_rejected_findings(filtered_job["result"])
+            return filtered_job
+        return {**job, "job_id": job["id"]}
     if parts == ["links"] and method == "POST":
         return add_link(body.get("source_id", ""), body.get("target_id", ""), body.get("relation_type", "related_to"), body.get("weight", 1.0), body.get("note", ""), body.get("source_agent", "frontend"))
     if len(parts) == 2 and parts[0] == "links" and method == "GET":

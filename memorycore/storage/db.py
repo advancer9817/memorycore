@@ -273,12 +273,50 @@ def init_db(conn: sqlite3.Connection) -> None:
           execution_id TEXT NOT NULL DEFAULT '',
           applied_by TEXT NOT NULL DEFAULT '',
           rolled_back_by TEXT NOT NULL DEFAULT '',
-          approval_kind TEXT NOT NULL DEFAULT ''
+          approval_kind TEXT NOT NULL DEFAULT '',
+          curator_job_id TEXT NOT NULL DEFAULT '',
+          curator_batch_id TEXT NOT NULL DEFAULT ''
         );
 
         CREATE INDEX IF NOT EXISTS idx_governance_review ON governance_decisions(review_status);
         CREATE INDEX IF NOT EXISTS idx_governance_created ON governance_decisions(created_at);
         CREATE INDEX IF NOT EXISTS idx_governance_type ON governance_decisions(decision_type);
+
+        CREATE TABLE IF NOT EXISTS llm_curator_jobs (
+          id TEXT PRIMARY KEY,
+          status TEXT NOT NULL,
+          started_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          finished_at TEXT,
+          params_json TEXT NOT NULL DEFAULT '{}',
+          progress_json TEXT NOT NULL DEFAULT '{}',
+          summary_json TEXT NOT NULL DEFAULT '{}',
+          error_json TEXT NOT NULL DEFAULT '[]',
+          governance_run_id TEXT NOT NULL DEFAULT '',
+          created_by TEXT NOT NULL DEFAULT 'frontend'
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_llm_curator_jobs_status_updated ON llm_curator_jobs(status, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_llm_curator_jobs_started ON llm_curator_jobs(started_at);
+
+        CREATE TABLE IF NOT EXISTS llm_curator_batches (
+          id TEXT PRIMARY KEY,
+          job_id TEXT NOT NULL,
+          stage TEXT NOT NULL,
+          batch_index INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          started_at TEXT NOT NULL,
+          finished_at TEXT,
+          candidate_count INTEGER NOT NULL DEFAULT 0,
+          finding_count INTEGER NOT NULL DEFAULT 0,
+          decision_count INTEGER NOT NULL DEFAULT 0,
+          cursor_token TEXT NOT NULL DEFAULT '',
+          error_json TEXT,
+          FOREIGN KEY(job_id) REFERENCES llm_curator_jobs(id) ON DELETE CASCADE
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_curator_batches_unique ON llm_curator_batches(job_id, stage, batch_index);
+        CREATE INDEX IF NOT EXISTS idx_llm_curator_batches_job_started ON llm_curator_batches(job_id, started_at);
 
         CREATE TABLE IF NOT EXISTS governance_runs (
           id TEXT PRIMARY KEY,
@@ -462,7 +500,11 @@ def init_db(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "governance_decisions", "applied_by", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(conn, "governance_decisions", "rolled_back_by", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(conn, "governance_decisions", "approval_kind", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "governance_decisions", "curator_job_id", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "governance_decisions", "curator_batch_id", "TEXT NOT NULL DEFAULT ''")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_governance_candidate_hash ON governance_decisions(candidate_hash)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_governance_curator_job_created ON governance_decisions(curator_job_id, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_governance_curator_job_id ON governance_decisions(curator_job_id, id)")
 
     _ensure_column(conn, "context_quality_events", "vector_avg_score", "REAL NOT NULL DEFAULT 0.0")
     _ensure_column(conn, "context_quality_events", "cross_retrieval_rate", "REAL NOT NULL DEFAULT 0.0")

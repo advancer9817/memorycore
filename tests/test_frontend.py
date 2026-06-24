@@ -226,7 +226,69 @@ def test_frontend_governance_actionable_filter_excludes_applied_history():
     assert applied_decision["id"] in history_ids
 
 
-def test_frontend_auth_token_required_for_api():
+def test_frontend_llm_curator_job_decisions_are_cursor_paginated(monkeypatch):
+    from memorycore.storage.llm_curator_jobs import create_llm_curator_job
+
+    first = add_memory_record("episodic_memory", "LLM incremental target", "Incremental job content", importance=0.4)
+    second = add_memory_record("episodic_memory", "LLM incremental target 2", "Incremental job content 2", importance=0.4)
+    job = create_llm_curator_job("job-test-incremental", params={"limit": 5}, created_by="pytest")
+    first_decision = create_governance_decision(
+        "importance_reassessment",
+        "downgrade",
+        [first["id"]],
+        0.95,
+        "low",
+        {"id": first["id"], "action": "downgrade", "new_importance": 0.2, "reason": "incremental test 1"},
+        curator_job_id=job["id"],
+        curator_batch_id="batch-1",
+    )
+    second_decision = create_governance_decision(
+        "importance_reassessment",
+        "downgrade",
+        [second["id"]],
+        0.95,
+        "low",
+        {"id": second["id"], "action": "downgrade", "new_importance": 0.2, "reason": "incremental test 2"},
+        curator_job_id=job["id"],
+        curator_batch_id="batch-1",
+    )
+
+    with _client() as client:
+        status = client.get(f"/api/curator/llm/{job['id']}")
+        page = client.get(f"/api/curator/llm/{job['id']}/decisions?limit=1")
+        next_cursor = page.json()["data"]["next_cursor"]
+        next_page = client.get(f"/api/curator/llm/{job['id']}/decisions?limit=1&after={next_cursor}")
+
+    assert status.status_code == 200
+    assert status.json()["data"]["job_id"] == job["id"]
+    assert page.status_code == 200
+    first_id = page.json()["data"]["items"][0]["id"]
+    second_id = next_page.json()["data"]["items"][0]["id"]
+    assert {first_id, second_id} == {first_decision["id"], second_decision["id"]}
+    assert page.json()["data"]["items"][0]["curator_job_id"] == job["id"]
+    assert next_page.status_code == 200
+
+
+def test_frontend_reject_applied_governance_decision_is_blocked():
+    memory = add_memory_record("episodic_memory", "Reject applied target", "Reject applied content", importance=0.4)
+    decision = create_governance_decision(
+        "importance_reassessment",
+        "downgrade",
+        [memory["id"]],
+        0.95,
+        "low",
+        {"id": memory["id"], "action": "downgrade", "new_importance": 0.2},
+    )
+    apply_governance_decision(decision["id"], source_agent="pytest")
+
+    with _client() as client:
+        rejected = client.post(f"/api/governance/{decision['id']}/reject", json={"source_agent": "pytest"})
+
+    assert rejected.status_code == 400
+    assert "cannot be rejected" in rejected.json()["error"]["message"]
+
+
+
     with _client(token="secret") as client:
         denied = client.get("/api/dashboard")
         allowed = client.get("/api/dashboard", headers={"Authorization": "Bearer secret"})

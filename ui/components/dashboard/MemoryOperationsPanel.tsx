@@ -55,11 +55,37 @@ type LlmFindingView = {
   action: string;
   reason: string;
   title?: string;
+  decisionId?: string;
+  reviewStatus?: string;
+  decisionType?: string;
   llm_thinking?: string;
   llm_raw?: string;
   llm_prompt?: string;
   _category?: LlmFindingCategory;
   _raw?: RawFinding;
+};
+
+type GovernanceDecision = {
+  id: string;
+  decision_type?: string;
+  recommended_action?: string;
+  review_status?: string;
+  finding?: RawFinding;
+  llm_trace?: {
+    prompt?: string;
+    response?: string;
+    thinking?: string;
+    rationale?: string;
+  };
+  policy_reason?: string;
+};
+
+type LlmJobProgress = {
+  stage?: string;
+  batch_index?: number;
+  candidate_count?: number;
+  decision_count?: number;
+  error?: string;
 };
 
 type LlmResultPayload = {
@@ -93,6 +119,13 @@ function getPayloadErrorMessage(payload: unknown, fallback: string): string {
 
 function getString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function ellipsize(value: string | undefined, maxChars: number): string | undefined {
+  if (!value) return value;
+  const chars = Array.from(value);
+  if (chars.length <= maxChars) return value;
+  return `${chars.slice(0, Math.max(0, maxChars - 3)).join("")}...`;
 }
 
 type CuratorRunState = {
@@ -187,6 +220,10 @@ export const MemoryOperationsPanel = () => {
     startedAt?: number;
     elapsedMs?: number;
     summary?: Record<string, number>;
+    progress?: LlmJobProgress;
+    nextCursor?: string;
+    hasMore?: boolean;
+    loadedCount?: number;
     errors?: string[];
     error?: string;
     findings?: LlmFindingView[];
@@ -198,8 +235,25 @@ export const MemoryOperationsPanel = () => {
   const [applyFindingStates, setApplyFindingStates] = useState<Record<number, ApplyFindingState>>({});
   const [isRecovering, setIsRecovering] = useState(false);
   const llmPollRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const llmCursorRef = React.useRef<string | undefined>(undefined);
 
   const LLM_JOB_KEY = "mcore_llm_curator_job";
+
+  const _findingFromDecision = (decision: GovernanceDecision): LlmFindingView => {
+    const finding = decision.finding || {};
+    return {
+      action: decision.recommended_action || getString(finding.action) || "review",
+      title: getString(finding.title) || getString(finding.drop_title) || getString(finding.older_title),
+      reason: getString(finding.reason) || decision.policy_reason || decision.llm_trace?.rationale || "",
+      decisionId: decision.id,
+      reviewStatus: decision.review_status,
+      decisionType: decision.decision_type,
+      llm_thinking: decision.llm_trace?.thinking || getString(finding.llm_thinking),
+      llm_raw: decision.llm_trace?.response || getString(finding.llm_raw),
+      llm_prompt: decision.llm_trace?.prompt || getString(finding.llm_prompt),
+      _raw: finding,
+    };
+  };
 
   const _parseLlmResult = (data: LlmResultPayload) => ({
     summary: data.summary || {},
@@ -250,6 +304,34 @@ export const MemoryOperationsPanel = () => {
     ],
   });
 
+  const _loadJobDecisions = React.useCallback(async (jobId: string, after?: string) => {
+    const params = new URLSearchParams({ limit: "50", review_status: "actionable" });
+    if (after) params.set("after", after);
+    const response = await fetch(`${getApiBaseUrl()}/api/curator/llm/${jobId}/decisions?${params.toString()}`);
+    if (!response.ok) return;
+    const payload = await response.json();
+    const data = payload.data || payload;
+    const decisions = Array.isArray(data.items) ? data.items as GovernanceDecision[] : [];
+    const findings = decisions.map(_findingFromDecision);
+    llmCursorRef.current = data.next_cursor;
+    setLlmRunState((prev) => {
+      const existing = prev.findings || [];
+      const knownIds = new Set(existing.map((item) => item.decisionId).filter(Boolean));
+      const fresh = findings.filter((item) => !item.decisionId || !knownIds.has(item.decisionId));
+      return {
+        ...prev,
+        findings: after ? [...existing, ...fresh] : fresh,
+        nextCursor: data.next_cursor,
+        hasMore: Boolean(data.has_more),
+        loadedCount: (after ? existing.length : 0) + fresh.length,
+        summary: data.job?.summary || prev.summary,
+        progress: data.job?.progress || prev.progress,
+        errors: data.job?.errors || prev.errors,
+      };
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const _pollJob = React.useCallback(async (jobId: string, startedAt: number) => {
     try {
       const res = await fetch(`${getApiBaseUrl()}/api/curator/llm/${jobId}`);
@@ -264,31 +346,50 @@ export const MemoryOperationsPanel = () => {
       const payload = await res.json();
       const pollData = payload.data || payload;
       if (pollData.status === "done" || pollData.status === "succeeded") {
-        const result = pollData.result || pollData;
-        const parsed = _parseLlmResult(result);
-        setLlmRunState({
+        await _loadJobDecisions(jobId, llmCursorRef.current);
+        const result = pollData.result;
+        const parsed = result ? _parseLlmResult(result) : { summary: pollData.summary || {}, errors: pollData.errors || [], findings: [] };
+        setLlmRunState((prev) => ({
+          ...prev,
           state: "succeeded",
           jobId,
           startedAt,
           elapsedMs: Date.now() - startedAt,
-          ...parsed,
-        });
+          summary: pollData.summary || parsed.summary || prev.summary,
+          errors: pollData.errors || parsed.errors || prev.errors,
+          progress: pollData.progress || prev.progress,
+          findings: prev.findings && prev.findings.length > 0 ? prev.findings : parsed.findings,
+        }));
         setLlmRunning(false);
         localStorage.removeItem(LLM_JOB_KEY);
         fetchStatus();
-      } else if (pollData.status === "error") {
-        setLlmRunState({
+      } else if (pollData.status === "error" || pollData.status === "failed") {
+        setLlmRunState((prev) => ({
+          ...prev,
           state: "failed",
           jobId,
           startedAt,
           elapsedMs: Date.now() - startedAt,
-          error: pollData.error || "LLM Curator job failed",
-        });
+          summary: pollData.summary || prev.summary,
+          progress: pollData.progress || prev.progress,
+          errors: pollData.errors || prev.errors,
+          error: pollData.error || (Array.isArray(pollData.errors) ? pollData.errors.join("; ") : "LLM Curator job failed"),
+        }));
         setLlmRunning(false);
         localStorage.removeItem(LLM_JOB_KEY);
       } else {
+        await _loadJobDecisions(jobId, llmCursorRef.current);
+        setLlmRunState((prev) => ({
+          ...prev,
+          state: "running",
+          jobId,
+          startedAt,
+          summary: pollData.summary || prev.summary,
+          progress: pollData.progress || prev.progress,
+          errors: pollData.errors || prev.errors,
+        }));
         // still running — schedule next poll
-        llmPollRef.current = setTimeout(() => _pollJob(jobId, startedAt), 2000);
+        llmPollRef.current = setTimeout(() => _pollJob(jobId, startedAt), 3000);
       }
     } catch {
       setIsRecovering(false);
@@ -310,7 +411,7 @@ export const MemoryOperationsPanel = () => {
             const startedAt = Date.now();
             setLlmRunning(true);
             setIsRecovering(true);
-            setLlmRunState({ state: "running", jobId: d.job_id, startedAt });
+            setLlmRunState({ state: "running", jobId: d.job_id, startedAt, summary: d.summary || {}, progress: d.progress || {}, errors: d.errors || [] });
             localStorage.setItem(LLM_JOB_KEY, JSON.stringify({ jobId: d.job_id, startedAt }));
             llmPollRef.current = setTimeout(() => _pollJob(d.job_id, startedAt), 2000);
           }
@@ -342,6 +443,7 @@ export const MemoryOperationsPanel = () => {
   const runLlmCurator = async () => {
     if (llmRunning) return;
     const startedAt = Date.now();
+    llmCursorRef.current = undefined;
     setLlmRunning(true);
     setLlmDismissedIndices(new Set());
     setLlmRunState({ state: "running", startedAt });
@@ -349,7 +451,7 @@ export const MemoryOperationsPanel = () => {
       const response = await fetch(`${getApiBaseUrl()}/api/curator/llm`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ dry_run: false }),
+        body: JSON.stringify({ dry_run: true }),
       });
       const payload = await response.json();
       if (!response.ok || payload.ok === false) {
@@ -379,8 +481,20 @@ export const MemoryOperationsPanel = () => {
     setAcceptingAll(true);
     const results = await Promise.allSettled(
       visible.map(async (f) => {
-        if (!f._category || !f._raw) return undefined;
         const globalIdx = findings.indexOf(f);
+        if (f.decisionId) {
+          const response = await fetch(`${getApiBaseUrl()}/api/governance/${f.decisionId}/apply`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ source_agent: "frontend" }),
+          });
+          const payload: ApiEnvelope<unknown> = await response.json();
+          if (!response.ok || payload.ok === false) {
+            throw new Error(getPayloadErrorMessage(payload, `${t.dashboard.applyError}: ${response.status}`));
+          }
+          return globalIdx;
+        }
+        if (!f._category || !f._raw) return undefined;
         const response = await fetch(`${getApiBaseUrl()}/api/curator/llm/apply-single`, {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -412,9 +526,35 @@ export const MemoryOperationsPanel = () => {
     fetchStatus();
   };
 
-  const dismissAllFindings = () => {
+  const dismissAllFindings = async () => {
     const findings = llmRunState.findings ?? [];
-    setLlmDismissedIndices(new Set(findings.map((_, i) => i)));
+    const visible = findings.filter((_, i) => !llmDismissedIndices.has(i));
+    const rejected = new Set<number>();
+    const failures: Record<number, ApplyFindingState> = {};
+    const results = await Promise.allSettled(visible.map(async (f) => {
+      const globalIdx = findings.indexOf(f);
+      if (!f.decisionId) return globalIdx;
+      const response = await fetch(`${getApiBaseUrl()}/api/governance/${f.decisionId}/reject`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source_agent: "frontend", reason: "dismissed from LLM Curator panel" }),
+      });
+      const payload: ApiEnvelope<unknown> = await response.json();
+      if (!response.ok || payload.ok === false) {
+        throw new Error(getPayloadErrorMessage(payload, `${t.dashboard.applyError}: ${response.status}`));
+      }
+      return globalIdx;
+    }));
+    results.forEach((result, index) => {
+      const globalIdx = findings.indexOf(visible[index]);
+      if (result.status === "fulfilled") {
+        rejected.add(result.value);
+      } else {
+        failures[globalIdx] = { state: "failed", message: getErrorMessage(result.reason, t.dashboard.applyError) };
+      }
+    });
+    setApplyFindingStates((prev) => ({ ...prev, ...failures }));
+    setLlmDismissedIndices((prev) => new Set([...prev, ...rejected]));
   };
 
   const summary = status?.curator.summary || {};
@@ -563,14 +703,20 @@ export const MemoryOperationsPanel = () => {
             {(runActionsShowAll ? runState.actions : runState.actions.slice(0, 3)).map((action, i) => (
               <div key={action.id ?? i} className="rounded bg-zinc-800 px-2 py-1.5 text-xs flex items-start gap-2">
                 <div className="min-w-0 flex-1">
-                  <div className="line-clamp-2 break-words">
-                    <span className="text-emerald-300 font-medium shrink-0">{action.action}</span>
-                    {action.title && <span className="text-zinc-400"> · {action.title}</span>}
+                  <div className="truncate whitespace-nowrap" title={[action.action, action.title].filter(Boolean).join(" · ")}>
+                    <span className="text-emerald-300 font-medium shrink-0">
+                      {ellipsize(action.action, 54)}
+                    </span>
+                    {action.title && <span className="text-zinc-400"> · {ellipsize(action.title, 72)}</span>}
                   </div>
-                  {action.reason && <div className="text-zinc-500 line-clamp-2 mt-0.5">{action.reason}</div>}
+                  {action.reason && (
+                    <div className="truncate whitespace-nowrap text-zinc-500 mt-0.5" title={action.reason}>
+                      {ellipsize(action.reason, 120)}
+                    </div>
+                  )}
                 </div>
                 {action.id && (
-                  <Link href={`/memory/${action.id}`} target="_blank" className="rounded px-1.5 py-0.5 text-[10px] transition-colors bg-zinc-700/50 text-zinc-400 hover:text-zinc-200 shrink-0">
+                  <Link href={`/memory/${action.id}`} className="rounded px-1.5 py-0.5 text-[10px] transition-colors bg-zinc-700/50 text-zinc-400 hover:text-zinc-200 shrink-0">
                     {t.common?.details ?? "详情"}
                   </Link>
                 )}
@@ -620,6 +766,13 @@ export const MemoryOperationsPanel = () => {
                   {" · "}{t.dashboard.contradictions} <span className="text-zinc-200">{llmRunState.summary.contradictions ?? 0}</span>
                   {" · "}{t.dashboard.reassessments} <span className="text-zinc-200">{llmRunState.summary.importance_reassessments ?? 0}</span>
                   {" · "}{t.dashboard.splits} <span className="text-zinc-200">{llmRunState.summary.split_candidates ?? 0}</span>
+                  {llmRunState.progress?.stage && (
+                    <span className="text-zinc-500 text-xs ml-1">
+                      stage <span className="text-zinc-200">{llmRunState.progress.stage}</span>
+                      {llmRunState.progress.batch_index !== undefined && <span> · batch <span className="text-zinc-200">{llmRunState.progress.batch_index}</span></span>}
+                      {llmRunState.loadedCount !== undefined && <span> · loaded <span className="text-zinc-200">{llmRunState.loadedCount}</span></span>}
+                    </span>
+                  )}
                 </span>
               )}
             </div>
@@ -657,25 +810,48 @@ export const MemoryOperationsPanel = () => {
                     const globalIdx = llmRunState.findings!.indexOf(f);
                     return (
                       <LlmFinding
-                        key={globalIdx}
+                        key={f.decisionId || globalIdx}
                         finding={f}
                         applyState={applyFindingStates[globalIdx]}
                         labels={{ accept: t.dashboard.accept, reject: t.dashboard.reject, thinking: t.dashboard.thinking, raw: t.dashboard.raw, prompt: t.dashboard.prompt, applyError: t.dashboard.applyError, acceptFindingTitle: t.dashboard.acceptFindingTitle, dismissFindingTitle: t.dashboard.dismissFindingTitle, details: t.common.details }}
                         onAccept={async () => {
-                          if (!f._category || !f._raw) return;
-                          const response = await fetch(`${getApiBaseUrl()}/api/curator/llm/apply-single`, {
-                            method: "POST",
-                            headers: { "content-type": "application/json" },
-                            body: JSON.stringify({ category: f._category, finding: f._raw }),
-                          });
-                          const payload: ApiEnvelope<unknown> = await response.json();
-                          if (!response.ok || payload.ok === false) {
-                            throw new Error(getPayloadErrorMessage(payload, `${t.dashboard.applyError}: ${response.status}`));
+                          if (f.decisionId) {
+                            const response = await fetch(`${getApiBaseUrl()}/api/governance/${f.decisionId}/apply`, {
+                              method: "POST",
+                              headers: { "content-type": "application/json" },
+                              body: JSON.stringify({ source_agent: "frontend" }),
+                            });
+                            const payload: ApiEnvelope<unknown> = await response.json();
+                            if (!response.ok || payload.ok === false) {
+                              throw new Error(getPayloadErrorMessage(payload, `${t.dashboard.applyError}: ${response.status}`));
+                            }
+                          } else {
+                            if (!f._category || !f._raw) return;
+                            const response = await fetch(`${getApiBaseUrl()}/api/curator/llm/apply-single`, {
+                              method: "POST",
+                              headers: { "content-type": "application/json" },
+                              body: JSON.stringify({ category: f._category, finding: f._raw }),
+                            });
+                            const payload: ApiEnvelope<unknown> = await response.json();
+                            if (!response.ok || payload.ok === false) {
+                              throw new Error(getPayloadErrorMessage(payload, `${t.dashboard.applyError}: ${response.status}`));
+                            }
                           }
                           setApplyFindingStates((prev) => ({ ...prev, [globalIdx]: { state: "succeeded", message: t.dashboard.applySuccess } }));
                           setLlmDismissedIndices((prev) => new Set([...prev, globalIdx]));
                         }}
-                        onDismiss={() => {
+                        onDismiss={async () => {
+                          if (f.decisionId) {
+                            const response = await fetch(`${getApiBaseUrl()}/api/governance/${f.decisionId}/reject`, {
+                              method: "POST",
+                              headers: { "content-type": "application/json" },
+                              body: JSON.stringify({ source_agent: "frontend", reason: "dismissed from LLM Curator panel" }),
+                            });
+                            const payload: ApiEnvelope<unknown> = await response.json();
+                            if (!response.ok || payload.ok === false) {
+                              throw new Error(getPayloadErrorMessage(payload, `${t.dashboard.applyError}: ${response.status}`));
+                            }
+                          }
                           setLlmDismissedIndices((prev) => new Set([...prev, globalIdx]));
                         }}
                       />
@@ -687,6 +863,14 @@ export const MemoryOperationsPanel = () => {
                       className="w-full text-center text-xs text-zinc-400 hover:text-zinc-200 py-1.5 rounded bg-zinc-800/50 hover:bg-zinc-800 transition-colors"
                     >
                       {t.dashboard.showAll(visibleFindings.length)}
+                    </button>
+                  )}
+                  {llmRunState.hasMore && llmRunState.jobId && (
+                    <button
+                      onClick={() => _loadJobDecisions(llmRunState.jobId!, llmCursorRef.current)}
+                      className="w-full text-center text-xs text-violet-300 hover:text-violet-200 py-1.5 rounded bg-violet-950/30 hover:bg-violet-900/40 transition-colors"
+                    >
+                      Load more results
                     </button>
                   )}
                 </div>
@@ -721,7 +905,7 @@ function LlmFinding({ finding, applyState, labels, onAccept, onDismiss }: {
   applyState?: ApplyFindingState;
   labels: { accept: string; reject: string; thinking: string; raw: string; prompt: string; applyError: string; acceptFindingTitle: string; dismissFindingTitle: string; details: string };
   onAccept?: () => Promise<void>;
-  onDismiss?: () => void;
+  onDismiss?: () => Promise<void> | void;
 }) {
   const [expanded, setExpanded] = React.useState<null | "thinking" | "raw" | "prompt">(null);
   const [accepting, setAccepting] = React.useState(false);
@@ -741,6 +925,15 @@ function LlmFinding({ finding, applyState, labels, onAccept, onDismiss }: {
     }
   };
 
+  const handleDismiss = async () => {
+    if (!onDismiss) return;
+    try {
+      await onDismiss();
+    } catch (error: unknown) {
+      setLocalApplyState({ state: "failed", message: getErrorMessage(error, labels.applyError) });
+    }
+  };
+
   let targetId: string | undefined;
   if (finding._raw) {
     targetId = (finding._raw.id || finding._raw.drop_id || finding._raw.older_id || finding._raw.source_id) as string | undefined;
@@ -750,15 +943,19 @@ function LlmFinding({ finding, applyState, labels, onAccept, onDismiss }: {
     <div className="rounded bg-zinc-800 px-2 py-2 text-xs">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="line-clamp-2 break-words">
-            <span className="text-violet-300 font-medium">{finding.action}</span>
-            {finding.title && <span className="text-zinc-400"> · {finding.title}</span>}
+          <div className="truncate whitespace-nowrap" title={[finding.action, finding.title].filter(Boolean).join(" · ")}>
+            <span className="text-violet-300 font-medium">{ellipsize(finding.action, 54)}</span>
+            {finding.title && <span className="text-zinc-400"> · {ellipsize(finding.title, 72)}</span>}
           </div>
-          {finding.reason && <div className="text-zinc-500 line-clamp-2 mt-0.5">{finding.reason}</div>}
+          {finding.reason && (
+            <div className="truncate whitespace-nowrap text-zinc-500 mt-0.5" title={finding.reason}>
+              {ellipsize(finding.reason, 120)}
+            </div>
+          )}
         </div>
         <div className="flex gap-1 shrink-0 mt-0.5 items-center">
           {targetId && (
-            <Link href={`/memory/${targetId}`} target="_blank" className="rounded px-1.5 py-0.5 text-[10px] transition-colors bg-zinc-700/50 text-zinc-400 hover:text-zinc-200">
+            <Link href={`/memory/${targetId}`} className="rounded px-1.5 py-0.5 text-[10px] transition-colors bg-zinc-700/50 text-zinc-400 hover:text-zinc-200">
               {labels.details}
             </Link>
           )}
@@ -774,7 +971,7 @@ function LlmFinding({ finding, applyState, labels, onAccept, onDismiss }: {
           )}
           {onDismiss && (
             <button
-              onClick={onDismiss}
+              onClick={handleDismiss}
               className="rounded px-1.5 py-0.5 text-[10px] transition-colors bg-zinc-700 text-zinc-400 hover:bg-red-900/60 hover:text-red-300"
               title={labels.dismissFindingTitle}
             >

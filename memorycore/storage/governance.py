@@ -223,7 +223,7 @@ def policy_gate(
         reasons.append("destructive_action_not_low_risk")
 
     # Phase 6 时间信号: 针对7天内创建/更新的记忆的破坏性操作强制进入人工审核
-    if is_destructive:
+    if is_destructive and action != "supersede":
         from memorycore.models import load_config as _lc_g, local_now as _now_g
         _tcfg = _lc_g().get("temporal", {})
         if _tcfg.get("enabled", False):
@@ -400,6 +400,8 @@ def create_governance_decision(
     raw_response_ref: str = "",
     source_agent: str = "llm_curator",
     llm_trace: dict[str, Any] | None = None,
+    curator_job_id: str = "",
+    curator_batch_id: str = "",
 ) -> dict[str, Any]:
     finding = finding or {}
     llm_trace = llm_trace or _llm_trace_from_finding(finding)
@@ -429,6 +431,16 @@ def create_governance_decision(
             (candidate_hash,),
         ).fetchone()
         if existing is not None:
+            if curator_job_id or curator_batch_id:
+                conn.execute(
+                    """
+                    UPDATE governance_decisions
+                    SET curator_job_id=?, curator_batch_id=?, updated_at=?
+                    WHERE id=?
+                    """,
+                    (curator_job_id or existing["curator_job_id"], curator_batch_id or existing["curator_batch_id"], ts, existing["id"]),
+                )
+                existing = conn.execute("SELECT * FROM governance_decisions WHERE id=?", (existing["id"],)).fetchone()
             return _decision_row_to_dict(existing)
         conn.execute(
             """
@@ -437,8 +449,8 @@ def create_governance_decision(
               risk_level, review_status, policy_reason, finding_json, llm_trace_json, raw_response_ref,
               before_state_json, after_state_json, created_at, updated_at, applied_at, rolled_back_at, source_agent,
               candidate_hash, policy_reasons_json, policy_version, judge_model, judge_schema_version,
-              decision_version, execution_id, applied_by, rolled_back_by, approval_kind
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              decision_version, execution_id, applied_by, rolled_back_by, approval_kind, curator_job_id, curator_batch_id
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 decision_id, decision_type, as_json(source_ids), recommended_action, confidence,
@@ -447,6 +459,7 @@ def create_governance_decision(
                 ts, ts, None, None, source_agent or "llm_curator",
                 candidate_hash, as_json(gate.get("policy_reasons", [])), gate.get("policy_version", POLICY_VERSION),
                 JUDGE_MODEL, JUDGE_SCHEMA_VERSION, DECISION_VERSION, "", "", "", "",
+                curator_job_id or "", curator_batch_id or "",
             ),
         )
         row = conn.execute("SELECT * FROM governance_decisions WHERE id=?", (decision_id,)).fetchone()
@@ -517,7 +530,12 @@ def get_governance_decision(decision_id: str) -> dict[str, Any] | None:
     return decision
 
 
-def convert_llm_findings_to_decisions(report: dict[str, Any], auto_apply: bool = False) -> dict[str, Any]:
+def convert_llm_findings_to_decisions(
+    report: dict[str, Any],
+    auto_apply: bool = False,
+    curator_job_id: str = "",
+    curator_batch_id: str = "",
+) -> dict[str, Any]:
     decisions: list[dict[str, Any]] = []
     applied: list[dict[str, Any]] = []
     skipped_keep = 0
@@ -537,6 +555,8 @@ def convert_llm_findings_to_decisions(report: dict[str, Any], auto_apply: bool =
                 risk_level=risk,
                 finding=finding,
                 raw_response_ref="llm_raw" if finding.get("llm_raw") else "",
+                curator_job_id=curator_job_id,
+                curator_batch_id=curator_batch_id,
             )
             decisions.append(decision)
             if auto_apply and decision["review_status"] == "auto_approved":
@@ -560,10 +580,13 @@ def _risk_for_action(action: str) -> str:
 def reject_governance_decision(decision_id: str, source_agent: str = "agent", reason: str = "") -> dict[str, Any]:
     ts = now()
     with managed_conn() as conn:
+        row = conn.execute("SELECT * FROM governance_decisions WHERE id=?", (decision_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"governance decision not found: {decision_id}")
+        if row["review_status"] not in ACTIONABLE_REVIEW_STATUSES:
+            raise ValueError(f"decision cannot be rejected from status {row['review_status']!r}")
         conn.execute("UPDATE governance_decisions SET review_status='rejected', updated_at=? WHERE id=?", (ts, decision_id))
         row = conn.execute("SELECT * FROM governance_decisions WHERE id=?", (decision_id,)).fetchone()
-    if row is None:
-        raise ValueError(f"governance decision not found: {decision_id}")
     decision = _decision_row_to_dict(row)
     _audit.log_audit_event("governance_decision_reject", memory_id=(decision["source_ids"][0] if decision["source_ids"] else None), agent=source_agent, detail={"decision_id": decision_id, "reason": reason})
     return decision

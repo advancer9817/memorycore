@@ -411,3 +411,4 @@ Final acceptance criteria:
 
 - 2026-06-24 初版：基于全项目审计的修复计划
 - 2026-06-24 详化版：用实测数据核实全部断言，补充量化基线（测试 4 failed / 队列 1759 needs_review）、精确代码位置、正确修复路径、Phase 1.3 已实施记录、修正前端冗余组件断言
+- 2026-06-24 收尾版：Phase 1 P0 后端缺陷已修复；Phase 2 审计目标已达成（needs_review 从 1759 降至 411，低于 <500 目标，当前 dry-run 无更多可安全重分类项）；Phase 3 未知 source_agent 稳定路由已修复；Phase 4 Dashboard 首屏已收敛为健康情报入口，调参/运维执行组件不再直接挂在首页；Phase 5 Graph 品牌残留从 `NeuralGraph` 改为 `Memory Graph`；Phase 6 进入全量验证。

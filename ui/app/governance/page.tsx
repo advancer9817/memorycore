@@ -50,7 +50,7 @@ const DECISION_TYPE_FILTERS: DecisionTypeFilter[] = [
   { value: "split_candidate", labelKey: "filterSplits" },
 ];
 
-const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 500, 1000] as const;
 
 function GovernancePageInner() {
   const { messages } = useI18n();

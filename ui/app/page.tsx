@@ -10,10 +10,8 @@ export default function DashboardPage() {
     <div className="text-white py-6">
       <div className="container">
         <div className="w-full mx-auto space-y-6">
-          <div>
-            <div className="animate-fade-slide-down">
-              <MemoryOperationsPanel />
-            </div>
+          <div className="animate-fade-slide-down">
+            <MemoryOperationsPanel />
           </div>
 
           <div className="animate-fade-slide-down delay-1">

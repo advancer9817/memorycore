@@ -56,7 +56,7 @@ export function GraphTopbar({
       <div className="flex items-center gap-2 shrink-0">
         <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse" />
         <span className="font-mono text-xs font-bold uppercase tracking-[0.15em] text-cyan-500/70 select-none">
-          NeuralGraph
+          Memory Graph
         </span>
       </div>
 
