@@ -117,38 +117,41 @@ function GovernancePageInner() {
   }, [paginated]);
 
   const runBatch = useCallback(async (ids: string[], action: "apply" | "reject") => {
-    if (!ids.length) return 0;
+    if (!ids.length) return { applied: 0, skipped: 0, rejectCount: 0 };
     if (action === "apply") {
       try {
-        return await cockpit.applyBatchDecisions(ids);
+        const result = await cockpit.applyBatchDecisions(ids);
+        return { applied: result.applied, skipped: result.skipped, rejectCount: 0 };
       } catch {
-        return 0;
+        return { applied: 0, skipped: 0, rejectCount: 0 };
       }
     }
 
-    let successCount = 0;
+    let rejectCount = 0;
     const reason = messages.governance.defaultRejectReason;
     for (const id of ids) {
       try {
         await cockpit.rejectDecisionOrThrow(id, reason);
-        successCount++;
+        rejectCount++;
       } catch {
         // individual failures handled by the hook's toast
       }
     }
-    return successCount;
+    return { applied: 0, skipped: 0, rejectCount };
   }, [cockpit, messages.governance.defaultRejectReason]);
 
   const runSelectedBatch = useCallback(async (action: "apply" | "reject") => {
     const ids = Array.from(selectedIds);
     if (!ids.length) return;
     setBatchPending(true);
-    const successCount = await runBatch(ids, action);
+    const result = await runBatch(ids, action);
     setBatchPending(false);
     setSelectedIds(new Set());
-    if (successCount > 0) {
+    const count = action === "apply" ? result.applied : result.rejectCount;
+    if (count > 0) {
       const actionLabel = action === "apply" ? messages.governance.apply : messages.governance.reject;
-      toast({ description: messages.governance.batchSuccess(successCount, actionLabel) });
+      const skippedNote = result.skipped > 0 ? `（跳过 ${result.skipped} 条低置信度）` : "";
+      toast({ description: `${messages.governance.batchSuccess(count, actionLabel)}${skippedNote}` });
     }
     await cockpit.refresh();
   }, [selectedIds, runBatch, messages.governance, toast, cockpit]);
@@ -157,11 +160,12 @@ function GovernancePageInner() {
     const ids = paginated.filter(isActionableDecision).map((d) => d.id);
     if (!ids.length) return;
     setBatchPending(true);
-    const successCount = await runBatch(ids, "apply");
+    const result = await runBatch(ids, "apply");
     setBatchPending(false);
     setSelectedIds(new Set());
-    if (successCount > 0) {
-      toast({ description: messages.governance.batchSuccess(successCount, messages.governance.apply) });
+    if (result.applied > 0 || result.skipped > 0) {
+      const skippedNote = result.skipped > 0 ? `，跳过 ${result.skipped} 条低置信度` : "";
+      toast({ description: `已应用 ${result.applied} 条${skippedNote}` });
     }
     await cockpit.refresh();
   }, [paginated, cockpit, runBatch, messages.governance, toast]);

@@ -51,7 +51,7 @@ interface UseGovernanceCockpitReturn extends GovernanceCockpitState {
   rollbackDecision: (decisionId: string) => Promise<void>;
   applyDecisionOrThrow: (decisionId: string) => Promise<void>;
   rejectDecisionOrThrow: (decisionId: string, reason: string) => Promise<void>;
-  applyBatchDecisions: (decisionIds: string[]) => Promise<number>;
+  applyBatchDecisions: (decisionIds: string[]) => Promise<{ applied: number; skipped: number }>;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -302,17 +302,17 @@ export function useGovernanceCockpit(): UseGovernanceCockpitReturn {
     runAction(decisionId, "reject", { source_agent: "frontend", reason }, "Decision rejected"),
   [runAction]);
 
-  const applyBatchDecisions = useCallback(async (decisionIds: string[]): Promise<number> => {
-    if (!decisionIds.length) return 0;
+  const applyBatchDecisions = useCallback(async (decisionIds: string[]): Promise<{ applied: number; skipped: number }> => {
+    if (!decisionIds.length) return { applied: 0, skipped: 0 };
     setState((current) => ({ ...current, actionPendingId: "batch", error: null }));
     try {
-      const result = await fetchJson<{ applied_count: number }>(`${baseUrl}/api/governance/batch/apply`, {
+      const result = await fetchJson<{ applied_count: number; skipped_count?: number }>(`${baseUrl}/api/governance/batch/apply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ decision_ids: decisionIds, source_agent: "frontend" }),
       });
       await loadOverview();
-      return result.applied_count || 0;
+      return { applied: result.applied_count || 0, skipped: result.skipped_count || 0 };
     } catch (error: unknown) {
       const message = getErrorMessage(error);
       setState((current) => ({ ...current, error: message }));

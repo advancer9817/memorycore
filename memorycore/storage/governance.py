@@ -663,10 +663,13 @@ def apply_governance_decisions_batch(decision_ids: list[str], source_agent: str 
         else:
             valid_decisions.append(d)
 
+    skipped_decisions: list[dict] = []
     if not valid_decisions:
         return {
             "applied_count": 0,
             "decisions": [],
+            "skipped_count": len(skipped_decisions),
+            "skipped": skipped_decisions,
             "already_applied": [d["id"] for d in already_applied]
         }
 
@@ -686,12 +689,16 @@ def apply_governance_decisions_batch(decision_ids: list[str], source_agent: str 
         )
         policy_results = [evaluate_mutation_policy(req, context) for req in requests]
 
-        # Enforce batch policy gate: if any request is blocked (queued or rejected), fail the entire batch
+        # Skip decisions blocked by policy (confidence_below_auto_threshold, etc.)
+        # rather than failing the entire batch — collect them for reporting.
         blocking = [r for r in policy_results if r["policy_decision"] in {"queued", "rejected"}]
         if blocking:
-            raise ValueError(
-                f"decision {d['id']} is blocked by policy: {blocking[0]['policy_reason']}"
-            )
+            skipped_decisions.append({
+                "id": d["id"],
+                "reason": blocking[0]["policy_reason"],
+                "decision_type": d.get("decision_type", ""),
+            })
+            continue
         all_requests_with_decisions.append((d, requests, context, policy_results))
 
     results = []
@@ -825,6 +832,8 @@ def apply_governance_decisions_batch(decision_ids: list[str], source_agent: str 
         "applied_count": len(applied_decisions),
         "decisions": applied_decisions,
         "already_applied": [d["id"] for d in already_applied],
+        "skipped_count": len(skipped_decisions),
+        "skipped": skipped_decisions,
         "run_id": run_id
     }
 
