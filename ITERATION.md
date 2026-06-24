@@ -4418,3 +4418,5 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 ### 回滚
 `git revert HEAD`
+
+- [2026-06-24] 拉取 origin/main 最新代码，并将更新部署至本地环境，通过 mcore restart 重启相关 systemd 服务。
