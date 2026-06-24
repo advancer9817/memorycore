@@ -310,7 +310,7 @@ function GovernancePageInner() {
         </div>
 
         {/* Pagination */}
-        {totalPages > 1 && (
+        {cockpit.decisions.length > 0 && (
           <div className="mt-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="text-sm text-zinc-500">

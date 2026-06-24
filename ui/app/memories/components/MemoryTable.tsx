@@ -125,9 +125,9 @@ export function MemoryTable() {
 
   return (
     <TooltipProvider>
-    <div className="rounded-md border">
+    <div className="rounded-md border h-[calc(100vh-230px)] overflow-y-auto">
       <Table className="">
-        <TableHeader>
+        <TableHeader className="sticky top-0 z-10 bg-zinc-900">
           <TableRow className="bg-zinc-800 hover:bg-zinc-800">
             <TableHead className="w-[50px] pl-4">
               <Checkbox

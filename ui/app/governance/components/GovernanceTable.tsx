@@ -50,9 +50,9 @@ export function GovernanceTable({
   const isPartial = selectableDecisions.some((d) => selectedIds.has(d.id)) && !isAllSelected;
 
   return (
-    <div className="rounded-md border border-zinc-800">
+    <div className="rounded-md border border-zinc-800 h-[calc(100vh-230px)] overflow-y-auto">
       <Table>
-        <TableHeader>
+        <TableHeader className="sticky top-0 z-10 bg-zinc-900">
           <TableRow className="bg-zinc-800 hover:bg-zinc-800">
             <TableHead className="w-[50px] pl-4">
               <Checkbox

@@ -397,7 +397,7 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
 
     if parts == ["governance", "decisions"] and method == "GET":
         from memorycore.storage.governance import list_governance_decisions
-        return list_governance_decisions(_str_q(query, "review_status", None), _str_q(query, "decision_type", None), _int_q(query, "limit", 100))
+        return list_governance_decisions(_str_q(query, "review_status", None), _str_q(query, "decision_type", None), _int_q(query, "limit", None))
     if len(parts) == 2 and parts[0] == "governance" and parts[1] not in ("decisions", "metrics", "counts") and method == "GET":
         from memorycore.storage.governance import get_governance_decision
         decision = get_governance_decision(parts[1])
@@ -1265,9 +1265,11 @@ def _str_q(query: dict[str, list[str]], key: str, default: str | None = "") -> s
     return values[-1]
 
 
-def _int_q(query: dict[str, list[str]], key: str, default: int) -> int:
-    value = _str_q(query, key, str(default))
-    return int(value or default)
+def _int_q(query: dict[str, list[str]], key: str, default: int | None) -> int | None:
+    value = _str_q(query, key, str(default) if default is not None else None)
+    if value is None or value == "None":
+        return default
+    return int(value)
 
 
 def _bool_q(query: dict[str, list[str]], key: str, default: bool) -> bool:
