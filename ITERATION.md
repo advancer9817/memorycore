@@ -4442,3 +4442,10 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
   4. **批量操作安全**（UI）：治理页“一键应用全部”改为“应用本页”，仅应用当前分页里的可操作项，降低大队列下误批量执行风险。
   5. **实测队列变化**：接口验证时执行了一次非 dry-run 重分类，107 条历史 `needs_review` 被移动到 `auto_approved`；未执行 apply，相关 memory 状态未被修改。
   6. **验证**：`.venv/bin/python -m py_compile memorycore/storage/governance.py memorycore/frontend.py memorycore/storage/__init__.py memorycore/server.py` 通过；`timeout 60 .venv/bin/python -m pytest tests/test_governance.py -q` 结果 24 passed, 1 warning；`cd ui && pnpm exec tsc --noEmit` 通过。`tests/test_frontend.py` 两个定向用例在 60 秒内无输出被 timeout 终止，未计为通过。
+
+- [2026-06-24] Phase 3 Apps/source-agent workflow 修复：
+  1. **未知 source_agent 不再丢弃**（`frontend.py`）：`_apps_list()` 移除 `_KNOWN_AGENTS` 白名单过滤；未知 source_agent 以原始 id/name 进入 Apps 列表，保持稳定路由。
+  2. **已知 agent 别名保留**：新增 `_app_id_for_source_agent()` 与 `_source_agents_for_app_id()`；`claude-code → claude`、`hermes-* → hermes` 等 display-name 聚合仍然生效。
+  3. **路由一致性**：`/api/v1/apps/{app_id}`、`/api/v1/apps/{app_id}/memories`、`DELETE /api/v1/apps/{app_id}` 使用同一组 source_agent 别名解析；memories 路由改为按 source_agent 直接 SQL 分页查询，不再依赖全局 search limit 后过滤。
+  4. **测试覆盖**：新增 `test_frontend_apps_include_unknown_source_agent_with_stable_routes`，覆盖 `source_agent=memorycore-smoke-test` 在 Apps 列表、detail、memories 路由中的一致性。
+  5. **验证**：`.venv/bin/python -m py_compile memorycore/frontend.py` 通过；直接调用 `_dispatch_api_sync()` 验证 `memorycore-smoke-test` 的 `in_apps=True/detail_ok=True/memory_ok=True`；`cd ui && pnpm exec tsc --noEmit` 通过。`timeout 60 .venv/bin/python -m pytest tests/test_frontend.py::test_frontend_apps_include_unknown_source_agent_with_stable_routes -q` 无输出超时，未计为通过。

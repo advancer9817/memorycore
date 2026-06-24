@@ -131,6 +131,30 @@ def test_frontend_v1_memory_compat_routes():
     assert deleted.json()["status"] == "archived"
 
 
+def test_frontend_apps_include_unknown_source_agent_with_stable_routes():
+    source_agent = "memorycore-smoke-test"
+    record = add_memory_record(
+        "project_memory",
+        "Smoke source agent",
+        "memorycore smoke source agent route content",
+        source_agent=source_agent,
+    )
+
+    with _client() as client:
+        apps = client.get("/api/v1/apps/?page_size=100")
+        detail = client.get(f"/api/v1/apps/{source_agent}")
+        memories = client.get(f"/api/v1/apps/{source_agent}/memories?page=1&page_size=20")
+
+    assert apps.status_code == 200
+    app = next(row for row in apps.json()["apps"] if row["id"] == source_agent)
+    assert app["name"] == source_agent
+    assert app["total_memories_created"] >= 1
+    assert detail.status_code == 200
+    assert detail.json()["total_memories_created"] >= 1
+    assert memories.status_code == 200
+    assert any(item["id"] == record["id"] for item in memories.json()["memories"])
+
+
 def test_frontend_invalid_json_returns_400():
     with _client() as client:
         response = client.post("/api/memories", data="{bad", headers={"content-type": "application/json"})

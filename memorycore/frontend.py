@@ -15,7 +15,7 @@ from urllib.parse import parse_qs
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
-from memorycore.models import MEMORY_TYPES, STATUSES, VALID_RELATION_TYPES, load_config, config_path
+from memorycore.models import MEMORY_TYPES, STATUSES, VALID_RELATION_TYPES, load_config, config_path, row_to_dict
 from memorycore.storage.db import _managed_query
 from memorycore.storage import (
     add_feedback,
@@ -664,9 +664,30 @@ def _dispatch_v1_compat(
     if len(parts) == 3 and parts[0] == "apps" and parts[2] == "memories" and method == "GET":
         page = _int_q(query, "page", 1)
         page_size = _int_q(query, "page_size", 50)
-        rows = search_memory_records(status="active", limit=max(page * page_size, 1000))
-        rows = [row for row in rows if (row.get("source_agent") or "manual") == parts[1]]
-        return {"memories": [_memory_item(row) for row in rows], "total": len(rows), "page": page, "page_size": page_size}
+        source_agents = set(_source_agents_for_app_id(parts[1]))
+        placeholders = ",".join("?" for _ in source_agents)
+        offset = max(0, page - 1) * page_size
+        from memorycore.storage.db import read_conn as _rc_apps
+        with _rc_apps() as conn:
+            total_row = conn.execute(
+                f"SELECT COUNT(*) as cnt FROM memories WHERE status='active' AND source_agent IN ({placeholders})",
+                tuple(source_agents),
+            ).fetchone()
+            rows = conn.execute(
+                f"""
+                SELECT * FROM memories
+                WHERE status='active' AND source_agent IN ({placeholders})
+                ORDER BY COALESCE(updated_at, created_at) DESC
+                LIMIT ? OFFSET ?
+                """,
+                (*source_agents, page_size, offset),
+            ).fetchall()
+        return {
+            "memories": [_memory_item(row_to_dict(row)) for row in rows],
+            "total": int(total_row["cnt"] if total_row else 0),
+            "page": page,
+            "page_size": page_size,
+        }
     if len(parts) == 3 and parts[0] == "apps" and parts[2] == "accessed" and method == "GET":
         return {"memories": [], "total": 0, "page": _int_q(query, "page", 1), "page_size": _int_q(query, "page_size", 50)}
     if len(parts) == 2 and parts[0] == "apps" and method == "DELETE":
@@ -831,6 +852,19 @@ _AGENT_DISPLAY_NAME: dict[str, str] = {
     "default-router": "hermes",
 }
 
+
+def _app_id_for_source_agent(source_agent: str | None) -> str:
+    agent_raw = str(source_agent or "manual")
+    return _AGENT_DISPLAY_NAME.get(agent_raw, agent_raw)
+
+
+def _source_agents_for_app_id(app_id: str) -> list[str]:
+    aliases = [source for source, app in _AGENT_DISPLAY_NAME.items() if app == app_id]
+    if app_id not in aliases:
+        aliases.append(app_id)
+    return aliases
+
+
 def _apps_list(
     limit: int = 50,
     name: str = "",
@@ -850,9 +884,7 @@ def _apps_list(
     apps_by_id: dict[str, dict[str, Any]] = {}
     for row in agg_rows:
         agent_raw = str(row["source_agent"] or "manual")
-        if agent_raw not in _KNOWN_AGENTS:
-            continue
-        app = _AGENT_DISPLAY_NAME.get(agent_raw, agent_raw)
+        app = _app_id_for_source_agent(agent_raw)
         if name and name.lower() not in app.lower():
             continue
         existing = apps_by_id.get(app)
@@ -921,10 +953,12 @@ def _apps_list(
 
 def _app_details(app_id: str) -> dict[str, Any]:
     from memorycore.storage.db import read_conn as _rc
+    source_agents = _source_agents_for_app_id(app_id)
+    placeholders = ",".join("?" for _ in source_agents)
     with _rc() as conn:
         row = conn.execute(
-            "SELECT COUNT(*) as cnt FROM memories WHERE status='active' AND source_agent=?",
-            (app_id,),
+            f"SELECT COUNT(*) as cnt FROM memories WHERE status='active' AND source_agent IN ({placeholders})",
+            tuple(source_agents),
         ).fetchone()
     total = int(row["cnt"]) if row else 0
     return {
@@ -939,10 +973,12 @@ def _app_details(app_id: str) -> dict[str, Any]:
 def _delete_app_memories(app_id: str) -> dict[str, Any]:
     from memorycore.storage.db import read_conn as _rc, managed_conn as _mc
     from memorycore.models import now as _now
+    source_agents = _source_agents_for_app_id(app_id)
+    source_placeholders = ",".join("?" for _ in source_agents)
     with _rc() as conn:
         rows = conn.execute(
-            "SELECT id FROM memories WHERE status='active' AND source_agent=?",
-            (app_id,),
+            f"SELECT id FROM memories WHERE status='active' AND source_agent IN ({source_placeholders})",
+            tuple(source_agents),
         ).fetchall()
     target_ids = [str(row["id"]) for row in rows]
     if not target_ids:
