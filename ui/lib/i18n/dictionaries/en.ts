@@ -264,9 +264,9 @@ export const en = {
     batchRejectConfirm: (count: number) => `Reject ${count} selected decisions?`,
     batchSuccess: (count: number, action: string) => `${count} decisions ${action}`,
     selected: (count: number) => `${count} selected`,
-    approveAll: (count: number) => `Approve all (${count})`,
-    confirmApproveAllTitle: "Approve all actionable decisions?",
-    confirmApproveAllDescription: (count: number) => `This will apply all ${count} actionable decisions. Each mutation will be recorded and can be reviewed in history.`,
+    approveAll: (count: number) => `Approve page (${count})`,
+    confirmApproveAllTitle: "Approve actionable decisions on this page?",
+    confirmApproveAllDescription: (count: number) => `This will apply ${count} actionable decisions on the current page. Each mutation will be recorded and can be reviewed in history.`,
     jumpToPage: "Go to page",
     goButton: "Go",
     statusLabels: {

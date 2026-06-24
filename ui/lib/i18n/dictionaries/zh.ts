@@ -266,9 +266,9 @@ export const zh = {
     batchRejectConfirm: (count: number) => `拒绝 ${count} 条选中的决策？`,
     batchSuccess: (count: number, action: string) => `已${action} ${count} 条决策`,
     selected: (count: number) => `已选 ${count} 条`,
-    approveAll: (count: number) => `一键应用全部（${count}）`,
-    confirmApproveAllTitle: "应用全部可操作决策？",
-    confirmApproveAllDescription: (count: number) => `将应用全部 ${count} 条可操作决策。每次变更都会被记录，可在历史中查看。`,
+    approveAll: (count: number) => `应用本页（${count}）`,
+    confirmApproveAllTitle: "应用本页可操作决策？",
+    confirmApproveAllDescription: (count: number) => `将应用当前页 ${count} 条可操作决策。每次变更都会被记录，可在历史中查看。`,
     jumpToPage: "跳转页码",
     goButton: "跳转",
     statusLabels: {

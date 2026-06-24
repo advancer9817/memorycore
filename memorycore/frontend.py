@@ -407,6 +407,13 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
     if parts == ["governance", "batch", "apply"] and method == "POST":
         from memorycore.storage.governance import apply_governance_decisions_batch
         return apply_governance_decisions_batch(body.get("decision_ids", []), source_agent=body.get("source_agent", "frontend"))
+    if parts == ["governance", "recalibrate"] and method == "POST":
+        from memorycore.storage.governance import recalibrate_governance_review_queue
+        return recalibrate_governance_review_queue(
+            limit=body.get("limit"),
+            dry_run=bool(body.get("dry_run", True)),
+            source_agent=body.get("source_agent", "frontend"),
+        )
     if len(parts) == 3 and parts[0] == "governance" and parts[2] == "apply" and method == "POST":
         from memorycore.storage.governance import apply_governance_decision
         return apply_governance_decision(parts[1], source_agent=body.get("source_agent", "frontend"))

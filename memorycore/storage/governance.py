@@ -25,7 +25,7 @@ PRECIOUS_TYPES = {"user_profile", "decision", "project_memory"}
 HIGH_IMPORTANCE_THRESHOLD = 0.85
 AUTO_CONFIDENCE_THRESHOLD = 0.90
 REVIEW_CONFIDENCE_THRESHOLD = 0.55
-POLICY_VERSION = "2026-06-09.1"
+POLICY_VERSION = "2026-06-24.2"
 JUDGE_SCHEMA_VERSION = "1"
 DECISION_VERSION = "1"
 JUDGE_MODEL = "deterministic"
@@ -207,6 +207,7 @@ def policy_gate(
     is_high_importance = any(float(m.get("importance") or 0.0) >= HIGH_IMPORTANCE_THRESHOLD for m in memories)
     has_positive_feedback = any(float(m.get("feedback_score") or 0.0) > 0 for m in memories)
     is_destructive = action in DESTRUCTIVE_ACTIONS or "delete" in action or "merge" in action
+    is_simple_duplicate_archive = action == "archive_duplicate" and normalized_risk == "low"
 
     if is_precious:
         reasons.append("precious_memory_type")
@@ -241,7 +242,19 @@ def policy_gate(
         and not is_precious
         and not is_high_importance
     )
-    effective_auto_threshold = 0.70 if is_low_risk_importance_adjustment else AUTO_CONFIDENCE_THRESHOLD
+    is_low_risk_duplicate_archive = (
+        is_simple_duplicate_archive
+        and not is_precious
+        and not is_high_importance
+        and not has_positive_feedback
+    )
+    effective_auto_threshold = (
+        0.70
+        if is_low_risk_importance_adjustment
+        else 0.72
+        if is_low_risk_duplicate_archive
+        else AUTO_CONFIDENCE_THRESHOLD
+    )
     if confidence < effective_auto_threshold:
         reasons.append("confidence_below_auto_threshold")
 
@@ -257,6 +270,123 @@ def policy_gate(
         "policy_reason": "low-risk high-confidence recommendation",
         "policy_reasons": [],
         "policy_version": POLICY_VERSION,
+    }
+
+
+def _memory_snapshot_by_id(memory_ids: list[str]) -> dict[str, dict[str, Any]]:
+    return {str(row.get("id")): row for row in _fetch_memory_summaries(memory_ids)}
+
+
+def _decision_memories_for_policy(decision: dict[str, Any]) -> list[dict[str, Any]]:
+    source_ids = [str(item) for item in decision.get("source_ids", []) if item]
+    by_id = _memory_snapshot_by_id(source_ids)
+    finding = decision.get("finding") or {}
+    action = decision.get("recommended_action")
+    if action in {"archive_duplicate", "archive_and_merge_duplicate"}:
+        drop_id = str(finding.get("drop_id") or "")
+        if drop_id and drop_id in by_id:
+            return [by_id[drop_id]]
+    if action == "supersede":
+        older_id = str(finding.get("older_id") or finding.get("old_id") or "")
+        if older_id and older_id in by_id:
+            return [by_id[older_id]]
+    if action in {"promote", "downgrade", "archive", "split", "mark_contradicted"}:
+        primary_id = str(finding.get("id") or finding.get("older_id") or "")
+        if primary_id and primary_id in by_id:
+            return [by_id[primary_id]]
+    return [by_id[item] for item in source_ids if item in by_id]
+
+
+def recalibrate_governance_review_queue(limit: int | None = None, dry_run: bool = True, source_agent: str = "maintenance") -> dict[str, Any]:
+    """Reclassify existing low-risk needs_review decisions under the current policy.
+
+    This never applies mutations. It only moves decisions that now pass the policy gate
+    from needs_review to auto_approved so explicit apply/batch apply remains the final
+    mutation boundary.
+    """
+    cap = max(1, int(limit)) if limit is not None else None
+    params: list[Any] = []
+    limit_clause = ""
+    if cap is not None:
+        params.append(cap)
+        limit_clause = " LIMIT ?"
+    with read_conn() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT * FROM governance_decisions
+            WHERE review_status='needs_review'
+              AND recommended_action != 'keep'
+            ORDER BY created_at DESC
+            {limit_clause}
+            """,
+            tuple(params),
+        ).fetchall()
+
+    candidates: list[dict[str, Any]] = []
+    unchanged = 0
+    rejected = 0
+    for row in rows:
+        decision = _decision_row_to_dict(row)
+        gate = policy_gate(
+            decision["recommended_action"],
+            float(decision.get("llm_confidence") or 0.0),
+            str(decision.get("risk_level") or "medium"),
+            memories=_decision_memories_for_policy(decision),
+        )
+        if gate["review_status"] == "auto_approved":
+            candidates.append({**decision, "_gate": gate})
+        elif gate["review_status"] == "rejected":
+            rejected += 1
+        else:
+            unchanged += 1
+
+    changed_ids = [item["id"] for item in candidates]
+    if changed_ids and not dry_run:
+        ts = now()
+        with managed_conn() as conn:
+            for item in candidates:
+                gate = item["_gate"]
+                conn.execute(
+                    """
+                    UPDATE governance_decisions
+                    SET review_status='auto_approved', policy_reason=?, policy_reasons_json=?,
+                        policy_version=?, updated_at=?
+                    WHERE id=? AND review_status='needs_review'
+                    """,
+                    (
+                        gate["policy_reason"],
+                        as_json(gate.get("policy_reasons", [])),
+                        gate.get("policy_version", POLICY_VERSION),
+                        ts,
+                        item["id"],
+                    ),
+                )
+        for item in candidates:
+            _audit.log_audit_event(
+                "governance_decision_recalibrate",
+                memory_id=(item["source_ids"][0] if item["source_ids"] else None),
+                agent=source_agent,
+                detail={
+                    "decision_id": item["id"],
+                    "from": "needs_review",
+                    "to": "auto_approved",
+                    "policy_version": item["_gate"].get("policy_version", POLICY_VERSION),
+                },
+            )
+
+    by_type: dict[str, int] = {}
+    for item in candidates:
+        decision_type = str(item.get("decision_type") or "unknown")
+        by_type[decision_type] = by_type.get(decision_type, 0) + 1
+    return {
+        "dry_run": dry_run,
+        "checked": len(rows),
+        "would_reclassify": len(candidates),
+        "reclassified": 0 if dry_run else len(candidates),
+        "unchanged": unchanged,
+        "would_reject": rejected,
+        "by_type": by_type,
+        "decision_ids": changed_ids,
     }
 
 

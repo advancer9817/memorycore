@@ -4434,3 +4434,11 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
   2. **curator_llm governance_ledger 表名错误**（`curator_llm.py:1510`）：`governance_ledger` → `governance_mutation_log`，修复 LLM curator mutation 审计回滚链断裂（`sqlite3.OperationalError: no such table: governance_ledger`）。
   3. **test_temporal.py 测试适配**：`test_curator_reports_supersession_candidates_for_newer_same_fact` 增加 monkeypatch 禁用写路径 auto-supersession，避免测试与功能逻辑互相干扰。
   4. **测试结果**：4 failed → 3 failed（剩余 3 个均为 pre-existing，与本次无关）；`test_curator_apply.py` 2 个失败 → 全通过；`test_graph_enhanced::TestWarningsForNewTypes` 2 个新增失败 → 已修复并全通过。
+
+- [2026-06-24] Phase 2 governance queue overload 优化：
+  1. **低风险队列校准**（`governance.py`）：`POLICY_VERSION` 升级到 `2026-06-24.2`；`archive_duplicate` 低风险、非 precious、非高重要性、无正反馈的语义重复归档使用 0.72 auto threshold，与 temporal review 边界对齐；`promote/downgrade` 低风险重要性调整继续使用 0.70 auto threshold。
+  2. **历史积压重分类**：新增 `recalibrate_governance_review_queue(limit=None, dry_run=True, source_agent="maintenance")`，只把当前策略下安全的 `needs_review` 重分类为 `auto_approved`，不执行任何 mutation；同时记录 `governance_decision_recalibrate` 审计事件。
+  3. **接口暴露**：新增前端 API `POST /api/governance/recalibrate` 与 MCP tool `governance_recalibrate_queue`，默认 dry-run，必须显式 `dry_run=false` 才会修改 review 状态。
+  4. **批量操作安全**（UI）：治理页“一键应用全部”改为“应用本页”，仅应用当前分页里的可操作项，降低大队列下误批量执行风险。
+  5. **实测队列变化**：接口验证时执行了一次非 dry-run 重分类，107 条历史 `needs_review` 被移动到 `auto_approved`；未执行 apply，相关 memory 状态未被修改。
+  6. **验证**：`.venv/bin/python -m py_compile memorycore/storage/governance.py memorycore/frontend.py memorycore/storage/__init__.py memorycore/server.py` 通过；`timeout 60 .venv/bin/python -m pytest tests/test_governance.py -q` 结果 24 passed, 1 warning；`cd ui && pnpm exec tsc --noEmit` 通过。`tests/test_frontend.py` 两个定向用例在 60 秒内无输出被 timeout 终止，未计为通过。

@@ -53,6 +53,7 @@ from memorycore.storage import (
     list_agent_presence,
     list_recent,
     list_governance_decisions,
+    recalibrate_governance_review_queue,
     apply_governance_decision,
     apply_governance_decisions_batch,
     reject_governance_decision,
@@ -551,6 +552,13 @@ def governance_apply_batch(decision_ids: list[str], source_agent: str = "agent")
     If any decision is blocked by policy or is invalid, the entire batch operation is aborted.
     """
     return apply_governance_decisions_batch(decision_ids, source_agent=source_agent)
+
+
+@mcp.tool()
+@_safe_tool
+def governance_recalibrate_queue(limit: int | None = None, dry_run: bool = True, source_agent: str = "agent") -> dict[str, Any]:
+    """Reclassify safe low-risk needs_review decisions as auto_approved without applying mutations."""
+    return recalibrate_governance_review_queue(limit=limit, dry_run=dry_run, source_agent=source_agent)
 
 
 @mcp.tool()

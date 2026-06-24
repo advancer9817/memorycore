@@ -10,10 +10,11 @@ from memorycore.storage import (
     get_governance_metrics,
     list_governance_decisions,
     policy_gate,
+    recalibrate_governance_review_queue,
     reject_governance_decision,
     rollback_governance_decision,
 )
-from memorycore.storage.db import read_conn
+from memorycore.storage.db import managed_conn, read_conn
 
 
 def test_policy_gate_auto_approves_low_risk_high_confidence_memory():
@@ -39,6 +40,29 @@ def test_policy_gate_protects_precious_memory_from_auto_apply():
     assert "precious" in result["policy_reason"]
 
 
+def test_policy_gate_auto_approves_low_risk_duplicate_archive_above_calibrated_threshold():
+    result = policy_gate(
+        "archive_duplicate",
+        0.80,
+        "low",
+        memories=[{"type": "episodic_memory", "importance": 0.2, "feedback_score": 0}],
+    )
+
+    assert result["review_status"] == "auto_approved"
+
+
+def test_policy_gate_keeps_positive_feedback_duplicate_archive_in_review():
+    result = policy_gate(
+        "archive_duplicate",
+        0.99,
+        "low",
+        memories=[{"type": "episodic_memory", "importance": 0.2, "feedback_score": 1}],
+    )
+
+    assert result["review_status"] == "needs_review"
+    assert "positive_feedback_requires_review" in result["policy_reasons"]
+
+
 def test_policy_gate_rejects_delete_and_reviews_merge_actions():
     delete_result = policy_gate(
         "delete",
@@ -56,6 +80,44 @@ def test_policy_gate_rejects_delete_and_reviews_merge_actions():
     assert delete_result["review_status"] == "rejected"
     assert merge_result["review_status"] == "needs_review"
     assert "merge" in merge_result["policy_reason"]
+
+
+def test_recalibrate_governance_review_queue_promotes_safe_existing_decisions_without_applying():
+    keep = add_memory_record("episodic_memory", "Canonical duplicate", "Keep this duplicate", importance=0.3)
+    drop = add_memory_record("episodic_memory", "Duplicate copy", "Drop this duplicate", importance=0.2)
+    decision = create_governance_decision(
+        "semantic_duplicate",
+        "archive_duplicate",
+        [keep["id"], drop["id"]],
+        0.72,
+        "low",
+        {"keep_id": keep["id"], "drop_id": drop["id"], "action": "archive_duplicate"},
+    )
+    with managed_conn() as conn:
+        conn.execute(
+            "UPDATE governance_decisions SET review_status='needs_review', policy_reason='legacy threshold' WHERE id=?",
+            (decision["id"],),
+        )
+    with read_conn() as conn:
+        legacy = conn.execute("SELECT review_status FROM governance_decisions WHERE id=?", (decision["id"],)).fetchone()
+    assert legacy["review_status"] == "needs_review"
+
+    dry = recalibrate_governance_review_queue(dry_run=True, source_agent="pytest")
+    assert dry["would_reclassify"] >= 1
+    assert decision["id"] in dry["decision_ids"]
+    with read_conn() as conn:
+        before = conn.execute("SELECT review_status FROM governance_decisions WHERE id=?", (decision["id"],)).fetchone()
+        drop_status = conn.execute("SELECT status FROM memories WHERE id=?", (drop["id"],)).fetchone()
+    assert before["review_status"] == "needs_review"
+    assert drop_status["status"] == "active"
+
+    applied = recalibrate_governance_review_queue(dry_run=False, source_agent="pytest")
+    assert applied["reclassified"] >= 1
+    with read_conn() as conn:
+        after = conn.execute("SELECT review_status FROM governance_decisions WHERE id=?", (decision["id"],)).fetchone()
+        drop_status = conn.execute("SELECT status FROM memories WHERE id=?", (drop["id"],)).fetchone()
+    assert after["review_status"] == "auto_approved"
+    assert drop_status["status"] == "active"
 
 
 def test_governance_decision_persists_with_policy_status():
@@ -504,4 +566,3 @@ def test_apply_governance_decisions_batch_rollback():
 
     assert mem1["importance"] == 0.8
     assert dec1["review_status"] == "auto_approved"
-

@@ -82,7 +82,7 @@ function GovernancePageInner() {
     setJumpValue(String(page + 1));
   }, [page]);
 
-  const allActionableCount = cockpit.decisions.filter(isActionableDecision).length;
+  const pageActionableCount = paginated.filter(isActionableDecision).length;
 
   const handleJump = useCallback(() => {
     const n = parseInt(jumpValue, 10);
@@ -154,7 +154,7 @@ function GovernancePageInner() {
   }, [selectedIds, runBatch, messages.governance, toast, cockpit]);
 
   const runApproveAll = useCallback(async () => {
-    const ids = cockpit.decisions.filter(isActionableDecision).map((d) => d.id);
+    const ids = paginated.filter(isActionableDecision).map((d) => d.id);
     if (!ids.length) return;
     setBatchPending(true);
     const successCount = await runBatch(ids, "apply");
@@ -164,7 +164,7 @@ function GovernancePageInner() {
       toast({ description: messages.governance.batchSuccess(successCount, messages.governance.apply) });
     }
     await cockpit.refresh();
-  }, [cockpit, runBatch, messages.governance, toast]);
+  }, [paginated, cockpit, runBatch, messages.governance, toast]);
 
   return (
     <div className="text-white py-6">
@@ -251,7 +251,7 @@ function GovernancePageInner() {
               </DropdownMenu>
             )}
 
-            {allActionableCount > 0 && (
+            {pageActionableCount > 0 && (
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button
@@ -260,14 +260,14 @@ function GovernancePageInner() {
                     className="border-violet-700/50 bg-violet-950/40 text-violet-200 hover:bg-violet-900/50"
                   >
                     <CheckCheck className="mr-2 h-4 w-4" />
-                    {messages.governance.approveAll(allActionableCount)}
+                    {messages.governance.approveAll(pageActionableCount)}
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent className="border-zinc-800 bg-zinc-950 text-zinc-100">
                   <AlertDialogHeader>
                     <AlertDialogTitle>{messages.governance.confirmApproveAllTitle}</AlertDialogTitle>
                     <AlertDialogDescription className="text-zinc-400">
-                      {messages.governance.confirmApproveAllDescription(allActionableCount)}
+                      {messages.governance.confirmApproveAllDescription(pageActionableCount)}
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
