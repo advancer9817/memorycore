@@ -17,6 +17,15 @@ from memorycore.storage import (
 from memorycore.storage.db import managed_conn, read_conn
 
 
+def mark_memories_as_old(*memory_ids: str) -> None:
+    with managed_conn() as conn:
+        for memory_id in memory_ids:
+            conn.execute(
+                "UPDATE memories SET created_at='2000-01-01T00:00:00', updated_at='2000-01-01T00:00:00' WHERE id=?",
+                (memory_id,),
+            )
+
+
 def test_policy_gate_auto_approves_low_risk_high_confidence_memory():
     result = policy_gate(
         "downgrade",
@@ -85,6 +94,7 @@ def test_policy_gate_rejects_delete_and_reviews_merge_actions():
 def test_recalibrate_governance_review_queue_promotes_safe_existing_decisions_without_applying():
     keep = add_memory_record("episodic_memory", "Canonical duplicate", "Keep this duplicate", importance=0.3)
     drop = add_memory_record("episodic_memory", "Duplicate copy", "Drop this duplicate", importance=0.2)
+    mark_memories_as_old(keep["id"], drop["id"])
     decision = create_governance_decision(
         "semantic_duplicate",
         "archive_duplicate",
@@ -527,6 +537,54 @@ def test_apply_governance_decisions_batch_success():
     # Check audit log
     logs = get_audit_log(event_type="governance_decision_apply", limit=2)
     assert len(logs) >= 2
+
+
+def test_apply_governance_decisions_batch_skips_policy_blocked_decisions():
+    allowed_record = add_memory_record("episodic_memory", "Batch allowed", "Allowed downgrade", importance=0.8)
+    blocked_record = add_memory_record("episodic_memory", "Batch blocked", "Blocked archive", importance=0.7)
+
+    allowed = create_governance_decision(
+        "importance_reassessment",
+        "downgrade",
+        [allowed_record["id"]],
+        0.95,
+        "low",
+        {"id": allowed_record["id"], "action": "downgrade", "new_importance": 0.2},
+    )
+    blocked = create_governance_decision(
+        "importance_reassessment",
+        "downgrade",
+        [blocked_record["id"]],
+        0.50,
+        "low",
+        {"id": blocked_record["id"], "action": "downgrade", "new_importance": 0.1},
+    )
+    with managed_conn() as conn:
+        conn.execute(
+            "UPDATE governance_decisions SET review_status='auto_approved', policy_reason='legacy auto approval' WHERE id=?",
+            (blocked["id"],),
+        )
+
+    assert allowed["review_status"] == "auto_approved"
+
+    res = apply_governance_decisions_batch([allowed["id"], blocked["id"]], source_agent="pytest_batch")
+
+    assert res["applied_count"] == 1
+    assert [d["id"] for d in res["decisions"]] == [allowed["id"]]
+    assert res["skipped_count"] == 1
+    assert res["skipped"][0]["id"] == blocked["id"]
+    assert "confidence_below_review_threshold" in res["skipped"][0]["reason"]
+
+    with read_conn() as conn:
+        allowed_memory = conn.execute("SELECT importance FROM memories WHERE id=?", (allowed_record["id"],)).fetchone()
+        blocked_memory = conn.execute("SELECT status FROM memories WHERE id=?", (blocked_record["id"],)).fetchone()
+        allowed_decision = conn.execute("SELECT review_status FROM governance_decisions WHERE id=?", (allowed["id"],)).fetchone()
+        blocked_decision = conn.execute("SELECT review_status FROM governance_decisions WHERE id=?", (blocked["id"],)).fetchone()
+
+    assert allowed_memory["importance"] == 0.2
+    assert blocked_memory["status"] == "active"
+    assert allowed_decision["review_status"] == "applied"
+    assert blocked_decision["review_status"] == "auto_approved"
 
 
 def test_apply_governance_decisions_batch_rollback():

@@ -1,6 +1,6 @@
 "use client";
 
-import { Install } from "@/components/dashboard/Install";
+import { MemoryOperationsPanel } from "@/components/dashboard/MemoryOperationsPanel";
 import { CuratorTuningPanel } from "@/components/dashboard/CuratorTuningPanel";
 import { MemoryIntelligenceCenter } from "@/components/dashboard/MemoryIntelligenceCenter";
 import "@/styles/animation.css";
@@ -12,7 +12,7 @@ export default function DashboardPage() {
         <div className="w-full mx-auto space-y-6">
           <div>
             <div className="animate-fade-slide-down">
-              <Install />
+              <MemoryOperationsPanel />
             </div>
           </div>
 

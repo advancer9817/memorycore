@@ -4449,3 +4449,24 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
   3. **路由一致性**：`/api/v1/apps/{app_id}`、`/api/v1/apps/{app_id}/memories`、`DELETE /api/v1/apps/{app_id}` 使用同一组 source_agent 别名解析；memories 路由改为按 source_agent 直接 SQL 分页查询，不再依赖全局 search limit 后过滤。
   4. **测试覆盖**：新增 `test_frontend_apps_include_unknown_source_agent_with_stable_routes`，覆盖 `source_agent=memorycore-smoke-test` 在 Apps 列表、detail、memories 路由中的一致性。
   5. **验证**：`.venv/bin/python -m py_compile memorycore/frontend.py` 通过；直接调用 `_dispatch_api_sync()` 验证 `memorycore-smoke-test` 的 `in_apps=True/detail_ok=True/memory_ok=True`；`cd ui && pnpm exec tsc --noEmit` 通过。`timeout 60 .venv/bin/python -m pytest tests/test_frontend.py::test_frontend_apps_include_unknown_source_agent_with_stable_routes -q` 无输出超时，未计为通过。
+
+## [迭代 32] 2026-06-24 — 产品方向文档与 Governance/UI 收敛
+
+### 变更
+
+- 新增市场与产品方向文档 `docs/plans/2026-06-24-memorycore-market-product-direction.md`，将 MemoryCore 定位为 local-first Agent Memory OS，并明确 Context Lab、治理队列压缩、语义图谱质量、Operations console、source policy/privacy 五条优先方向。
+- Dashboard 历史 `Install` 组件重命名为 `MemoryOperationsPanel`，同步更新首页入口与设计文档命名，减少“安装页/运维面板”职责混淆。
+- 清理 Dashboard 下未引用的旧 governance/intelligence 组件路径，保留活跃 `/governance` 页面与 `ui/hooks/useGovernanceCockpit.ts` 作为唯一治理入口，避免后续改动落到错误组件树。
+- README、MCP tool 文档与 server docstring 对齐 `governance_apply_batch` 语义：无效 review status 仍整体拒绝；policy-blocked 决策跳过并报告；剩余可操作决策在同一事务中应用。
+
+### 修复
+
+- `_fetch_memory_summaries()` 补充 `created_at`、`updated_at` 字段，保证 recent-memory 相关 policy gate 有完整时间上下文。
+- `apply_governance_decisions_batch()` 空批次返回补齐 `skipped_count`、`skipped`、`already_applied` 字段，调用方不需要特殊分支处理。
+- 新增 batch apply 测试覆盖 legacy `auto_approved` 但当前 policy 不再允许的决策：确认该项被 skip，允许项继续 apply，且被 skip 的 memory 与 decision 状态保持不变。
+
+### 验证
+
+- `.venv/bin/python -m pytest tests/test_governance.py -q`：25 passed, 1 warning。
+- `.venv/bin/python -m py_compile memorycore/storage/governance.py memorycore/server.py`：通过。
+- `cd ui && pnpm exec tsc --noEmit`：通过。

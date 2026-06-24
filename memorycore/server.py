@@ -547,9 +547,11 @@ def governance_apply(decision_id: str, source_agent: str = "agent") -> dict[str,
 @mcp.tool()
 @_safe_tool
 def governance_apply_batch(decision_ids: list[str], source_agent: str = "agent") -> dict[str, Any]:
-    """Apply multiple approved governance decisions atomically in a single database transaction.
+    """Apply multiple actionable governance decisions as one batch.
 
-    If any decision is blocked by policy or is invalid, the entire batch operation is aborted.
+    Invalid review statuses abort the batch before mutations. Policy-blocked
+    decisions are skipped and reported while the remaining allowed decisions are
+    applied in one transaction.
     """
     return apply_governance_decisions_batch(decision_ids, source_agent=source_agent)
 

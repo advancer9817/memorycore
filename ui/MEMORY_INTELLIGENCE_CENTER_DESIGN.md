@@ -8,7 +8,7 @@ We recommend scaffolding a new module within `components/dashboard/` to contain 
 
 ```text
 app/page.tsx (DashboardPage)
-├── components/dashboard/Install.tsx (Existing Operations Cards)
+├── components/dashboard/MemoryOperationsPanel.tsx (Existing Operations Cards)
 └── components/dashboard/intelligence/MemoryIntelligenceCenter.tsx (New Wrapper)
     ├── NeedsAttentionWidget.tsx
     ├── MemoryHealthWidget.tsx

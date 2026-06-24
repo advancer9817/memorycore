@@ -117,7 +117,7 @@ function formatTime(value?: string, locale: "en" | "zh" = "en") {
   });
 }
 
-export const Install = () => {
+export const MemoryOperationsPanel = () => {
   const { messages: t, locale } = useI18n();
   const [status, setStatus] = useState<CuratorStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -700,7 +700,7 @@ export const Install = () => {
   );
 };
 
-export default Install;
+export default MemoryOperationsPanel;
 
 function LlmElapsedTimer({ startedAt }: { startedAt: number }) {
   const { messages } = useI18n();

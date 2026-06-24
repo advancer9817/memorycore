@@ -310,7 +310,10 @@ Apply an approved governance decision and emit audit records.
 
 ### `governance_apply_batch`
 
-Apply multiple approved governance decisions atomically in a single database transaction.
+Apply multiple actionable governance decisions as one batch. Invalid review
+statuses abort the batch before mutations. Policy-blocked decisions are skipped
+and returned in `skipped`, while the remaining allowed decisions are applied in
+one transaction.
 
 **Returns:** `dict[str, Any]`
 

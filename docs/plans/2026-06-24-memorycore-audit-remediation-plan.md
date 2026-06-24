@@ -161,17 +161,16 @@ route. Governance should be the complete review surface. Settings should own tun
 
 ### Redundant frontend components
 
-**修正原断言：** 这些组件并非全部"未接入路由"。
+2026-06-24 后续实施已完成一次 grep 校验并清理未引用组件：
 
-- `ui/components/dashboard/governance/GovernanceCockpit.tsx` — 实测 `ui/app/governance/page.tsx:27` 在用 `useGovernanceCockpit`
-- `ui/components/dashboard/governance/useGovernanceCockpit.ts` — 同上，活跃
-- `ui/components/dashboard/governance/api.ts` — 待确认是否仍被引用
-- `ui/components/dashboard/intelligence/NeedsReviewQueue.tsx` — 待确认接入状态
-- `ui/components/dashboard/intelligence/ReviewQueuePanel.tsx` — 待确认接入状态
-- `ui/components/dashboard/intelligence/AutoAppliedStrip.tsx` — 待确认接入状态
+- `ui/components/dashboard/governance/GovernanceCockpit.tsx`
+- `ui/components/dashboard/governance/useGovernanceCockpit.ts`
+- `ui/components/dashboard/governance/api.ts`
+- `ui/components/dashboard/intelligence/NeedsReviewQueue.tsx`
+- `ui/components/dashboard/intelligence/ReviewQueuePanel.tsx`
+- `ui/components/dashboard/intelligence/AutoAppliedStrip.tsx`
 
-真实问题：Dashboard 与 `/governance` 存在两套 governance 组件路径，职责重叠。应在统一为一套后，
-移除未引用的组件，避免未来改动更新到错误的 UI 路径。**实施前需逐一 grep import 确认引用状态，不可假定废弃。**
+当前活跃治理入口为 `/governance` 页面与 `ui/hooks/useGovernanceCockpit.ts`，Dashboard 不再保留第二套 governance cockpit。
 
 ### Apps/source-agent consistency
 
@@ -337,7 +336,7 @@ Acceptance criteria:
 
 Implementation direction:
 
-- Rename `Install` to `MemoryOperationsPanel` or `CuratorOperationsPanel`
+- Rename `Install` to `MemoryOperationsPanel` or `CuratorOperationsPanel`（已完成：`MemoryOperationsPanel.tsx`）
 - Dashboard 聚焦 health / workload / last run / shortcuts
 - 把 curator tuning 移到 Settings 或独立 Curator 区
 - `/governance` 作为完整 review surface

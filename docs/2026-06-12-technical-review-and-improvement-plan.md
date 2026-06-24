@@ -203,7 +203,7 @@ def _similarity(left, right):
 
 #### 问题 H3：Dashboard 未按已决策方案重设计
 
-**现状**：Dashboard 由两个巨型组件（Install.tsx 785行 + MemoryIntelligenceCenter.tsx 972行）构成，包含已决定移除的元素：
+**现状**：Dashboard 由两个巨型组件（现 `MemoryOperationsPanel.tsx`，原 `Install.tsx` + MemoryIntelligenceCenter.tsx 972行）构成，包含已决定移除的元素：
 - "Run Curator" 和 "Run LLM" 按钮（应移至 Governance 页面）
 - "Open Queue" 和 "Open Ops" 两个按钮（应合并为 "前往治理"）
 - 底部无关内容（应为治理/运营区域）

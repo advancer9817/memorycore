@@ -153,7 +153,7 @@ def _fetch_memory_summaries(memory_ids: list[str]) -> list[dict[str, Any]]:
     placeholders = ",".join("?" for _ in memory_ids)
     with read_conn() as conn:
         rows = conn.execute(
-            f"SELECT id, title, content, type, importance, feedback_score, scope, project_path, status FROM memories WHERE id IN ({placeholders})",
+            f"SELECT id, title, content, type, importance, feedback_score, scope, project_path, status, created_at, updated_at FROM memories WHERE id IN ({placeholders})",
             tuple(memory_ids),
         ).fetchall()
     return [dict(row) for row in rows]
@@ -634,8 +634,14 @@ def apply_governance_decision(decision_id: str, source_agent: str = "agent") -> 
 
 
 def apply_governance_decisions_batch(decision_ids: list[str], source_agent: str = "agent") -> dict[str, Any]:
+    """Apply a batch of actionable governance decisions.
+
+    Decisions in invalid review states still fail the whole batch before any mutation.
+    Decisions blocked by the mutation policy are skipped and reported, while the
+    remaining allowed decisions are applied in a single transaction.
+    """
     if not decision_ids:
-        return {"applied_count": 0, "decisions": []}
+        return {"applied_count": 0, "decisions": [], "skipped_count": 0, "skipped": [], "already_applied": []}
 
     # Fetch decisions first
     with read_conn() as conn:

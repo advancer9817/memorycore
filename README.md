@@ -175,7 +175,7 @@ Optional / degraded：
 | `memory_warnings` | 根据 active links 返回冲突/替代 warning |
 | `governance_decisions` | 查询治理决策队列，支持按 review status 过滤 |
 | `governance_apply` | 应用 policy gate 允许或人工批准的治理决策 |
-| `governance_apply_batch` | 批量原子应用多项治理决策 |
+| `governance_apply_batch` | 批量应用可操作治理决策；无效状态整体拒绝，策略拦截项跳过并报告 |
 | `governance_reject` | 拒绝治理决策并记录原因 |
 | `governance_rollback` | 回滚已应用的治理决策 |
 | `governance_metrics` | 返回治理健康指标：回滚率、复活率、审核队列深度/老化、降级警告 |
