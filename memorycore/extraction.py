@@ -141,7 +141,7 @@ class ExtractionConfig:
     model: str = "deepseek-v4-flash"
     temperature: float = 0.1
     max_tokens: int = 2000
-    timeout: int = 60
+    timeout: int = 180
     custom_instructions: str = ""
 
     def __post_init__(self):
@@ -170,7 +170,7 @@ def extraction_config_from_dict(cfg: dict[str, Any]) -> ExtractionConfig:
         model=extraction.get("model", "deepseek-v4-flash"),
         temperature=extraction.get("temperature", 0.1),
         max_tokens=extraction.get("max_tokens", 16000),
-        timeout=extraction.get("timeout", 60),
+        timeout=extraction.get("timeout", 180),
         custom_instructions=extraction.get("custom_instructions", ""),
     )
 

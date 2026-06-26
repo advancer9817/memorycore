@@ -4527,3 +4527,25 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 - `cd ui && pnpm exec tsc --noEmit`：通过。
 - `cd ui && pnpm build`：通过，standalone 静态资源复制成功。
+
+## [迭代 37] 2026-06-27 — LLM Curator 调度冲突修复与超时扩大
+
+### 痛点
+
+手动点击"运行 LLM"后，job 跑到一半（10-45 分钟）总是报 "Job was interrupted by service restart; partial results remain available"。
+
+### 修复
+
+- `memorycore/extraction.py`: httpx 默认超时从 60 秒提高到 180 秒，解决大批量 LLM 调用时单次请求超过 60 秒导致 `httpx.ReadTimeout` 的问题。
+- `run_curator.sh`: 新增 LLM job 运行中检测保护，timer 触发时如果已有 LLM curator job 在跑则跳过本轮。
+- `~/.config/systemd/user/mcore-curator.service`: 新增 `LOCAL_MEMORY_LLM_CURATOR_ENABLED=0`，彻底禁止 timer 触发 CLI 模式的 LLM curator（每轮 30-45 分钟，与手动 job 冲突是根因）。timer 仅执行规则 curator（几秒完成），LLM 分析改为仅从 Dashboard 手动触发。
+
+### 根因分析
+
+已安装的 `mcore-curator.service` 缺少 `LOCAL_MEMORY_LLM_CURATOR_ENABLED` 变量，导致 `run_curator.sh` 的默认值 `${LOCAL_MEMORY_LLM_CURATOR_ENABLED:-1}` 生效，每次 timer 都会启动一个 CLI 模式的 LLM curator 进程（每轮 30-45 分钟）。当用户手动点击"运行 LLM"时，timer 触发的 CLI 进程与 HTTP job 同时操作 SQLite，互相冲突导致 job 被标记为 interrupted。
+
+### 验证
+
+- `bash -n run_curator.sh`：语法通过。
+- `systemctl --user daemon-reload`：通过。
+- timer 触发的 curator run 从 30-45 分钟降至 1.5 秒（仅规则 curator）。

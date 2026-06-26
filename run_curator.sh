@@ -44,14 +44,29 @@ append_apply_flag "LOCAL_MEMORY_CURATOR_APPLY" "${LOCAL_MEMORY_CURATOR_APPLY:-}"
 
 LLM_ENABLED="${LOCAL_MEMORY_LLM_CURATOR_ENABLED:-1}"
 if truthy_flag "$LLM_ENABLED"; then
-  LLM_APPLY_FLAG=()
-  append_apply_flag \
-    "LOCAL_MEMORY_LLM_CURATOR_APPLY" \
-    "${LOCAL_MEMORY_LLM_CURATOR_APPLY:-${LOCAL_MEMORY_CURATOR_APPLY:-}}" \
-    LLM_APPLY_FLAG
-  "$PY" "$SERVER" llm-curator --limit "${LOCAL_MEMORY_LLM_CURATOR_LIMIT:-200}" \
-    --sim-threshold "${LOCAL_MEMORY_LLM_CURATOR_SIM_THRESHOLD:-0.72}" \
-    "${LLM_APPLY_FLAG[@]}" > "$LLM_REPORT"
+  # Skip if an LLM curator job is already running (prevents service-restart interruption)
+  LLM_RUNNING=$("$PY" -c "
+import json, urllib.request
+try:
+    r = urllib.request.urlopen('http://127.0.0.1:${MCORE_PORT:-8318}/api/curator/llm/latest', timeout=3)
+    d = json.loads(r.read())
+    s = (d.get('data') or d).get('status', '')
+    print('1' if s == 'running' else '0')
+except Exception:
+    print('0')
+" 2>/dev/null || echo "0")
+  if [ "$LLM_RUNNING" = "1" ]; then
+    echo "[mcore] LLM curator job already running — skipping this round" >&2
+  else
+    LLM_APPLY_FLAG=()
+    append_apply_flag \
+      "LOCAL_MEMORY_LLM_CURATOR_APPLY" \
+      "${LOCAL_MEMORY_LLM_CURATOR_APPLY:-${LOCAL_MEMORY_CURATOR_APPLY:-}}" \
+      LLM_APPLY_FLAG
+    "$PY" "$SERVER" llm-curator --limit "${LOCAL_MEMORY_LLM_CURATOR_LIMIT:-200}" \
+      --sim-threshold "${LOCAL_MEMORY_LLM_CURATOR_SIM_THRESHOLD:-0.72}" \
+      "${LLM_APPLY_FLAG[@]}" > "$LLM_REPORT"
+  fi
 fi
 
 "$PY" "$SERVER" html "$ROOT/dashboard.html" >/dev/null
