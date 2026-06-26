@@ -1158,6 +1158,7 @@ def get_governance_metrics() -> dict[str, Any]:
         revival_rate > 0.05
         or rollback_rate > 0.10
         or (auto_supersede_enabled is False and needs_review > 20)
+        or review_queue_age_hours > 72.0
     )
 
     return {
