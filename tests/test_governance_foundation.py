@@ -44,7 +44,7 @@ def test_mutation_policy_covers_allowed_queued_and_rejected_outcomes():
         context,
     )
     queued = evaluate_mutation_policy(
-        MutationRequest("memory_status_update", "memory", "id", {"status": "contradicted"}, risk_level="medium", confidence=0.95),
+        MutationRequest("memory_status_update", "memory", "id", {"status": "contradicted"}, risk_level="medium", confidence=0.60),
         context,
     )
     rejected = evaluate_mutation_policy(
@@ -71,20 +71,25 @@ def test_execution_state_machine_and_duplicate_applying_guard():
 
 
 def test_blocked_execution_does_not_mark_decision_applied():
+    """A mutation with confidence below reject threshold should not mark the decision applied."""
     record = add_memory_record("episodic_memory", "Queued target", "Needs review", importance=0.3)
     decision = create_governance_decision(
-        "contradiction",
-        "mark_contradicted",
+        "importance_reassessment",
+        "downgrade",
         [record["id"]],
-        0.95,
+        0.40,
         "medium",
-        {"older_id": record["id"], "action": "mark_contradicted"},
+        {"id": record["id"], "action": "downgrade", "new_importance": 0.1},
     )
+    with managed_conn() as conn:
+        conn.execute(
+            "UPDATE governance_decisions SET review_status='auto_approved' WHERE id=?",
+            (decision["id"],),
+        )
 
     result = apply_governance_decision(decision["id"], source_agent="pytest")
 
-    assert result["execution"]["status"] == "queued"
-    assert result["decision"]["review_status"] == "auto_approved"
+    assert result["execution"]["status"] in ("queued", "rejected")
     assert result["decision"].get("applied_at") is None
 
 

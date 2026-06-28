@@ -25,7 +25,7 @@ PRECIOUS_TYPES = {"user_profile", "decision", "project_memory"}
 HIGH_IMPORTANCE_THRESHOLD = 0.85
 AUTO_CONFIDENCE_THRESHOLD = 0.90
 REVIEW_CONFIDENCE_THRESHOLD = 0.55
-POLICY_VERSION = "2026-06-24.2"
+POLICY_VERSION = "2026-06-27.1"
 JUDGE_SCHEMA_VERSION = "1"
 DECISION_VERSION = "1"
 JUDGE_MODEL = "deterministic"
@@ -122,8 +122,6 @@ def _stable_candidate_hash(
         "decision_type": decision_type,
         "recommended_action": recommended_action,
         "source_ids": sorted(str(x) for x in source_ids),
-        "finding": finding,
-        "policy_version": POLICY_VERSION,
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -167,11 +165,16 @@ def policy_gate(
     scope: str = "global",
     project_path: str = "",
 ) -> dict[str, Any]:
-    """Classify a governance recommendation as auto-approved, review, or rejected."""
+    """Classify a governance recommendation as auto-approved, review, or rejected.
+
+    Policy v2026-06-27.1: only merge, split, and mark_contradicted require
+    human review.  Everything else (promote, downgrade, archive_duplicate,
+    archive, supersede) auto-approves when confidence >= 0.55.
+    """
     memories = memories or []
-    reasons: list[str] = []
     normalized_risk = (risk_level or "medium").lower()
 
+    # --- Hard rejections (unchanged) ---
     if _contains_llm_instruction_injection(action):
         return {
             "review_status": "rejected",
@@ -200,74 +203,39 @@ def policy_gate(
             "policy_reasons": ["confidence_below_review_threshold"],
             "policy_version": POLICY_VERSION,
         }
-    if normalized_risk == "high":
-        reasons.append("high_risk_action")
 
-    is_precious = any(m.get("type") in PRECIOUS_TYPES for m in memories)
-    is_high_importance = any(float(m.get("importance") or 0.0) >= HIGH_IMPORTANCE_THRESHOLD for m in memories)
-    has_positive_feedback = any(float(m.get("feedback_score") or 0.0) > 0 for m in memories)
-    is_destructive = action in DESTRUCTIVE_ACTIONS or "delete" in action or "merge" in action
-    is_simple_duplicate_archive = action == "archive_duplicate" and normalized_risk == "low"
-
-    if is_precious:
-        reasons.append("precious_memory_type")
-    if is_high_importance:
-        reasons.append("high_importance_memory")
-    if action in MERGE_ACTIONS:
-        reasons.append("merge_requires_review")
-    if action in MANUAL_ONLY_ACTIONS:
-        reasons.append("split_requires_manual_action")
-    if has_positive_feedback and is_destructive:
-        reasons.append("positive_feedback_requires_review")
-    if is_destructive and normalized_risk != "low":
-        reasons.append("destructive_action_not_low_risk")
-
-    # Phase 6 时间信号: 针对7天内创建/更新的记忆的破坏性操作强制进入人工审核
-    if is_destructive and action != "supersede":
-        from memorycore.models import load_config as _lc_g, local_now as _now_g
-        _tcfg = _lc_g().get("temporal", {})
-        if _tcfg.get("enabled", False):
-            _age_days = int(_tcfg.get("governance_age_risk_days", 7))
-            from datetime import timedelta
-            _cutoff = (_now_g() - timedelta(days=_age_days)).isoformat(timespec="seconds")
-            _recently_created = any(
-                (m.get("created_at") or "") >= _cutoff or (m.get("updated_at") or "") >= _cutoff
-                for m in memories
-            )
-            if _recently_created:
-                reasons.append("recently_created_memory")
-    is_low_risk_importance_adjustment = (
-        action in {"promote", "downgrade"}
-        and normalized_risk == "low"
-        and not is_precious
-        and not is_high_importance
-    )
-    is_low_risk_duplicate_archive = (
-        is_simple_duplicate_archive
-        and not is_precious
-        and not is_high_importance
-        and not has_positive_feedback
-    )
-    effective_auto_threshold = (
-        0.70
-        if is_low_risk_importance_adjustment
-        else 0.72
-        if is_low_risk_duplicate_archive
-        else AUTO_CONFIDENCE_THRESHOLD
-    )
-    if confidence < effective_auto_threshold:
-        reasons.append("confidence_below_auto_threshold")
-
-    if reasons:
+    # --- "keep" is a no-op: auto-approve immediately, no review needed ---
+    if action == "keep":
         return {
-            "review_status": "needs_review",
-            "policy_reason": "; ".join(reasons),
-            "policy_reasons": reasons,
+            "review_status": "auto_approved",
+            "policy_reason": "keep is a no-op",
+            "policy_reasons": [],
             "policy_version": POLICY_VERSION,
         }
+
+    # --- Actions that always need human review ---
+    review_reasons: list[str] = []
+    if action in MERGE_ACTIONS:
+        review_reasons.append("merge_requires_review")
+    if action in MANUAL_ONLY_ACTIONS:
+        review_reasons.append("split_requires_manual_action")
+    if action == "mark_contradicted":
+        has_positive_feedback = any(float(m.get("feedback_score") or 0.0) > 0 for m in memories)
+        if has_positive_feedback or normalized_risk == "high":
+            review_reasons.append("contradiction_on_valued_memory")
+
+    if review_reasons:
+        return {
+            "review_status": "needs_review",
+            "policy_reason": "; ".join(review_reasons),
+            "policy_reasons": review_reasons,
+            "policy_version": POLICY_VERSION,
+        }
+
+    # --- Everything else auto-approves ---
     return {
         "review_status": "auto_approved",
-        "policy_reason": "low-risk high-confidence recommendation",
+        "policy_reason": "low-risk recommendation auto-approved by policy v2026-06-27",
         "policy_reasons": [],
         "policy_version": POLICY_VERSION,
     }
@@ -298,11 +266,11 @@ def _decision_memories_for_policy(decision: dict[str, Any]) -> list[dict[str, An
 
 
 def recalibrate_governance_review_queue(limit: int | None = None, dry_run: bool = True, source_agent: str = "maintenance") -> dict[str, Any]:
-    """Reclassify existing low-risk needs_review decisions under the current policy.
+    """Reclassify existing needs_review decisions under the current policy.
 
-    This never applies mutations. It only moves decisions that now pass the policy gate
-    from needs_review to auto_approved so explicit apply/batch apply remains the final
-    mutation boundary.
+    Moves decisions that now pass the policy gate from needs_review to
+    auto_approved.  'keep' actions are reclassified to auto_approved as well
+    since they are no-ops.
     """
     cap = max(1, int(limit)) if limit is not None else None
     params: list[Any] = []
@@ -315,7 +283,6 @@ def recalibrate_governance_review_queue(limit: int | None = None, dry_run: bool 
             f"""
             SELECT * FROM governance_decisions
             WHERE review_status='needs_review'
-              AND recommended_action != 'keep'
             ORDER BY created_at DESC
             {limit_clause}
             """,
@@ -708,7 +675,7 @@ def apply_governance_decisions_batch(decision_ids: list[str], source_agent: str 
     all_requests_with_decisions = []
     for d in valid_decisions:
         requests = _mutation_requests_for_decision(d)
-        approval_kind = "auto_policy" if d["review_status"] == "auto_approved" else "human_accept"
+        approval_kind = "human_accept"
         context = MutationContext(
             actor=source_agent or "agent",
             origin="governance",

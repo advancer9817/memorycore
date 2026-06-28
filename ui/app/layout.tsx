@@ -7,9 +7,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Providers } from "./providers";
 
 export const metadata = {
-  title: "MemoryCore - Developer Dashboard",
-  description: "Manage your MemoryCore agent memory store",
-  generator: "v0.dev",
+  title: "MemoryCore",
+  description: "Agent Memory OS — local-first memory for multi-agent systems",
+  icons: {
+    icon: "/icon.svg",
+  },
 };
 
 export default function RootLayout({

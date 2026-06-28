@@ -4549,3 +4549,37 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 - `bash -n run_curator.sh`：语法通过。
 - `systemctl --user daemon-reload`：通过。
 - timer 触发的 curator run 从 30-45 分钟降至 1.5 秒（仅规则 curator）。
+
+## [迭代 38] 2026-06-28 — LLM Curator PID 丢失 bug 修复与向量同步/治理增强
+
+### 痛点
+
+LLM 分析 job 仍然被中断（"Job was interrupted by service restart"），迭代 37 的 timer 禁用方案未完全解决问题。
+
+### 根因分析
+
+`run_llm_curator_incremental()` 内的 `progress()` 函数每次更新 `progress_json` 时只写入 `stage` 和 `elapsed_ms`，**覆盖了** `create_llm_curator_job()` 初始存入的 `{"pid": <owner_pid>}`，导致 `owner_pid` 变为 `None`。当任何新进程（timer oneshot、CLI 命令）导入 `frontend.py` 时，模块级 `mark_stale_running_jobs_failed()` 执行 PID 存活检查，因 `owner_pid=None` 跳过检查，无条件将正在运行的 job 标记为 failed。
+
+### 修复
+
+- `memorycore/storage/curator_llm.py`:
+  - 新增 `import os as _os`
+  - `run_llm_curator_incremental()` 开头捕获 `_owner_pid = _os.getpid()`
+  - `progress()` payload 始终包含 `"pid": _owner_pid`
+  - 最终完成调用也保留 `"pid": _owner_pid`
+  - 新增 `_diag()` 日志点（CURATOR_START/STAGE/CURATOR_END）
+  - `_find_candidate_pairs()` 跳过不在 active memories 列表中的 Qdrant 结果，避免处理已归档/已取代的记忆
+
+- `memorycore/storage/crud.py`: 向量删除改为同步执行（防止服务重启前异步线程未完成导致向量泄漏）
+
+- `memorycore/storage/governance.py`, `memorycore/storage/mutations.py`, `memorycore/storage/llm_curator_jobs.py`: 治理与突变执行增强
+
+- `tests/`: 相关测试更新
+
+- `ui/app/layout.tsx`, `ui/app/icon.svg`, `ui/public/icon.svg`: UI 布局与图标更新
+
+### 验证
+
+- `python -c "from memorycore.storage.curator_llm import run_llm_curator_incremental; print('import OK')"`: 通过
+- `curl http://127.0.0.1:8318/health`: 服务健康
+- `systemctl --user restart mcore.service`: 重启成功

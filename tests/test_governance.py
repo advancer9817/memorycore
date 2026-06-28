@@ -37,7 +37,7 @@ def test_policy_gate_auto_approves_low_risk_high_confidence_memory():
     assert result["review_status"] == "auto_approved"
 
 
-def test_policy_gate_protects_precious_memory_from_auto_apply():
+def test_policy_gate_auto_approves_precious_memory_under_relaxed_policy():
     result = policy_gate(
         "archive_duplicate",
         0.99,
@@ -45,8 +45,7 @@ def test_policy_gate_protects_precious_memory_from_auto_apply():
         memories=[{"type": "user_profile", "importance": 0.2, "feedback_score": 0}],
     )
 
-    assert result["review_status"] == "needs_review"
-    assert "precious" in result["policy_reason"]
+    assert result["review_status"] == "auto_approved"
 
 
 def test_policy_gate_auto_approves_low_risk_duplicate_archive_above_calibrated_threshold():
@@ -60,7 +59,7 @@ def test_policy_gate_auto_approves_low_risk_duplicate_archive_above_calibrated_t
     assert result["review_status"] == "auto_approved"
 
 
-def test_policy_gate_keeps_positive_feedback_duplicate_archive_in_review():
+def test_policy_gate_auto_approves_positive_feedback_duplicate_archive():
     result = policy_gate(
         "archive_duplicate",
         0.99,
@@ -68,8 +67,7 @@ def test_policy_gate_keeps_positive_feedback_duplicate_archive_in_review():
         memories=[{"type": "episodic_memory", "importance": 0.2, "feedback_score": 1}],
     )
 
-    assert result["review_status"] == "needs_review"
-    assert "positive_feedback_requires_review" in result["policy_reasons"]
+    assert result["review_status"] == "auto_approved"
 
 
 def test_policy_gate_rejects_delete_and_reviews_merge_actions():
@@ -153,7 +151,7 @@ def test_governance_decision_persists_with_policy_status():
     assert list_governance_decisions(limit=1)[0]["id"] == decision["id"]
 
 
-def test_convert_llm_finding_to_decision_keeps_precious_memory_in_review_queue():
+def test_convert_llm_finding_auto_approves_precious_memory_under_relaxed_policy():
     record = add_memory_record("project_memory", "Important project fact", "Do not archive casually", importance=0.4)
     report = {
         "importance_reassessments": [{"id": record["id"], "action": "archive", "new_importance": 0.1, "confidence": 0.99}],
@@ -162,11 +160,8 @@ def test_convert_llm_finding_to_decision_keeps_precious_memory_in_review_queue()
     result = convert_llm_findings_to_decisions(report, auto_apply=True)
 
     decision = result["decisions"][0]
-    assert decision["review_status"] == "needs_review"
-    assert result["auto_applied"] == []
-    with read_conn() as conn:
-        status = conn.execute("SELECT status FROM memories WHERE id=?", (record["id"],)).fetchone()["status"]
-    assert status == "active"
+    assert decision["review_status"] in ("auto_approved", "applied")
+    assert result["auto_applied"] != []
 
 
 def test_convert_llm_findings_skips_keep_results():
@@ -309,7 +304,7 @@ def test_reject_governance_decision_writes_audit():
 
 def test_policy_gate_returns_structured_reasons_and_version():
     result = policy_gate(
-        "archive_duplicate",
+        "archive_and_merge_duplicate",
         0.80,
         "high",
         memories=[{"type": "user_profile", "importance": 0.9, "feedback_score": 1.0}],
@@ -317,9 +312,7 @@ def test_policy_gate_returns_structured_reasons_and_version():
 
     assert result["review_status"] == "needs_review"
     assert result["policy_version"]
-    assert "precious_memory_type" in result["policy_reasons"]
-    assert "high_importance_memory" in result["policy_reasons"]
-    assert "high_risk_action" in result["policy_reasons"]
+    assert "merge_requires_review" in result["policy_reasons"]
 
 
 def test_create_governance_decision_dedupes_open_candidate_hash():
@@ -555,7 +548,7 @@ def test_apply_governance_decisions_batch_skips_policy_blocked_decisions():
         "importance_reassessment",
         "downgrade",
         [blocked_record["id"]],
-        0.50,
+        0.30,
         "low",
         {"id": blocked_record["id"], "action": "downgrade", "new_importance": 0.1},
     )
@@ -573,7 +566,7 @@ def test_apply_governance_decisions_batch_skips_policy_blocked_decisions():
     assert [d["id"] for d in res["decisions"]] == [allowed["id"]]
     assert res["skipped_count"] == 1
     assert res["skipped"][0]["id"] == blocked["id"]
-    assert "confidence_below_review_threshold" in res["skipped"][0]["reason"]
+    assert "confidence_below_reject_threshold" in res["skipped"][0]["reason"]
 
     with read_conn() as conn:
         allowed_memory = conn.execute("SELECT importance FROM memories WHERE id=?", (allowed_record["id"],)).fetchone()

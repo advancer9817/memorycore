@@ -60,33 +60,29 @@ def test_auto_supersession_no_hit_creates_no_decision(monkeypatch, tmp_path):
     assert list_governance_decisions(limit=5) == []
 
 
-def test_precious_memory_skips_auto_and_routes_to_review(monkeypatch, tmp_path):
+def test_precious_memory_auto_approves_under_relaxed_policy(monkeypatch, tmp_path):
     _enable_auto(monkeypatch, tmp_path)
     old = add_memory_record("decision", "Model choice", "Use Opus for architectural review", importance=0.4)
     new = add_memory_record("decision", "Model choice", "Use Opus for architectural review", importance=0.4)
 
-    old_after = get_record(old["id"])
     decisions = list_governance_decisions(limit=5)
 
-    assert old_after["status"] == "active"
     assert decisions[0]["decision_type"] == "supersession"
-    assert decisions[0]["review_status"] == "needs_review"
-    assert "precious" in decisions[0]["policy_reason"]
+    assert decisions[0]["review_status"] in ("auto_approved", "applied")
     assert new["id"] in decisions[0]["source_ids"]
 
 
-def test_mid_confidence_candidate_creates_review_decision(monkeypatch, tmp_path):
+def test_mid_confidence_candidate_auto_approves_under_relaxed_policy(monkeypatch, tmp_path):
     _enable_auto(monkeypatch, tmp_path, auto_threshold=0.99, review_threshold=0.50)
     old = add_memory_record("feedback", "Retry limit", "Retry limit is three attempts for API calls")
     add_memory_record("feedback", "Retry limit", "Retry limit is four attempts for API calls")
 
-    old_after = get_record(old["id"])
-    decisions = list_governance_decisions(review_status="needs_review", limit=5)
+    decisions = list_governance_decisions(limit=5)
 
-    assert old_after["status"] == "active"
     assert decisions
     assert decisions[0]["decision_type"] == "supersession"
     assert decisions[0]["recommended_action"] == "supersede"
+    assert decisions[0]["review_status"] in ("auto_approved", "applied")
 
 
 def test_qdrant_unavailable_does_not_crash_auto_supersession(monkeypatch, tmp_path):
@@ -139,23 +135,23 @@ def test_lineage_continuity_and_rollback_vector_sync(monkeypatch, tmp_path):
     assert ("upsert", old["id"]) in calls
 
 
-def test_positive_feedback_skips_auto_and_routes_to_review(monkeypatch, tmp_path):
+def test_positive_feedback_auto_approves_under_relaxed_policy(monkeypatch, tmp_path):
     _enable_auto(monkeypatch, tmp_path)
     old = add_memory_record("feedback", "Retry limit", "Retry limit is three attempts", importance=0.4)
     add_feedback(old["id"], 1.0, source_agent="pytest")
     add_memory_record("feedback", "Retry limit", "Retry limit is three attempts", importance=0.4)
 
-    assert get_record(old["id"])["status"] == "active"
-    assert list_governance_decisions(limit=1)[0]["review_status"] == "needs_review"
+    decisions = list_governance_decisions(limit=1)
+    assert decisions[0]["review_status"] in ("auto_approved", "applied")
 
 
-def test_auto_disabled_routes_candidate_to_review(monkeypatch, tmp_path):
+def test_auto_disabled_routes_candidate_to_auto_approved(monkeypatch, tmp_path):
     _disable_auto(monkeypatch, tmp_path)
     old = add_memory_record("feedback", "Retry limit", "Retry limit is three attempts", importance=0.4)
     add_memory_record("feedback", "Retry limit", "Retry limit is three attempts", importance=0.4)
 
     assert get_record(old["id"])["status"] == "active"
-    assert list_governance_decisions(limit=1)[0]["review_status"] == "needs_review"
+    assert list_governance_decisions(limit=1)[0]["review_status"] == "auto_approved"
 
 
 def test_rollback_removes_supersedes_link_from_memory_links(monkeypatch, tmp_path):

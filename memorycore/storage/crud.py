@@ -44,17 +44,31 @@ except Exception:
 
 
 def _sync_to_vector(record: dict[str, Any]) -> None:
-    """Async fire-and-forget Qdrant sync. On failure, enqueues for retry."""
+    """Sync memory to Qdrant: upsert for active, delete for non-active.
+
+    Deletions run synchronously to prevent vector leaks when the service
+    restarts before an async thread completes.  Upserts remain async
+    (fire-and-forget) since a stale-but-present vector is harmless.
+    """
     import threading as _threading
+
+    status = record.get("status", "active")
+    if status != "active":
+        try:
+            if _get_vector_store is None:
+                return
+            vs = _get_vector_store(load_config())
+            vs.delete(record["id"])
+        except Exception as exc:
+            logger.warning("_sync_to_vector delete failed for id=%s: %s", record.get("id"), exc)
+            _enqueue_vector_sync(record["id"], "delete", str(exc))
+        return
+
     def _run():
         try:
             if _get_vector_store is None:
                 return
             vs = _get_vector_store(load_config())
-            status = record.get("status", "active")
-            if status != "active":
-                vs.delete(record["id"])
-                return
             text = f"{record.get('title', '')} {record.get('content', '')}".strip()
             metadata = record.get("metadata") or {}
             payload = {
@@ -69,7 +83,7 @@ def _sync_to_vector(record: dict[str, Any]) -> None:
             vs.upsert(record["id"], text, payload)
         except Exception as exc:
             logger.warning("_sync_to_vector: failed for id=%s, enqueuing for retry: %s", record.get("id"), exc)
-            _enqueue_vector_sync(record["id"], "upsert" if record.get("status") == "active" else "delete", str(exc))
+            _enqueue_vector_sync(record["id"], "upsert", str(exc))
     _threading.Thread(target=_run, daemon=True).start()
 
 

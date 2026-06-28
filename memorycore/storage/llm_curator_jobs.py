@@ -2,11 +2,30 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
+import os
 import uuid
 from typing import Any
 
 from memorycore.models import as_json, now
 from memorycore.storage.db import managed_conn, read_conn
+
+logger = logging.getLogger(__name__)
+
+_DIAG_LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs", "llm-curator-diag.log")
+
+
+def _diag(msg: str) -> None:
+    """Append a timestamped diagnostic line to the LLM curator diagnostic log."""
+    try:
+        import datetime
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        line = f"[{ts}] [pid={os.getpid()}] {msg}\n"
+        os.makedirs(os.path.dirname(_DIAG_LOG_PATH), exist_ok=True)
+        with open(_DIAG_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception:
+        pass
 
 
 def _loads(value: str | None, fallback: Any) -> Any:
@@ -72,7 +91,7 @@ def create_llm_curator_job(
                 ts,
                 ts,
                 as_json(params or {}),
-                as_json({}),
+                as_json({"pid": os.getpid()}),
                 as_json({}),
                 as_json([]),
                 governance_run_id or "",
@@ -124,10 +143,33 @@ def get_llm_curator_job(job_id: str) -> dict[str, Any] | None:
 
 
 def mark_stale_running_jobs_failed() -> int:
+    """Mark jobs stuck in 'running' as failed — but ONLY if the owning process is dead.
+
+    The job's owner PID is stored in progress_json.pid. If that process is still
+    alive, the job is genuinely running and must not be touched.
+    """
     ts = now()
+    marked = 0
     with managed_conn() as conn:
-        rows = conn.execute("SELECT id FROM llm_curator_jobs WHERE status='running'").fetchall()
+        rows = conn.execute("SELECT id, started_at, progress_json FROM llm_curator_jobs WHERE status='running'").fetchall()
         for row in rows:
+            owner_pid = None
+            try:
+                progress = json.loads(row["progress_json"]) if row["progress_json"] else {}
+                owner_pid = progress.get("pid")
+            except Exception:
+                pass
+            if owner_pid is not None:
+                try:
+                    os.kill(int(owner_pid), 0)
+                    _diag(f"SKIP_INTERRUPT: job {row['id']} owner pid={owner_pid} is still alive")
+                    continue
+                except (ProcessLookupError, ValueError):
+                    pass
+                except PermissionError:
+                    _diag(f"SKIP_INTERRUPT: job {row['id']} owner pid={owner_pid} exists (PermissionError)")
+                    continue
+            _diag(f"INTERRUPTED: marking job {row['id']} as failed (was running since {row['started_at']}, owner_pid={owner_pid})")
             conn.execute(
                 """
                 UPDATE llm_curator_jobs
@@ -136,7 +178,12 @@ def mark_stale_running_jobs_failed() -> int:
                 """,
                 (ts, ts, as_json(["Job was interrupted by service restart; partial results remain available."]), row["id"]),
             )
-    return len(rows)
+            marked += 1
+    if marked:
+        _diag(f"STARTUP: marked {marked} stale running job(s) as failed")
+    else:
+        _diag(f"STARTUP: no stale running jobs to mark ({len(rows)} running, all alive)" if rows else "STARTUP: no running jobs found")
+    return marked
 
 
 def get_latest_llm_curator_job() -> dict[str, Any] | None:

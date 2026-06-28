@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os as _os
 import time as _time
 import uuid
 from typing import Any
@@ -353,7 +354,8 @@ def _fetch_memories_by_ids(ids: list[str]) -> dict[str, dict[str, Any]]:
     rows = _managed_query(
         f"SELECT id, title, content, type, importance, confidence, feedback_score, "
         f"injected_count, updated_at, created_at, valid_from, valid_until, "
-        f"last_accessed_at, last_injected_at FROM memories WHERE id IN ({placeholders})",
+        f"last_accessed_at, last_injected_at FROM memories WHERE id IN ({placeholders})"
+        f" AND status IN ('active', 'candidate')",
         tuple(ids),
     )
     return {r["id"]: r for r in rows}
@@ -370,9 +372,9 @@ def _find_candidate_pairs(
 ) -> list[tuple[dict, dict, float]]:
     """One vector scan returning all pairs >= sim_threshold*0.8.
 
-    Callers split by score:
-    - >= sim_threshold       → dedup candidates
-    - >= sim_threshold * 0.8 → contradiction candidates
+    Only pairs where BOTH sides are in the active memories list are returned.
+    Qdrant may contain stale vectors for archived/superseded records — those
+    are silently skipped here so callers never see non-active candidates.
     """
     recently_reviewed = _get_recently_reviewed_ids()
     memories = [m for m in memories if m["id"] not in recently_reviewed]
@@ -380,7 +382,6 @@ def _find_candidate_pairs(
     seen: set[frozenset[str]] = set()
     pairs: list[tuple[dict, dict, float]] = []
     by_id = {m["id"]: m for m in memories}
-    missing_ids: set[str] = set()
     effective_floor = sim_threshold * 0.8
 
     for mem in memories:
@@ -396,27 +397,13 @@ def _find_candidate_pairs(
             other_id = r.id
             if other_id == mem["id"]:
                 continue
+            if other_id not in by_id:
+                continue
             key = frozenset([mem["id"], other_id])
             if key in seen:
                 continue
             seen.add(key)
-            if other_id not in by_id:
-                missing_ids.add(other_id)
-                pairs.append((mem, {"id": other_id, "_score": r.score}, r.score))
-            else:
-                pairs.append((mem, by_id[other_id], r.score))
-
-    if missing_ids:
-        fetched = _fetch_memories_by_ids(list(missing_ids))
-        resolved = []
-        for a, b, score in pairs:
-            if "_score" in b:
-                b_full = fetched.get(b["id"])
-                if b_full:
-                    resolved.append((a, b_full, score))
-            else:
-                resolved.append((a, b, score))
-        pairs = resolved
+            pairs.append((mem, by_id[other_id], r.score))
 
     return sorted(pairs, key=lambda x: x[2], reverse=True)
 
@@ -1154,7 +1141,10 @@ def run_llm_curator_incremental(
     rebuild_vectors: bool = True,
 ) -> dict[str, Any]:
     """Run LLM curation and persist decisions after each completed batch."""
+    from memorycore.storage.llm_curator_jobs import _diag
+    import os as _os
     t_start = _time.monotonic()
+    _diag(f"CURATOR_START: job={job_id} pid={_os.getpid()} limit={limit} sim={sim_threshold} apply={apply}")
     from memorycore.models import load_config
     from memorycore.storage.governance import convert_llm_findings_to_decisions
     from memorycore.storage.llm_curator_jobs import (
@@ -1179,8 +1169,10 @@ def run_llm_curator_incremental(
     counts: dict[str, int] = {}
     all_evaluated_ids: set[str] = set()
 
+    _owner_pid = _os.getpid()
+
     def progress(stage: str, extra: dict[str, Any] | None = None) -> None:
-        payload = {"stage": stage, "elapsed_ms": int((_time.monotonic() - t_start) * 1000), **(extra or {})}
+        payload = {"stage": stage, "elapsed_ms": int((_time.monotonic() - t_start) * 1000), "pid": _owner_pid, **(extra or {})}
         update_llm_curator_job(job_id, progress=payload, summary=_summary_from_counts(counts, counts.get("total_memories", 0)), errors=errors)
 
     def persist_batch(stage: str, batch_index: int, category: str, candidates: list[Any], run_batch: Any) -> None:
@@ -1238,6 +1230,7 @@ def run_llm_curator_incremental(
 
     _cleanup_reviewed_ids()
     progress("vector_scan")
+    _diag(f"STAGE: vector_scan started, {len(memories)} memories loaded")
 
     if vs_available:
         try:
@@ -1252,6 +1245,7 @@ def run_llm_curator_incremental(
             contra_pairs = []
             errors.append(f"Vector scan failed: {exc}")
             logger.error("vector scan error: %s", exc, exc_info=True)
+        _diag(f"STAGE: dedup starting, {len(dup_pairs)} pairs, batch_size={batch_size}")
         for batch_index, start in enumerate(range(0, len(dup_pairs), batch_size)):
             candidates = dup_pairs[start:start + batch_size]
             persist_batch(
@@ -1261,6 +1255,7 @@ def run_llm_curator_incremental(
                 candidates,
                 lambda batch: _llm_judge_duplicates(batch, llm_config, batch_size=len(batch), content_max_chars=content_max_chars, prompt_style=prompt_style, config=full_config),
             )
+        _diag(f"STAGE: contradiction starting, {len(contra_pairs)} pairs")
         for batch_index, start in enumerate(range(0, len(contra_pairs), batch_size)):
             candidates = contra_pairs[start:start + batch_size]
             persist_batch(
@@ -1273,6 +1268,7 @@ def run_llm_curator_incremental(
     else:
         errors.append("Vector store not available — skipping semantic dedup and contradiction detection")
 
+    _diag(f"STAGE: importance starting, elapsed={int(_time.monotonic()-t_start)}s")
     try:
         import random as _random
         recently_reviewed = _get_recently_reviewed_ids()
@@ -1293,6 +1289,7 @@ def run_llm_curator_incremental(
         errors.append(f"Importance reassessment failed: {exc}")
         logger.error("importance reassessment error: %s", exc, exc_info=True)
 
+    _diag(f"STAGE: split starting, elapsed={int(_time.monotonic()-t_start)}s")
     try:
         long_memories = [m for m in memories if len(m.get("content", "")) > split_threshold][:max_split]
         counts["split_candidates_checked"] = len(long_memories)
@@ -1321,7 +1318,8 @@ def run_llm_curator_incremental(
 
     summary = _summary_from_counts(counts)
     status = "failed" if errors and counts.get("decisions_created", 0) == 0 else "succeeded" if counts.get("decisions_created", 0) else "done"
-    update_llm_curator_job(job_id, status=status, progress={"stage": "finished"}, summary=summary, errors=errors, finished=True)
+    _diag(f"CURATOR_END: job={job_id} status={status} elapsed={int(_time.monotonic()-t_start)}s decisions={counts.get('decisions_created',0)} errors={len(errors)}")
+    update_llm_curator_job(job_id, status=status, progress={"stage": "finished", "pid": _owner_pid}, summary=summary, errors=errors, finished=True)
     try:
         from memorycore.storage.audit import log_audit_event
         log_audit_event("llm_curator_run", agent="llm_curator", detail={"job_id": job_id, "incremental": True, "summary": summary, "errors": errors})

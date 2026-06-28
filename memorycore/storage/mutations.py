@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-POLICY_VERSION = "2026-06-10.1"
+POLICY_VERSION = "2026-06-27.1"
 VALID_ORIGINS = {"llm_curator", "rule_curator", "governance", "atomization", "mcp", "ui", "cli", "maintenance"}
 VALID_RISK_LEVELS = {"low", "medium", "high"}
 VALID_ACTION_TYPES = {
@@ -122,10 +122,10 @@ def evaluate_mutation_policy(request: MutationRequest, context: MutationContext)
     if request.action_type in MEDIUM_RISK_ACTIONS and request.risk_level != "low":
         decision = "queued"
         reasons.append("medium_risk_requires_safe_envelope")
-    if request.confidence < 0.55:
+    if request.confidence < 0.45:
         decision = "rejected"
-        reasons.append("confidence_below_review_threshold")
-    elif request.confidence < 0.90 and decision == "allowed" and request.action_type not in LOW_RISK_ACTIONS:
+        reasons.append("confidence_below_reject_threshold")
+    elif request.confidence < 0.65 and decision == "allowed" and request.action_type not in LOW_RISK_ACTIONS:
         decision = "queued"
         reasons.append("confidence_below_auto_threshold")
     if context.approval_kind in {"human_accept", "admin_override", "rollback", "maintenance"} and decision == "queued":
