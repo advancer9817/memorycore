@@ -56,8 +56,11 @@ from memorycore.storage import (
 
 logger = logging.getLogger(__name__)
 try:
-    from memorycore.storage.llm_curator_jobs import mark_stale_running_jobs_failed
-    mark_stale_running_jobs_failed()
+    from memorycore.storage.llm_curator_jobs import mark_stale_running_jobs_failed, _diag as _curator_diag
+    _curator_diag(f"SERVICE_START: frontend.py loaded, pid={__import__('os').getpid()}")
+    marked = mark_stale_running_jobs_failed()
+    if marked:
+        _curator_diag(f"SERVICE_START: marked {marked} stale job(s) as failed on startup")
 except Exception:
     logger.debug("failed to mark stale llm curator jobs", exc_info=True)
 
@@ -69,12 +72,28 @@ _MUTATING_METHODS = {"POST", "PATCH", "PUT", "DELETE"}
 # ---------------------------------------------------------------------------
 import threading
 import uuid
+import signal
+import atexit
 
 _llm_curator_jobs: dict[str, dict] = {}  # job_id -> {status, result, error}
 _llm_curator_lock = threading.Lock()
 _latest_llm_job_id: list[str] = []  # single-element list used as mutable container
+_llm_curator_thread: threading.Thread | None = None
 
 _LLM_JOB_TTL_SECONDS = 1800  # 30 minutes
+
+
+def _wait_for_curator_thread() -> None:
+    """Wait for the LLM curator thread on shutdown so it can finish gracefully."""
+    global _llm_curator_thread
+    t = _llm_curator_thread
+    if t is not None and t.is_alive():
+        logger.info("Waiting for LLM curator thread to finish (up to 120s)...")
+        t.join(timeout=120)
+        if t.is_alive():
+            logger.warning("LLM curator thread did not finish in time")
+
+atexit.register(_wait_for_curator_thread)
 
 
 def _cleanup_stale_llm_jobs() -> None:
@@ -90,9 +109,12 @@ def _cleanup_stale_llm_jobs() -> None:
 
 
 def _run_llm_curator_job(job_id: str, cfg: Any, limit: int, sim_threshold: float, apply: bool) -> None:
-    """Runs in a daemon thread; persists incremental job state to SQLite."""
+    """Runs in a background thread; persists incremental job state to SQLite."""
     from memorycore.storage.curator_llm import run_llm_curator_incremental
-    from memorycore.storage.llm_curator_jobs import update_llm_curator_job
+    from memorycore.storage.llm_curator_jobs import update_llm_curator_job, _diag
+    import threading
+
+    _diag(f"THREAD_START: job={job_id} thread={threading.current_thread().name} pid={__import__('os').getpid()} daemon={threading.current_thread().daemon}")
 
     try:
         report = run_llm_curator_incremental(
@@ -102,6 +124,7 @@ def _run_llm_curator_job(job_id: str, cfg: Any, limit: int, sim_threshold: float
             sim_threshold=sim_threshold,
             apply=apply,
         )
+        _diag(f"THREAD_DONE: job={job_id} status={report.get('status', 'done')} errors={len(report.get('errors', []))}")
         with _llm_curator_lock:
             _llm_curator_jobs[job_id] = {
                 "status": report.get("status", "done"),
@@ -111,6 +134,7 @@ def _run_llm_curator_job(job_id: str, cfg: Any, limit: int, sim_threshold: float
             }
         _clear_curator_status_cache()
     except Exception as exc:
+        _diag(f"THREAD_EXCEPTION: job={job_id} error={exc!r}")
         logger.warning("[llm-curator job %s] failed: %s", job_id, exc)
         update_llm_curator_job(job_id, status="failed", errors=[str(exc)], finished=True)
         with _llm_curator_lock:
@@ -324,12 +348,14 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
             _cleanup_stale_llm_jobs()
             _llm_curator_jobs[job_id] = {"status": "running", "job_id": job_id}
             _latest_llm_job_id[:] = [job_id]
+        global _llm_curator_thread
         t = threading.Thread(
             target=_run_llm_curator_job,
             args=(job_id, cfg, int(body.get("limit", 10000)), float(body.get("sim_threshold", 0.55)), apply),
-            daemon=True,
+            daemon=False,
             name=f"llm-curator-{job_id[:8]}",
         )
+        _llm_curator_thread = t
         t.start()
         return {"job_id": job_id, "status": "running"}
     if parts == ["curator", "llm", "apply-single"] and method == "POST":
@@ -1119,14 +1145,31 @@ def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
         next_hour = (now_dt + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
         next_run_at = next_hour.isoformat()
 
-    llm_run = _latest_audit_event("llm_curator_run")
-    llm_detail = llm_run.get("detail", {})
-    llm_last_run_at = llm_run.get("created_at", "")
-    llm_errors = llm_detail.get("errors", []) if isinstance(llm_detail, dict) else []
-    llm_last_result = "failed" if llm_errors else ("success" if llm_last_run_at else "unknown")
+    # For LLM Curator, we now use the jobs table directly instead of audit logs
     with _llm_curator_lock:
         latest_job_id = _latest_llm_job_id[0] if _latest_llm_job_id else None
         latest_job = dict(_llm_curator_jobs.get(latest_job_id, {})) if latest_job_id else {}
+
+    if not latest_job:
+        try:
+            from memorycore.storage.llm_curator_jobs import get_latest_llm_curator_job
+            job = get_latest_llm_curator_job()
+            if job:
+                latest_job = job
+        except Exception:
+            pass
+
+    llm_errors = latest_job.get("errors", []) if isinstance(latest_job.get("errors"), list) else []
+
+    llm_last_run_at = latest_job.get("started_at", "")
+    if latest_job.get("status") == "succeeded":
+        llm_last_result = "success"
+    elif latest_job.get("status") == "failed":
+        llm_last_result = "failed"
+    elif latest_job.get("status") == "running":
+        llm_last_result = "running"
+    else:
+        llm_last_result = "unknown"
 
     if "result" in latest_job:
         from memorycore.storage.governance import filter_applied_or_rejected_findings
@@ -1139,7 +1182,7 @@ def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
         ).fetchall()
     active_counts = {row["decision_type"]: row["cnt"] for row in rows}
 
-    llm_summary = dict(llm_detail.get("summary", {}) if isinstance(llm_detail, dict) else {})
+    llm_summary = latest_job.get("summary", {}) if isinstance(latest_job.get("summary"), dict) else {}
     for category, decision_type in _CATEGORY_TO_DECISION_TYPE.items():
         if category in llm_summary:
             llm_summary[category] = active_counts.get(decision_type, 0)
