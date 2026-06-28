@@ -32,13 +32,13 @@ extraction_strategy:
   default_importance: 0.5
   default_memory_type: episodic_memory
   default_scope: global
-  default_status: candidate
+  default_status: active
   link_threshold: 0.55
   max_related_ids: 10
   min_importance: 0.3
-  skip_threshold: 0.92
+  skip_threshold: 0.88
   title_max_length: 80
-  update_threshold: 0.78
+  update_threshold: 0.82
 governance:
   auto_approve_confidence: 0.8
   auto_approve_low_risk_confidence: 0.7
@@ -74,7 +74,7 @@ qdrant:
   timeout: 30
   url: http://127.0.0.1:6333
 rule_curator:
-  archive_days_default: 730
+  archive_days_default: 365
   archive_days_episodic: 30
   candidate_ttl_default_days: 7
   candidate_ttl_episodic_days: 7
@@ -99,7 +99,7 @@ rule_curator:
   revival_window_days: 7
   skill_promote_feedback_min: 0
   skill_promote_importance: 0.65
-  stale_days_default: 365
+  stale_days_default: 180
   stale_days_episodic: 14
   stale_feedback_threshold: -0.5
   stale_importance_threshold: 0.45

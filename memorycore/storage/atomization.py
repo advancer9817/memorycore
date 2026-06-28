@@ -97,7 +97,7 @@ def plan_child_facts(
     seen_hashes: set[str] = set()
     for text, start, end in _candidate_spans(content):
         text = re.sub(r"\s+", " ", text).strip(" -\t")
-        if len(text) < 24 or len(text) > 520:
+        if len(text) < 50 or len(text) > 520:
             continue
         if not re.search(r"[一-鿿\w]{4,}", text):
             continue

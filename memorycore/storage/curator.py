@@ -112,6 +112,8 @@ def curator_report(
     skill_promotion_candidates: list[dict] = []
     evolution_candidates: list[dict] = []
     supersession_candidates: list[dict[str, Any]] = []
+    unused_active_candidates: list[dict] = []
+    _UNUSED_STALE_DAYS = 90
 
     for r in all_rows:
         typ = _s(r, "type", "")
@@ -174,6 +176,13 @@ def curator_report(
                 and updated < stale_cutoff and importance < stale_importance
                 and feedback <= stale_feedback and decay not in ("freeze", "stable")):
             stale_candidates.append(r)
+
+        # unused active: never injected after 90 days, non-precious, importance < 0.9
+        unused_cutoff = (now_dt - timedelta(days=_UNUSED_STALE_DAYS)).isoformat()
+        if (status == "active" and injected == 0 and typ not in _PRECIOUS
+                and importance < 0.9 and updated < unused_cutoff
+                and decay not in ("freeze", "stable")):
+            unused_active_candidates.append(r)
 
         # precious stale
         if (status == "active" and typ in _PRECIOUS
@@ -299,6 +308,8 @@ def curator_report(
         _plan(r, "archive", "dead_candidate", "archived")
     for r in never_accessed_candidates:
         _plan(r, "archive", "never_accessed_candidate", "archived")
+    for r in unused_active_candidates:
+        _plan(r, "mark_stale", "unused_90_days", "stale")
     for r in contradicted_archive_candidates:
         _plan(r, "archive", "contradicted_expired", "archived")
 

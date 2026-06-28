@@ -457,8 +457,8 @@ def test_split_apply_creates_children_and_archives_parent():
             "id": record["id"],
             "action": "split",
             "sub_memories": [
-                {"title": "Fact one", "content": "Fact one.", "importance": 0.4},
-                {"title": "Fact two", "content": "Fact two.", "importance": 0.4},
+                {"title": "First fact from split", "content": "The first important fact extracted from the original memory record for testing purposes.", "importance": 0.4},
+                {"title": "Second fact from split", "content": "The second important fact extracted from the original memory record for testing purposes.", "importance": 0.4},
             ],
         },
     )

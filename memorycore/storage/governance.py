@@ -357,6 +357,68 @@ def recalibrate_governance_review_queue(limit: int | None = None, dry_run: bool 
     }
 
 
+# Low-risk actions eligible for auto-expiry after stale period
+_AUTO_EXPIRE_ACTIONS = {"archive", "downgrade", "archive_duplicate", "archive_and_merge_duplicate", "keep"}
+
+
+def auto_expire_stale_reviews(stale_days: int = 14, dry_run: bool = True, source_agent: str = "maintenance") -> dict[str, Any]:
+    """Auto-approve low-risk needs_review decisions older than stale_days.
+
+    High-risk actions (split, supersede on precious types) are never auto-expired.
+    """
+    from datetime import datetime, timedelta, timezone
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=stale_days)).isoformat()
+    with read_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM governance_decisions
+            WHERE review_status='needs_review'
+              AND created_at < ?
+            ORDER BY created_at ASC
+            """,
+            (cutoff,),
+        ).fetchall()
+
+    expired: list[dict[str, Any]] = []
+    skipped = 0
+    for row in rows:
+        decision = _decision_row_to_dict(row)
+        action = decision.get("recommended_action", "")
+        if action not in _AUTO_EXPIRE_ACTIONS:
+            skipped += 1
+            continue
+        expired.append(decision)
+
+    if expired and not dry_run:
+        ts = now()
+        with managed_conn() as conn:
+            for item in expired:
+                conn.execute(
+                    """
+                    UPDATE governance_decisions
+                    SET review_status='auto_approved', policy_reason=?, updated_at=?
+                    WHERE id=? AND review_status='needs_review'
+                    """,
+                    (f"auto_expired_after_{stale_days}_days", ts, item["id"]),
+                )
+        for item in expired:
+            _audit.log_audit_event(
+                "governance_decision_auto_expire",
+                memory_id=(item["source_ids"][0] if item.get("source_ids") else None),
+                agent=source_agent,
+                detail={"decision_id": item["id"], "stale_days": stale_days, "action": item.get("recommended_action")},
+            )
+
+    return {
+        "dry_run": dry_run,
+        "checked": len(rows),
+        "would_expire": len(expired),
+        "expired": 0 if dry_run else len(expired),
+        "skipped_high_risk": skipped,
+        "cutoff": cutoff,
+    }
+
+
 def create_governance_decision(
     decision_type: str,
     recommended_action: str,
@@ -978,8 +1040,17 @@ def _split_requests(decision: dict[str, Any], finding: dict[str, Any], confidenc
         raise ValueError(f"split source memory {orig_id!r} not found")
     orig = row_to_dict(orig_row)
     decision_id = str(decision.get("id"))
+    # Quality gate: limit fragment count and enforce minimum length
+    max_splits = 5
+    min_content_len = 50
+    min_title_len = 10
+    qualified_subs = [
+        sub for sub in sub_memories
+        if len(str(sub.get("content") or "").strip()) >= min_content_len
+        and len(str(sub.get("title") or "").strip()) >= min_title_len
+    ][:max_splits]
     requests = [_memory_request("memory_archive", orig_id, {"status": "archived"}, risk, confidence, decision_id)]
-    for index, sub in enumerate(sub_memories):
+    for index, sub in enumerate(qualified_subs):
         sub_title = str(sub.get("title") or "")[:120].strip()
         sub_content = str(sub.get("content") or "").strip()
         if not sub_title or not sub_content:

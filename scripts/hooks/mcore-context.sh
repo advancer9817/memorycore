@@ -76,7 +76,7 @@ SESSION_ID="$(printf '%s' "$INIT_RESPONSE" | awk -F': ' 'tolower($1)=="mcp-sessi
 PAYLOAD="$(python3 -c '
 import json
 import sys
-prompt = sys.argv[1][:300]
+prompt = sys.argv[1][:500]
 agent = sys.argv[2]
 payload = {
     "jsonrpc": "2.0",
@@ -84,7 +84,7 @@ payload = {
     "method": "tools/call",
     "params": {
         "name": "memory_context",
-        "arguments": {"task": prompt, "agent": agent, "project_path": sys.argv[3], "token_budget": 1500},
+        "arguments": {"task": prompt, "agent": agent, "project_path": sys.argv[3], "token_budget": 2000},
     },
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -92,13 +92,37 @@ print(json.dumps(payload, ensure_ascii=False))
 
 [ -z "$PAYLOAD" ] && exit 0
 
-RESPONSE="$(curl -sS --max-time 1.8 -X POST "$MCORE_URL" \
+RESPONSE="$(curl -sS --max-time 3.0 -X POST "$MCORE_URL" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "Mcp-Session-Id: $SESSION_ID" \
   -d "$PAYLOAD" 2>/dev/null || true)"
 
-[ -z "$RESPONSE" ] && exit 0
+CACHE_FILE="/tmp/mcore-last-context-${AGENT}.cache"
+
+[ -z "$RESPONSE" ] && {
+  # Fallback: use cached context from last successful call
+  [ -f "$CACHE_FILE" ] && CONTEXT="$(cat "$CACHE_FILE" 2>/dev/null || true)" || CONTEXT=""
+  [ -z "$CONTEXT" ] && exit 0
+  # Skip to output with cached context
+  python3 -c '
+import json, sys
+context = sys.argv[1]
+event = sys.argv[2]
+if event == "pre_llm_call":
+    payload = {"context": context}
+else:
+    hook_event_name = "BeforeAgent" if event == "BeforeAgent" else "UserPromptSubmit"
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": hook_event_name,
+            "additionalContext": context,
+        }
+    }
+print(json.dumps(payload, ensure_ascii=False))
+' "$CONTEXT" "$HOOK_EVENT" 2>/dev/null || true
+  exit 0
+}
 
 CONTEXT="$(printf '%s' "$RESPONSE" | python3 -c '
 import json
@@ -129,6 +153,9 @@ except Exception:
 ' 2>/dev/null || true)"
 
 [ -z "$CONTEXT" ] && exit 0
+
+# Cache successful context for fallback on next timeout
+printf '%s' "$CONTEXT" > "$CACHE_FILE" 2>/dev/null || true
 
 python3 -c '
 import json, sys

@@ -874,17 +874,20 @@ def _start_auto_curator(interval_hours: float = 6.0) -> None:
             try:
                 from memorycore.storage.handoff import cleanup_expired_handoffs
                 from memorycore.storage.crud import _drain_vector_sync_queue
+                from memorycore.storage.governance import auto_expire_stale_reviews
                 handoff_cleanup = cleanup_expired_handoffs()
                 sync_result = _drain_vector_sync_queue()
                 rollup = rollup_report(dry_run=False)
                 rollup_summary = rollup.get("summary", {})
+                expire_result = auto_expire_stale_reviews(stale_days=14, dry_run=False)
                 logger.info(
-                    "[auto-curator] handoff_cleaned=%s sync_retried=%s/%s rollup_created=%s rollup_archived=%s",
+                    "[auto-curator] handoff_cleaned=%s sync_retried=%s/%s rollup_created=%s rollup_archived=%s expired_reviews=%s",
                     handoff_cleanup.get("cleaned", 0),
                     sync_result.get("succeeded", 0),
                     sync_result.get("failed", 0),
                     rollup_summary.get("created", 0),
                     rollup_summary.get("archived_sources", 0),
+                    expire_result.get("expired", 0),
                 )
             except Exception as exc:
                 logger.warning("[auto-curator] error: %s", exc)

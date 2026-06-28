@@ -246,7 +246,7 @@ def ingest(
     # --- 4. Dedup each fact ---
     for fact in facts:
         try:
-            fact_type = mem_type
+            fact_type = fact.memory_type if fact.memory_type else mem_type
             type_link = TYPE_THRESHOLDS.get(fact_type, (base_skip, base_update, base_link))[2]
             similar = []
             if vs.available:
@@ -307,7 +307,7 @@ def ingest(
                 new_id = str(uuid.uuid4())
                 _add_memory_fn(
                     memory_id=new_id,
-                    memory_type=mem_type,
+                    memory_type=fact_type,
                     title=fact.text[:title_max],
                     content=fact.text,
                     scope=mem_scope,
@@ -335,7 +335,7 @@ def ingest(
                 new_id = str(uuid.uuid4())
                 _add_memory_fn(
                     memory_id=new_id,
-                    memory_type=mem_type,
+                    memory_type=fact_type,
                     title=fact.text[:title_max],
                     content=fact.text,
                     scope=mem_scope,

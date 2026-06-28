@@ -4583,3 +4583,57 @@ LLM 分析 job 仍然被中断（"Job was interrupted by service restart"），�
 - `python -c "from memorycore.storage.curator_llm import run_llm_curator_incremental; print('import OK')"`: 通过
 - `curl http://127.0.0.1:8318/health`: 服务健康
 - `systemctl --user restart mcore.service`: 重启成功
+
+## [迭代 39] 2026-06-29 — 记忆引擎四轮系统重构（记得准、记得牢、读得准、治得好）
+
+### 背景
+
+用户要求围绕"记得准、记得牢、读得准、治得好"四个维度对 MemoryCore 进行全面系统重构。经过对 10+ 核心文件的逐行审计和数据库实际数据分析，识别出 18 个系统性缺陷并分四轮修复。
+
+### 变更（13 files, +359/-130 lines）
+
+**记得准（提取质量）**：
+- 重写中文 extraction prompt：强制输出 type 分类（decision/bug_fix/environment_fact/user_profile/project_memory/feedback/skill_learned）、工程场景 few-shot、反例
+- ExtractedFact 增加 memory_type 字段，_parse_response 解析 type
+- 已有记忆传入 type/importance/date 给 LLM（原来只传 id+text）
+- dedup 全链路使用 LLM 输出的 type 查 TYPE_THRESHOLDS（3 处 mem_type→fact_type）
+- extraction 失败 1 次重试 + audit_events 审计记录
+- default_status 从 candidate 改为 active（消除记忆隐身期）
+- dedup 阈值：skip 0.92→0.88，update 0.78→0.82
+
+**读得准（召回质量）**：
+- 排序公式引入 usage_rate 0.08 权重（动态自适应，高频记忆上浮、死重下沉）
+- importance 权重 0.07→0.05（降低静态权重）
+- feedback 自动闭环（被注入使用的记忆自动 +0.5 正反馈）
+- candidate 记忆纳入 FTS + vector 召回范围（0.85 排名折扣）
+- FTS5 长查询改为分段 AND/OR（4+ 词不再全 AND 零命中）
+- _lexical_relevance 增加 consecutive_bonus（连续词对匹配加 0.10）
+- context 输出从固定 type 分组改为全局 rank 排序（高相关记忆不再被低相关高优先级 type 挤到后面）
+- episodic_memory 召回上限 2→4 条
+- hook call 超时 1.8→3.0s，prompt 截断 300→500，token_budget 1500→2000
+- hook fallback 缓存（超时时用上次成功结果降级注入）
+- 向量降级时 FTS 补偿（limit 40→60）
+
+**治得好（自动治理）**：
+- needs_review 低风险决策 14 天自动降级（auto_expire_stale_reviews），接入 auto_curator 定时调度
+- 死重回收规则：90 天 injected_count=0 且 importance<0.9 的非 precious 记忆→stale
+- split 碎片质量门控：content ≥50 字符、title ≥10 字符、单条最多拆 5 条
+- atomization 最小长度 24→50 字符
+- 归档阈值收紧：archive_days 730→365，stale_days 365→180
+- 归档 18 条 <30 字符极端碎片
+
+**记得牢（持久存储）**：
+- 启动时 WAL TRUNCATE checkpoint
+- embedding 降级写 audit_events
+
+**文案与定位**：
+- README 定位重写为"记得准、记得牢、读得准、治得好"四维框架
+- 全局 CLAUDE.md 追加"记忆写回质量要求（记得准）"
+- mcore 定位记忆 supersede 为新四维框架
+- 新增框架重设计完整方案 docs/plans/2026-06-29-framework-redesign.md
+
+### 验证
+
+- `.venv/bin/python -m pytest tests/ -x -q`：263 passed, 1 pre-existing failure, 3 skipped
+- extraction 实测：3 条事实正确分类（bug_fix + decision + decision），内容自包含
+- 5 组查询 Top-1 全部命中最相关记忆

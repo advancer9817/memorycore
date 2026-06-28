@@ -69,6 +69,10 @@ def _get_thread_conn(path) -> sqlite3.Connection:
                 conn.execute("PRAGMA wal_autocheckpoint=0")
                 conn.execute("PRAGMA foreign_keys=ON")
                 conn.execute("PRAGMA busy_timeout=30000")
+                try:
+                    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                except Exception:
+                    pass
                 init_db(conn)
                 _INITIALIZED_DB_PATHS.add(key)
             else:

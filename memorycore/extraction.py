@@ -44,63 +44,85 @@ def _language_instruction(output_language: str) -> str:
 # ---------------------------------------------------------------------------
 
 ADDITIVE_EXTRACTION_PROMPT = """\
-You are a Personal Information Organizer specialized in accurately storing facts, \
-user memories, and preferences from developer/engineering conversations. \
-Your primary role is to extract relevant pieces of information from conversations \
-and organize them into distinct, manageable facts.
+你是一个精准的工程对话事实提取器。
+你的任务是从开发者与 AI 助手的对话中提取所有值得长期记住的事实。
+提取的事实将在未来对话中作为上下文注入，帮助助手快速理解项目状态和用户偏好。
 
-# [IMPORTANT]: ANALYZE THE FULL CONVERSATION (both user and assistant messages). \
-Extract facts revealed by the USER's intent, decisions, and requests — \
-but also extract technical facts confirmed in ASSISTANT responses: \
-bug root causes, code changes made, fixes applied, architectural decisions, \
-and project context. Do NOT extract filler, greetings, or generic assistant prose.
+# 分析范围
 
-Types of Information to Remember:
-1. Personal Preferences: likes, dislikes, specific preferences.
-2. Important Personal Details: names, relationships, important dates.
-3. Plans and Intentions: upcoming events, goals, plans.
-4. Professional Details: job titles, work habits, career goals.
-5. Environment & Tools: OS, editors, languages, frameworks, workflows.
-6. Decisions: choices made, approaches adopted, things rejected.
-7. Bug Fixes & Root Causes: what broke, why it broke, how it was fixed.
-8. Code Changes: files modified, logic changed, new features added.
-9. Miscellaneous: any other stable facts worth remembering.
+分析完整对话（用户和助手的消息）。提取：
+- 用户的意图、决策、请求中揭示的事实
+- 助手回复中确认的技术事实：Bug 根因、代码变更、修复方案、架构决策
+不提取：寒暄、感谢、进度更新、助手的通用解释
 
-Few-shot examples:
-Input: Hi.
-Output: {"memory": []}
+# 提取原则
 
-Input: My name is Alice and I use Neovim with lazy.nvim.
-Output: {"memory": [{"id": "0", "text": "User's name is Alice and uses Neovim with lazy.nvim plugin manager"}]}
+1. 提取结果而非过程："通过修改 config.yaml 的 timeout 从 1.8s 改为 2.5s 解决了 hook 超时" > "用户问了 hook 超时的问题"
+2. 自包含：每条事实脱离原对话后仍可独立理解，用具体名称替代代词
+3. 保留细节：文件路径、配置值、版本号、端口号、命令参数
+4. 捕获变化：记录"从X改为Y"而非只记录最终状态
+5. 面向未来：问自己"下次对话时这条信息是否有用？"
 
-Input: I switched from Python to Rust for performance-critical modules.
-Output: {"memory": [{"id": "0", "text": "User switched from Python to Rust for performance-critical modules"}]}
+# 输出格式
 
-Rules:
-- Today's date is {today}.
-- Detect the language of the user input and record facts in the same language.
-- If nothing is worth extracting, return: {"memory": []}
-- Each fact must be self-contained (replace pronouns with "User" or the person's name).
-- Capture transitions: what changed AND what it changed from.
-- Preserve specific details: exact names, versions, numbers, titles.
-- Return ONLY valid JSON parseable by json.loads(). No prose, no markdown fences.
-
-Output format:
-{
+{{
   "memory": [
-    {"id": "0", "text": "...", "importance": 0.7, "linked_memory_ids": ["<existing-uuid>"]},
-    {"id": "1", "text": "...", "importance": 0.4}
+    {{
+      "id": "0",
+      "text": "...",
+      "type": "decision",
+      "importance": 0.8,
+      "linked_memory_ids": ["<existing-uuid>"]
+    }}
   ]
-}
-linked_memory_ids is optional — include only when the new fact clearly relates to
-an existing memory (same entity, update, contradiction, continuation).
+}}
 
-importance is a float 0.0–1.0 rating how durable and reusable this fact is:
-  0.8–1.0: identity, long-term preferences, decisions, environment facts
-  0.5–0.7: project context, tools, workflows, plans
-  0.2–0.4: ephemeral context, transient debugging details, one-off mentions
-  0.0–0.1: greetings, filler, chat noise — DO NOT extract these
-Only extract facts with importance >= 0.3. Skip trivial or transient information.
+## type 必须是以下之一：
+- decision: 技术决策、选择的方案、放弃的方案及原因
+- environment_fact: 环境配置、路径、端口、版本、依赖关系
+- bug_fix: Bug 根因分析、修复方案、涉及的文件
+- user_profile: 用户偏好、工作习惯、技术栈、角色
+- project_memory: 项目状态、架构变更、里程碑、进度
+- feedback: 用户对 AI 行为的纠正或确认（"不要这样做"、"就这样"）
+- skill_learned: 可复用的工作流程、模式、技巧
+
+## importance 评分：
+  0.8–1.0: 根因分析、架构决策、用户强偏好、环境关键配置
+  0.5–0.7: Bug 修复细节、配置变更、工作流决策、项目上下文
+  0.3–0.4: 已完成任务的实现细节（短期有用）
+  < 0.3: 不提取
+
+## linked_memory_ids（可选）：
+当新事实明确更新、矛盾或延续某条 Existing Memory 时填写其 id。
+
+# 正确提取示例
+
+Input: user: "mcore-context.sh 的 curl 超时 1.8s 太短了" / assistant: "根因是 Qdrant 向量查询偶发超过 1.5s，建议改为 2.5s" / user: "改了，同时 token_budget 从 1500 改到 2000"
+Output: {{"memory": [
+  {{"id": "0", "text": "mcore-context.sh 的 MCP 调用超时从 1.8s 改为 2.5s，根因是 Qdrant 向量查询偶发超过 1.5s", "type": "bug_fix", "importance": 0.7}},
+  {{"id": "1", "text": "mcore-context.sh 的 token_budget 从 1500 改为 2000", "type": "environment_fact", "importance": 0.6}}
+]}}
+
+Input: user: "不要在 PR 描述里加 emoji" / assistant: "好的，以后不加了"
+Output: {{"memory": [{{"id": "0", "text": "用户偏好：PR 描述中不使用 emoji", "type": "feedback", "importance": 0.8}}]}}
+
+Input: user: "决定用 SQLite 而不是 PostgreSQL，因为本项目是单机部署" / assistant: "合理的选择"
+Output: {{"memory": [{{"id": "0", "text": "项目选择 SQLite 而非 PostgreSQL 作为数据库，原因是单机部署场景", "type": "decision", "importance": 0.9}}]}}
+
+Input: user: "Hi" / assistant: "你好，有什么可以帮你的？"
+Output: {{"memory": []}}
+
+Input: user: "已完成第 3 步" / assistant: "好的，继续第 4 步"
+Output: {{"memory": []}}
+
+# 规则
+
+- 今天日期是 {today}。
+- 检测输入语言，用相同语言记录事实。中文输入用中文，英文输入用英文。
+- 技术术语、专有名词、版本号保持原文不翻译。
+- 无值得提取的内容时返回：{{"memory": []}}
+- 仅返回合法 JSON，不要 prose，不要 markdown fence。
+- importance < 0.3 的事实不要输出。
 """
 
 
@@ -115,8 +137,16 @@ def _build_user_prompt(
     parts.append(f"## Observation Date\n{today}")
 
     if existing_memories:
-        mem_list = [{"id": m["id"], "text": m.get("content", m.get("text", ""))}
-                    for m in existing_memories]
+        mem_list = [
+            {
+                "id": m["id"],
+                "text": m.get("content", m.get("text", "")),
+                "type": m.get("type", ""),
+                "importance": m.get("importance", 0.5),
+                "date": (m.get("created_at") or "")[:10],
+            }
+            for m in existing_memories
+        ]
         parts.append(f"## Existing Memories\n{json.dumps(mem_list, ensure_ascii=False)}")
     else:
         parts.append("## Existing Memories\n[]")
@@ -185,6 +215,7 @@ class ExtractedFact:
     linked_memory_ids: list[str] = field(default_factory=list)
     raw_id: str = ""          # sequential id from LLM response ("0", "1", ...)
     importance: float = 0.5   # LLM-assigned importance 0.0–1.0
+    memory_type: str = ""     # LLM-assigned type (decision, bug_fix, etc.)
 
 
 # ---------------------------------------------------------------------------
@@ -248,14 +279,31 @@ def extract_facts(
     )
 
     t0 = time.time()
-    try:
-        raw = _call_llm(system_prompt, user_prompt, config)
-    except Exception as exc:
-        elapsed = time.time() - t0
-        logger.error("extraction: LLM call failed: %s", exc)
-        return [], elapsed
+    last_error = None
+    for attempt in range(2):
+        try:
+            raw = _call_llm(system_prompt, user_prompt, config)
+            last_error = None
+            break
+        except Exception as exc:
+            last_error = exc
+            if attempt == 0:
+                logger.warning("extraction: LLM call failed (attempt 1), retrying: %s", exc)
+                time.sleep(1)
 
     elapsed = time.time() - t0
+
+    if last_error is not None:
+        logger.error("extraction: LLM call failed after 2 attempts: %s", last_error)
+        try:
+            from memorycore.storage.audit import log_audit_event
+            log_audit_event(
+                "extraction_failed",
+                detail={"error": str(last_error), "elapsed_s": round(elapsed, 2), "model": config.model},
+            )
+        except Exception:
+            pass
+        return [], elapsed
 
     facts = _parse_response(raw, min_importance=min_importance)
     logger.info("extraction: extracted %d facts in %.2fs", len(facts), elapsed)
@@ -408,6 +456,7 @@ def _parse_response(raw: str, *, min_importance: float = 0.3) -> list[ExtractedF
                 linked_memory_ids=[str(x) for x in linked if x],
                 raw_id=str(item.get("id", "")),
                 importance=imp,
+                memory_type=str(item.get("type", "")),
             ))
 
     return facts

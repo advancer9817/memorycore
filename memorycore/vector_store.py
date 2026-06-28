@@ -156,6 +156,11 @@ def embed_text(text: str, config: EmbedConfig | None = None) -> list[float]:
             return _embed_ollama(text, config)
         except Exception as exc:
             logger.warning("embed_text: Ollama failed (%s), using %s fallback", exc, config.fallback_provider)
+            try:
+                from memorycore.storage.audit import log_audit_event
+                log_audit_event("embedding_degraded", detail={"provider": "ollama", "error": str(exc), "fallback": config.fallback_provider})
+            except Exception:
+                pass
             return _embed_fallback(text, config)
     if provider == "hashing":
         return _embed_hashing(text, config.dim)

@@ -2,21 +2,23 @@
 
 作者：advancer9817-crypto <advancer9817-crypto@users.noreply.github.com>
 
-本地优先、MCP 暴露的多 agent 共享记忆与协作适配层。
-
-给任何支持 MCP 的本地 agent/client 提供统一的长期记忆总线，替代把所有内容塞进某个单一客户端的记忆文件。
+本地优先的智能记忆中枢。通过 MCP 为 AI 对话提供持久化长期记忆 — 对话前自动召回相关上下文，对话后自动提取关键经验，后台自动治理记忆质量。
 
 ## 定位
 
-不是完整的 memory platform，也不是 agent 调度框架。
+核心追求四件事：**记得准、记得牢、读得准、治得好**。
 
-定位是：**多 agent 记忆与协作控制面**。
+- **记得准**：对话结束时精准提取关键事实 — 决策、根因、修复方案、配置变更，结果导向而非过程记录。
+- **记得牢**：SQLite + FTS5 + Qdrant 向量 + 实体索引多路存储，原子事实拆分，跨设备 git 同步。
+- **读得准**：对话前 FTS5 + 向量 + 实体三路融合召回，交叉验证加成，不遗漏、不噪音。
+- **治得好**：自动去重、归档过时、检测矛盾、建立图谱关联。自动化是默认，人工是例外。
 
-- 统一入口：所有 agent 通过同一个 MCP server 读写记忆，不维护孤岛。
+技术特性：
+
+- 统一入口：通过 MCP server 读写记忆，不维护孤岛。
 - 上下文包装：按任务生成 compact context pack，控制 token budget，区分记忆类型。
-- 协作基础：共享记忆 + agent mailbox + presence，支持 Hermes 总控 + Codex/Claude 专职执行。
-- 自进化：curator 定期整理、降噪、归档、合并，高价值经验沉淀为 skills/playbooks。
-- 低心智负担：agent 不直接关心 SQLite/Qdrant 细节，只调用稳定 MCP tools。
+- 自进化：curator 定期整理、降噪、归档、合并，高价值经验沉淀。
+- 低心智负担：调用方不直接关心 SQLite/Qdrant 细节，只调用稳定 MCP tools。
 
 ## 路径
 

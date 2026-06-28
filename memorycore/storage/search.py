@@ -182,11 +182,18 @@ def _lexical_relevance(task: str, record: dict[str, Any]) -> float:
     content = str(record.get("content") or "").lower()
     tags = " ".join(str(t).lower() for t in record.get("tags", []))
     haystack = f"{title} {content} {tags}"
-    matched = sum(1 for term in terms if term in haystack)
+    matched_terms = [term for term in terms if term in haystack]
+    matched = len(matched_terms)
     title_matched = sum(1 for term in terms if term in title)
     phrase = task.strip().lower()
     phrase_bonus = 0.15 if len(phrase) >= 4 and phrase in haystack else 0.0
-    return min(1.0, (matched / len(terms)) * 0.75 + (title_matched / len(terms)) * 0.20 + phrase_bonus)
+    consecutive_bonus = 0.0
+    if matched >= 2:
+        for i in range(len(terms) - 1):
+            bigram = f"{terms[i]} {terms[i+1]}" if i + 1 < len(terms) else ""
+            if bigram and bigram in haystack:
+                consecutive_bonus += 0.10
+    return min(1.0, (matched / len(terms)) * 0.65 + (title_matched / len(terms)) * 0.20 + phrase_bonus + consecutive_bonus)
 
 
 def _record_context_quality_event(
@@ -388,9 +395,21 @@ def search_memory_records(
         if not terms:
             return []
         base += " JOIN memories_fts f ON f.id = m.id"
-        # AND for multi-term queries to reduce false positives; OR for single term
-        connector = " AND " if len(terms) >= 2 else " OR "
-        fts_query = connector.join(fts_phrase(term) for term in terms)
+        # Smart FTS query: short queries use AND, long queries split to avoid zero-hit
+        if len(terms) <= 3:
+            connector = " AND " if len(terms) >= 2 else " OR "
+            fts_query = connector.join(fts_phrase(term) for term in terms)
+        elif len(terms) <= 6:
+            mid = len(terms) // 2
+            left = " AND ".join(fts_phrase(t) for t in terms[:mid])
+            right = " AND ".join(fts_phrase(t) for t in terms[mid:])
+            fts_query = f"({left}) OR ({right})"
+        else:
+            top_terms = terms[:6]
+            mid = len(top_terms) // 2
+            left = " AND ".join(fts_phrase(t) for t in top_terms[:mid])
+            right = " AND ".join(fts_phrase(t) for t in top_terms[mid:])
+            fts_query = f"({left}) OR ({right})"
         clauses.append("memories_fts MATCH ?")
         params.append(fts_query)
         fts_active = True
@@ -605,6 +624,16 @@ def _parent_id(record: dict[str, Any]) -> str:
     return str(_metadata(record).get("parent_id") or "")
 
 
+def _auto_feedback_for_used(ids: list[str]) -> None:
+    """Auto-positive feedback for memories that were actually injected into context."""
+    from memorycore.storage.crud import add_feedback
+    for mid in ids:
+        try:
+            add_feedback(mid, score=0.5, note="auto:injected", source_agent="system")
+        except Exception:
+            pass
+
+
 def _context_recency_weight() -> float:
     from memorycore.models import load_config as _lc_w
     cfg = _lc_w()
@@ -661,8 +690,25 @@ def build_context_pack(
     # --- Hybrid retrieval: FTS5 + Qdrant vector search + entity aliases (concurrent) ---
     import concurrent.futures as _cf
 
+    # Quick check if vector store is likely available (for FTS compensation)
+    vs_available_hint = False
+    try:
+        from memorycore.vector_store import get_vector_store as _gvs_hint
+        _vs_hint = _gvs_hint()
+        vs_available_hint = getattr(_vs_hint, "available", False)
+    except Exception:
+        pass
+
     def _fetch_fts():
-        rows = search_memory_records(task, scope=scope, project_path=project_path, status="active", limit=40)
+        fts_limit = 40
+        if not vs_available_hint:
+            fts_limit = 60
+        rows = search_memory_records(task, scope=scope, project_path=project_path, status="active", limit=fts_limit)
+        if not rows:
+            rows = search_memory_records(task, scope=scope, project_path=project_path, status="candidate", limit=20)
+        else:
+            candidate_rows = search_memory_records(task, scope=scope, project_path=project_path, status="candidate", limit=10)
+            rows.extend(candidate_rows)
         if not rows:
             rows = _keyword_scan_records(task, scope=scope, project_path=project_path, limit=40)
         return rows
@@ -708,7 +754,7 @@ def build_context_pack(
             placeholders = ",".join("?" for _ in extra_ids)
             extra_clauses = [
                 f"id IN ({placeholders})",
-                "status = 'active'",
+                "status IN ('active', 'candidate')",
                 "(valid_until IS NULL OR valid_until > ?)",
             ]
             extra_params: list[Any] = [*extra_ids, now()]
@@ -771,20 +817,24 @@ def build_context_pack(
 
         atomic_bonus = 0.07 if prefer_atomic and _is_atomic_fact(r) else 0.0
         parent_penalty = -0.05 if prefer_atomic and not include_parent and _metadata(r).get("kind") == "parent_memory" else 0.0
+        candidate_discount = 0.85 if r.get("status") == "candidate" else 1.0
         feedback = max(-1.0, min(1.0, float(r.get("feedback_score") or 0)))
+        usage_rate = min(1.0, float(r.get("injected_count") or 0) / 10.0)
 
         return max(
             0.0,
-            vector_score * 0.30
-            + lexical * 0.35
+            (vector_score * 0.25
+            + lexical * 0.30
             + entity_boosts.get(r["id"], 0.0)
             + source_bonus
             + atomic_bonus
             + parent_penalty
-            + float(r.get("importance") or 0) * 0.07
-            + float(r.get("effectiveness_score") or 0) * 0.05
-            + feedback * 0.02
-            + _recency_score(r) * recency_weight
+            + float(r.get("importance") or 0) * 0.05
+            + usage_rate * 0.08
+            + float(r.get("effectiveness_score") or 0) * 0.04
+            + feedback * 0.03
+            + _recency_score(r) * recency_weight)
+            * candidate_discount
         )
 
     fallback_used = False
@@ -853,9 +903,23 @@ def build_context_pack(
         "skill_candidate", "user_profile", "environment_fact", "agent_architecture",
         "project_memory", "decision", "timeline_event", "episodic_memory", "feedback",
     ]
-    grouped: dict[str, list[dict[str, Any]]] = {k: [] for k in groups_order}
+    # Global rank-sorted output: records are already sorted by _rank_score.
+    # Apply per-type cap (max 6 each) but output in rank order, not type order.
+    type_counts: dict[str, int] = {}
+    rank_capped: list[dict[str, Any]] = []
     for r in records:
-        grouped.setdefault(r["type"], []).append(r)
+        t = r.get("type", "episodic_memory")
+        type_counts[t] = type_counts.get(t, 0) + 1
+        if t == "episodic_memory" and type_counts[t] > 4:
+            continue
+        if type_counts[t] > 6:
+            continue
+        rank_capped.append(r)
+
+    grouped: dict[str, list[dict[str, Any]]] = {k: [] for k in groups_order}
+    for r in rank_capped:
+        grouped.setdefault(r.get("type", "episodic_memory"), []).append(r)
+    # Output: sorted by rank_score across all types, with type labels inline
     lines = [
         f"# memory_context for {agent}",
         f"task: {task}",
@@ -867,39 +931,32 @@ def build_context_pack(
     used_ids: list[str] = []
     filtered_ids: list[str] = []
     injection_warnings: list[dict[str, Any]] = []
-    for group in groups_order:
-        items = grouped.get(group) or []
-        if not items:
+    current_type = ""
+    for item in rank_capped:
+        check = check_memory_for_injection(item)
+        if check.is_high_risk:
+            filtered_ids.append(item["id"])
+            injection_warnings.append(warning_for_filtered_memory(item, check))
             continue
-        if group == "episodic_memory":
-            items = [i for i in items if float(i.get("feedback_score", 0)) >= 0][:2]
-            if not items:
-                continue
-        section = [f"## {group}"]
-        section_used_ids: list[str] = []
-        for item in items[:6]:
-            check = check_memory_for_injection(item)
-            if check.is_high_risk:
-                filtered_ids.append(item["id"])
-                injection_warnings.append(warning_for_filtered_memory(item, check))
-                continue
-            snippet = item["content"].replace("\n", " ")
-            if len(snippet) > 420:
-                snippet = snippet[:417] + "..."
-            section.append(f"- [{item['id']}] {item['title']}: {snippet}")
-            section_used_ids.append(item["id"])
-        if len(section) == 1:
-            continue
-        candidate = "\n".join(lines + section) + "\n"
-        if len(candidate) > max_chars:
+        item_type = item.get("type", "episodic_memory")
+        if item_type != current_type:
+            lines.append(f"## {item_type}")
+            current_type = item_type
+        snippet = item["content"].replace("\n", " ")
+        if len(snippet) > 420:
+            snippet = snippet[:417] + "..."
+        candidate_line = f"- [{item['id']}] {item['title']}: {snippet}"
+        test_text = "\n".join(lines + [candidate_line])
+        if len(test_text) > max_chars:
             break
-        lines.extend(section + [""])
-        used_ids.extend(section_used_ids)
+        lines.append(candidate_line)
+        used_ids.append(item["id"])
     text = "\n".join(lines).strip()
     if used_ids:
         ts = now()
         ids_snapshot = list(used_ids)
         _write_injected_counts(ids_snapshot, ts)
+        _auto_feedback_for_used(ids_snapshot)
     active_count = sum(1 for r in records if r["status"] == "active")
     warnings = (get_active_warnings(used_ids) if used_ids else []) + injection_warnings
     hit_rate = round(len(used_ids) / max(len(records), 1), 3)
