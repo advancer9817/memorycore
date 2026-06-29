@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode, useCallback, useState } from "react";
-import { AppWindow, Home, Layers3, Menu, Network, RefreshCcw, Settings, ShieldCheck } from "lucide-react";
+import { Home, Layers3, Menu, Network, RefreshCcw, Settings } from "lucide-react";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -31,13 +31,8 @@ async function refreshForPath(pathname: string): Promise<void> {
     fetches.push(fetch(`${base}/api/v1/stats`));
   } else if (pathname.startsWith("/memories")) {
     return;
-  } else if (pathname.startsWith("/apps")) {
-    fetches.push(fetch(`${base}/api/v1/apps/`));
   } else if (pathname.startsWith("/settings")) {
     fetches.push(fetch(`${base}/api/v1/config`));
-  } else if (pathname.startsWith("/governance")) {
-    fetches.push(fetch(`${base}/api/governance/metrics`));
-    fetches.push(fetch(`${base}/api/governance/decisions?review_status=actionable&limit=500`));
   }
 
   await Promise.allSettled(fetches);
@@ -61,15 +56,9 @@ export function Navbar() {
       } else if (pathname.startsWith("/memories")) {
         const { requestMemoriesRefresh } = await import("@/store/memoriesSlice");
         store.dispatch(requestMemoriesRefresh());
-      } else if (pathname.startsWith("/apps")) {
-        const { requestAppsRefresh } = await import("@/store/appsSlice");
-        store.dispatch(requestAppsRefresh());
       } else if (pathname.startsWith("/graph")) {
         const { requestGraphRefresh } = await import("@/store/uiSlice");
         store.dispatch(requestGraphRefresh());
-      } else if (pathname.startsWith("/governance")) {
-        const { requestGovernanceRefresh } = await import("@/store/uiSlice");
-        store.dispatch(requestGovernanceRefresh());
       } else {
         await refreshForPath(pathname);
         const { resetProfileState } = await import("@/store/profileSlice");
@@ -89,9 +78,7 @@ export function Navbar() {
   const navItems: NavItem[] = [
     { href: "/", label: messages.nav.dashboard, icon: <Home /> },
     { href: "/memories", label: messages.nav.memories, icon: <Layers3 /> },
-    { href: "/apps", label: messages.nav.apps, icon: <AppWindow /> },
     { href: "/graph", label: messages.nav.graph, icon: <Network className="h-4 w-4" /> },
-    { href: "/governance", label: messages.nav.governance, icon: <ShieldCheck className="h-4 w-4" /> },
     { href: "/settings", label: messages.nav.settings, icon: <Settings className="h-4 w-4" /> },
   ];
 

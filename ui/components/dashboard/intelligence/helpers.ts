@@ -417,29 +417,16 @@ export function buildReviewQueue(
     [t.attentionAgingKnowledge]: "/memories?search=stale&page=1&size=20&sort=created_at&dir=desc",
     [t.attentionPendingReview]: "/memories?search=candidate&page=1&size=20&sort=created_at&dir=desc",
     [t.attentionPlannedActions]: "/memories?search=candidate&page=1&size=20&sort=created_at&dir=desc",
-    [t.attentionImportanceReviews]: "/governance",
-    [t.attentionSplitCandidates]: "/governance",
+    [t.attentionImportanceReviews]: "/memories?page=1&size=20&sort=created_at&dir=desc",
+    [t.attentionSplitCandidates]: "/memories?page=1&size=20&sort=created_at&dir=desc",
   };
-
-  const llmSummary = curatorStatus?.llm_curator?.summary ?? {};
 
   return attentionItems
     .filter((item) => item.count > 0)
     .slice(0, 5)
     .map((item) => {
-      let primaryHref = hrefByLabel[item.label] ?? "/memories";
-      let primaryLabel = t.openMemories;
-
-      if (item.label === t.attentionImportanceReviews || item.label === t.attentionSplitCandidates) {
-        primaryHref = item.label === t.attentionImportanceReviews ? "/governance?type=importance_reassessment" : "/governance?type=split_candidate";
-        primaryLabel = t.reviewOpenGovernance;
-      } else if (item.label === t.attentionContradictions && asNumber(llmSummary.contradictions) > 0) {
-        primaryHref = "/governance?type=contradiction";
-        primaryLabel = t.reviewOpenGovernance;
-      } else if (item.label === t.attentionMergeOpportunities && asNumber(llmSummary.semantic_duplicates) > 0) {
-        primaryHref = "/governance?type=semantic_duplicate";
-        primaryLabel = t.reviewOpenGovernance;
-      }
+      const primaryHref = hrefByLabel[item.label] ?? "/memories";
+      const primaryLabel = t.openMemories;
 
       return {
         ...item,

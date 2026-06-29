@@ -4664,3 +4664,27 @@ LLM 分析 job 仍然被中断（"Job was interrupted by service restart"），�
 
 ### 验证
 - `.venv/bin/python -m pytest tests/`：488 passed, 3 skipped, 3 pre-existing failures（与本次无关）
+
+## [迭代 41] 2026-06-30 — 框架重设计 Phase 3：前端精简（6→4 页）+ Context Lab
+
+### 变更
+
+**导航精简（6→4 页）**
+- `ui/components/Navbar.tsx`：移除 Apps 和 Governance 导航入口及刷新逻辑，保留 Dashboard / Memories / Graph / Settings
+- `ui/components/dashboard/intelligence/helpers.ts`：所有 `/governance?type=...` 链接改为 `/memories`，移除无用的 `llmSummary` 变量
+
+**Dashboard 简化**
+- `ui/app/page.tsx`：移除 MemoryOperationsPanel 和 CuratorTuningPanel，仅保留 MemoryIntelligenceCenter + Context Lab
+
+**新增 Context Lab 组件**
+- `ui/components/dashboard/ContextLab.tsx`：召回调试器，输入 prompt 调用 `/api/context` POST，展示召回记忆列表（title、type、importance、vector_score、retrieval_source 标签）和检索追踪面板（used/filtered/candidates、vector_avg、cross_retrieval_rate、hit_rate 等 14 个指标）
+- `ui/lib/i18n/dictionaries/en.ts` / `zh.ts`：新增 28 个 contextLab* 国际化键
+
+**配置更新**
+- `ui/next.config.mjs` + `next.config.dev.mjs`：新增 `/api/context` 代理规则
+
+### 验证
+- `npm run build`：成功，Dashboard 12kB，全部 9 个路由正常编译
+- 4 页 HTTP 200：Dashboard / Memories / Graph / Settings
+- `/api/context` POST 端点：返回 6 条 records + trace 数据
+- `systemctl --user restart mcore-ui`：服务正常运行
