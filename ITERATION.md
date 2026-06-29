@@ -4637,3 +4637,30 @@ LLM 分析 job 仍然被中断（"Job was interrupted by service restart"），�
 - `.venv/bin/python -m pytest tests/ -x -q`：263 passed, 1 pre-existing failure, 3 skipped
 - extraction 实测：3 条事实正确分类（bug_fix + decision + decision），内容自包含
 - 5 组查询 Top-1 全部命中最相关记忆
+
+## [迭代 40] 2026-06-30 — 框架重设计 Phase 1+2：MCP 精简 + 治理自动化
+
+### 变更（8 files, +135/-478 lines）
+
+**Phase 1: MCP 工具精简（46 → 25）**
+- `memorycore/server.py`：移除 20 个工具的 `@mcp.tool()` 装饰器（governance 8个 + agent 协作 9个 + 离线报告 3个），函数代码保留供内部调用
+- `README.md`：工具表从 45 条精简为 25 条，工具计数 45→25
+- `docs/tools.md`：通过 `scripts/generate_tools_doc.py` 自动重新生成
+
+**Phase 2: 治理层简化与去审批化**
+- `memorycore/storage/curator_llm.py`：从 `llm_curator_report()` 和 `run_llm_curator_incremental()` 移除 importance 重评估和 split 检测阶段，仅保留 dedup + contradiction + link_discovery
+- `memorycore/storage/governance.py`：
+  - Policy gate 阈值更新：`AUTO_CONFIDENCE=0.90→0.65`、`REVIEW_CONFIDENCE=0.55→0.45`；destructive 操作需 0.75，非 destructive 需 0.65
+  - `create_governance_decision()` 在 `auto_approved` 时立即调用 `apply_governance_decision()` 自动执行
+  - `recalibrate_governance_review_queue()` 和 `auto_expire_stale_reviews()` 重分类后自动 apply
+  - `convert_llm_findings_to_decisions()` 适配：已 applied 决策直接加入 `auto_applied` 列表
+  - Policy version 升级到 `2026-06-29`
+
+### 测试适配
+- `tests/test_governance.py`：25/25 通过，适配 auto-apply 行为（使用 split 动作测试 needs_review 路径）
+- `tests/test_governance_foundation.py`：6/6 通过
+- `tests/test_frontend.py`：2 个相关测试修复通过
+- `tests/test_docs_consistency.py`：3/3 通过
+
+### 验证
+- `.venv/bin/python -m pytest tests/`：488 passed, 3 skipped, 3 pre-existing failures（与本次无关）

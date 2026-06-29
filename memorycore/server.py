@@ -239,8 +239,6 @@ def memory_timeline(query: str = "", scope: str = "", limit: int = 20) -> list[d
     return timeline(query, scope, limit)
 
 
-@mcp.tool()
-@_safe_tool
 def memory_curator_report(
     dry_run: bool = True,
     limit: int = 500,
@@ -253,8 +251,6 @@ def memory_curator_report(
     return curator_report(dry_run, limit, stale_after_days, archive_after_days, allow_actions, deny_actions)
 
 
-@mcp.tool()
-@_safe_tool
 def memory_rollup_report(
     dry_run: bool = True,
     limit: int = 250,
@@ -278,8 +274,6 @@ def memory_rollup_report(
     )
 
 
-@mcp.tool()
-@_safe_tool
 def memory_atomize_report(
     record_id: str = "",
     dry_run: bool = True,
@@ -530,22 +524,16 @@ def memory_warnings(
     return get_active_warnings(memory_ids, min_weight=min_weight, max_warnings=max_warnings)
 
 
-@mcp.tool()
-@_safe_tool
 def governance_decisions(review_status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
     """Return governance decisions ordered by newest first."""
     return list_governance_decisions(review_status=review_status, limit=limit)
 
 
-@mcp.tool()
-@_safe_tool
 def governance_apply(decision_id: str, source_agent: str = "agent") -> dict[str, Any]:
     """Apply an approved governance decision and emit audit records."""
     return apply_governance_decision(decision_id, source_agent=source_agent)
 
 
-@mcp.tool()
-@_safe_tool
 def governance_apply_batch(decision_ids: list[str], source_agent: str = "agent") -> dict[str, Any]:
     """Apply multiple actionable governance decisions as one batch.
 
@@ -556,37 +544,27 @@ def governance_apply_batch(decision_ids: list[str], source_agent: str = "agent")
     return apply_governance_decisions_batch(decision_ids, source_agent=source_agent)
 
 
-@mcp.tool()
-@_safe_tool
 def governance_recalibrate_queue(limit: int | None = None, dry_run: bool = True, source_agent: str = "agent") -> dict[str, Any]:
     """Reclassify safe low-risk needs_review decisions as auto_approved without applying mutations."""
     return recalibrate_governance_review_queue(limit=limit, dry_run=dry_run, source_agent=source_agent)
 
 
-@mcp.tool()
-@_safe_tool
 def governance_reject(decision_id: str, source_agent: str = "agent", reason: str = "") -> dict[str, Any]:
     """Reject a governance decision and emit audit records."""
     return reject_governance_decision(decision_id, source_agent=source_agent, reason=reason)
 
 
-@mcp.tool()
-@_safe_tool
 def governance_rollback(decision_id: str, source_agent: str = "agent") -> dict[str, Any]:
     """Rollback an applied governance decision and restore the prior snapshot."""
     return rollback_governance_decision(decision_id, source_agent=source_agent)
 
 
-@mcp.tool()
-@_safe_tool
 def governance_metrics() -> dict[str, Any]:
     """Return operational governance health metrics: rollback rate, revival rate, review queue depth/age, and degraded warning."""
     from memorycore.storage.governance import get_governance_metrics
     return get_governance_metrics()
 
 
-@mcp.tool()
-@_safe_tool
 def governance_ledger(
     correlation_id: str = "",
     target_id: str = "",
@@ -699,8 +677,6 @@ def memory_stats() -> dict[str, Any]:
     return get_memory_stats()
 
 
-@mcp.tool()
-@_safe_tool
 def agent_handoff_create(
     from_agent: str,
     to_agent: str,
@@ -720,8 +696,6 @@ def agent_handoff_create(
     return create_agent_handoff(from_agent, to_agent, task, payload, correlation_id, priority, ttl_seconds, auto_route)
 
 
-@mcp.tool()
-@_safe_tool
 def agent_handoff_update(
     message_id: str,
     from_agent: str,
@@ -733,8 +707,6 @@ def agent_handoff_update(
     return update_agent_handoff(message_id, from_agent, status, result, error)
 
 
-@mcp.tool()
-@_safe_tool
 def agent_capability_register(
     agent_id: str,
     capabilities: list[str] | str,
@@ -745,8 +717,6 @@ def agent_capability_register(
     return register_agent_capability(agent_id, capabilities, namespace, metadata)
 
 
-@mcp.tool()
-@_safe_tool
 def agent_capability_search(
     capability: str = "",
     namespace: str = "",
@@ -756,8 +726,6 @@ def agent_capability_search(
     return search_agent_capabilities(capability, namespace, limit)
 
 
-@mcp.tool()
-@_safe_tool
 def agent_send(
     from_agent: str,
     to_agent: str,
@@ -784,8 +752,6 @@ def agent_send(
     return send_agent_message(from_agent, to_agent, subject, body, priority, metadata, ttl_seconds)
 
 
-@mcp.tool()
-@_safe_tool
 def agent_messages_cleanup() -> dict[str, Any]:
     """Delete all expired agent messages (where expires_at is set and in the past).
 
@@ -796,8 +762,6 @@ def agent_messages_cleanup() -> dict[str, Any]:
     return {"deleted": deleted}
 
 
-@mcp.tool()
-@_safe_tool
 def agent_inbox(
     agent_id: str,
     status: str = "",
@@ -818,8 +782,6 @@ def agent_inbox(
     return get_agent_inbox(agent_id, status=status, mark_read=mark_read, limit=limit)
 
 
-@mcp.tool()
-@_safe_tool
 def agent_presence_update(
     agent_id: str,
     status: str = "online",
@@ -838,8 +800,6 @@ def agent_presence_update(
     return update_agent_presence(agent_id, status=status, metadata=metadata)
 
 
-@mcp.tool()
-@_safe_tool
 def agent_presence_list(
     status: str = "",
     limit: int = 100,

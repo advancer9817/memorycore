@@ -136,7 +136,7 @@ scripts/sync-memory.sh status
 ## 已验证功能
 
 1. **SQLite + FTS5 结构化记忆层**：支持 type/scope/tags/status/importance/confidence/source_agent/effectiveness 等字段，FTS5 全文检索。
-2. **HTTP MCP server**：45 个工具，任意 MCP 客户端可通过 `http://127.0.0.1:8318/mcp` 连接。
+2. **HTTP MCP server**：25 个工具，任意 MCP 客户端可通过 `http://127.0.0.1:8318/mcp` 连接。
 3. **Context Pack**：`memory_context` 按任务生成 compact 上下文包，支持 token budget 控制，按记忆类型分组，集成 active contradicts/supersedes warning，并将检索记忆标记为 untrusted data；命中注入特征的记忆会从普通 context body 过滤到 warnings。
 4. **Curator**：重复标题、低反馈、stale、archive、矛盾候选、skill_candidate 推广候选检测；默认 dry-run。
 5. **Feedback / effectiveness**：`memory_feedback` 记录反馈事件并更新 feedback_score、injected_count、ineffective_count、effectiveness_score。
@@ -162,27 +162,16 @@ Optional / degraded：
 | `memory_list_recent` | 最近更新记录 |
 | `memory_feedback` | 记录记忆有用性反馈 |
 | `memory_timeline` | 决策/事件时间线 |
-| `memory_curator_report` | curator 候选报告，可选标记 stale/archive |
-| `memory_rollup_report` | 将累计 episodic 记忆滚动总结为长期记忆 |
-| `memory_atomize_report` | 规划或执行 parent memory 到 atomic child facts 的拆分 |
 | `memory_entity_search` | 按实体/别名索引搜索 active memories |
 | `memory_ingest` | 从显式传入的对话消息抽取并去重写入 candidate |
 | `memory_vector_search` | Qdrant 语义向量搜索 |
 | `memory_vector_status` | Qdrant 向量存储状态 |
 | `memory_vector_audit` | 检查 SQLite active memories 与 Qdrant points 的一致性 |
 | `memory_link_add` | 创建/更新记忆之间的有向关系 |
-| `memory_link_query` | 查询某条记忆的 incoming/outgoing links |
+| `memory_link_query` | 查询某条记忆 of incoming/outgoing links |
 | `memory_lineage` | 查询某条记忆的 supersession lineage |
 | `memory_supersede` | 将旧记忆标记为被新记忆替代并写入审计 |
 | `memory_warnings` | 根据 active links 返回冲突/替代 warning |
-| `governance_decisions` | 查询治理决策队列，支持按 review status 过滤 |
-| `governance_apply` | 应用 policy gate 允许或人工批准的治理决策 |
-| `governance_apply_batch` | 批量应用可操作治理决策；无效状态整体拒绝，策略拦截项跳过并报告 |
-| `governance_reject` | 拒绝治理决策并记录原因 |
-| `governance_rollback` | 回滚已应用的治理决策 |
-| `governance_metrics` | 返回治理健康指标：回滚率、复活率、审核队列深度/老化、降级警告 |
-| `governance_ledger` | 查询 governance mutation ledger，支持按 correlation/target/origin/status 过滤 |
-| `governance_recalibrate_queue` | 将当前策略下安全的 needs_review 重新归类为 auto_approved |
 | `memory_update` | 更新已有记忆的 title/content/status/confidence/importance |
 | `memory_audit_log` | 查询记忆写入、更新、状态变更的审计事件日志 |
 | `memory_export` | 导出 schema-versioned JSON 记忆数据 |
@@ -190,15 +179,6 @@ Optional / degraded：
 | `memory_backup` | 使用 SQLite backup API 创建数据库备份 |
 | `memory_rebuild_vectors` | 从 SQLite 记录重建 Qdrant 向量索引 |
 | `memory_stats` | 返回按 type/status/agent 分组的记忆统计与聚合分数 |
-| `agent_send` | 向指定 agent 发送消息 |
-| `agent_handoff_create` | 创建结构化 agent handoff 请求 |
-| `agent_handoff_update` | 更新 handoff 状态并发送响应 |
-| `agent_capability_register` | 注册 agent 能力用于任务移交 |
-| `agent_capability_search` | 按能力和 namespace 查找 agent |
-| `agent_inbox` | 读取 agent 收件箱，支持按状态过滤和自动标记已读 |
-| `agent_presence_update` | 更新 agent 在线状态（心跳） |
-| `agent_presence_list` | 列出 agent 在线状态，支持按状态过滤 |
-| `agent_messages_cleanup` | 清理所有已过期的 agent 消息，返回删除数 |
 
 ## CLI
 

@@ -1006,26 +1006,7 @@ def llm_curator_report(
 
     # --- Importance re-evaluation ---
     importance_reassessments: list[dict] = []
-    try:
-        import random as _random
-        recently_reviewed = _get_recently_reviewed_ids()
-        all_candidates = [m for m in memories if m["id"] not in recently_reviewed]
-        diagnostics["memories_after_cooldown_filter"] = len(all_candidates)
-        _random.shuffle(all_candidates)
-        candidates = all_candidates[:importance_limit]
-        diagnostics["importance_candidates"] = len(candidates)
-        if candidates:
-            t0 = _time.monotonic()
-            importance_reassessments, imp_ids = _llm_reassess_importance(
-                candidates, llm_config, batch_size=batch_size,
-                content_max_chars=content_max_chars, prompt_style=prompt_style,
-                keep_threshold=keep_threshold, config=full_config)
-            all_evaluated_ids.update(imp_ids)
-            diagnostics["importance_skipped_keep"] = len(candidates) - len(importance_reassessments)
-            timing["importance_llm_ms"] = int((_time.monotonic() - t0) * 1000)
-    except Exception as exc:
-        errors.append(f"Importance reassessment failed: {exc}")
-        logger.error("importance reassessment error: %s", exc, exc_info=True)
+    # (Disabled under 2026-06-29 framework-redesign: importance is managed by usage_rate + feedback)
 
     # --- Link discovery (knowledge graph) ---
     link_discoveries: list[dict] = []
@@ -1048,22 +1029,7 @@ def llm_curator_report(
 
     # --- Long-content split detection ---
     split_candidates: list[dict] = []
-    try:
-        long_memories = [
-            m for m in memories
-            if len(m.get("content", "")) > split_threshold
-        ][:max_split]
-        diagnostics["split_candidates_checked"] = len(long_memories)
-        if long_memories:
-            t0 = _time.monotonic()
-            split_candidates = _llm_detect_splittable(
-                long_memories, llm_config, batch_size=batch_size,
-                content_max_chars=content_max_chars, prompt_style=prompt_style,
-                config=full_config)
-            timing["split_llm_ms"] = int((_time.monotonic() - t0) * 1000)
-    except Exception as exc:
-        errors.append(f"Split detection failed: {exc}")
-        logger.error("split detection error: %s", exc, exc_info=True)
+    # (Disabled under 2026-06-29 framework-redesign: split detection is handled via rule-based atomization in ingest)
 
     # Full cooldown: mark ALL evaluated memories, not just those with findings
     all_evaluated_ids.discard("")
@@ -1268,43 +1234,7 @@ def run_llm_curator_incremental(
     else:
         errors.append("Vector store not available — skipping semantic dedup and contradiction detection")
 
-    _diag(f"STAGE: importance starting, elapsed={int(_time.monotonic()-t_start)}s")
-    try:
-        import random as _random
-        recently_reviewed = _get_recently_reviewed_ids()
-        all_candidates = [m for m in memories if m["id"] not in recently_reviewed]
-        _random.shuffle(all_candidates)
-        candidates = all_candidates[:importance_limit]
-        counts["importance_candidates"] = len(candidates)
-        for batch_index, start in enumerate(range(0, len(candidates), batch_size)):
-            batch_candidates = candidates[start:start + batch_size]
-            persist_batch(
-                "importance",
-                batch_index,
-                "importance_reassessments",
-                batch_candidates,
-                lambda batch: _llm_reassess_importance(batch, llm_config, batch_size=len(batch), content_max_chars=content_max_chars, prompt_style=prompt_style, keep_threshold=keep_threshold, config=full_config),
-            )
-    except Exception as exc:
-        errors.append(f"Importance reassessment failed: {exc}")
-        logger.error("importance reassessment error: %s", exc, exc_info=True)
-
-    _diag(f"STAGE: split starting, elapsed={int(_time.monotonic()-t_start)}s")
-    try:
-        long_memories = [m for m in memories if len(m.get("content", "")) > split_threshold][:max_split]
-        counts["split_candidates_checked"] = len(long_memories)
-        for batch_index, start in enumerate(range(0, len(long_memories), batch_size)):
-            batch_candidates = long_memories[start:start + batch_size]
-            persist_batch(
-                "split",
-                batch_index,
-                "split_candidates",
-                batch_candidates,
-                lambda batch: _llm_detect_splittable(batch, llm_config, batch_size=len(batch), content_max_chars=content_max_chars, prompt_style=prompt_style, config=full_config),
-            )
-    except Exception as exc:
-        errors.append(f"Split detection failed: {exc}")
-        logger.error("split detection error: %s", exc, exc_info=True)
+    # (Disabled under 2026-06-29 framework-redesign: importance is managed by usage_rate + feedback, split is handled in ingest)
 
     if all_evaluated_ids:
         _mark_reviewed(list(all_evaluated_ids))

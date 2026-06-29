@@ -172,14 +172,15 @@ def test_frontend_missing_memory_returns_404():
 
 
 def test_frontend_governance_bad_request_includes_message():
-    record = add_memory_record("episodic_memory", "Governance API note", "Can be downgraded", importance=0.6)
+    record = add_memory_record("episodic_memory", "Governance API note", "Can be split", importance=0.6)
+    # Use split action which routes to needs_review, then reject it
     decision = create_governance_decision(
-        "importance_reassessment",
-        "downgrade",
+        "split_candidate",
+        "split",
         [record["id"]],
         0.95,
-        "low",
-        {"id": record["id"], "action": "downgrade", "new_importance": 0.2},
+        "high",
+        {"id": record["id"], "action": "split", "sub_memories": []},
     )
     reject_governance_decision(decision["id"], source_agent="pytest", reason="reject before apply")
 
@@ -194,16 +195,18 @@ def test_frontend_governance_bad_request_includes_message():
 
 
 def test_frontend_governance_actionable_filter_excludes_applied_history():
-    active = add_memory_record("episodic_memory", "Frontend active", "Actionable", importance=0.3)
+    active = add_memory_record("episodic_memory", "Frontend active", "Actionable split", importance=0.3)
     applied = add_memory_record("episodic_memory", "Frontend applied", "Historical", importance=0.3)
+    # Use split action which routes to needs_review (actionable)
     active_decision = create_governance_decision(
-        "importance_reassessment",
-        "downgrade",
+        "split_candidate",
+        "split",
         [active["id"]],
-        0.75,
-        "low",
-        {"id": active["id"], "action": "downgrade", "new_importance": 0.2},
+        0.95,
+        "high",
+        {"id": active["id"], "action": "split", "sub_memories": []},
     )
+    # downgrade with high confidence auto-applies immediately
     applied_decision = create_governance_decision(
         "importance_reassessment",
         "downgrade",
@@ -212,7 +215,6 @@ def test_frontend_governance_actionable_filter_excludes_applied_history():
         "low",
         {"id": applied["id"], "action": "downgrade", "new_importance": 0.2},
     )
-    apply_governance_decision(applied_decision["id"], source_agent="pytest")
 
     with _client() as client:
         actionable = client.get("/api/governance/decisions?review_status=actionable")

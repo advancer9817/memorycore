@@ -104,15 +104,17 @@ def test_governance_apply_writes_execution_and_mutation_log():
         {"id": record["id"], "action": "downgrade", "new_importance": 0.2},
     )
 
-    applied = apply_governance_decision(decision["id"], source_agent="pytest")
-    ledger = query_ledger(correlation_id=applied["decision"]["execution_id"])
+    # Decision is auto-applied on creation; verify via DB
+    assert decision["review_status"] == "applied"
+    execution_id = decision.get("execution_id", "")
+    assert execution_id
 
-    assert applied["execution"]["status"] == "applied"
+    ledger = query_ledger(correlation_id=execution_id)
     assert ledger
     assert ledger[0]["mutation_type"] == "memory_importance_update"
     assert ledger[0]["before_json"]
     assert ledger[0]["after_json"]
     assert ledger[0]["inverse_json"]
     with read_conn() as conn:
-        execution = conn.execute("SELECT * FROM governance_executions WHERE id=?", (applied["decision"]["execution_id"],)).fetchone()
+        execution = conn.execute("SELECT * FROM governance_executions WHERE id=?", (execution_id,)).fetchone()
     assert execution["status"] == "applied"

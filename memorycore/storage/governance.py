@@ -23,9 +23,9 @@ logger = logging.getLogger(__name__)
 
 PRECIOUS_TYPES = {"user_profile", "decision", "project_memory"}
 HIGH_IMPORTANCE_THRESHOLD = 0.85
-AUTO_CONFIDENCE_THRESHOLD = 0.90
-REVIEW_CONFIDENCE_THRESHOLD = 0.55
-POLICY_VERSION = "2026-06-27.1"
+AUTO_CONFIDENCE_THRESHOLD = 0.65
+REVIEW_CONFIDENCE_THRESHOLD = 0.45
+POLICY_VERSION = "2026-06-29"
 JUDGE_SCHEMA_VERSION = "1"
 DECISION_VERSION = "1"
 JUDGE_MODEL = "deterministic"
@@ -167,9 +167,13 @@ def policy_gate(
 ) -> dict[str, Any]:
     """Classify a governance recommendation as auto-approved, review, or rejected.
 
-    Policy v2026-06-27.1: only merge, split, and mark_contradicted require
-    human review.  Everything else (promote, downgrade, archive_duplicate,
-    archive, supersede) auto-approves when confidence >= 0.55.
+    Policy v2026-06-29: only merge, split, and mark_contradicted require
+    human review. Everything else (promote, downgrade, archive_duplicate,
+    archive, supersede) auto-approves when confidence meets thresholds:
+      - 0.75 for destructive actions (archive, archive_duplicate, merge, split, supersede)
+      - 0.65 for non-destructive actions (promote, downgrade, mark_contradicted)
+      - < 0.45 is hard rejected
+      - Between 0.45 and required threshold: marked as rejected (not blocking)
     """
     memories = memories or []
     normalized_risk = (risk_level or "medium").lower()
@@ -213,6 +217,18 @@ def policy_gate(
             "policy_version": POLICY_VERSION,
         }
 
+    # --- Threshold check based on destructiveness ---
+    is_destructive = action in DESTRUCTIVE_ACTIONS or action in MERGE_ACTIONS
+    required_conf = 0.75 if is_destructive else 0.65
+
+    if confidence < required_conf:
+        return {
+            "review_status": "rejected",
+            "policy_reason": f"confidence {confidence} below required auto-approval threshold ({required_conf})",
+            "policy_reasons": ["confidence_below_auto_threshold"],
+            "policy_version": POLICY_VERSION,
+        }
+
     # --- Actions that always need human review ---
     review_reasons: list[str] = []
     if action in MERGE_ACTIONS:
@@ -235,7 +251,7 @@ def policy_gate(
     # --- Everything else auto-approves ---
     return {
         "review_status": "auto_approved",
-        "policy_reason": "low-risk recommendation auto-approved by policy v2026-06-27",
+        "policy_reason": f"low-risk recommendation auto-approved by policy v{POLICY_VERSION}",
         "policy_reasons": [],
         "policy_version": POLICY_VERSION,
     }
@@ -329,6 +345,10 @@ def recalibrate_governance_review_queue(limit: int | None = None, dry_run: bool 
                     ),
                 )
         for item in candidates:
+            try:
+                apply_governance_decision(item["id"], source_agent=source_agent)
+            except Exception as exc:
+                logger.error("recalibrate: failed to apply decision %s: %s", item["id"], exc)
             _audit.log_audit_event(
                 "governance_decision_recalibrate",
                 memory_id=(item["source_ids"][0] if item["source_ids"] else None),
@@ -402,6 +422,10 @@ def auto_expire_stale_reviews(stale_days: int = 14, dry_run: bool = True, source
                     (f"auto_expired_after_{stale_days}_days", ts, item["id"]),
                 )
         for item in expired:
+            try:
+                apply_governance_decision(item["id"], source_agent=source_agent)
+            except Exception as exc:
+                logger.error("auto_expire: failed to apply decision %s: %s", item["id"], exc)
             _audit.log_audit_event(
                 "governance_decision_auto_expire",
                 memory_id=(item["source_ids"][0] if item.get("source_ids") else None),
@@ -492,8 +516,18 @@ def create_governance_decision(
             ),
         )
         row = conn.execute("SELECT * FROM governance_decisions WHERE id=?", (decision_id,)).fetchone()
+
+    decision_dict = _decision_row_to_dict(row)
+    if gate["review_status"] == "auto_approved":
+        try:
+            apply_res = apply_governance_decision(decision_id, source_agent=source_agent)
+            if apply_res.get("decision"):
+                decision_dict = apply_res["decision"]
+        except Exception as exc:
+            logger.error("Failed to automatically apply auto-approved decision %s: %s", decision_id, exc, exc_info=True)
+
     _audit.log_audit_event("governance_decision_create", memory_id=source_ids[0] if source_ids else None, agent=source_agent, detail={"decision_id": decision_id, "review_status": gate["review_status"], "action": recommended_action, "policy_reasons": gate.get("policy_reasons", []), "policy_version": gate.get("policy_version", POLICY_VERSION)})
-    return _decision_row_to_dict(row)
+    return decision_dict
 
 
 def _decision_row_to_dict(row: Any) -> dict[str, Any]:
@@ -588,8 +622,13 @@ def convert_llm_findings_to_decisions(
                 curator_batch_id=curator_batch_id,
             )
             decisions.append(decision)
-            if auto_apply and decision["review_status"] == "auto_approved":
-                applied.append(apply_governance_decision(decision["id"], source_agent="llm_curator"))
+            if decision["review_status"] == "applied":
+                applied.append(decision)
+            elif auto_apply and decision["review_status"] == "auto_approved":
+                try:
+                    applied.append(apply_governance_decision(decision["id"], source_agent="llm_curator"))
+                except Exception as exc:
+                    logger.warning("convert_llm_findings: failed to apply decision %s: %s", decision["id"], exc)
     if not decisions and skipped_keep > 0:
         logger.warning(
             "[governance] All %d LLM findings were 'keep' — no governance decisions created. "
