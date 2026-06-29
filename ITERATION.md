@@ -4664,3 +4664,27 @@ LLM 分析 job 仍然被中断（"Job was interrupted by service restart"），�
 
 ### 验证
 - `.venv/bin/python -m pytest tests/`：488 passed, 3 skipped, 3 pre-existing failures（与本次无关）
+
+## [迭代 42] 2026-06-30 — 召回层分词与排序缺陷修复
+
+### 问题诊断
+
+用户在新对话中说"继续mcore的phase3"，mcore 的 `memory_context` 完全未召回 Phase 3 相关记忆（数据库中有 14 条），根因：
+1. `search_memory_records` 的分词正则 `[\w一-鿿]+` 将中英混合输入（如 "继续mcore的phase3"）当作单个 token，FTS5 完全无法匹配
+2. `phase3`（连写）匹配不到 `Phase 3`（空格分隔）——缺少查询变体扩展
+3. 中文停用词（"继续"、"的"）参与 FTS AND 查询，导致整个查询零结果
+4. 泛化 mcore 记忆因 vector score 加持压过精确匹配的 Phase 3 记忆
+
+### 变更（1 file, +56/-14 lines）
+
+- `memorycore/storage/search.py`:
+  - `search_memory_records()` 分词改为中英文边界自动拆分 + 停用词过滤
+  - `_query_terms()` 对数字粘连词（phase3）自动拆出 word + number
+  - FTS 查询扩展：`phase3` → `"phase3" OR "phase 3"`
+  - `_lexical_relevance()` 增加精确标识符匹配 boost（+0.25）
+  - `_rank_score()` 增加高 lexical 记忆 boost（≥0.5 → +0.15），vector 权重从 0.25 降至 0.22，lexical 从 0.30 升至 0.33
+  - 用 `_CJK_FUNCTIONAL_CHARS` + `_is_cjk_stopword()` 替代硬编码中文停用词列表
+
+### 验证
+- 12/12 搜索和召回测试通过
+- "继续mcore的phase3" 查询：top-3 命中 2 条 Phase 3 记忆（修复前为 0）
