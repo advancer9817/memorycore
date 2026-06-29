@@ -114,9 +114,24 @@ _MIN_KEYWORD_LEXICAL_RELEVANCE_SCORE = 0.08
 _STOP_TERMS = {
     "a", "an", "and", "are", "as", "at", "be", "for", "from", "how", "i", "in",
     "is", "it", "of", "on", "or", "that", "the", "this", "to", "with", "you",
-    "帮我", "一下", "这个", "那个", "当前", "进行", "实现", "问题", "继续", "查看", "查询", "需要", "使用", "关于",
 }
-_CJK_STOP_CHARS = set("的一是在了和与及或把给让后前中上下来去也都就很")
+_CJK_FUNCTIONAL_CHARS = set(
+    "的一是在了不有和与及或把给让被到过着对从用以将又也都还就"
+    "很太可会能要想得已正才只这那个么什为而且但如所跟比被"
+    "吗呢吧啊哦嗯啦呀哈吧嘛"
+    "我你他她它们您咱自己"
+    "上下来去前后中里外"
+    "帮看查找做说问想用需继续使用关于进行实现开始"
+)
+
+
+def _is_cjk_stopword(term: str) -> bool:
+    if not term:
+        return True
+    if all("一" <= c <= "鿿" for c in term):
+        if len(term) <= 2 and all(c in _CJK_FUNCTIONAL_CHARS for c in term):
+            return True
+    return False
 
 _TASK_TYPE_WEIGHTS: dict[str, dict[str, float]] = {
     "feedback": {"feedback": 1.5, "user_profile": 1.2, "project_memory": 0.9},
@@ -171,7 +186,7 @@ def _query_terms(text: str) -> list[str]:
         for width in (3, 2):
             for idx in range(0, max(len(span) - width + 1, 0)):
                 gram = span[idx:idx + width]
-                if any(char in _CJK_STOP_CHARS for char in gram):
+                if any(char in _CJK_FUNCTIONAL_CHARS for char in gram):
                     continue
                 add(gram)
 
@@ -406,7 +421,7 @@ def search_memory_records(
             parts = re.split(r"(?<=[一-鿿])(?=[a-zA-Z0-9])|(?<=[a-zA-Z0-9])(?=[一-鿿])", tok)
             terms.extend(parts)
         terms = [t for t in terms if len(t) > 1 or ("一" <= t <= "鿿")]
-        terms = [t for t in terms if t.lower() not in _STOP_TERMS and not all(c in _CJK_STOP_CHARS for c in t)]
+        terms = [t for t in terms if t.lower() not in _STOP_TERMS and not _is_cjk_stopword(t)]
         if not terms:
             return []
         base += " JOIN memories_fts f ON f.id = m.id"
