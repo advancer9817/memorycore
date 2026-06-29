@@ -1,7 +1,8 @@
 "use client";
 
+import { MemoryOperationsPanel } from "@/components/dashboard/MemoryOperationsPanel";
+import { CuratorTuningPanel } from "@/components/dashboard/CuratorTuningPanel";
 import { MemoryIntelligenceCenter } from "@/components/dashboard/MemoryIntelligenceCenter";
-import { ContextLab } from "@/components/dashboard/ContextLab";
 import "@/styles/animation.css";
 
 export default function DashboardPage() {
@@ -10,11 +11,15 @@ export default function DashboardPage() {
       <div className="container">
         <div className="w-full mx-auto space-y-6">
           <div className="animate-fade-slide-down">
-            <MemoryIntelligenceCenter />
+            <MemoryOperationsPanel />
           </div>
 
           <div className="animate-fade-slide-down delay-1">
-            <ContextLab />
+            <CuratorTuningPanel />
+          </div>
+
+          <div className="animate-fade-slide-down delay-2">
+            <MemoryIntelligenceCenter />
           </div>
         </div>
       </div>
