@@ -114,7 +114,7 @@ _MIN_KEYWORD_LEXICAL_RELEVANCE_SCORE = 0.08
 _STOP_TERMS = {
     "a", "an", "and", "are", "as", "at", "be", "for", "from", "how", "i", "in",
     "is", "it", "of", "on", "or", "that", "the", "this", "to", "with", "you",
-    "帮我", "一下", "这个", "那个", "当前", "进行", "实现", "问题",
+    "帮我", "一下", "这个", "那个", "当前", "进行", "实现", "问题", "继续", "查看", "查询", "需要", "使用", "关于",
 }
 _CJK_STOP_CHARS = set("的一是在了和与及或把给让后前中上下来去也都就很")
 
@@ -160,6 +160,10 @@ def _query_terms(text: str) -> list[str]:
 
     for term in re.findall(r"[a-z0-9_][a-z0-9_.+-]*", lowered):
         add(term)
+        m = re.match(r"^([a-z_]+)(\d+)$", term)
+        if m:
+            add(m.group(1))
+            add(m.group(2))
 
     for span in re.findall(r"[\u4e00-\u9fff]+", lowered):
         if 2 <= len(span) <= 8:
@@ -187,13 +191,18 @@ def _lexical_relevance(task: str, record: dict[str, Any]) -> float:
     title_matched = sum(1 for term in terms if term in title)
     phrase = task.strip().lower()
     phrase_bonus = 0.15 if len(phrase) >= 4 and phrase in haystack else 0.0
+    alphanumeric_phrase_bonus = 0.0
+    for m in re.finditer(r"([a-z_]+)(\d+)", phrase):
+        spaced = f"{m.group(1)} {m.group(2)}"
+        if spaced in haystack or m.group(0) in haystack:
+            alphanumeric_phrase_bonus += 0.25
     consecutive_bonus = 0.0
     if matched >= 2:
         for i in range(len(terms) - 1):
             bigram = f"{terms[i]} {terms[i+1]}" if i + 1 < len(terms) else ""
             if bigram and bigram in haystack:
                 consecutive_bonus += 0.10
-    return min(1.0, (matched / len(terms)) * 0.65 + (title_matched / len(terms)) * 0.20 + phrase_bonus + consecutive_bonus)
+    return min(1.0, (matched / len(terms)) * 0.55 + (title_matched / len(terms)) * 0.20 + phrase_bonus + alphanumeric_phrase_bonus + consecutive_bonus)
 
 
 def _record_context_quality_event(
@@ -391,24 +400,39 @@ def search_memory_records(
     base = "SELECT m.* FROM memories m"
     fts_active = False
     if query.strip():
-        terms = re.findall(r"[\w一-鿿]+", query, flags=re.UNICODE)
+        raw_tokens = re.findall(r"[\w一-鿿]+", query, flags=re.UNICODE)
+        terms: list[str] = []
+        for tok in raw_tokens:
+            parts = re.split(r"(?<=[一-鿿])(?=[a-zA-Z0-9])|(?<=[a-zA-Z0-9])(?=[一-鿿])", tok)
+            terms.extend(parts)
+        terms = [t for t in terms if len(t) > 1 or ("一" <= t <= "鿿")]
+        terms = [t for t in terms if t.lower() not in _STOP_TERMS and not all(c in _CJK_STOP_CHARS for c in t)]
         if not terms:
             return []
         base += " JOIN memories_fts f ON f.id = m.id"
         # Smart FTS query: short queries use AND, long queries split to avoid zero-hit
+        # Expand alphanumeric tokens: phase3 → "phase3" OR "phase 3"
+        def _fts_term_variants(term: str) -> str:
+            variants = [fts_phrase(term)]
+            m = re.match(r"^([a-zA-Z_]+)(\d+)$", term)
+            if m:
+                spaced = f"{m.group(1)} {m.group(2)}"
+                variants.append(fts_phrase(spaced))
+            return " OR ".join(variants)
+
         if len(terms) <= 3:
             connector = " AND " if len(terms) >= 2 else " OR "
-            fts_query = connector.join(fts_phrase(term) for term in terms)
+            fts_query = connector.join(f"({_fts_term_variants(term)})" for term in terms)
         elif len(terms) <= 6:
             mid = len(terms) // 2
-            left = " AND ".join(fts_phrase(t) for t in terms[:mid])
-            right = " AND ".join(fts_phrase(t) for t in terms[mid:])
+            left = " AND ".join(f"({_fts_term_variants(t)})" for t in terms[:mid])
+            right = " AND ".join(f"({_fts_term_variants(t)})" for t in terms[mid:])
             fts_query = f"({left}) OR ({right})"
         else:
             top_terms = terms[:6]
             mid = len(top_terms) // 2
-            left = " AND ".join(fts_phrase(t) for t in top_terms[:mid])
-            right = " AND ".join(fts_phrase(t) for t in top_terms[mid:])
+            left = " AND ".join(f"({_fts_term_variants(t)})" for t in top_terms[:mid])
+            right = " AND ".join(f"({_fts_term_variants(t)})" for t in top_terms[mid:])
             fts_query = f"({left}) OR ({right})"
         clauses.append("memories_fts MATCH ?")
         params.append(fts_query)
@@ -815,6 +839,8 @@ def build_context_pack(
         multi_source_bonus = 0.12 if ("fts" in sources and "vector" in sources) else 0.0
         source_bonus += multi_source_bonus
 
+        high_lexical_bonus = 0.15 if lexical >= 0.5 else 0.0
+
         atomic_bonus = 0.07 if prefer_atomic and _is_atomic_fact(r) else 0.0
         parent_penalty = -0.05 if prefer_atomic and not include_parent and _metadata(r).get("kind") == "parent_memory" else 0.0
         candidate_discount = 0.85 if r.get("status") == "candidate" else 1.0
@@ -823,10 +849,11 @@ def build_context_pack(
 
         return max(
             0.0,
-            (vector_score * 0.25
-            + lexical * 0.30
+            (vector_score * 0.22
+            + lexical * 0.33
             + entity_boosts.get(r["id"], 0.0)
             + source_bonus
+            + high_lexical_bonus
             + atomic_bonus
             + parent_penalty
             + float(r.get("importance") or 0) * 0.05
