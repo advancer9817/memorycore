@@ -535,6 +535,13 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
     if parts == ["entities"] and method == "GET":
         return entity_search(_str_q(query, "query", _str_q(query, "q", "")) or "", _int_q(query, "limit", 20))
 
+    if parts == ["metrics", "recall"] and method == "GET":
+        return _get_recall_metrics()
+    if parts == ["metrics", "governance"] and method == "GET":
+        return _get_governance_metrics()
+    if parts == ["metrics", "curator"] and method == "GET":
+        return _get_curator_metrics()
+
     if parts == ["graph"] and method == "GET":
         status = _str_q(query, "status", "active,candidate") or "active,candidate"
         default_limit = 2000 if status == "all" else 500
@@ -1221,6 +1228,108 @@ def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
     _curator_status_cache = result
     _curator_status_cache_ts = _time.monotonic()
     return result
+
+
+def _get_recall_metrics() -> dict:
+    """召回效率指标：active 记忆的注入统计。"""
+    from memorycore.storage.db import read_conn
+    with read_conn() as conn:
+        row = conn.execute("""
+            SELECT
+                COUNT(*) as total_active,
+                SUM(CASE WHEN injected_count = 0 THEN 1 ELSE 0 END) as never_injected,
+                SUM(CASE WHEN injected_count > 0 THEN 1 ELSE 0 END) as injected,
+                AVG(injected_count) as avg_injected_count,
+                AVG(effectiveness_score) as avg_effectiveness
+            FROM memories WHERE status = 'active'
+        """).fetchone()
+        total = row[0] or 1
+        by_source = [
+            {"source": r[0], "total": r[1], "never_injected": r[2],
+             "never_injected_pct": round(r[2] * 100.0 / r[1], 1) if r[1] else 0}
+            for r in conn.execute("""
+                SELECT source, COUNT(*) as total,
+                       SUM(CASE WHEN injected_count = 0 THEN 1 ELSE 0 END) as never
+                FROM memories WHERE status = 'active'
+                GROUP BY source ORDER BY total DESC LIMIT 10
+            """).fetchall()
+        ]
+    return {
+        "total_active": row[0],
+        "never_injected": row[1],
+        "injected": row[2],
+        "never_injected_pct": round((row[1] or 0) * 100.0 / total, 1),
+        "avg_injected_count": round(row[3] or 0, 2),
+        "avg_effectiveness": round(row[4] or 0, 3),
+        "by_source": by_source,
+    }
+
+
+def _get_governance_metrics() -> dict:
+    """治理系统健康指标：决策状态分布与积压趋势。"""
+    from memorycore.storage.db import read_conn
+    with read_conn() as conn:
+        status_rows = conn.execute("""
+            SELECT review_status, COUNT(*) as cnt
+            FROM governance_decisions
+            GROUP BY review_status ORDER BY cnt DESC
+        """).fetchall()
+        total = sum(r[1] for r in status_rows)
+        status_dist = {r[0]: r[1] for r in status_rows}
+
+        recent_7d = conn.execute("""
+            SELECT
+                SUM(CASE WHEN review_status = 'applied' THEN 1 ELSE 0 END) as applied,
+                SUM(CASE WHEN review_status = 'needs_review' THEN 1 ELSE 0 END) as needs_review,
+                SUM(CASE WHEN review_status = 'rolled_back' THEN 1 ELSE 0 END) as rolled_back
+            FROM governance_decisions
+            WHERE created_at > datetime('now', '-7 days')
+        """).fetchone()
+
+    needs_review = status_dist.get("needs_review", 0)
+    return {
+        "total_decisions": total,
+        "status_distribution": status_dist,
+        "needs_review": needs_review,
+        "needs_review_pct": round(needs_review * 100.0 / total, 1) if total else 0,
+        "recent_7d": {
+            "applied": recent_7d[0] or 0,
+            "needs_review": recent_7d[1] or 0,
+            "rolled_back": recent_7d[2] or 0,
+        },
+    }
+
+
+def _get_curator_metrics() -> dict:
+    """LLM Curator 运行状态指标。"""
+    import os
+    from pathlib import Path
+
+    reports_dir = Path(os.environ.get("LOCAL_MEMORY_ROOT", ".")) / "reports"
+    llm_reports = sorted(reports_dir.glob("llm-curator-*.json"), reverse=True) if reports_dir.exists() else []
+
+    latest_report = None
+    latest_size = 0
+    if llm_reports:
+        latest_report = llm_reports[0].name
+        latest_size = llm_reports[0].stat().st_size
+
+    total_reports = len(llm_reports)
+    total_size_mb = round(sum(f.stat().st_size for f in llm_reports) / (1024 * 1024), 1) if llm_reports else 0
+
+    from memorycore.storage.db import read_conn
+    with read_conn() as conn:
+        llm_source_count = conn.execute(
+            "SELECT COUNT(*) FROM memories WHERE source = 'llm_curator'"
+        ).fetchone()[0]
+
+    return {
+        "latest_report": latest_report,
+        "latest_report_size_kb": round(latest_size / 1024, 1),
+        "total_reports": total_reports,
+        "total_reports_size_mb": total_size_mb,
+        "memories_produced": llm_source_count,
+    }
 
 
 async def _json_body(request: Request) -> dict[str, Any]:

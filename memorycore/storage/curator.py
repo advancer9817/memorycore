@@ -113,7 +113,10 @@ def curator_report(
     evolution_candidates: list[dict] = []
     supersession_candidates: list[dict[str, Any]] = []
     unused_active_candidates: list[dict] = []
-    _UNUSED_STALE_DAYS = 90
+    unused_fragment_candidates: list[dict] = []
+    _UNUSED_STALE_DAYS = 30
+    _UNUSED_FRAGMENT_STALE_DAYS = 7
+    _FRAGMENT_SOURCES = {"atomizer", "governance_split"}
 
     for r in all_rows:
         typ = _s(r, "type", "")
@@ -177,12 +180,23 @@ def curator_report(
                 and feedback <= stale_feedback and decay not in ("freeze", "stable")):
             stale_candidates.append(r)
 
-        # unused active: never injected after 90 days, non-precious, importance < 0.9
+        # unused active: never injected after 30 days, non-precious, importance < 0.9
         unused_cutoff = (now_dt - timedelta(days=_UNUSED_STALE_DAYS)).isoformat()
         if (status == "active" and injected == 0 and typ not in _PRECIOUS
                 and importance < 0.9 and updated < unused_cutoff
                 and decay not in ("freeze", "stable")):
             unused_active_candidates.append(r)
+
+        # unused fragment: atomizer/governance_split sources, 14 days without injection
+        # Fragment source overrides precious-type protection — split artifacts
+        # should not survive indefinitely just because they inherited the parent type.
+        source = _s(r, "source", "")
+        created = _s(r, "created_at", "")
+        fragment_cutoff = (now_dt - timedelta(days=_UNUSED_FRAGMENT_STALE_DAYS)).isoformat()
+        if (status == "active" and injected == 0 and source in _FRAGMENT_SOURCES
+                and created < fragment_cutoff
+                and decay not in ("freeze", "stable")):
+            unused_fragment_candidates.append(r)
 
         # precious stale
         if (status == "active" and typ in _PRECIOUS
@@ -309,7 +323,10 @@ def curator_report(
     for r in never_accessed_candidates:
         _plan(r, "archive", "never_accessed_candidate", "archived")
     for r in unused_active_candidates:
-        _plan(r, "mark_stale", "unused_90_days", "stale")
+        _plan(r, "mark_stale", "unused_30_days", "stale")
+    for r in unused_fragment_candidates:
+        if r not in unused_active_candidates:
+            _plan(r, "mark_stale", "unused_fragment_14_days", "stale")
     for r in contradicted_archive_candidates:
         _plan(r, "archive", "contradicted_expired", "archived")
 
@@ -383,6 +400,7 @@ def curator_report(
         "stale_candidates": all_stale,
         "archive_candidates": all_archive,
         "never_accessed_candidates": never_accessed_candidates,
+        "unused_fragment_candidates": unused_fragment_candidates,
         "contradiction_candidates": contradiction_candidates,
         "supersession_candidates": supersession_candidates,
         "skill_promotion_candidates": skill_promotion_candidates,

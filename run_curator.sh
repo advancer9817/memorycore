@@ -6,6 +6,8 @@ SERVER="$ROOT/memorycore"
 OUT_DIR="$ROOT/reports"
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 mkdir -p "$OUT_DIR"
+# Auto-cleanup: remove reports older than 7 days
+find "$OUT_DIR" -name "*.json" -mtime +7 -delete 2>/dev/null || true
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
 REPORT="$OUT_DIR/curator-$TS.json"
 LLM_REPORT="$OUT_DIR/llm-curator-$TS.json"

@@ -43,14 +43,13 @@ def is_atomic_fact(record: dict[str, Any]) -> bool:
     return _metadata(record).get("kind") == "atomic_fact"
 
 
-def should_atomize(record: dict[str, Any], atomize: str | bool = "auto", min_chars: int = 600) -> bool:
+def should_atomize(record: dict[str, Any], atomize: str | bool = "auto", min_chars: int = 1200) -> bool:
     """Return True if the record should be split into atomic facts (rule-based path).
 
-    Note on thresholds: this function uses min_chars=600 as its default for the
-    rule-based splitting path.  The LLM-driven splitting path in curator_llm.py
-    uses _SPLIT_CONTENT_THRESHOLD=400.  The two paths are intentionally separate:
-    the LLM path is more aggressive because it can judge content quality; this
-    rule-based path requires a higher character count to reduce false positives.
+    Thresholds were raised in Phase 1 (2026-07-02 audit) to reduce noise:
+    min_chars 600→1200, lines 6→10, sentences 3→5.  The prior aggressive
+    defaults produced 46% of all memories as fragments with 58-77% never
+    recalled, diluting context pack quality.
     """
     if atomize is False or str(atomize).lower() in {"false", "0", "no", "off"}:
         return False
@@ -62,10 +61,10 @@ def should_atomize(record: dict[str, Any], atomize: str | bool = "auto", min_cha
     if len(content) >= int(min_chars):
         return True
     lines = [line for line in content.splitlines() if line.strip()]
-    if len(lines) >= 6:
+    if len(lines) >= 10:
         return True
     sentences = [s for s in re.split(r"[。.!?\n]", content) if len(s.strip()) > 20]
-    return len(sentences) >= 3
+    return len(sentences) >= 5
 
 
 def _candidate_spans(content: str) -> list[tuple[str, int, int]]:

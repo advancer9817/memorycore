@@ -75,7 +75,7 @@ def _flush_write_batch(batch: list[tuple]) -> None:
                         injected,
                     )
     except Exception:
-        pass
+        logger.warning("write-queue flush: injected_count update failed", exc_info=True)
 
 
 def _drain_write_queue_on_exit() -> None:
@@ -255,7 +255,7 @@ def _record_context_quality_event(
                     params,
                 )
         except Exception:
-            pass
+            logger.warning("context_quality_events write failed", exc_info=True)
 
     threading.Thread(target=_write, daemon=True).start()
 
@@ -670,7 +670,7 @@ def _auto_feedback_for_used(ids: list[str]) -> None:
         try:
             add_feedback(mid, score=0.5, note="auto:injected", source_agent="system")
         except Exception:
-            pass
+            logger.warning("auto feedback write failed for memory %s", mid, exc_info=True)
 
 
 def _context_recency_weight() -> float:
@@ -704,11 +704,11 @@ def build_context_pack(
         mode = "strict"
     mode_settings = {
         "strict": {
-            "vector_top_k": 20,
+            "vector_top_k": 30,
             "entity_limit": 30,
             "min_context_score": _MIN_CONTEXT_RELEVANCE_SCORE,
             "min_vector_only_score": _MIN_VECTOR_ONLY_RELEVANCE_SCORE,
-            "vector_search_threshold": 0.40,
+            "vector_search_threshold": 0.32,
         },
         "balanced": {
             "vector_top_k": 30,
@@ -856,7 +856,6 @@ def build_context_pack(
 
         high_lexical_bonus = 0.15 if lexical >= 0.5 else 0.0
 
-        atomic_bonus = 0.07 if prefer_atomic and _is_atomic_fact(r) else 0.0
         parent_penalty = -0.05 if prefer_atomic and not include_parent and _metadata(r).get("kind") == "parent_memory" else 0.0
         candidate_discount = 0.85 if r.get("status") == "candidate" else 1.0
         feedback = max(-1.0, min(1.0, float(r.get("feedback_score") or 0)))
@@ -864,12 +863,11 @@ def build_context_pack(
 
         return max(
             0.0,
-            (vector_score * 0.22
-            + lexical * 0.33
+            (vector_score * 0.30
+            + lexical * 0.26
             + entity_boosts.get(r["id"], 0.0)
             + source_bonus
             + high_lexical_bonus
-            + atomic_bonus
             + parent_penalty
             + float(r.get("importance") or 0) * 0.05
             + usage_rate * 0.08

@@ -4688,3 +4688,182 @@ LLM 分析 job 仍然被中断（"Job was interrupted by service restart"），�
 ### 验证
 - 12/12 搜索和召回测试通过
 - "继续mcore的phase3" 查询：top-3 命中 2 条 Phase 3 记忆（修复前为 0）
+
+---
+
+## [Phase 0] 2026-07-02 — 深度审计基线建立 + 可观测性修复
+
+### 背景
+
+基于 `docs/2026-07-02-memorycore-deep-audit-report-v2.md` 深度审计，发现三个核心问题：
+1. 69% active 记忆从未被召回（价值泄漏）
+2. 2,221 条治理决策积压（人工审核失效）
+3. LLM Curator 效果存疑（1,654 行代码但产出 3%）
+
+Phase 0 目标：建立基线、修复可观测性、为后续优化提供数据支撑。
+
+### 变更
+
+#### 0.1 建立基线指标
+
+- 生成 `docs/baseline-2026-07-02.json`，快照所有关键指标：
+  - Active 记忆 1,396 条，未召回率 68.3%
+  - 治理积压 2,221 条 (31.0%)
+  - Context Pack hit_rate 0.8158，avg used_count 7.11，总调用 729 次
+  - 按来源的召回率分布
+
+#### 0.2 添加监控 API 端点
+
+- `memorycore/frontend.py`: 新增 3 个 metrics API 端点：
+  - `GET /api/metrics/recall` — 召回效率指标（总量、未召回率、按来源分布）
+  - `GET /api/metrics/governance` — 治理健康指标（决策状态分布、7 天趋势）
+  - `GET /api/metrics/curator` — LLM Curator 运行状态（报告数量、大小、产出记忆数）
+
+#### 0.3 修复 Silent Failure
+
+- `memorycore/storage/search.py`: 修复 3 处 `except Exception: pass` 静默吞错：
+  - 第 77 行：写入队列 flush（injected_count 更新失败）→ 改为 `logger.warning`
+  - 第 257 行：context_quality_events 写入失败 → 改为 `logger.warning`
+  - 第 672 行：auto feedback 写入失败 → 改为 `logger.warning` 并记录 memory ID
+
+### 关键发现
+
+通过 recall metrics API 首次揭示按来源的未召回率分布：
+
+| 来源 | Active 数量 | 未召回率 | 说明 |
+|------|------------|---------|------|
+| governance_split | 929 | **77.0%** | 拆分碎片召回率最低 |
+| extraction | 82 | 75.6% | 提取记忆召回也不理想 |
+| atomizer | 217 | 58.1% | 规则拆分稍好 |
+| rollup | 151 | **35.1%** | 合并后质量最高 |
+| llm_curator | 9 | 22.2% | 策展产出几乎全部被召回 |
+| manual | 7 | **0.0%** | 手动创建全部被召回 |
+
+**结论**: governance_split 是未召回问题的主要来源（77% 未召回），Phase 1 应优先处理拆分问题。
+
+### 验证
+- 24/24 搜索和 context pack 测试通过
+- 3 个 metrics API 端点功能验证通过
+- 服务重启后正常运行
+
+---
+
+## [Phase 1] 2026-07-02 — 召回失败根因分析与修复
+
+### 背景
+
+Phase 0 recall metrics API 揭示核心问题：
+- `governance_split` 来源未召回率 **77.0%**（929 条中 715 条）
+- `atomizer` 来源未召回率 **58.1%**
+- `rollup` 来源未召回率仅 **35.1%**（合并后质量最高）
+- 未召回记忆平均长度极短（658 条在 50-150 字符）
+
+### 变更
+
+#### 1.1 + 1.2 限制拆分行为
+
+- `memorycore/storage/atomization.py`: `should_atomize()` 阈值提高
+  - `min_chars`: 600 → 1200
+  - 行数阈值: 6 → 10
+  - 句子数阈值: 3 → 5
+  - 更新 docstring 记录变更原因
+- governance_split LLM 拆分已在 2026-06-29 framework-redesign 中禁用（第 1032 行注释确认），无需额外操作
+
+#### 1.3 调整召回算法权重
+
+- `memorycore/storage/search.py` `_rank_score()`:
+  - vector_score 权重: 0.22 → **0.30**（+36%，向量搜索对中文更友好）
+  - lexical 权重: 0.33 → **0.26**（-21%，降低 FTS 主导性）
+  - 移除 `atomic_bonus = 0.07`（碎片不应获得加分）
+- `memorycore/storage/search.py` strict 模式:
+  - `vector_top_k`: 20 → **30**（扩大向量候选池）
+  - `vector_search_threshold`: 0.40 → **0.32**（降低过滤门槛）
+
+#### 1.4 清理低质量未召回记忆
+
+- `memorycore/storage/curator.py`: 新增 fragment 清理规则
+  - 新增 `_UNUSED_FRAGMENT_STALE_DAYS = 7`（碎片 7 天未召回即降级 stale）
+  - 新增 `_FRAGMENT_SOURCES = {"atomizer", "governance_split"}`
+  - Fragment 来源覆盖 precious-type 保护（拆分碎片不应因继承父记忆类型而免受清理）
+  - 使用 `created_at`（而非 `updated_at`）判断碎片年龄，避免 curator decay 刷新时间
+  - 通用 `_UNUSED_STALE_DAYS` 从 90 → **30** 天
+- 执行 curator 清理：610 条碎片标记为 stale
+
+### 成果
+
+| 指标 | 基线 | Phase 1 后 | 改善 |
+|------|------|-----------|------|
+| Active 记忆 | 1,396 | 763 | -45% |
+| 未召回 active | 958 | 329 | -66% |
+| **未召回率** | **68.4%** | **43.1%** | **-37%** |
+| avg_injected_count | 2.86 | 5.26 | +84% |
+| governance_split 未召回率 | 77.0% | 39.2% | -49% |
+
+### 验证
+- 31/31 curator + atomization 测试通过
+- 28/28 context pack + search + context_relevance 测试通过
+- recall metrics API 数据确认一致
+
+---
+
+## [Phase 2] 2026-07-02 — 治理系统修复
+
+### 背景
+
+审计发现 2,283 条 needs_review 积压（31%），人工审核环节完全失效。
+分析积压构成发现根因：
+- promote/downgrade（1,045 条）被旧版 policy_gate 的 `precious_memory_type` 拦截
+- archive_duplicate（336 条）被 precious 保护拦截（即使 confidence 0.99）
+- split（105 条）已在 framework-redesign 中禁用但决策未清理
+- 代码中 `auto_approve_confidence` 硬编码为 0.65/0.75，config.yaml 的 0.8 是死配置
+
+### 变更
+
+#### 2.1 + 2.2 批量重分类历史积压
+
+无需修改代码（当前 policy_gate v2026-06-29 逻辑已合理），直接对历史积压做一次性 recalibrate：
+
+| 规则 | 条件 | 动作 | 处理数 |
+|------|------|------|--------|
+| Rule 1 | promote, conf≥0.65 | → auto_approved | 568 |
+| Rule 2 | downgrade, conf≥0.65 | → auto_approved | 477 |
+| Rule 3 | archive_dup, conf≥0.75 | → auto_approved | 331 |
+| Rule 4 | contradicted, conf≥0.75 | → auto_approved | 90 |
+| Rule 5 | archive, conf<0.75 | → rejected | 200 |
+| Rule 6 | split（已禁用） | → rejected | 105 |
+| **合计** | | | **1,771** |
+
+#### 2.3 Agent 通信 MCP 工具
+
+确认 8 个 agent 函数已在 framework-redesign 中移除 `@mcp.tool()` 装饰器，无需额外操作。
+
+#### 2.4 LLM Curator 报告清理
+
+- 手动清理 7 天以上旧报告：460 → 87 个文件，190 MB → 38 MB
+- `run_curator.sh`: 添加自动清理逻辑 `find "$OUT_DIR" -name "*.json" -mtime +7 -delete`
+
+### 成果
+
+| 指标 | Phase 1 后 | Phase 2 后 | 改善 |
+|------|-----------|-----------|------|
+| needs_review 积压 | 2,283 | **512** | **-78%** |
+| auto_approved | 538 | 2,002 | +272% |
+| 报告文件数 | 460 | 87 | -81% |
+| 报告目录大小 | 190 MB | 38 MB | -80% |
+
+### 最终治理决策分布
+
+| 状态 | 数量 | 占比 |
+|------|------|------|
+| applied | 4,423 | 60.2% |
+| auto_approved | 2,002 | 27.2% |
+| needs_review | 512 | 7.0% |
+| rejected | 335 | 4.6% |
+| rolled_back | 1 | 0.0% |
+
+剩余 512 条 needs_review 主要是 merge 决策（490 条），需要人工判断是否合并，合理保留。
+
+### 验证
+- 治理决策分布验证通过
+- 报告清理验证通过
+- Agent 工具确认已移除

@@ -1,0 +1,120 @@
+{
+  "timestamp": "2026-07-02T08:20:47.635895Z",
+  "description": "MemoryCore Phase 0 基线快照 — 深度审计后优化前的基准数据",
+  "memories": {
+    "total": 6556,
+    "active": 1396,
+    "archived": 4785,
+    "stale": 263,
+    "contradicted": 93,
+    "superseded": 19,
+    "never_injected_active": 954,
+    "injected_active": 442,
+    "avg_importance": 0.7921489971346708,
+    "avg_confidence": 0.9412177650429958,
+    "avg_effectiveness": 0.5146131805157573
+  },
+  "governance": {
+    "total": 7162,
+    "applied": 4383,
+    "needs_review": 2221,
+    "auto_approved": 538,
+    "rejected": 19,
+    "rolled_back": 1
+  },
+  "links": {
+    "total": 5494
+  },
+  "feedback": {
+    "total_events": 874,
+    "positive_memories": 267
+  },
+  "audit": {
+    "total_events": 16511
+  },
+  "source_distribution": {
+    "extraction": 2626,
+    "governance_split": 2143,
+    "atomizer": 867,
+    "rollup": 601,
+    "llm_curator": 196,
+    "manual": 83,
+    "v1-compat": 20,
+    "user": 11,
+    "agent": 5,
+    "conversation": 2,
+    "user_report": 1,
+    "codex": 1
+  },
+  "type_distribution": {
+    "episodic_memory": 2971,
+    "project_memory": 1774,
+    "decision": 554,
+    "environment_fact": 537,
+    "feedback": 217,
+    "user_profile": 209,
+    "timeline_event": 158,
+    "agent_architecture": 106,
+    "skill_candidate": 30
+  },
+  "recall_by_source": {
+    "governance_split": {
+      "total": 929,
+      "never_injected": 715,
+      "injected": 214,
+      "never_injected_pct": 77.0
+    },
+    "atomizer": {
+      "total": 217,
+      "never_injected": 126,
+      "injected": 91,
+      "never_injected_pct": 58.1
+    },
+    "rollup": {
+      "total": 151,
+      "never_injected": 53,
+      "injected": 98,
+      "never_injected_pct": 35.1
+    },
+    "extraction": {
+      "total": 78,
+      "never_injected": 58,
+      "injected": 20,
+      "never_injected_pct": 74.4
+    },
+    "llm_curator": {
+      "total": 9,
+      "never_injected": 2,
+      "injected": 7,
+      "never_injected_pct": 22.2
+    },
+    "manual": {
+      "total": 7,
+      "never_injected": 0,
+      "injected": 7,
+      "never_injected_pct": 0.0
+    },
+    "user": {
+      "total": 3,
+      "never_injected": 0,
+      "injected": 3,
+      "never_injected_pct": 0.0
+    },
+    "conversation": {
+      "total": 2,
+      "never_injected": 0,
+      "injected": 2,
+      "never_injected_pct": 0.0
+    }
+  },
+  "context_quality": {
+    "avg_hit_rate": 0.8158,
+    "avg_used_count": 7.11,
+    "total_calls": 729
+  },
+  "key_metrics": {
+    "never_injected_rate": 68.3,
+    "governance_backlog_rate": 31.0,
+    "archive_rate": 73.0
+  }
+}
