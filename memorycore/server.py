@@ -959,6 +959,8 @@ def main(argv: list[str] | None = None) -> int:
                           help="Output file path (default: memory-export.json)")
     p_export.add_argument("--memories-only", action="store_true",
                           help="Only export memories/links/feedback (skip agent state); recommended for sync")
+    p_export.add_argument("--full", action="store_true",
+                          help="Export ALL data tables (memories, governance, entities, audit, curator state)")
     p_export.add_argument("--include-audit", action="store_true",
                           help="Also include audit_events in the export")
     p_import = sub.add_parser("import", help="Import memories from a JSON file")
@@ -966,6 +968,8 @@ def main(argv: list[str] | None = None) -> int:
     p_import.add_argument("--conflict-policy", default="newer",
                           choices=["skip", "replace", "newer"],
                           help="How to handle conflicts (default: newer — keep whichever is more recent)")
+    p_import.add_argument("--full-replace", action="store_true",
+                          help="DELETE all rows in each table before importing (full overwrite); rebuilds FTS and vectors after")
     p_import.add_argument("--apply", action="store_true",
                           help="Actually apply the import (default is dry-run)")
     p_serve = sub.add_parser("serve")
@@ -1085,12 +1089,14 @@ def main(argv: list[str] | None = None) -> int:
         payload = export_memory_payload(
             include_audit=args.include_audit,
             memories_only=args.memories_only,
+            full=args.full,
         )
         out_path = Path(args.out)
         out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         counts = payload["counts"]
         total = sum(counts.values())
-        print(f"Exported {total} rows to {out_path}", file=sys.stderr)
+        mode = "full" if args.full else ("memories-only" if args.memories_only else "default")
+        print(f"Exported {total} rows ({mode}) to {out_path}", file=sys.stderr)
         print(json.dumps(counts, ensure_ascii=False))
     elif args.cmd == "import":
         src_path = Path(args.src)
@@ -1099,12 +1105,18 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         payload = json.loads(src_path.read_text(encoding="utf-8"))
         dry_run = not args.apply
-        result = import_memory_payload(payload, dry_run=dry_run, conflict_policy=args.conflict_policy)
+        full_replace = args.full_replace
+        result = import_memory_payload(
+            payload, dry_run=dry_run,
+            conflict_policy=args.conflict_policy,
+            full_replace=full_replace,
+        )
         if "error" in result:
             print(json.dumps(result, ensure_ascii=False, indent=2), file=sys.stderr)
             return 1
         mode = "DRY RUN" if dry_run else "APPLIED"
-        print(f"[{mode}] conflict_policy={args.conflict_policy}", file=sys.stderr)
+        policy = "full-replace" if full_replace else f"conflict_policy={args.conflict_policy}"
+        print(f"[{mode}] {policy}", file=sys.stderr)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.cmd == "serve":
         cfg = load_config()

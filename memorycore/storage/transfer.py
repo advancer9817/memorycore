@@ -11,7 +11,27 @@ from memorycore.storage.db import connect, db_path, managed_conn
 
 SCHEMA_VERSION = 1
 
-# All tables eligible for full backup export
+# Full export: all user-facing data tables (excludes FTS/vec internals and audit_events)
+# audit_events is device-local and can be very large (>100MB); export separately with --include-audit
+_FULL_TABLES = [
+    "memories",
+    "feedback_events",
+    "memory_links",
+    "memory_entities",
+    "governance_decisions",
+    "governance_executions",
+    "governance_mutation_log",
+    "governance_runs",
+    "curator_review_log",
+    "llm_curator_batches",
+    "llm_curator_jobs",
+    "context_quality_events",
+    "agent_messages",
+    "agent_presence",
+    "agent_capabilities",
+]
+
+# Legacy: all tables eligible for full backup export
 _TRANSFER_TABLES = [
     "memories",
     "feedback_events",
@@ -25,14 +45,26 @@ _SYNC_TABLES = [
     "memories",
     "feedback_events",
     "memory_links",
+    "memory_entities",
 ]
 
 _TABLE_PK = {
     "memories": "id",
     "feedback_events": "id",
     "memory_links": "id",
+    "memory_entities": "id",
+    "governance_decisions": "id",
+    "governance_executions": "id",
+    "governance_mutation_log": "id",
+    "governance_runs": "id",
+    "curator_review_log": "id",
+    "llm_curator_batches": "batch_id",
+    "llm_curator_jobs": "job_id",
+    "audit_events": "id",
+    "context_quality_events": "id",
     "agent_messages": "id",
     "agent_presence": "agent_id",
+    "agent_capabilities": "id",
 }
 
 _CONFLICT_POLICIES = {"skip", "replace", "newer"}
@@ -61,6 +93,7 @@ def _table_rows(conn, table: str) -> list[dict[str, Any]]:
 def memory_export(
     include_audit: bool = False,
     memories_only: bool = False,
+    full: bool = False,
 ) -> dict[str, Any]:
     """Export memory data as a schema-versioned JSON-compatible payload.
 
@@ -69,24 +102,38 @@ def memory_export(
         memories_only: Only export memories/feedback_events/memory_links —
             the durable cross-device knowledge. Skips agent_messages,
             and presence (device-local runtime state).
+        full: Export ALL data tables (memories, governance, entities,
+            audit, curator state, context quality). Use for full backup
+            or cross-device migration with --full-replace import.
     """
-    if memories_only:
+    if full:
+        tables = list(_FULL_TABLES)
+        if include_audit:
+            tables.append("audit_events")
+    elif memories_only:
         tables = list(_SYNC_TABLES)
     else:
         tables = list(_TRANSFER_TABLES)
-    if include_audit and not memories_only:
-        tables.append("audit_events")
+        if include_audit:
+            tables.append("audit_events")
     data: dict[str, list[dict[str, Any]]] = {}
     with managed_conn() as conn:
         version_row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
         schema_version = int(version_row[0] or SCHEMA_VERSION)
+        existing_tables = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
         for table in tables:
-            data[table] = _table_rows(conn, table)
+            if table in existing_tables:
+                data[table] = _table_rows(conn, table)
+            else:
+                data[table] = []
     return {
         "schema_version": schema_version,
         "exported_at": _exported_at_for_tables(data, tables) if memories_only else now(),
         "memories_only": memories_only,
-        "tables": tables,
+        "full": full,
+        "tables": [t for t in tables if t in data],
         "counts": {table: len(rows) for table, rows in data.items()},
         "data": data,
     }
@@ -96,6 +143,7 @@ def memory_import(
     payload: dict[str, Any],
     dry_run: bool = True,
     conflict_policy: str = "skip",
+    full_replace: bool = False,
 ) -> dict[str, Any]:
     """Import a schema-versioned memory payload with dry-run conflict reporting.
 
@@ -104,31 +152,75 @@ def memory_import(
         replace — overwrite existing row with incoming unconditionally
         newer   — keep whichever row has the later updated_at timestamp
                   (best for multi-device sync; falls back to skip on ties)
+
+    full_replace:
+        When True, DELETE all rows in each imported table before inserting.
+        This is a full overwrite — use with --full export for complete migration.
+        After import, FTS index and Qdrant vectors are rebuilt automatically.
+        Ignores conflict_policy (everything is fresh insert).
     """
     schema_version = int(payload.get("schema_version") or 0)
     if schema_version > SCHEMA_VERSION:
         return {"error": "unsupported_schema_version", "schema_version": schema_version, "supported": SCHEMA_VERSION}
-    if conflict_policy not in _CONFLICT_POLICIES:
+    if not full_replace and conflict_policy not in _CONFLICT_POLICIES:
         return {"error": "invalid_conflict_policy", "allowed": sorted(_CONFLICT_POLICIES)}
 
     data = payload.get("data") or {}
     conflicts: dict[str, list[str]] = {}
-    newer_wins: dict[str, int] = {}   # incoming rows that won the newer comparison
+    newer_wins: dict[str, int] = {}
     planned: dict[str, int] = {}
     inserted: dict[str, int] = {}
+    deleted: dict[str, int] = {}
 
-    tables_in_payload = [t for t in _TRANSFER_TABLES if t in data]
-    ignored_tables = sorted(t for t in data.keys() if t not in _TRANSFER_TABLES)
+    importable_tables = set(_FULL_TABLES) | set(_TRANSFER_TABLES) | set(_SYNC_TABLES)
+    tables_in_payload = [t for t in data if t in importable_tables]
+    ignored_tables = sorted(t for t in data.keys() if t not in importable_tables)
 
     with managed_conn() as conn:
+        existing_tables = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+
         for table in tables_in_payload:
+            if table not in existing_tables:
+                ignored_tables.append(table)
+                continue
+
             rows = list(data.get(table) or [])
-            pk = _TABLE_PK[table]
+            pk = _TABLE_PK.get(table, "id")
+            columns = _table_columns(conn, table)
+
+            if full_replace:
+                conflicts[table] = []
+                newer_wins[table] = 0
+                planned[table] = len(rows)
+                inserted[table] = 0
+                deleted[table] = 0
+
+                if dry_run:
+                    deleted[table] = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                    continue
+
+                del_count = conn.execute(f"DELETE FROM {table}").rowcount
+                deleted[table] = del_count
+
+                for row in rows:
+                    filtered = {key: row.get(key) for key in columns if key in row}
+                    if not filtered:
+                        continue
+                    names = list(filtered.keys())
+                    placeholders = ",".join("?" for _ in names)
+                    conn.execute(
+                        f"INSERT INTO {table} ({','.join(names)}) VALUES ({placeholders})",
+                        [filtered[name] for name in names],
+                    )
+                    inserted[table] += 1
+                continue
+
             ids = [str(row[pk]) for row in rows if pk in row]
             existing_map: dict[str, dict[str, Any]] = {}
             if ids:
                 placeholders = ",".join("?" for _ in ids)
-                columns = _table_columns(conn, table)
                 for raw in conn.execute(
                     f"SELECT * FROM {table} WHERE {pk} IN ({placeholders})", ids
                 ).fetchall():
@@ -137,6 +229,7 @@ def memory_import(
 
             conflicts[table] = [item for item in ids if item in existing_map]
             newer_wins[table] = 0
+            deleted[table] = 0
             candidates: list[dict[str, Any]] = []
 
             for row in rows:
@@ -145,7 +238,7 @@ def memory_import(
                     candidates.append(row)
                     continue
                 if conflict_policy == "skip":
-                    pass  # not a candidate
+                    pass
                 elif conflict_policy == "replace":
                     candidates.append(row)
                 elif conflict_policy == "newer":
@@ -160,7 +253,6 @@ def memory_import(
             if dry_run:
                 continue
 
-            columns = _table_columns(conn, table)
             for row in candidates:
                 filtered = {key: row.get(key) for key in columns if key in row}
                 if not filtered:
@@ -177,20 +269,55 @@ def memory_import(
     if not dry_run:
         log_audit_event("memory_import", detail={
             "inserted": inserted,
-            "conflict_policy": conflict_policy,
+            "deleted": deleted,
+            "conflict_policy": conflict_policy if not full_replace else "full_replace",
             "newer_wins": newer_wins,
             "ignored_tables": ignored_tables,
+            "full_replace": full_replace,
         })
-    return {
+
+    result = {
         "dry_run": dry_run,
         "applied": not dry_run,
-        "conflict_policy": conflict_policy,
+        "full_replace": full_replace,
+        "conflict_policy": conflict_policy if not full_replace else "full_replace",
         "ignored_tables": ignored_tables,
         "conflicts": conflicts,
         "newer_wins": newer_wins,
+        "deleted": deleted,
         "planned": planned,
         "inserted": inserted,
     }
+
+    if not dry_run and full_replace and "memories" in tables_in_payload:
+        result["post_import"] = _rebuild_indexes_after_import()
+
+    return result
+
+
+def _rebuild_indexes_after_import() -> dict[str, Any]:
+    """Rebuild FTS index and Qdrant vectors after full-replace import."""
+    import logging
+    logger = logging.getLogger(__name__)
+    post = {"fts_rebuilt": False, "vectors_rebuilt": False}
+
+    try:
+        with managed_conn() as conn:
+            conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
+        post["fts_rebuilt"] = True
+    except Exception as exc:
+        logger.warning("FTS rebuild failed: %s", exc)
+        post["fts_error"] = str(exc)
+
+    try:
+        result = memory_rebuild_vectors(dry_run=False, limit=5000)
+        post["vectors_rebuilt"] = True
+        post["vectors_count"] = result.get("rebuilt", 0)
+    except Exception as exc:
+        logger.warning("Vector rebuild failed: %s", exc)
+        post["vectors_error"] = str(exc)
+
+    return post
 
 
 def memory_backup(path: str | None = None) -> dict[str, Any]:
