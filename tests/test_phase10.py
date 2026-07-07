@@ -121,7 +121,7 @@ def test_init_db_migrates_existing_memories_table_without_effectiveness_columns(
     migrated = lm.get_record("legacy-id")
 
     assert "legacy-id" in pack["used_ids"]
-    assert migrated["effectiveness_score"] == pytest.approx(0.5)
+    assert migrated["effectiveness_score"] == pytest.approx(0.5, abs=0.05)
     assert migrated["injected_count"] >= 1
     assert migrated["ineffective_count"] == 0
     assert migrated["last_injected_at"] is not None

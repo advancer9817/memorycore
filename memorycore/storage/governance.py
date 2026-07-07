@@ -25,7 +25,7 @@ PRECIOUS_TYPES = {"user_profile", "decision", "project_memory"}
 HIGH_IMPORTANCE_THRESHOLD = 0.85
 AUTO_CONFIDENCE_THRESHOLD = 0.65
 REVIEW_CONFIDENCE_THRESHOLD = 0.45
-POLICY_VERSION = "2026-06-29"
+POLICY_VERSION = "2026-07-07"
 JUDGE_SCHEMA_VERSION = "1"
 DECISION_VERSION = "1"
 JUDGE_MODEL = "deterministic"
@@ -40,7 +40,7 @@ MUTATING_ACTIONS = {
     "supersede",
 }
 DESTRUCTIVE_ACTIONS = {"archive_duplicate", "archive_and_merge_duplicate", "archive", "split", "supersede"}
-MERGE_ACTIONS = {"archive_and_merge_duplicate"}
+MERGE_ACTIONS: set[str] = set()
 MANUAL_ONLY_ACTIONS = {"split"}
 DELETE_ACTIONS = {"delete", "hard_delete"}
 ACTIONABLE_REVIEW_STATUSES = {"needs_review", "auto_approved"}
@@ -165,20 +165,19 @@ def policy_gate(
     scope: str = "global",
     project_path: str = "",
 ) -> dict[str, Any]:
-    """Classify a governance recommendation as auto-approved, review, or rejected.
+    """Classify a governance recommendation as auto-approved or rejected.
 
-    Policy v2026-06-29: only merge, split, and mark_contradicted require
-    human review. Everything else (promote, downgrade, archive_duplicate,
-    archive, supersede) auto-approves when confidence meets thresholds:
-      - 0.75 for destructive actions (archive, archive_duplicate, merge, split, supersede)
-      - 0.65 for non-destructive actions (promote, downgrade, mark_contradicted)
-      - < 0.45 is hard rejected
-      - Between 0.45 and required threshold: marked as rejected (not blocking)
+    Policy v2026-07-07: no human review — all decisions are either
+    auto-approved (confidence >= 0.75) or rejected.
+      - < 0.45: hard rejected
+      - 0.45..0.75: rejected (confidence too low)
+      - >= 0.75: auto-approved
+      - split: always rejected (requires manual action)
+      - delete: always rejected
     """
     memories = memories or []
-    normalized_risk = (risk_level or "medium").lower()
 
-    # --- Hard rejections (unchanged) ---
+    # --- Hard rejections ---
     if _contains_llm_instruction_injection(action):
         return {
             "review_status": "rejected",
@@ -200,6 +199,13 @@ def policy_gate(
             "policy_reasons": ["unsupported_action"],
             "policy_version": POLICY_VERSION,
         }
+    if action in MANUAL_ONLY_ACTIONS:
+        return {
+            "review_status": "rejected",
+            "policy_reason": "split requires manual action",
+            "policy_reasons": ["split_requires_manual_action"],
+            "policy_version": POLICY_VERSION,
+        }
     if confidence < REVIEW_CONFIDENCE_THRESHOLD:
         return {
             "review_status": "rejected",
@@ -208,7 +214,7 @@ def policy_gate(
             "policy_version": POLICY_VERSION,
         }
 
-    # --- "keep" is a no-op: auto-approve immediately, no review needed ---
+    # --- "keep" is a no-op ---
     if action == "keep":
         return {
             "review_status": "auto_approved",
@@ -217,10 +223,8 @@ def policy_gate(
             "policy_version": POLICY_VERSION,
         }
 
-    # --- Threshold check based on destructiveness ---
-    is_destructive = action in DESTRUCTIVE_ACTIONS or action in MERGE_ACTIONS
-    required_conf = 0.75 if is_destructive else 0.65
-
+    # --- Confidence threshold ---
+    required_conf = 0.75
     if confidence < required_conf:
         return {
             "review_status": "rejected",
@@ -229,29 +233,10 @@ def policy_gate(
             "policy_version": POLICY_VERSION,
         }
 
-    # --- Actions that always need human review ---
-    review_reasons: list[str] = []
-    if action in MERGE_ACTIONS:
-        review_reasons.append("merge_requires_review")
-    if action in MANUAL_ONLY_ACTIONS:
-        review_reasons.append("split_requires_manual_action")
-    if action == "mark_contradicted":
-        has_positive_feedback = any(float(m.get("feedback_score") or 0.0) > 0 for m in memories)
-        if has_positive_feedback or normalized_risk == "high":
-            review_reasons.append("contradiction_on_valued_memory")
-
-    if review_reasons:
-        return {
-            "review_status": "needs_review",
-            "policy_reason": "; ".join(review_reasons),
-            "policy_reasons": review_reasons,
-            "policy_version": POLICY_VERSION,
-        }
-
-    # --- Everything else auto-approves ---
+    # --- Auto-approve ---
     return {
         "review_status": "auto_approved",
-        "policy_reason": f"low-risk recommendation auto-approved by policy v{POLICY_VERSION}",
+        "policy_reason": f"auto-approved by policy v{POLICY_VERSION}",
         "policy_reasons": [],
         "policy_version": POLICY_VERSION,
     }
@@ -306,8 +291,8 @@ def recalibrate_governance_review_queue(limit: int | None = None, dry_run: bool 
         ).fetchall()
 
     candidates: list[dict[str, Any]] = []
+    reject_candidates: list[dict[str, Any]] = []
     unchanged = 0
-    rejected = 0
     for row in rows:
         decision = _decision_row_to_dict(row)
         gate = policy_gate(
@@ -319,12 +304,13 @@ def recalibrate_governance_review_queue(limit: int | None = None, dry_run: bool 
         if gate["review_status"] == "auto_approved":
             candidates.append({**decision, "_gate": gate})
         elif gate["review_status"] == "rejected":
-            rejected += 1
+            reject_candidates.append({**decision, "_gate": gate})
         else:
             unchanged += 1
 
     changed_ids = [item["id"] for item in candidates]
-    if changed_ids and not dry_run:
+    rejected_ids = [item["id"] for item in reject_candidates]
+    if not dry_run:
         ts = now()
         with managed_conn() as conn:
             for item in candidates:
@@ -333,6 +319,23 @@ def recalibrate_governance_review_queue(limit: int | None = None, dry_run: bool 
                     """
                     UPDATE governance_decisions
                     SET review_status='auto_approved', policy_reason=?, policy_reasons_json=?,
+                        policy_version=?, updated_at=?
+                    WHERE id=? AND review_status='needs_review'
+                    """,
+                    (
+                        gate["policy_reason"],
+                        as_json(gate.get("policy_reasons", [])),
+                        gate.get("policy_version", POLICY_VERSION),
+                        ts,
+                        item["id"],
+                    ),
+                )
+            for item in reject_candidates:
+                gate = item["_gate"]
+                conn.execute(
+                    """
+                    UPDATE governance_decisions
+                    SET review_status='rejected', policy_reason=?, policy_reasons_json=?,
                         policy_version=?, updated_at=?
                     WHERE id=? AND review_status='needs_review'
                     """,
@@ -371,9 +374,11 @@ def recalibrate_governance_review_queue(limit: int | None = None, dry_run: bool 
         "would_reclassify": len(candidates),
         "reclassified": 0 if dry_run else len(candidates),
         "unchanged": unchanged,
-        "would_reject": rejected,
+        "would_reject": len(reject_candidates),
+        "rejected": 0 if dry_run else len(reject_candidates),
         "by_type": by_type,
         "decision_ids": changed_ids,
+        "rejected_ids": rejected_ids,
     }
 
 
@@ -547,6 +552,8 @@ def list_governance_decisions(review_status: str | None = None, decision_type: s
     params: list[Any] = []
     if review_status == "actionable":
         conditions.append("review_status IN ('needs_review', 'auto_approved') AND recommended_action != 'keep'")
+    elif review_status == "auto_approved":
+        conditions.append("review_status = 'applied' AND approval_kind = 'auto'")
     elif review_status and review_status != "all":
         conditions.append("review_status=?")
         params.append(review_status)

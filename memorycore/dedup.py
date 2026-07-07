@@ -32,24 +32,51 @@ from memorycore.extraction import extract_facts  # noqa: E402
 logger = logging.getLogger(__name__)
 
 # Base cosine similarity thresholds
-SKIP_THRESHOLD = 0.92       # near-identical → skip
-UPDATE_THRESHOLD = 0.78     # same topic, new info → update existing
+SKIP_THRESHOLD = 0.82       # near-identical or same-fact rewording → skip
+UPDATE_THRESHOLD = 0.68     # same topic, new info → update existing
 LINK_THRESHOLD = 0.55       # related → add new, link to existing
 
 # Per-type threshold overrides (skip, update, link)
 # Types not listed fall back to the base thresholds above.
 TYPE_THRESHOLDS: dict[str, tuple[float, float, float]] = {
     # Conservative: keep decision records separate; avoid accidental merges
-    "decision":          (0.96, 0.88, 0.65),
-    "user_profile":      (0.95, 0.85, 0.60),
-    "environment_fact":  (0.95, 0.85, 0.60),
-    "project_memory":    (0.94, 0.84, 0.60),
+    "decision":          (0.90, 0.78, 0.65),
+    "user_profile":      (0.88, 0.75, 0.60),
+    "environment_fact":  (0.88, 0.75, 0.60),
+    "project_memory":    (0.88, 0.75, 0.60),
     # Aggressive: merge similar episodic/feedback fragments readily
-    "episodic_memory":   (0.88, 0.72, 0.50),
-    "feedback":          (0.88, 0.72, 0.50),
+    "episodic_memory":   (0.78, 0.65, 0.50),
+    "feedback":          (0.78, 0.65, 0.50),
     # skill_candidate: moderate
-    "skill_candidate":   (0.90, 0.78, 0.55),
+    "skill_candidate":   (0.85, 0.72, 0.55),
 }
+
+
+# ---------------------------------------------------------------------------
+# Batch-internal dedup (character n-gram Jaccard similarity)
+# ---------------------------------------------------------------------------
+
+def _char_ngrams(text: str, n: int = 2) -> set[str]:
+    t = text.lower().strip()
+    if len(t) < n:
+        return {t}
+    return {t[i:i + n] for i in range(len(t) - n + 1)}
+
+
+def _batch_similar(text: str, seen: list[str], threshold: float = 0.55) -> bool:
+    if not seen:
+        return False
+    ngrams_a = _char_ngrams(text)
+    if not ngrams_a:
+        return False
+    for s in seen:
+        ngrams_b = _char_ngrams(s)
+        if not ngrams_b:
+            continue
+        jaccard = len(ngrams_a & ngrams_b) / len(ngrams_a | ngrams_b)
+        if jaccard >= threshold:
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -244,8 +271,15 @@ def ingest(
         return result
 
     # --- 4. Dedup each fact ---
+    batch_texts: list[str] = []
     for fact in facts:
         try:
+            # Batch-internal dedup: skip if very similar to a fact already processed in this batch
+            if _batch_similar(fact.text, batch_texts):
+                result.skipped += 1
+                logger.debug("dedup: BATCH_SKIP %s", fact.text[:60])
+                continue
+
             fact_type = fact.memory_type if fact.memory_type else mem_type
             type_link = TYPE_THRESHOLDS.get(fact_type, (base_skip, base_update, base_link))[2]
             similar = []
@@ -253,7 +287,6 @@ def ingest(
                 similar = vs.search(
                     fact.text,
                     top_k=dedup_top_k,
-                    filters={"status": "active"},
                     score_threshold=type_link,
                 )
 
@@ -329,6 +362,7 @@ def ingest(
                         "agent_id": agent_id,
                     })
                 result.updated += 1
+                batch_texts.append(fact.text)
                 logger.debug("dedup: UPDATE [%.3f] %s", decision.similarity, fact.text[:60])
 
             else:  # add
@@ -357,6 +391,7 @@ def ingest(
                         "agent_id": agent_id,
                     })
                 result.added += 1
+                batch_texts.append(fact.text)
                 logger.debug("dedup: ADD    [%.3f] %s", decision.similarity, fact.text[:60])
 
         except Exception as exc:

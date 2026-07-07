@@ -128,7 +128,7 @@ def evaluate_mutation_policy(request: MutationRequest, context: MutationContext)
     elif request.confidence < 0.65 and decision == "allowed" and request.action_type not in LOW_RISK_ACTIONS:
         decision = "queued"
         reasons.append("confidence_below_auto_threshold")
-    if context.approval_kind in {"human_accept", "admin_override", "rollback", "maintenance"} and decision == "queued":
+    if context.approval_kind in {"human_accept", "admin_override", "rollback", "maintenance", "auto_policy"} and decision == "queued":
         decision = "override_allowed" if context.approval_kind == "admin_override" else "allowed"
         reasons.append(f"approved_by_{context.approval_kind}")
 

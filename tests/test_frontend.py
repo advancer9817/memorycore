@@ -10,6 +10,7 @@ from starlette.testclient import TestClient
 
 import memorycore as lm
 from memorycore.storage import add_memory_record, apply_governance_decision, create_governance_decision, reject_governance_decision
+from memorycore.storage.db import managed_conn
 from memorycore.frontend import (
     configure_frontend,
     frontend_api,
@@ -172,16 +173,21 @@ def test_frontend_missing_memory_returns_404():
 
 
 def test_frontend_governance_bad_request_includes_message():
-    record = add_memory_record("episodic_memory", "Governance API note", "Can be split", importance=0.6)
-    # Use split action which routes to needs_review, then reject it
+    record = add_memory_record("episodic_memory", "Governance API note", "Can be downgraded", importance=0.6)
+    # Create a promote decision (auto-applied), force to needs_review, then reject
     decision = create_governance_decision(
-        "split_candidate",
-        "split",
+        "importance_reassessment",
+        "promote",
         [record["id"]],
         0.95,
-        "high",
-        {"id": record["id"], "action": "split", "sub_memories": []},
+        "low",
+        {"id": record["id"], "action": "promote", "new_importance": 0.8},
     )
+    with managed_conn() as conn:
+        conn.execute(
+            "UPDATE governance_decisions SET review_status='needs_review', applied_at=NULL WHERE id=?",
+            (decision["id"],),
+        )
     reject_governance_decision(decision["id"], source_agent="pytest", reason="reject before apply")
 
     with _client() as client:
@@ -195,17 +201,22 @@ def test_frontend_governance_bad_request_includes_message():
 
 
 def test_frontend_governance_actionable_filter_excludes_applied_history():
-    active = add_memory_record("episodic_memory", "Frontend active", "Actionable split", importance=0.3)
+    active = add_memory_record("episodic_memory", "Frontend active", "Actionable promote", importance=0.3)
     applied = add_memory_record("episodic_memory", "Frontend applied", "Historical", importance=0.3)
-    # Use split action which routes to needs_review (actionable)
+    # Create a promote decision (auto-applied), force to needs_review to make it actionable
     active_decision = create_governance_decision(
-        "split_candidate",
-        "split",
+        "importance_reassessment",
+        "promote",
         [active["id"]],
         0.95,
-        "high",
-        {"id": active["id"], "action": "split", "sub_memories": []},
+        "low",
+        {"id": active["id"], "action": "promote", "new_importance": 0.5},
     )
+    with managed_conn() as conn:
+        conn.execute(
+            "UPDATE governance_decisions SET review_status='needs_review', applied_at=NULL WHERE id=?",
+            (active_decision["id"],),
+        )
     # downgrade with high confidence auto-applies immediately
     applied_decision = create_governance_decision(
         "importance_reassessment",
@@ -257,9 +268,9 @@ def test_frontend_llm_curator_job_decisions_are_cursor_paginated(monkeypatch):
 
     with _client() as client:
         status = client.get(f"/api/curator/llm/{job['id']}")
-        page = client.get(f"/api/curator/llm/{job['id']}/decisions?limit=1")
+        page = client.get(f"/api/curator/llm/{job['id']}/decisions?limit=1&review_status=all")
         next_cursor = page.json()["data"]["next_cursor"]
-        next_page = client.get(f"/api/curator/llm/{job['id']}/decisions?limit=1&after={next_cursor}")
+        next_page = client.get(f"/api/curator/llm/{job['id']}/decisions?limit=1&after={next_cursor}&review_status=all")
 
     assert status.status_code == 200
     assert status.json()["data"]["job_id"] == job["id"]

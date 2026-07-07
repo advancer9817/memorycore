@@ -271,11 +271,11 @@ export const en = {
     goButton: "Go",
     statusLabels: {
       actionable: "Actionable",
-      all: "All records",
-      auto_approved: "Auto approved",
+      all: "All",
+      auto_approved: "Auto",
       applied: "Applied",
       rejected: "Rejected",
-      rolled_back: "Rolled back",
+      needs_review: "Pending",
     },
     decisionTypeLabels: {
       contradiction: "Contradiction",

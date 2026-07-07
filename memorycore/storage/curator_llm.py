@@ -289,26 +289,51 @@ def _llm_split_fact_hash(parent_id: str, content: str) -> str:
     return hashlib.sha256(f"{parent_id}:{_normalize_fact_text(content)}".encode()).hexdigest()
 
 
+_LLM_MAX_RETRIES = 3
+_LLM_RETRY_BACKOFF = [2, 5, 10]
+
+
 def _call_llm_with_thinking(prompt: str, system: str, config: Any) -> tuple[str, str]:
     """Call LLM and return (json_content, thinking).
 
     DeepSeek v3 and R1 wrap chain-of-thought in <think>...</think> before the JSON.
     Claude returns markdown-fenced JSON (```json...```).
     We extract thinking separately and return the clean JSON string.
+    Retries up to 3 times on transient errors (connection, 500, timeout).
     """
+    import time as _time_mod
     from memorycore.extraction import _call_llm as _base_call
     import re as _re
-    raw = _base_call(system, prompt, config)
-    # Extract <think>...</think> block if present
+
+    last_exc: Exception | None = None
+    for attempt in range(_LLM_MAX_RETRIES):
+        try:
+            raw = _base_call(system, prompt, config)
+            break
+        except Exception as exc:
+            last_exc = exc
+            exc_str = str(exc).lower()
+            is_transient = any(kw in exc_str for kw in [
+                "disconnected", "500", "502", "503", "504",
+                "timeout", "connection", "eof", "reset",
+            ])
+            if not is_transient or attempt == _LLM_MAX_RETRIES - 1:
+                raise
+            wait = _LLM_RETRY_BACKOFF[attempt]
+            logger.warning(
+                "LLM call failed (attempt %d/%d), retrying in %ds: %s",
+                attempt + 1, _LLM_MAX_RETRIES, wait, exc,
+            )
+            _time_mod.sleep(wait)
+    else:
+        raise last_exc  # type: ignore[misc]
+
     thinking_match = _re.search(r"<think>(.*?)</think>", raw, _re.DOTALL)
     thinking = thinking_match.group(1).strip() if thinking_match else ""
-    # Strip thinking block from the JSON content
     content = _re.sub(r"<think>.*?</think>", "", raw, flags=_re.DOTALL).strip()
-    # Strip markdown code fences: ```json...``` or ```...```
     fence_match = _re.search(r"```(?:json)?\s*([\s\S]*?)```", content)
     if fence_match:
         content = fence_match.group(1).strip()
-    # If still not clean JSON, try to find the outermost { ... }
     if not content.startswith("{"):
         start = content.find("{")
         end = content.rfind("}") + 1

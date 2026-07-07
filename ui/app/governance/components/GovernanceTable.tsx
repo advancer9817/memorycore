@@ -108,8 +108,10 @@ export function GovernanceTable({
                     onClick={() => onRowClick(decision)}
                   >
                     <div className="flex items-center gap-2 mb-1">
-                      <Badge className={reviewStatusTone(decision.review_status)}>
-                        {(messages.statusLabels as Record<string, string>)?.[decision.review_status] ?? titleCase(decision.review_status)}
+                      <Badge className={reviewStatusTone(decision.approval_kind === "auto" ? "auto_approved" : decision.review_status)}>
+                        {decision.approval_kind === "auto"
+                          ? ((messages.statusLabels as Record<string, string>)?.["auto_approved"] ?? "Auto")
+                          : ((messages.statusLabels as Record<string, string>)?.[decision.review_status] ?? titleCase(decision.review_status))}
                       </Badge>
                     </div>
                     <div className="font-medium text-white cursor-pointer line-clamp-2">

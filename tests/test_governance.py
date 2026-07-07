@@ -70,7 +70,7 @@ def test_policy_gate_auto_approves_positive_feedback_duplicate_archive():
     assert result["review_status"] == "auto_approved"
 
 
-def test_policy_gate_rejects_delete_and_reviews_merge_actions():
+def test_policy_gate_rejects_delete_and_auto_approves_merge_actions():
     delete_result = policy_gate(
         "delete",
         0.99,
@@ -85,8 +85,7 @@ def test_policy_gate_rejects_delete_and_reviews_merge_actions():
     )
 
     assert delete_result["review_status"] == "rejected"
-    assert merge_result["review_status"] == "needs_review"
-    assert "merge" in merge_result["policy_reason"]
+    assert merge_result["review_status"] == "auto_approved"
 
 
 def test_recalibrate_governance_review_queue_promotes_safe_existing_decisions_without_applying(monkeypatch):
@@ -185,18 +184,24 @@ def test_convert_llm_findings_skips_keep_results():
 
 
 def test_actionable_governance_list_excludes_history_and_noop_keep():
-    active = add_memory_record("episodic_memory", "Active candidate", "Can be split", importance=0.3)
+    active = add_memory_record("episodic_memory", "Active candidate", "Can be promoted", importance=0.3)
     keep = add_memory_record("episodic_memory", "Keep candidate", "No mutation needed", importance=0.3)
     applied_record = add_memory_record("episodic_memory", "Applied candidate", "Already handled", importance=0.3)
-    # Use split action which routes to needs_review (actionable)
+    # Create a promote decision that auto-applies, then force it back to needs_review
     active_decision = create_governance_decision(
-        "split_candidate",
-        "split",
+        "importance_reassessment",
+        "promote",
         [active["id"]],
         0.95,
-        "high",
-        {"id": active["id"], "action": "split", "sub_memories": []},
+        "low",
+        {"id": active["id"], "action": "promote", "new_importance": 0.5},
     )
+    with managed_conn() as conn:
+        conn.execute(
+            "UPDATE governance_decisions SET review_status='needs_review', applied_at=NULL WHERE id=?",
+            (active_decision["id"],),
+        )
+        active_decision["review_status"] = "needs_review"
     keep_decision = create_governance_decision(
         "importance_reassessment",
         "keep",
@@ -229,7 +234,7 @@ def test_low_risk_importance_adjustments_auto_approve_at_result_threshold():
         "importance_reassessment",
         "promote",
         [record["id"]],
-        0.70,
+        0.80,
         "low",
         {"id": record["id"], "action": "promote", "new_importance": 0.5},
     )
@@ -293,13 +298,19 @@ def test_llm_finding_persists_trace_fields():
 def test_reject_governance_decision_writes_audit():
     record = add_memory_record("episodic_memory", "Reject candidate", "No change", importance=0.2)
     decision = create_governance_decision(
-        "split_candidate",
-        "split",
+        "importance_reassessment",
+        "promote",
         [record["id"]],
         0.95,
-        "high",
-        {"id": record["id"], "action": "split", "sub_memories": []},
+        "low",
+        {"id": record["id"], "action": "promote", "new_importance": 0.5},
     )
+    # Force back to needs_review so we can reject it
+    with managed_conn() as conn:
+        conn.execute(
+            "UPDATE governance_decisions SET review_status='needs_review', applied_at=NULL WHERE id=?",
+            (decision["id"],),
+        )
 
     rejected = reject_governance_decision(decision["id"], source_agent="pytest", reason="bad recommendation")
 
@@ -317,9 +328,8 @@ def test_policy_gate_returns_structured_reasons_and_version():
         memories=[{"type": "user_profile", "importance": 0.9, "feedback_score": 1.0}],
     )
 
-    assert result["review_status"] == "needs_review"
+    assert result["review_status"] == "auto_approved"
     assert result["policy_version"]
-    assert "merge_requires_review" in result["policy_reasons"]
 
 
 def test_create_governance_decision_dedupes_open_candidate_hash():
@@ -440,14 +450,14 @@ def test_get_governance_metrics_structure_and_rates():
     assert metrics["rollback_rate"] > 0.0
 
 
-def test_split_action_routes_to_needs_review_via_policy_gate():
+def test_split_action_routes_to_rejected_via_policy_gate():
     result = policy_gate(
         "split",
         0.95,
         "high",
         memories=[{"type": "episodic_memory", "importance": 0.3, "feedback_score": 0}],
     )
-    assert result["review_status"] == "needs_review"
+    assert result["review_status"] == "rejected"
     assert "split_requires_manual_action" in result["policy_reasons"]
 
 
@@ -469,7 +479,13 @@ def test_split_apply_creates_children_and_archives_parent():
             ],
         },
     )
-    assert decision["review_status"] == "needs_review"
+    assert decision["review_status"] == "rejected"
+    # Force to needs_review so we can manually apply the split
+    with managed_conn() as conn:
+        conn.execute(
+            "UPDATE governance_decisions SET review_status='needs_review' WHERE id=?",
+            (decision["id"],),
+        )
 
     result = apply_governance_decision(decision["id"], source_agent="pytest")
 
@@ -574,27 +590,31 @@ def test_apply_governance_decisions_batch_rollback():
     record1 = add_memory_record("episodic_memory", "Rollback record 1", "Will not be downgraded", importance=0.8)
     record2 = add_memory_record("episodic_memory", "Rollback record 2", "Will not be downgraded", importance=0.7)
 
-    # Use split actions which route to needs_review (not auto-applied)
+    # Create promote decisions (auto-applied), then force back to needs_review
     d1 = create_governance_decision(
-        "split_candidate",
-        "split",
+        "importance_reassessment",
+        "promote",
         [record1["id"]],
         0.95,
-        "high",
-        {"id": record1["id"], "action": "split", "sub_memories": [
-            {"title": "Fact A from rollback test", "content": "First fact for rollback batch test purposes.", "importance": 0.4},
-        ]},
+        "low",
+        {"id": record1["id"], "action": "promote", "new_importance": 0.9},
     )
     d2 = create_governance_decision(
-        "split_candidate",
-        "split",
+        "importance_reassessment",
+        "promote",
         [record2["id"]],
         0.95,
-        "high",
-        {"id": record2["id"], "action": "split", "sub_memories": [
-            {"title": "Fact B from rollback test", "content": "Second fact for rollback batch test purposes.", "importance": 0.4},
-        ]},
+        "low",
+        {"id": record2["id"], "action": "promote", "new_importance": 0.9},
     )
+    with managed_conn() as conn:
+        conn.execute(
+            "UPDATE governance_decisions SET review_status='needs_review', applied_at=NULL WHERE id IN (?, ?)",
+            (d1["id"], d2["id"]),
+        )
+        conn.execute("DELETE FROM governance_executions WHERE decision_id IN (?, ?)", (d1["id"], d2["id"]))
+        conn.execute("UPDATE memories SET importance=0.8 WHERE id=?", (record1["id"],))
+        conn.execute("UPDATE memories SET importance=0.7 WHERE id=?", (record2["id"],))
 
     # Reject the second decision so that it is in an invalid status for batch application
     reject_governance_decision(d2["id"], source_agent="pytest")

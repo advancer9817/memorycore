@@ -185,12 +185,7 @@ def process_auto_supersession(new_record: dict[str, Any], source_agent: str = "a
             source_agent=source_agent,
             llm_trace=llm_trace,
         )
-        applied = None
-        if decision["review_status"] == "auto_approved":
-            from memorycore.storage.governance import apply_governance_decision
-
-            applied = apply_governance_decision(decision["id"], source_agent=source_agent)
-        return {"checked": True, "matched": True, "action": "auto_supersede", "decision": decision, "applied": applied}
+        return {"checked": True, "matched": True, "action": "auto_supersede", "decision": decision}
 
     decision = create_governance_decision(
         decision_type="supersession",

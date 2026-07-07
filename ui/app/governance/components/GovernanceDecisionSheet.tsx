@@ -210,8 +210,10 @@ export function GovernanceDecisionSheet({
           <>
             <SheetHeader className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge className={reviewStatusTone(decision.review_status)}>
-                  {titleCase(decision.review_status)}
+                <Badge className={reviewStatusTone(decision.approval_kind === "auto" ? "auto_approved" : decision.review_status)}>
+                  {decision.approval_kind === "auto"
+                    ? ((messages.statusLabels as Record<string, string>)?.["auto_approved"] ?? "Auto")
+                    : ((messages.statusLabels as Record<string, string>)?.[decision.review_status] ?? titleCase(decision.review_status))}
                 </Badge>
                 <Badge className={riskTone(decision.risk_level)}>
                   {titleCase(decision.risk_level)}

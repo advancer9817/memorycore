@@ -320,7 +320,7 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
             allow_actions=_list_q(query, "allow_actions"), deny_actions=_list_q(query, "deny_actions"),
         )
     if parts == ["curator", "status"] and method == "GET":
-        return _curator_status_payload(limit=_int_q(query, "limit", 10000))
+        return _curator_status_payload(limit=_int_q(query, "limit", 200))
     if parts == ["curator", "apply"] and method == "POST":
         result = curator_report(
             dry_run=False, limit=int(body.get("limit", 500)),

@@ -273,11 +273,11 @@ export const zh = {
     goButton: "跳转",
     statusLabels: {
       actionable: "待处理",
-      all: "全部记录",
-      auto_approved: "自动批准",
+      all: "全部",
+      auto_approved: "自动",
       applied: "已应用",
       rejected: "已拒绝",
-      rolled_back: "已回滚",
+      needs_review: "待审批",
     },
     decisionTypeLabels: {
       contradiction: "矛盾",

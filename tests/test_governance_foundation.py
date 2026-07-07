@@ -45,7 +45,7 @@ def test_mutation_policy_covers_allowed_queued_and_rejected_outcomes():
     )
     queued = evaluate_mutation_policy(
         MutationRequest("memory_status_update", "memory", "id", {"status": "contradicted"}, risk_level="medium", confidence=0.60),
-        context,
+        MutationContext(actor="pytest", origin="governance", approval_kind="unknown"),
     )
     rejected = evaluate_mutation_policy(
         MutationRequest("memory_importance_update", "memory", "id", {"importance": 0.2}, risk_level="low", confidence=0.1),
