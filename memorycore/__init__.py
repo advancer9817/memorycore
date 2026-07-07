@@ -25,8 +25,6 @@ from memorycore.models import (
     validate_config,
 )
 
-SQLITE_VEC_AVAILABLE: bool = False  # removed; vector search now via vector_store.py
-
 # ── Storage (SQLite operations) ────────────────────────────────────────────────
 from memorycore.storage import (
     add_feedback,
@@ -75,7 +73,6 @@ __all__ = [
     "BOUNDARY_NOTICE",
     "DEFAULT_ROOT",
     "_INITIALIZED_DB_PATHS",
-    "SQLITE_VEC_AVAILABLE",
     "add_feedback",
     "add_link",
     "add_memory_record",
