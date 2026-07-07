@@ -1,0 +1,10 @@
+{
+  "date": "2026-07-02",
+  "day": 1,
+  "recall_rate": 43.5,
+  "needs_review": 0,
+  "hit_rate": 0.899,
+  "used_count": 13.1,
+  "code_lines": 14085,
+  "passed": 2
+}

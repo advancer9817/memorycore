@@ -1,0 +1,66 @@
+[
+  {
+    "source": "extraction",
+    "total": 134,
+    "never_injected": 80,
+    "injected": 54,
+    "pct_never": 59.7,
+    "avg_content_len": 145.0
+  },
+  {
+    "source": "governance_split",
+    "total": 455,
+    "never_injected": 222,
+    "injected": 233,
+    "pct_never": 48.8,
+    "avg_content_len": 98.0
+  },
+  {
+    "source": "atomizer",
+    "total": 152,
+    "never_injected": 68,
+    "injected": 84,
+    "pct_never": 44.7,
+    "avg_content_len": 80.0
+  },
+  {
+    "source": "rollup",
+    "total": 166,
+    "never_injected": 56,
+    "injected": 110,
+    "pct_never": 33.7,
+    "avg_content_len": 186.0
+  },
+  {
+    "source": "llm_curator",
+    "total": 8,
+    "never_injected": 2,
+    "injected": 6,
+    "pct_never": 25.0,
+    "avg_content_len": 139.0
+  },
+  {
+    "source": "user",
+    "total": 3,
+    "never_injected": 0,
+    "injected": 3,
+    "pct_never": 0.0,
+    "avg_content_len": 137.0
+  },
+  {
+    "source": "manual",
+    "total": 6,
+    "never_injected": 0,
+    "injected": 6,
+    "pct_never": 0.0,
+    "avg_content_len": 143.0
+  },
+  {
+    "source": "conversation",
+    "total": 2,
+    "never_injected": 0,
+    "injected": 2,
+    "pct_never": 0.0,
+    "avg_content_len": 129.0
+  }
+]

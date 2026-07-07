@@ -1,0 +1,189 @@
+{
+  "analysis": {
+    "total_samples": 100,
+    "avg_length": 127.4,
+    "length_distribution": {
+      "very_short (<50)": 7,
+      "short (50-150)": 66,
+      "medium (150-500)": 27,
+      "long (>500)": 0
+    },
+    "type_distribution": {
+      "project_memory": 53,
+      "environment_fact": 11,
+      "decision": 25,
+      "user_profile": 5,
+      "timeline_event": 3,
+      "agent_architecture": 1,
+      "feedback": 2
+    },
+    "source_distribution": {
+      "rollup": 12,
+      "governance_split": 53,
+      "extraction": 23,
+      "atomizer": 12
+    }
+  },
+  "samples": [
+    {
+      "id": "6c2435d0-812b-4714-89b8-107e16b0a080",
+      "title": "mcore 治理门控、死重回收及重大 Bug 修复（治得好）",
+      "content": "治理规则自动化与门控升级：引入严格的记忆碎片质量门控，要求 split 与 atomization 内容至少 50 字符、标题 10 字符（单次最多产出5条）；建立死重回收机制，90 天未使用的记忆自动标记为 stale；整体收缩生命周期（archive 降至 365 天，stale 降至 180 天）；低风险 needs_review 队列满 14 天通过定时任务自动降级执行。重要修复历程：在彻底废除人工审批队列前，曾将 policy_gate 置信度阈值降至 0.65，取消了对 precious/high_importance 属性的拦截，并使用 human_accept 覆盖批量应用以解决建议积压问题。同时，修复了 LLM Curator 去重失效 Bug（取消 _stable_candidate_hash 中的动态 LLM 输出，改为 `decision_type + action + sorted source_ids` 哈希），并修复了归档记忆因异步删除失败导致的 Qdrant 遗留垃圾向量问题（改为同步执行并在查询中过滤非 active 状态 ID）。",
+      "source": "rollup",
+      "type": "project_memory",
+      "len": 490
+    },
+    {
+      "id": "79cab19f-ff74-4962-8ac4-761b9be62bcf",
+      "title": "MemoryCore 任务清理副作用与 PID 存活机制",
+      "content": "在 memorycore 项目中，导入 `frontend.py` 模块会触发模块级别的 `mark_stale_running_jobs_failed()` 任务清理机制。当 systemd 定时任务等外部脚本导入该模块时，会意外触发此清理逻辑。为避免长期运行的任务（如 LLM 分析任务）被误判为中断失败被杀，`curator_llm.py` 中的 `progress()` 方法在更新 `progress_json` 时，必须始终包含当前进程 PID（如 `_owner_pid` = `_os.getpid()`），以确保任务能顺利通过系统的 PID 存活检查。",
+      "source": "rollup",
+      "type": "project_memory",
+      "len": 285
+    },
+    {
+      "id": "78b9fa21-9482-5baa-af29-33441d0fbe15",
+      "title": "mcore 核心产品定位",
+      "content": "mcore 未来核心产品方向定位为“本地优先的多 Agent 记忆控制面” (Local-first Agent Memory Control Plane / Agent Memory OS)，专注为 Codex、Claude Code、Hermes 等本地开发型 Agent 提供具备强闭环特性的统一记忆与治理服务。",
+      "source": "governance_split",
+      "type": "project_memory",
+      "len": 159
+    },
+    {
+      "id": "8c9c6ac5-d3f4-505b-831d-6aaa0d6561ae",
+      "title": "MemoryCore 前端服务本地部署配置",
+      "content": "MemoryCore 前端 Next.js 服务在 WSL/Linux 本地通过 systemd 用户服务 `mcore-ui.service` 后台运行，占用端口 18318。",
+      "source": "governance_split",
+      "type": "environment_fact",
+      "len": 89
+    },
+    {
+      "id": "6c11dc4d-916b-51b3-86e0-25bc2df17734",
+      "title": "Dashboard Segregation and Governance Filtering",
+      "content": "The dashboard must segregate review items into 'Governance Decisions' (contradictions, merge candidates) and 'Memory Maintenance' (planned actions, pending review). Additionally, the governance page must support manual filtering via dropdowns for decision types.",
+      "source": "governance_split",
+      "type": "decision",
+      "len": 262
+    },
+    {
+      "id": "b259fa98-c386-5205-8785-7971920cbf4e",
+      "title": "lmmcp 写入去重逻辑更新",
+      "content": "lmmcp 的 `dedup.py` 在写入事实时，已改为使用 LLM 返回的动态 importance 值，不再使用之前硬编码的 0.5。",
+      "source": "governance_split",
+      "type": "project_memory",
+      "len": 70
+    },
+    {
+      "id": "49cd51bb-1369-5298-8974-8fcfcd359dfa",
+      "title": "Dashboard审查项目分类规则",
+      "content": "Dashboard必须将审查项目划分为 'Governance Decisions'（矛盾、合并候选）和 'Memory Maintenance'（计划操作、待审查）。",
+      "source": "governance_split",
+      "type": "decision",
+      "len": 84
+    },
+    {
+      "id": "f5cd84be-7add-5c23-8604-d20b42ea9605",
+      "title": "MemoryCore 限制定时 LLM 任务以防止 SQLite 锁冲突",
+      "content": "在 `mcore-curator.service` 中强制添加 `LOCAL_MEMORY_LLM_CURATOR_ENABLED=0`，使定时器 `mcore-curator.timer` 仅执行快速的 Rule Curator 规则清理，避免拉起耗时的 CLI LLM 进程引发 SQLite 锁冲突。LLM 语义分析改为由 Dashboard 手动触发。",
+      "source": "governance_split",
+      "type": "decision",
+      "len": 180
+    },
+    {
+      "id": "e5394ee1-9e85-571d-b8df-db1db3ef0375",
+      "title": "用户的开发与部署环境配置",
+      "content": "用户的开发环境基于 WSL/Ubuntu，mcore 与 CPA 等系统服务均由 systemd 进行管理。",
+      "source": "governance_split",
+      "type": "user_profile",
+      "len": 54
+    },
+    {
+      "id": "1dffc6da-16b2-55dd-8b3e-52d3436b2da3",
+      "title": "mcore 内存导出位置偏好",
+      "content": "导出 mcore 内存文件时，应将其放置在 memorycore 仓库的 memory-sync 目录下，而不是外部临时目录。",
+      "source": "governance_split",
+      "type": "decision",
+      "len": 63
+    },
+    {
+      "id": "343ef24d-7008-491a-9c8e-ee4db5f259b2",
+      "title": "mcore 项目 Context Pack 记忆注入功能分析：平均命中率达 81.3%，但约 70% 的 active 状态记忆从未被召回注入过，FTS5 及向",
+      "content": "mcore 项目 Context Pack 记忆注入功能分析：平均命中率达 81.3%，但约 70% 的 active 状态记忆从未被召回注入过，FTS5 及向量搜索的召回机制或记忆相关性匹配存在明显优化空间。",
+      "source": "extraction",
+      "type": "project_memory",
+      "len": 105
+    },
+    {
+      "id": "afb376cb-cef1-42eb-82ef-14e127240377",
+      "title": "取消了基于 `precious_type` 和 `high_importance` 的强行拦截，并将前端批量应用操作的 approval_kind 统一指定为 `human_a...",
+      "content": "取消了基于 `precious_type` 和 `high_importance` 的强行拦截，并将前端批量应用操作的 approval_kind 统一指定为 `human_accept`，以正确覆盖 queued 状态。",
+      "source": "atomizer",
+      "type": "project_memory",
+      "len": 111
+    },
+    {
+      "id": "e8b0facc-9850-44cf-bc0d-403837cb14d0",
+      "title": "用户终端 AI 助手偏好：习惯通过命令设置模型（如 Opus 4.8 / Sonnet 4.6），并倾向于将思考深度 (effort level) 设置为 xh",
+      "content": "用户终端 AI 助手偏好：习惯通过命令设置模型（如 Opus 4.8 / Sonnet 4.6），并倾向于将思考深度 (effort level) 设置为 xhigh (Deeper reasoning)。",
+      "source": "extraction",
+      "type": "user_profile",
+      "len": 103
+    },
+    {
+      "id": "115d36f6-9c83-550b-81aa-4eb4dd9be917",
+      "title": "Next.js not-found 页面 i18n SSR 坑点",
+      "content": "Next.js app router 的 `not-found.tsx` 在使用 `useI18n()` hook 时需标注 `\"use client\"`。在 SSR 渲染时 messages 可能未定义，必须使用防御性访问（如 `messages?.xxx`）。",
+      "source": "governance_split",
+      "type": "project_memory",
+      "len": 132
+    },
+    {
+      "id": "2effb745-9cdd-5f32-95e5-4b9b0412a64d",
+      "title": "MemoryCore 记忆排序公式与反馈闭环",
+      "content": "重新设计排序公式，新增 `usage_rate` 动态权重以抑制死重记忆，下调静态重要性权重；实现反馈自动闭环，被使用记忆自动增加 0.5 分。",
+      "source": "governance_split",
+      "type": "project_memory",
+      "len": 72
+    },
+    {
+      "id": "72b514c8-8d67-4392-9315-8e0ed0f6021a",
+      "title": "WSL 网络代理配置优化：修正了 `.zshrc` 中的代理环境变量设置，移除了旧版的 fallback 逻辑，使大写的 `HTTP_PROXY` 和 `HTT",
+      "content": "WSL 网络代理配置优化：修正了 `.zshrc` 中的代理环境变量设置，移除了旧版的 fallback 逻辑，使大写的 `HTTP_PROXY` 和 `HTTPS_PROXY` 强制直接引用小写变量的值（指向网关 IP 如 172.20.0.1:7890）。这解决了因大写环境变量滞后指向 127.0.0.1 导致的 Go 编译代理被拒绝问题。",
+      "source": "extraction",
+      "type": "environment_fact",
+      "len": 173
+    },
+    {
+      "id": "eb881f6f-f573-40da-b6c4-e98558ed35eb",
+      "title": "mcore 框架重设计 Phase 2：治理层全自动化。Rule Curator 直接执行更新状态不送审；LLM Curator 移除 split 和 impo",
+      "content": "mcore 框架重设计 Phase 2：治理层全自动化。Rule Curator 直接执行更新状态不送审；LLM Curator 移除 split 和 importance 评分重评估，仅保留去重（dedup）和矛盾检测（contradiction）；彻底移除人工审批队列（置信度>0.7直接执行，<0.7记录 audit_log）。",
+      "source": "extraction",
+      "type": "project_memory",
+      "len": 167
+    },
+    {
+      "id": "d2080ea8-6b90-4a85-abb9-455bda0c6a92",
+      "title": "页面从 8 个精简为 4 个（Dashboard, Memories, Graph, Settings）。",
+      "content": "页面从 8 个精简为 4 个（Dashboard, Memories, Graph, Settings）。",
+      "source": "atomizer",
+      "type": "project_memory",
+      "len": 53
+    },
+    {
+      "id": "f87a4093-a214-5b7d-8005-da970e0c4714",
+      "title": "mcore 交互细节规范",
+      "content": "mcore 的 Curator 运行超长记录必须通过省略号截断（禁止撑开卡片）；点击详情必须在当前页面跳转至 `/memory/:id`（强制移除 target='_blank'）。",
+      "source": "governance_split",
+      "type": "decision",
+      "len": 91
+    },
+    {
+      "id": "d004de5e-d6c7-5121-9d6c-4ff72cc427ff",
+      "title": "MemoryCore 批量应用与突变门槛调整",
+      "content": "修复 governance 页面批量应用 Bug：mutations.py 中 auto 门槛降至 0.65，reject 门槛降至 0.45，批量应用的 approval_kind 统一为 human_accept。",
+      "source": "governance_split",
+      "type": "timeline_event",
+      "len": 109
+    }
+  ]
+}
