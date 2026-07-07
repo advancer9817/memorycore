@@ -5050,3 +5050,37 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 | hit_rate | 0.816 | 0.889 | > 0.90 | 待观察（已微调） |
 | MCP 工具数 | 46→25 | 22 | ~22 | 达标 |
 | 代码总量 | 31,100 | 23,613 | < 28,000 | 超额达标 |
+
+---
+
+## [迭代 26] 2026-07-08 — 后端模块拆分 + 前端 Error Boundary + 文档归档
+
+### 变更
+
+#### 1. 后端模块拆分 — 准备大文件抽取
+
+- 新增 `memorycore/api_helpers.py`（582行）— API 辅助函数抽取
+- 新增 `memorycore/api_routes.py`（571行）— API 路由定义抽取
+- 新增 `memorycore/cli.py`（504行）— CLI 入口抽取
+- 新增 `memorycore/storage/context_pack.py`（682行）— context pack 构建逻辑抽取
+- 新增 `memorycore/storage/fts_search.py`（137行）— FTS5 搜索逻辑抽取
+- `curator_llm` 子模块新增：`contradiction.py`、`dedup_judge.py`、`importance.py`、`link_discovery.py`、`split_detector.py`
+- 清理未使用的 UI 组件：`form.tsx`、`pagination.tsx`、`toggle.tsx`
+
+#### 2. 前端 Error Boundary + 迭代监控面板
+
+- 新增 `ui/app/error.tsx` 和 `ui/app/graph/error.tsx` — Next.js Error Boundary
+- 新增 `ui/components/dashboard/IterationMetricsPanel.tsx`（240行）— 迭代指标监控面板
+
+#### 3. 文档归档
+
+- 新增深度审计报告、迭代计划文档、环境配置模板（`.env.example`）
+- 新增复审 Prompt 模板 `docs/2026-07-08-re-audit-prompt.md`
+- 归档迭代修复检查清单和进展报告
+
+### 提交记录
+
+- `5fdf68a` refactor: 后端模块拆分 — 准备文件抽取
+- `0c23082` feat: 前端 Error Boundary + 迭代监控面板
+- `3438ed7` docs: 深度审计报告 + 迭代计划文档 + 环境配置模板
+- `68a1464` chore: Day 6 清理 + 复审 Prompt
