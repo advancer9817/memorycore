@@ -1,6 +1,5 @@
 "use client";
 
-import "@/styles/animation.css";
 import { useEffect } from "react";
 import { useMemoriesApi } from "@/hooks/useMemoriesApi";
 import { use } from "react";
@@ -12,6 +11,7 @@ import { RootState } from "@/store/store";
 import { useSelector } from "react-redux";
 import NotFound from "@/app/not-found";
 import { useI18n } from "@/hooks/useI18n";
+import { PageShell } from "@/components/shared/PageShell";
 
 function MemoryContent({ id }: { id: string }) {
   const { fetchMemoryById, isLoading, error } = useMemoriesApi();
@@ -32,13 +32,11 @@ export default function MemoryPage({ params }: { params: Promise<{ id: string }>
   const resolvedParams = use(params);
   const { updateMemoryDialog, handleCloseUpdateMemoryDialog } = useUI();
   return (
-    <div>
-      <div className="animate-fade-slide-down delay-1">
-        <UpdateMemory memoryId={updateMemoryDialog.memoryId || ""} memoryContent={updateMemoryDialog.memoryContent || ""} open={updateMemoryDialog.isOpen} onOpenChange={handleCloseUpdateMemoryDialog} />
-      </div>
-      <div className="animate-fade-slide-down delay-2">
+    <PageShell>
+      <UpdateMemory memoryId={updateMemoryDialog.memoryId || ""} memoryContent={updateMemoryDialog.memoryContent || ""} open={updateMemoryDialog.isOpen} onOpenChange={handleCloseUpdateMemoryDialog} />
+      <div className="animate-fade-slide-down">
         <MemoryContent id={resolvedParams.id} />
       </div>
-    </div>
+    </PageShell>
   );
 }

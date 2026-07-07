@@ -23,7 +23,7 @@ export function memoryTitle(memory?: GovernanceMemorySnapshot): string {
 
 function findingTitle(finding?: Record<string, unknown>): string {
   if (!finding) return "";
-  for (const key of ["title", "newer_title", "keep_title", "older_title", "drop_title"]) {
+  for (const key of ["title", "newer_title", "new_title", "keep_title", "older_title", "old_title", "drop_title"]) {
     const val = finding[key];
     if (typeof val === "string" && val.trim()) return val.trim();
   }

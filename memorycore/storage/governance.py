@@ -584,7 +584,17 @@ def list_governance_decisions(review_status: str | None = None, decision_type: s
             rows = conn.execute(f"SELECT * FROM governance_decisions {where} {order_by} LIMIT ?", tuple(params)).fetchall()
         else:
             rows = conn.execute(f"SELECT * FROM governance_decisions {where} {order_by}", tuple(params)).fetchall()
-    return [_decision_row_to_dict(row) for row in rows]
+    decisions = [_decision_row_to_dict(row) for row in rows]
+    all_ids: list[str] = []
+    for d in decisions:
+        if not d.get("before_state"):
+            all_ids.extend(d.get("source_ids") or [])
+    if all_ids:
+        summaries_by_id = {s["id"]: s for s in _fetch_memory_summaries(list(set(all_ids)))}
+        for d in decisions:
+            if not d.get("before_state"):
+                d["before_state"] = [summaries_by_id[sid] for sid in (d.get("source_ids") or []) if sid in summaries_by_id]
+    return decisions
 
 
 def get_governance_decision(decision_id: str) -> dict[str, Any] | None:

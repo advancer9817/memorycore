@@ -31,7 +31,7 @@ export default function GraphPage() {
   const detailPanel = useResizable(320, 220, 500, "left");
 
   return (
-    <div className="flex flex-col h-[calc(100vh-56px)] bg-[#020408]">
+    <div className="flex flex-col h-[calc(100vh-var(--navbar-h))] bg-[#020408]">
 
       {/* ══ Topbar: brand · search(center) · actions ══ */}
       <GraphTopbar

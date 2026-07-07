@@ -30,7 +30,7 @@ export default function RootLayout({
             disableTransitionOnChange
           >
             <Navbar />
-            <ScrollArea className="h-[calc(100vh-64px)]">{children}</ScrollArea>
+            <ScrollArea className="h-[calc(100vh-var(--navbar-h))]">{children}</ScrollArea>
             <Toaster />
           </ThemeProvider>
         </Providers>

@@ -9,13 +9,13 @@ import { useMemoriesApi } from "@/hooks/useMemoriesApi";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MemoryCard } from "./components/MemoryCard";
 import AppDetailCard from "./components/AppDetailCard";
-import "@/styles/animation.css";
 import NotFound from "@/app/not-found";
 import { AppDetailCardSkeleton } from "@/skeleton/AppDetailCardSkeleton";
 import { MemoryCardSkeleton } from "@/skeleton/MemoryCardSkeleton";
 import { useUI } from "@/hooks/useUI";
 import UpdateMemory from "@/components/shared/update-memory";
 import { useI18n } from "@/hooks/useI18n";
+import { PageShell } from "@/components/shared/PageShell";
 
 export default function AppDetailsPage() {
   const params = useParams();
@@ -53,37 +53,63 @@ export default function AppDetailsPage() {
   };
 
   if (selectedApp.error) return <NotFound message={selectedApp.error} title={messages.apps.errorLoadingApp} />;
+
   if (!selectedApp.details) return (
-    <div className="flex-1 py-6 text-white"><div className="container flex justify-between">
-      <div className="flex-1 p-4 max-w-4xl animate-fade-slide-down"><div className="mb-6">
-        <div className="h-10 w-64 bg-zinc-800 rounded animate-pulse mb-6" />
-        <div className="space-y-6">{[...Array(3)].map((_, i) => <MemoryCardSkeleton key={i} />)}</div>
-      </div></div>
-      <div className="p-14 animate-fade-slide-down delay-2"><AppDetailCardSkeleton /></div>
-    </div></div>
+    <PageShell>
+      <div className="flex justify-between">
+        <div className="flex-1 max-w-4xl animate-fade-slide-down">
+          <div className="mb-6">
+            <div className="h-10 w-64 bg-zinc-800 rounded animate-pulse mb-6" />
+            <div className="space-y-6">{[...Array(3)].map((_, i) => <MemoryCardSkeleton key={i} />)}</div>
+          </div>
+        </div>
+        <div className="pl-14 animate-fade-slide-down delay-2"><AppDetailCardSkeleton /></div>
+      </div>
+    </PageShell>
   );
 
   return (
-    <div className="flex-1 py-6 text-white"><div className="container flex justify-between">
-      <div className="flex-1 p-4 max-w-4xl animate-fade-slide-down">
-        <Tabs defaultValue="created" className="mb-6" onValueChange={setActiveTab}>
-          <TabsList className="bg-transparent border-b border-zinc-800 rounded-none w-full justify-start gap-8 p-0">
-            <TabsTrigger value="created" className={`px-0 pb-2 rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none ${activeTab === "created" ? "text-white" : "text-zinc-400"}`}>{messages.apps.tabCreated(selectedApp.memories.created.total)}</TabsTrigger>
-            <TabsTrigger value="accessed" className={`px-0 pb-2 rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none ${activeTab === "accessed" ? "text-white" : "text-zinc-400"}`}>{messages.apps.tabAccessed(selectedApp.memories.accessed.total)}</TabsTrigger>
-          </TabsList>
-          <TabsContent value="created" className="mt-6 space-y-6 animate-fade-slide-down delay-1">
-            {selectedApp.memories.created.loading ? <div className="space-y-4">{[...Array(3)].map((_, i) => <MemoryCardSkeleton key={i} />)}</div>
-              : selectedApp.memories.created.items.map((m) => <MemoryCard key={m.id + m.created_at} id={m.id} content={m.content} created_at={m.created_at} metadata={m.metadata_} categories={m.categories} app_name={m.app_name} state={m.state} onDelete={handleDelete} onEdit={handleEdit} />)}
-          </TabsContent>
-          <TabsContent value="accessed" className="mt-6 space-y-6 animate-fade-slide-down delay-1">
-            {selectedApp.memories.accessed.loading ? <div className="space-y-4">{[...Array(3)].map((_, i) => <MemoryCardSkeleton key={i} />)}</div>
-              : selectedApp.memories.accessed.items.map((a) => <div key={a.memory.id} className="relative"><MemoryCard id={a.memory.id} content={a.memory.content} created_at={a.memory.created_at} metadata={a.memory.metadata_} categories={a.memory.categories} access_count={a.access_count} app_name={a.memory.app_name} state={a.memory.state} onDelete={handleDelete} /></div>)}
-          </TabsContent>
-        </Tabs>
+    <PageShell>
+      <div className="flex justify-between gap-6">
+        <div className="flex-1 max-w-4xl animate-fade-slide-down">
+          <Tabs defaultValue="created" className="mb-6" onValueChange={setActiveTab}>
+            <TabsList className="bg-transparent border-b border-zinc-800 rounded-none w-full justify-start gap-8 p-0">
+              <TabsTrigger
+                value="created"
+                className={`px-0 pb-2 rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none ${activeTab === "created" ? "text-white" : "text-zinc-400"}`}
+              >
+                {messages.apps.tabCreated(selectedApp.memories.created.total)}
+              </TabsTrigger>
+              <TabsTrigger
+                value="accessed"
+                className={`px-0 pb-2 rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none ${activeTab === "accessed" ? "text-white" : "text-zinc-400"}`}
+              >
+                {messages.apps.tabAccessed(selectedApp.memories.accessed.total)}
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="created" className="mt-6 space-y-6 animate-fade-slide-down delay-1">
+              {selectedApp.memories.created.loading
+                ? <div className="space-y-4">{[...Array(3)].map((_, i) => <MemoryCardSkeleton key={i} />)}</div>
+                : selectedApp.memories.created.items.map((m) => (
+                  <MemoryCard key={m.id + m.created_at} id={m.id} content={m.content} created_at={m.created_at} metadata={m.metadata_} categories={m.categories} app_name={m.app_name} state={m.state} onDelete={handleDelete} onEdit={handleEdit} />
+                ))}
+            </TabsContent>
+            <TabsContent value="accessed" className="mt-6 space-y-6 animate-fade-slide-down delay-1">
+              {selectedApp.memories.accessed.loading
+                ? <div className="space-y-4">{[...Array(3)].map((_, i) => <MemoryCardSkeleton key={i} />)}</div>
+                : selectedApp.memories.accessed.items.map((a) => (
+                  <div key={a.memory.id} className="relative">
+                    <MemoryCard id={a.memory.id} content={a.memory.content} created_at={a.memory.created_at} metadata={a.memory.metadata_} categories={a.memory.categories} access_count={a.access_count} app_name={a.memory.app_name} state={a.memory.state} onDelete={handleDelete} />
+                  </div>
+                ))}
+            </TabsContent>
+          </Tabs>
+        </div>
+        <div className="pl-8 animate-fade-slide-down delay-2">
+          <AppDetailCard appId={appId} selectedApp={selectedApp} />
+        </div>
       </div>
-      <div className="p-14 animate-fade-slide-down delay-2"><AppDetailCard appId={appId} selectedApp={selectedApp} /></div>
-    </div>
-    <UpdateMemory memoryId={updateMemoryDialog.memoryId || ""} memoryContent={updateMemoryDialog.memoryContent || ""} open={updateMemoryDialog.isOpen} onOpenChange={handleCloseUpdateMemoryDialog} />
-    </div>
+      <UpdateMemory memoryId={updateMemoryDialog.memoryId || ""} memoryContent={updateMemoryDialog.memoryContent || ""} open={updateMemoryDialog.isOpen} onOpenChange={handleCloseUpdateMemoryDialog} />
+    </PageShell>
   );
 }

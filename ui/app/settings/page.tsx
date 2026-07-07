@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { DEFAULT_API_URL, getApiBaseUrl, setApiBaseUrl } from "@/lib/api-url"
 import { useI18n } from "@/hooks/useI18n"
+import { PageShell } from "@/components/shared/PageShell"
 
 export default function SettingsPage() {
   const { toast } = useToast()
@@ -44,7 +45,6 @@ export default function SettingsPage() {
 
   useEffect(() => {
     setApiUrl(getApiBaseUrl())
-    // Load config from API on component mount
     const loadConfig = async () => {
       try {
         await fetchConfig()
@@ -56,11 +56,9 @@ export default function SettingsPage() {
         })
       }
     }
-    
     loadConfig()
   }, [])
 
-  // Update local state when redux state changes
   useEffect(() => {
     setSettings(prev => ({
       ...prev,
@@ -109,86 +107,85 @@ export default function SettingsPage() {
     }
   }
 
-  return (
-    <div className="text-white py-6">
-      <div className="container mx-auto py-10 max-w-4xl">
-        <div className="flex justify-between items-center mb-8">
-          <div className="animate-fade-slide-down">
-            <h1 className="text-3xl font-bold tracking-tight">{messages.settings.title}</h1>
-            <p className="text-muted-foreground mt-1">{messages.settings.description}</p>
-          </div>
-          <div className="flex space-x-2">
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="outline" className="border-zinc-800 text-zinc-200 hover:bg-zinc-700 hover:text-zinc-50 animate-fade-slide-down" disabled={isLoading}>
-                  <RotateCcw className="mr-2 h-4 w-4" />
-                  {messages.settings.resetDefaults}
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>{messages.settings.resetTitle}</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    {messages.settings.resetDescription}
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>{messages.common.cancel}</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleReset} className="bg-red-600 hover:bg-red-700">
-                    {messages.common.reset}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-            
-            <Button onClick={handleSave} className="bg-primary hover:bg-primary/90 animate-fade-slide-down" disabled={isLoading}>
-              <SaveIcon className="mr-2 h-4 w-4" />
-              {isLoading ? messages.common.saving : messages.settings.saveConfiguration}
-            </Button>
-          </div>
-        </div>
+  const headerActions = (
+    <div className="flex space-x-2">
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button variant="outline" className="border-zinc-800 text-zinc-200 hover:bg-zinc-700 hover:text-zinc-50" disabled={isLoading}>
+            <RotateCcw className="mr-2 h-4 w-4" />
+            {messages.settings.resetDefaults}
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent className="border-zinc-800 bg-zinc-950 text-zinc-100">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{messages.settings.resetTitle}</AlertDialogTitle>
+            <AlertDialogDescription className="text-zinc-400">
+              {messages.settings.resetDescription}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800">{messages.common.cancel}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleReset} className="bg-red-600 hover:bg-red-700">
+              {messages.common.reset}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-        <Card className="mb-8 animate-fade-slide-down delay-1">
-          <CardHeader>
-            <CardTitle>{messages.settings.apiConnection}</CardTitle>
-            <CardDescription>{messages.settings.apiConnectionDescription}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <Label htmlFor="api-url">{messages.settings.apiUrl}</Label>
-              <Input
-                id="api-url"
-                value={apiUrl}
-                placeholder="http://127.0.0.1:8318"
-                onChange={(event) => setApiUrl(event.target.value)}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as "form" | "json")} className="w-full animate-fade-slide-down delay-1">
-          <TabsList className="grid w-full grid-cols-2 mb-8">
-            <TabsTrigger value="form">{messages.settings.formView}</TabsTrigger>
-            <TabsTrigger value="json">{messages.settings.jsonEditor}</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="form">
-            <FormView settings={settings} onChange={setSettings} />
-          </TabsContent>
-
-          <TabsContent value="json">
-            <Card>
-              <CardHeader>
-                <CardTitle>{messages.settings.jsonConfiguration}</CardTitle>
-                <CardDescription>{messages.settings.jsonConfigurationDescription}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <JsonEditor value={settings} onChange={setSettings} />
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-      </div>
+      <Button onClick={handleSave} className="bg-primary hover:bg-primary/90" disabled={isLoading}>
+        <SaveIcon className="mr-2 h-4 w-4" />
+        {isLoading ? messages.common.saving : messages.settings.saveConfiguration}
+      </Button>
     </div>
+  )
+
+  return (
+    <PageShell
+      title={messages.settings.title}
+      subtitle={messages.settings.description}
+      actions={headerActions}
+      maxWidth="max-w-4xl"
+    >
+      <Card className="mb-6 animate-fade-slide-down delay-1">
+        <CardHeader>
+          <CardTitle>{messages.settings.apiConnection}</CardTitle>
+          <CardDescription>{messages.settings.apiConnectionDescription}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            <Label htmlFor="api-url">{messages.settings.apiUrl}</Label>
+            <Input
+              id="api-url"
+              value={apiUrl}
+              placeholder="http://127.0.0.1:8318"
+              onChange={(event) => setApiUrl(event.target.value)}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as "form" | "json")} className="w-full animate-fade-slide-down delay-2">
+        <TabsList className="grid w-full grid-cols-2 mb-6">
+          <TabsTrigger value="form">{messages.settings.formView}</TabsTrigger>
+          <TabsTrigger value="json">{messages.settings.jsonEditor}</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="form">
+          <FormView settings={settings} onChange={setSettings} />
+        </TabsContent>
+
+        <TabsContent value="json">
+          <Card>
+            <CardHeader>
+              <CardTitle>{messages.settings.jsonConfiguration}</CardTitle>
+              <CardDescription>{messages.settings.jsonConfigurationDescription}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <JsonEditor value={settings} onChange={setSettings} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </PageShell>
   )
 }

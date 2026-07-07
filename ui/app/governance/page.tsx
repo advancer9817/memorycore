@@ -27,6 +27,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useGovernanceCockpit } from "@/hooks/useGovernanceCockpit";
 import { useI18n } from "@/hooks/useI18n";
 import { useToast } from "@/hooks/use-toast";
+import { PageShell } from "@/components/shared/PageShell";
 import type { GovernanceReviewStatus } from "@/components/dashboard/intelligence/types";
 import { isActionableDecision } from "@/components/dashboard/intelligence/utils";
 import { GovernanceDecisionSheet } from "./components/GovernanceDecisionSheet";
@@ -170,152 +171,142 @@ function GovernancePageInner() {
     await cockpit.refresh();
   }, [paginated, cockpit, runBatch, messages.governance, toast]);
 
+  /* ---- toolbar rendered in the PageShell actions slot ---- */
+  const toolbar = (
+    <div className="flex shrink-0 flex-wrap items-center gap-2">
+      {/* Decision type filter pills */}
+      <div className="flex items-center gap-1 rounded-lg border border-zinc-800 p-1">
+        {DECISION_TYPE_FILTERS.map((filter) => (
+          <button
+            key={filter.value}
+            type="button"
+            onClick={() => {
+              cockpit.setDecisionType(filter.value);
+              setPage(0);
+              setSelectedIds(new Set());
+            }}
+            className={`rounded-md px-2 py-1 text-xs transition-colors ${
+              cockpit.decisionType === filter.value
+                ? "bg-zinc-700 text-white"
+                : "bg-zinc-900 text-zinc-400 hover:bg-zinc-800"
+            }`}
+          >
+            {messages.governance[filter.labelKey]}
+          </button>
+        ))}
+      </div>
+
+      <Select
+        value={cockpit.reviewStatus}
+        onValueChange={(v) => {
+          cockpit.setReviewStatus(v as GovernanceReviewStatus);
+          setPage(0);
+          setSelectedIds(new Set());
+        }}
+      >
+        <SelectTrigger className="w-[170px] border-zinc-700/50 bg-zinc-900 text-zinc-200">
+          <SelectValue aria-label={messages.common.filter} />
+        </SelectTrigger>
+        <SelectContent>
+          {REVIEW_STATUSES.map((s) => (
+            <SelectItem key={s} value={s}>{messages.governance.statusLabels[s]}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      {selectedIds.size > 0 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" className="border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800">
+              {messages.common.actions} ({messages.governance.selected(selectedIds.size)})
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="bg-zinc-900 border-zinc-800">
+            <DropdownMenuItem
+              disabled={batchPending}
+              onClick={(e) => { e.preventDefault(); void runSelectedBatch("apply"); }}
+            >
+              {batchPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {batchPending ? messages.common.saving : messages.governance.batchApply}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={batchPending}
+              onClick={(e) => { e.preventDefault(); void runSelectedBatch("reject"); }}
+              className="text-red-500 focus:text-red-500"
+            >
+              {batchPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {batchPending ? messages.common.saving : messages.governance.batchReject}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+
+      {pageActionableCount > 0 && (
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button
+              variant="outline"
+              disabled={batchPending}
+              className="border-violet-700/50 bg-violet-950/40 text-violet-200 hover:bg-violet-900/50"
+            >
+              <CheckCheck className="mr-2 h-4 w-4" />
+              {messages.governance.approveAll(pageActionableCount)}
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent className="border-zinc-800 bg-zinc-950 text-zinc-100">
+            <AlertDialogHeader>
+              <AlertDialogTitle>{messages.governance.confirmApproveAllTitle}</AlertDialogTitle>
+              <AlertDialogDescription className="text-zinc-400">
+                {messages.governance.confirmApproveAllDescription(pageActionableCount)}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800" disabled={batchPending}>
+                {messages.governance.cancel}
+              </AlertDialogCancel>
+              <AlertDialogAction onClick={(e) => { e.preventDefault(); void runApproveAll(); }} disabled={batchPending}>
+                {batchPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {batchPending ? messages.common.saving : messages.governance.apply}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+    </div>
+  );
+
   return (
-    <div className="text-white py-6">
-      <div className="container">
-        {/* Header */}
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="space-y-1">
-            <p className="text-xs font-medium uppercase tracking-[0.3em] text-violet-300">
-              {messages.nav.governance}
+    <PageShell
+      eyebrow={messages.nav.governance}
+      title={messages.governance.title}
+      subtitle={messages.governance.description}
+      actions={toolbar}
+    >
+      {cockpit.error && (
+        <Alert className="mb-6 border-red-800 bg-red-950/30 text-red-200">
+          <AlertDescription>{cockpit.error}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* Metrics */}
+      <div className="animate-fade-slide-down delay-1">
+        <GovernanceMetricsCards metrics={cockpit.metrics} messages={messages.governance} />
+      </div>
+
+      {/* Table */}
+      <div className="mt-6 animate-fade-slide-down delay-2">
+        {cockpit.reviewStatus === "actionable" && !cockpit.isLoading && cockpit.decisions.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <CheckCircle2 className="h-12 w-12 text-emerald-500 mb-4" />
+            <p className="text-lg font-medium text-emerald-300">
+              {messages.governance.allClear}
             </p>
-            <h1 className="text-2xl font-semibold">{messages.governance.title}</h1>
-            <p className="text-sm text-zinc-500">{messages.governance.description}</p>
+            <p className="text-sm text-zinc-500 mt-1">
+              {messages.governance.allClearDetail}
+            </p>
           </div>
-
-          {/* Controls */}
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {/* Filters group — always on one line */}
-            <div className="flex shrink-0 items-center gap-2">
-              {/* Decision type filter pills */}
-              <div className="flex items-center gap-1 rounded-lg border border-zinc-800 p-1">
-                {DECISION_TYPE_FILTERS.map((filter) => (
-                  <button
-                    key={filter.value}
-                    type="button"
-                    onClick={() => {
-                      cockpit.setDecisionType(filter.value);
-                      setPage(0);
-                      setSelectedIds(new Set());
-                    }}
-                    className={`rounded-md px-2 py-1 text-xs transition-colors ${
-                      cockpit.decisionType === filter.value
-                        ? "bg-zinc-700 text-white"
-                        : "bg-zinc-900 text-zinc-400 hover:bg-zinc-800"
-                    }`}
-                  >
-                    {messages.governance[filter.labelKey]}
-                  </button>
-                ))}
-              </div>
-
-              <Select
-                value={cockpit.reviewStatus}
-                onValueChange={(v) => {
-                  cockpit.setReviewStatus(v as GovernanceReviewStatus);
-                  setPage(0);
-                  setSelectedIds(new Set());
-                }}
-              >
-                <SelectTrigger className="w-[170px] border-zinc-700/50 bg-zinc-900 text-zinc-200">
-                  <SelectValue aria-label={messages.common.filter} />
-                </SelectTrigger>
-                <SelectContent>
-                  {REVIEW_STATUSES.map((s) => (
-                    <SelectItem key={s} value={s}>{messages.governance.statusLabels[s]}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {selectedIds.size > 0 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800">
-                    {messages.common.actions} ({messages.governance.selected(selectedIds.size)})
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="bg-zinc-900 border-zinc-800">
-                  <DropdownMenuItem
-                    disabled={batchPending}
-                    onClick={(e) => { e.preventDefault(); void runSelectedBatch("apply"); }}
-                  >
-                    {batchPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    {batchPending ? messages.common.saving : messages.governance.batchApply}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    disabled={batchPending}
-                    onClick={(e) => { e.preventDefault(); void runSelectedBatch("reject"); }}
-                    className="text-red-500 focus:text-red-500"
-                  >
-                    {batchPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    {batchPending ? messages.common.saving : messages.governance.batchReject}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-
-            {pageActionableCount > 0 && (
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button
-                    variant="outline"
-                    disabled={batchPending}
-                    className="border-violet-700/50 bg-violet-950/40 text-violet-200 hover:bg-violet-900/50"
-                  >
-                    <CheckCheck className="mr-2 h-4 w-4" />
-                    {messages.governance.approveAll(pageActionableCount)}
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent className="border-zinc-800 bg-zinc-950 text-zinc-100">
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>{messages.governance.confirmApproveAllTitle}</AlertDialogTitle>
-                    <AlertDialogDescription className="text-zinc-400">
-                      {messages.governance.confirmApproveAllDescription(pageActionableCount)}
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800" disabled={batchPending}>
-                      {messages.governance.cancel}
-                    </AlertDialogCancel>
-                    <AlertDialogAction onClick={(e) => { e.preventDefault(); void runApproveAll(); }} disabled={batchPending}>
-                      {batchPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      {batchPending ? messages.common.saving : messages.governance.apply}
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            )}
-          </div>
-        </div>
-
-        {cockpit.error && (
-          <Alert className="mt-4 border-red-800 bg-red-950/30 text-red-200">
-            <AlertDescription>{cockpit.error}</AlertDescription>
-          </Alert>
-        )}
-
-        {/* Metrics */}
-        <div className="mt-6">
-          <GovernanceMetricsCards metrics={cockpit.metrics} messages={messages.governance} />
-        </div>
-
-        {/* Table */}
-        <div className="mt-6">
-          {/* 正面空状态：actionable 筛选下无待审核项 */}
-          {cockpit.reviewStatus === "actionable" && !cockpit.isLoading && cockpit.decisions.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
-              <CheckCircle2 className="h-12 w-12 text-emerald-500 mb-4" />
-              <p className="text-lg font-medium text-emerald-300">
-                {messages.governance.allClear}
-              </p>
-              <p className="text-sm text-zinc-500 mt-1">
-                {messages.governance.allClearDetail}
-              </p>
-            </div>
-          )}
-          {!(cockpit.reviewStatus === "actionable" && !cockpit.isLoading && cockpit.decisions.length === 0) && (
-            <GovernanceTable
+        ) : (
+          <GovernanceTable
             decisions={paginated}
             selectedIds={selectedIds}
             onToggleSelect={toggleSelect}
@@ -324,83 +315,82 @@ function GovernancePageInner() {
             messages={messages.governance}
             isLoading={cockpit.isLoading}
           />
-          )}
-        </div>
-
-        {/* Pagination */}
-        {cockpit.decisions.length > 0 && (
-          <div className="mt-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="text-sm text-zinc-500">
-                {page * pageSize + 1}–{Math.min((page + 1) * pageSize, cockpit.decisions.length)} / {cockpit.decisions.length}
-              </div>
-              <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(0); }}>
-                <SelectTrigger className="h-8 w-[90px] border-zinc-700 bg-zinc-900 text-xs text-zinc-200">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="border-zinc-700 bg-zinc-900">
-                  {PAGE_SIZE_OPTIONS.map((n) => (
-                    <SelectItem key={n} value={String(n)} className="text-xs text-zinc-200">{n} 条/页</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page === 0}
-                onClick={() => setPage((p) => p - 1)}
-                className="border-zinc-700/50 bg-zinc-900 text-zinc-200"
-              >
-                {messages.governance.previousPage}
-              </Button>
-              <span className="text-sm text-zinc-500">{page + 1} / {totalPages}</span>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page >= totalPages - 1}
-                onClick={() => setPage((p) => p + 1)}
-                className="border-zinc-700/50 bg-zinc-900 text-zinc-200"
-              >
-                {messages.governance.nextPage}
-              </Button>
-              <Input
-                type="number"
-                min={1}
-                max={totalPages}
-                value={jumpValue}
-                onChange={(e) => setJumpValue(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") handleJump(); }}
-                aria-label={messages.governance.jumpToPage}
-                className="w-16 border-zinc-700/50 bg-zinc-900 text-center text-sm text-zinc-200"
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleJump}
-                className="border-zinc-700/50 bg-zinc-900 text-zinc-200"
-              >
-                {messages.governance.goButton}
-              </Button>
-            </div>
-          </div>
         )}
-
-        {/* Detail Sheet */}
-        <GovernanceDecisionSheet
-          decision={cockpit.selectedDecision}
-          lineage={cockpit.lineage}
-          auditEvents={cockpit.auditEvents}
-          isDetailLoading={cockpit.isDetailLoading}
-          actionPendingId={cockpit.actionPendingId}
-          messages={messages.governance}
-          onClose={() => cockpit.selectDecision(null)}
-          onApply={cockpit.applyDecision}
-          onReject={cockpit.rejectDecision}
-        />
       </div>
-    </div>
+
+      {/* Pagination */}
+      {cockpit.decisions.length > 0 && (
+        <div className="mt-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="text-sm text-zinc-500">
+              {page * pageSize + 1}–{Math.min((page + 1) * pageSize, cockpit.decisions.length)} / {cockpit.decisions.length}
+            </div>
+            <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(0); }}>
+              <SelectTrigger className="h-8 w-[90px] border-zinc-700 bg-zinc-900 text-xs text-zinc-200">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="border-zinc-700 bg-zinc-900">
+                {PAGE_SIZE_OPTIONS.map((n) => (
+                  <SelectItem key={n} value={String(n)} className="text-xs text-zinc-200">{n} 条/页</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page === 0}
+              onClick={() => setPage((p) => p - 1)}
+              className="border-zinc-700/50 bg-zinc-900 text-zinc-200"
+            >
+              {messages.governance.previousPage}
+            </Button>
+            <span className="text-sm text-zinc-500">{page + 1} / {totalPages}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= totalPages - 1}
+              onClick={() => setPage((p) => p + 1)}
+              className="border-zinc-700/50 bg-zinc-900 text-zinc-200"
+            >
+              {messages.governance.nextPage}
+            </Button>
+            <Input
+              type="number"
+              min={1}
+              max={totalPages}
+              value={jumpValue}
+              onChange={(e) => setJumpValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleJump(); }}
+              aria-label={messages.governance.jumpToPage}
+              className="w-16 border-zinc-700/50 bg-zinc-900 text-center text-sm text-zinc-200"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleJump}
+              className="border-zinc-700/50 bg-zinc-900 text-zinc-200"
+            >
+              {messages.governance.goButton}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Detail Sheet */}
+      <GovernanceDecisionSheet
+        decision={cockpit.selectedDecision}
+        lineage={cockpit.lineage}
+        auditEvents={cockpit.auditEvents}
+        isDetailLoading={cockpit.isDetailLoading}
+        actionPendingId={cockpit.actionPendingId}
+        messages={messages.governance}
+        onClose={() => cockpit.selectDecision(null)}
+        onApply={cockpit.applyDecision}
+        onReject={cockpit.rejectDecision}
+      />
+    </PageShell>
   );
 }
 

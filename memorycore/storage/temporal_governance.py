@@ -160,6 +160,8 @@ def process_auto_supersession(new_record: dict[str, Any], source_agent: str = "a
         "reason": "temporal auto-supersession candidate from write path",
         "old_title": old_record.get("title", ""),
         "new_title": new_record.get("title", ""),
+        "older_title": old_record.get("title", ""),
+        "newer_title": new_record.get("title", ""),
     }
     source_ids = [old_record["id"], new_record["id"]]
     llm_trace = {

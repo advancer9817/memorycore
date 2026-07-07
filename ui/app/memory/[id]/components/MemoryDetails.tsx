@@ -83,7 +83,7 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
   }, [memory?.id]);
 
   return (
-    <div className="container mx-auto py-6 px-4">
+    <div>
       <Button
         variant="ghost"
         className="mb-4 text-zinc-400 hover:text-white"
