@@ -681,8 +681,12 @@ def _dispatch_v1_compat(
             "accessed_at": record.get("last_accessed_at") or record.get("updated_at"),
         }]}
     if len(parts) == 3 and parts[0] == "memories" and parts[2] == "related" and method == "GET":
-        links = query_links(parts[1], direction="both", limit=20)
-        ids = [link["target_id"] for link in links.get("outgoing", [])] + [link["source_id"] for link in links.get("incoming", [])]
+        links = query_links(parts[1], direction="both", limit=50)
+        # 过滤掉 supports/part_of 自动关系，只保留语义链接
+        _NOISE_RELATIONS = {"supports", "part_of"}
+        outgoing = [l for l in links.get("outgoing", []) if l.get("relation_type") not in _NOISE_RELATIONS]
+        incoming = [l for l in links.get("incoming", []) if l.get("relation_type") not in _NOISE_RELATIONS]
+        ids = [link["target_id"] for link in outgoing] + [link["source_id"] for link in incoming]
         ids = list(dict.fromkeys(ids))  # deduplicate preserving order
         items = []
         if ids:
@@ -759,6 +763,8 @@ def _dispatch_v1_compat(
         return _delete_app_memories(parts[1])
     if len(parts) == 2 and parts[0] == "apps" and method == "PUT":
         return _app_details(parts[1])
+    if parts == ["context", "test"] and method == "POST":
+        return _context_lab_test(body)
     if parts == ["config"] and method == "GET":
         return _read_memorycore_config()
     if parts == ["config"] and method in {"PUT", "POST"}:
@@ -766,6 +772,58 @@ def _dispatch_v1_compat(
     if len(parts) >= 2 and parts[0] == "config" and method in {"PUT", "POST"}:
         return body
     raise LookupError(f"route not found: /api/v1/{'/'.join(parts)}")
+
+
+def _context_lab_test(body: dict[str, Any]) -> dict[str, Any]:
+    query = body.get("query", "")
+    if not query:
+        raise ValueError("'query' is required")
+    token_budget = int(body.get("token_budget", 2000))
+    result = build_context_pack(
+        query,
+        agent="context-lab",
+        project_path=body.get("project_path", ""),
+        scope=body.get("scope", "global"),
+        token_budget=token_budget,
+        retrieval_mode=body.get("retrieval_mode", "strict"),
+        prefer_atomic=bool(body.get("prefer_atomic", True)),
+        include_parent=bool(body.get("include_parent", False)),
+    )
+    records = result.get("records", [])
+    items = []
+    for rank, record in enumerate(records, 1):
+        content = ""
+        if record.get("id"):
+            full = get_record(record["id"])
+            if full:
+                content = (full.get("content") or "")[:200]
+        items.append({
+            "rank": rank,
+            "id": record.get("id", ""),
+            "title": record.get("title", ""),
+            "content": content,
+            "type": record.get("type", ""),
+            "importance": record.get("importance", 0),
+            "rank_score": round(record.get("_vector_score", 0), 4),
+            "retrieval_sources": record.get("_retrieval_sources", []),
+            "vector_score": round(record.get("_vector_score", 0), 4),
+        })
+    trace = result.get("trace", {})
+    quality = result.get("quality", {})
+    return {
+        "items": items,
+        "trace": {
+            "total_candidates": trace.get("total_candidates", 0),
+            "used_count": trace.get("used_count", 0),
+            "filtered_count": trace.get("filtered_count", 0),
+            "vector_hits": trace.get("vector_hits", 0),
+            "entity_hits": trace.get("entity_hits", 0),
+            "vector_avg_score": trace.get("vector_avg_score", 0),
+            "retrieval_mode": trace.get("retrieval_mode", "strict"),
+            "hit_rate": quality.get("hit_rate", 0),
+            "cross_retrieval_rate": quality.get("cross_retrieval_rate", 0),
+        },
+    }
 
 
 def _read_memorycore_config() -> dict[str, Any]:

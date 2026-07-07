@@ -59,7 +59,9 @@ export function useGraphPage() {
         const edgeTypes = new Set([...KNOWN_EDGE_TYPES, ...safeEdges.map((e: GraphEdge) => e.relation_type)]);
         setData({ nodes: raw.nodes, edges: safeEdges });
         setActiveTypes(new Set(raw.nodes.map((n: GraphNode) => n.type)));
-        setActiveEdgeTypes(edgeTypes);
+        // 默认只激活语义链接类型，隐藏 supports/part_of 自动关系
+        const semanticEdgeTypes = new Set([...edgeTypes].filter(t => t !== "supports" && t !== "part_of"));
+        setActiveEdgeTypes(semanticEdgeTypes);
       })
       .catch((e) => { if (e instanceof DOMException && e.name === "AbortError") return; setError(String(e)); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });

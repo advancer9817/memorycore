@@ -414,7 +414,6 @@ def memory_vector_status() -> dict[str, Any]:
         return {"available": False, "degraded": True, "reason": f"{type(exc).__name__}: {exc}"}
 
 
-@mcp.tool()
 @_safe_tool
 def memory_vector_audit(dry_run: bool = True, limit: int = 100) -> dict[str, Any]:
     """Audit SQLite active memories against Qdrant points and optionally rebuild missing vectors."""
@@ -484,7 +483,6 @@ def memory_link_query(
         return {"error": str(exc)}
 
 
-@mcp.tool()
 @_safe_tool
 def memory_lineage(memory_id: str, limit: int = 100) -> dict[str, Any]:
     """Return the supersession lineage for a memory without mutating records."""
@@ -663,7 +661,6 @@ def memory_backup(path: str | None = None) -> dict[str, Any]:
     return create_memory_backup(path)
 
 
-@mcp.tool()
 @_safe_tool
 def memory_rebuild_vectors(dry_run: bool = True, limit: int = 5000) -> dict[str, Any]:
     """Rebuild Qdrant vectors from SQLite memory rows."""

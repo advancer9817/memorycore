@@ -46,6 +46,7 @@ export const en = {
     memoriesUnit: "Memories",
     appsUnit: "Apps",
     operations: "Memory Operations",
+    advancedOps: "Advanced Operations",
     active: "Active",
     candidates: "Candidates",
     archived: "Archived",

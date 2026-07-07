@@ -3,13 +3,14 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ReactNode, useCallback, useState } from "react";
+import { ReactNode, useCallback, useEffect, useState } from "react";
 import { AppWindow, Home, Layers3, Menu, Network, RefreshCcw, Settings, ShieldCheck } from "lucide-react";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useI18n } from "@/hooks/useI18n";
 import { useToast } from "@/hooks/use-toast";
+import { getApiBaseUrl } from "@/lib/api-url";
 
 const CreateMemoryDialog = dynamic(
   () => import("@/app/memories/components/CreateMemoryDialog").then((mod) => mod.CreateMemoryDialog),
@@ -47,8 +48,36 @@ export function Navbar() {
   const pathname = usePathname();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [actionableCount, setActionableCount] = useState(0);
   const { messages } = useI18n();
   const { toast } = useToast();
+
+  // 轮询 governance actionable 计数
+  useEffect(() => {
+    const fetchActionableCount = async () => {
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/api/governance/counts`);
+        if (!res.ok) return;
+        const payload = await res.json();
+        const data = payload.data ?? payload;
+        // actionable = total - applied - rejected - rolled_back - auto_approved
+        const total = data?.total ?? 0;
+        const applied = data?.applied ?? 0;
+        const rejected = data?.rejected ?? 0;
+        const rolledBack = data?.rolled_back ?? 0;
+        const autoApproved = data?.auto_approved ?? 0;
+        const actionable = Math.max(0, total - applied - rejected - rolledBack - autoApproved);
+        setActionableCount(actionable);
+      } catch {
+        // 静默失败，badge 不是关键功能
+      }
+    };
+
+    fetchActionableCount();
+    // 每 60 秒轮询一次
+    const interval = setInterval(fetchActionableCount, 60_000);
+    return () => clearInterval(interval);
+  }, [pathname]);
 
   const handleRefresh = useCallback(async () => {
     if (isRefreshing) return;
@@ -98,6 +127,28 @@ export function Navbar() {
   const activeClass = "bg-zinc-800 text-white border-zinc-600";
   const inactiveClass = "text-zinc-300";
 
+  const renderNavButton = (item: NavItem, mobileClose?: () => void) => (
+    <Link key={item.href} href={item.href} onClick={mobileClose}>
+      <Button
+        variant={mobileClose ? "ghost" : "outline"}
+        size="sm"
+        className={`flex items-center gap-2 ${mobileClose ? "w-full justify-start" : "border-none"} ${
+          mobileClose
+            ? isActive(item.href) ? "bg-zinc-800 text-white" : "text-zinc-400 hover:text-white"
+            : isActive(item.href) ? activeClass : inactiveClass
+        }`}
+      >
+        {item.icon}
+        {item.label}
+        {item.href === "/governance" && actionableCount > 0 && (
+          <span className="ml-0.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-amber-950 text-[10px] font-bold leading-none">
+            {actionableCount > 99 ? "99+" : actionableCount}
+          </span>
+        )}
+      </Button>
+    </Link>
+  );
+
   return (
     <header className="sticky top-0 z-50 w-full border-b border-zinc-800 bg-zinc-950/95 backdrop-blur supports-[backdrop-filter]:bg-zinc-950/60">
       <div className="container flex h-14 items-center justify-between gap-4">
@@ -108,20 +159,7 @@ export function Navbar() {
         </Link>
 
         <nav className="hidden items-center gap-2 md:flex" aria-label="Primary">
-          {navItems.map((item) => (
-            <Link key={item.href} href={item.href}>
-              <Button
-                variant="outline"
-                size="sm"
-                className={`flex items-center gap-2 border-none ${
-                  isActive(item.href) ? activeClass : inactiveClass
-                }`}
-              >
-                {item.icon}
-                {item.label}
-              </Button>
-            </Link>
-          ))}
+          {navItems.map((item) => renderNavButton(item))}
         </nav>
 
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
@@ -138,19 +176,7 @@ export function Navbar() {
               <span className="text-lg font-medium text-white">MemoryCore</span>
             </div>
             <nav className="flex flex-col gap-1 p-2" aria-label="Mobile">
-              {navItems.map((item) => (
-                <Link key={item.href} href={item.href} onClick={() => setMobileOpen(false)}>
-                  <Button
-                    variant="ghost"
-                    className={`w-full justify-start gap-3 ${
-                      isActive(item.href) ? "bg-zinc-800 text-white" : "text-zinc-400 hover:text-white"
-                    }`}
-                  >
-                    {item.icon}
-                    {item.label}
-                  </Button>
-                </Link>
-              ))}
+              {navItems.map((item) => renderNavButton(item, () => setMobileOpen(false)))}
             </nav>
           </SheetContent>
         </Sheet>

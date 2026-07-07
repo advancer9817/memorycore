@@ -48,6 +48,7 @@ export const zh = {
     memoriesUnit: "条记忆",
     appsUnit: "个应用",
     operations: "记忆运维",
+    advancedOps: "高级操作",
     active: "活跃",
     candidates: "候选",
     archived: "已归档",

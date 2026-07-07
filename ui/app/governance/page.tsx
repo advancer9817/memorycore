@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { CheckCheck, Loader2 } from "lucide-react";
+import { CheckCheck, CheckCircle2, Loader2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,7 +34,7 @@ import { GovernanceTable } from "./components/GovernanceTable";
 import { GovernanceMetricsCards } from "./components/GovernanceMetricsCards";
 
 const REVIEW_STATUSES: GovernanceReviewStatus[] = [
-  "all", "auto_approved", "applied", "rejected",
+  "actionable", "all", "auto_approved", "applied", "rejected",
 ];
 
 interface DecisionTypeFilter {
@@ -302,7 +302,20 @@ function GovernancePageInner() {
 
         {/* Table */}
         <div className="mt-6">
-          <GovernanceTable
+          {/* 正面空状态：actionable 筛选下无待审核项 */}
+          {cockpit.reviewStatus === "actionable" && !cockpit.isLoading && cockpit.decisions.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <CheckCircle2 className="h-12 w-12 text-emerald-500 mb-4" />
+              <p className="text-lg font-medium text-emerald-300">
+                {messages.governance.allClear}
+              </p>
+              <p className="text-sm text-zinc-500 mt-1">
+                {messages.governance.allClearDetail}
+              </p>
+            </div>
+          )}
+          {!(cockpit.reviewStatus === "actionable" && !cockpit.isLoading && cockpit.decisions.length === 0) && (
+            <GovernanceTable
             decisions={paginated}
             selectedIds={selectedIds}
             onToggleSelect={toggleSelect}
@@ -311,6 +324,7 @@ function GovernancePageInner() {
             messages={messages.governance}
             isLoading={cockpit.isLoading}
           />
+          )}
         </div>
 
         {/* Pagination */}

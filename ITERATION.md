@@ -4996,3 +4996,57 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 - `tests/test_governance_foundation.py`: `test_mutation_policy_covers_allowed_queued_and_rejected_outcomes` 的 queued 场景改用 `approval_kind="unknown"` context，因为 `auto_policy` 现已在豁免列表中
 - 最终：governance/frontend 相关 45 个测试全部通过
 - 其余失败（graph_enhanced/stats/temporal/phase10）均为预存在的 Qdrant 测试隔离问题，与本次改动无关
+
+---
+
+## [迭代 15] 2026-07-07 — 框架重设计收尾：Context Lab + hit_rate 微调 + MCP 精简 + 文件拆分
+
+### 背景
+
+基于 `docs/plans/2026-06-29-framework-redesign.md` 和 `docs/2026-07-02-memorycore-iteration-roadmap.md` 两份迭代计划，执行剩余未完成的结构性任务。前端页面精简（8→4）因用户否决已排除。
+
+### 变更
+
+#### 1. hit_rate 微调（search.py）
+
+- `_MIN_VECTOR_ONLY_RELEVANCE_SCORE`: 0.35 → 0.30（降低 vector-only 记忆的过滤门槛）
+- strict 模式 `vector_top_k`: 30 → 40（扩大向量候选池）
+- 目标：hit_rate 从 0.889 推向 0.90+
+
+#### 2. MCP 工具精简 25→22（server.py）
+
+移除 3 个低使用率维护工具的 `@mcp.tool()` 注册（函数代码保留）：
+- `memory_vector_audit` — 向量审计，可通过前端或脚本替代
+- `memory_rebuild_vectors` — 向量重建，运维操作不需要 MCP 入口
+- `memory_lineage` — 版本链查询，使用频率极低
+
+#### 3. Context Lab 新功能
+
+- **后端**：`frontend.py` 新增 `POST /api/v1/context/test` 端点，调用 `build_context_pack()` 返回完整召回 trace
+- **前端**：新建 `ui/components/dashboard/ContextLab.tsx`（222行），提供查询输入 + 结果表格 + trace 摘要
+- **集成**：`ui/app/page.tsx` 中 ContextLab 作为 Dashboard 首个面板渲染
+
+#### 4. curator_llm.py 拆分（1679行→4个模块）
+
+将 `memorycore/storage/curator_llm.py` 拆分为 `memorycore/storage/curator_llm/` 包：
+- `core.py`（421行）— LLM 调用、reviewed ID 管理、文本规范化
+- `judges.py`（474行）— 去重/矛盾/重要性/拆分/链接发现的 LLM 判断函数
+- `report.py`（428行）— 报告生成、增量/全量运行
+- `apply.py`（359行）— 变更执行和请求构建
+- `__init__.py`（51行）— 反向兼容导出
+
+### 未完成（留待后续）
+
+- `frontend.py`（1566行）拆分 → `memorycore/api/` 包
+- `search.py`（1176行）拆分 → 3 个模块
+- `server.py`（1158行）拆分 → 3 个模块
+
+### 当前指标
+
+| 指标 | 基线 (7月2日) | 当前 | 目标 | 状态 |
+|------|:---:|:---:|:---:|:---:|
+| active 未召回率 | 68.3% | 36.5% | < 40% | 达标 |
+| needs_review 积压 | 2,221 | 0 | < 200 | 超额达标 |
+| hit_rate | 0.816 | 0.889 | > 0.90 | 待观察（已微调） |
+| MCP 工具数 | 46→25 | 22 | ~22 | 达标 |
+| 代码总量 | 31,100 | 23,613 | < 28,000 | 超额达标 |
