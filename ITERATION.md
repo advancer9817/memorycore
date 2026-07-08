@@ -5084,3 +5084,42 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 - `0c23082` feat: 前端 Error Boundary + 迭代监控面板
 - `3438ed7` docs: 深度审计报告 + 迭代计划文档 + 环境配置模板
 - `68a1464` chore: Day 6 清理 + 复审 Prompt
+
+---
+
+## 迭代 27 — Dashboard 看板重设计 + 治理僵死决策修复（2026-07-08）
+
+### 变更
+
+#### 1. 治理层：auto-apply 失败降级修复
+
+- `governance.py` — `create_governance_decision` 中 auto-apply 失败时，将决策从 `auto_approved` 降级为 `rejected`，避免僵死决策堆积
+- 清理 184 条引用已删除记忆的僵死 `auto_approved` supersession 决策
+
+#### 2. Dashboard 看板布局重设计
+
+- 区块重排为"概览→状态→工具→调参"信息层级：记忆运维 → 智能中心 → Context Lab → Curator 调谐
+- 移除"推荐下一步"彩色卡片、"早期预警"面板、"导出治理报告"按钮、"高级操作"折叠包裹
+- 记忆健康度改为 SVG 圆环仪表盘 + 信号卡片网格（全宽布局）
+- Skeleton 加载态与实际内容布局对齐，消除加载跳动
+
+#### 3. MemoryOperationsPanel 瘦身（1029 → 533 行）
+
+- 移除 LLM findings 逐条 apply/reject 交互（已由 Governance 页面承担）
+- 保留统计卡片、调度栏、运行按钮、运行结果摘要
+
+#### 4. i18n 补全
+
+- Context Lab：标题、badge、placeholder、按钮、表头、空状态全部接入全局语言控制
+- CurationActivityPanel：3 条 timeline 标题和详情从硬编码英文改为 i18n
+- BreakdownList 空状态文案接入 i18n
+- 新增 en/zh 各 16 条翻译 key
+
+#### 5. 样式统一
+
+- Context Lab 背景从 `bg-[#1a1a2e]/80` 改为 `bg-zinc-900 border-zinc-800`，输入框和按钮统一石墨色系
+
+### 影响
+
+- Dashboard 首页 JS：17.8kB → 13.6kB（-24%）
+- 10 个文件改动，净减少 438 行代码

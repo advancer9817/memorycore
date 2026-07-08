@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ReactNode } from "react";
-import { ArrowDownToLine, ArrowRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -10,7 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { useI18n } from "@/hooks/useI18n";
 import { formatNumber, percentage, titleCase, TrendPoint } from "./helpers";
 
-export function SectionHeader({ onExport }: { onExport: () => void }) {
+export function SectionHeader() {
   const { messages } = useI18n();
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -21,10 +21,6 @@ export function SectionHeader({ onExport }: { onExport: () => void }) {
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" className="w-fit border-zinc-700/50 bg-zinc-900 text-zinc-300 hover:bg-zinc-800" onClick={onExport}>
-          <ArrowDownToLine className="h-4 w-4" />
-          {messages.dashboard.reportExport}
-        </Button>
         <Button asChild variant="outline" size="sm" className="w-fit border-zinc-700/50 bg-zinc-900 text-zinc-300 hover:bg-zinc-800">
           <Link href="/memories">
             {messages.dashboard.openMemories}
@@ -124,6 +120,7 @@ export function BreakdownList({
   entries: [string, number][];
   total: number;
 }) {
+  const { messages } = useI18n();
   return (
     <div>
       <div className="mb-2 text-xs uppercase tracking-[0.16em] text-zinc-500">{title}</div>
@@ -140,7 +137,7 @@ export function BreakdownList({
           ))
         ) : (
           <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-500">
-            No distribution data yet.
+            {messages.dashboard.noDistribution}
           </div>
         )}
       </div>
@@ -152,19 +149,47 @@ export function MemoryIntelligenceSkeleton() {
   return (
     <section className="space-y-4">
       <SectionHeader onExport={() => undefined} />
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        {[0, 1, 2].map((item) => (
-          <Card key={item} className="border-zinc-800 bg-zinc-900">
-            <CardHeader>
-              <div className="h-4 w-40 animate-pulse rounded bg-zinc-800" />
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="h-16 animate-pulse rounded bg-zinc-800/80" />
-              <div className="h-16 animate-pulse rounded bg-zinc-800/70" />
-              <div className="h-16 animate-pulse rounded bg-zinc-800/60" />
-            </CardContent>
-          </Card>
-        ))}
+      {/* Health panel skeleton */}
+      <Card className="border-zinc-800 bg-zinc-900">
+        <CardHeader>
+          <div className="h-4 w-28 animate-pulse rounded bg-zinc-800" />
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
+            <div className="flex shrink-0 flex-col items-center gap-3 lg:w-48">
+              <div className="h-32 w-32 animate-pulse rounded-full bg-zinc-800/60" />
+              <div className="h-5 w-16 animate-pulse rounded bg-zinc-800" />
+            </div>
+            <div className="grid flex-1 grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-20 animate-pulse rounded-lg bg-zinc-800/50" />
+              ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+      {/* Activity + Breakdown skeleton */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
+        <Card className="border-zinc-800 bg-zinc-900 xl:col-span-3">
+          <CardHeader>
+            <div className="h-4 w-32 animate-pulse rounded bg-zinc-800" />
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="h-16 animate-pulse rounded bg-zinc-800/60" />
+            <div className="h-16 animate-pulse rounded bg-zinc-800/50" />
+            <div className="h-16 animate-pulse rounded bg-zinc-800/40" />
+          </CardContent>
+        </Card>
+        <Card className="border-zinc-800 bg-zinc-900 xl:col-span-2">
+          <CardHeader>
+            <div className="h-4 w-28 animate-pulse rounded bg-zinc-800" />
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="h-12 animate-pulse rounded bg-zinc-800/60" />
+            <div className="h-12 animate-pulse rounded bg-zinc-800/50" />
+            <div className="h-12 animate-pulse rounded bg-zinc-800/40" />
+          </CardContent>
+        </Card>
       </div>
     </section>
   );

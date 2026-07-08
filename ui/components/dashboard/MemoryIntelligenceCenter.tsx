@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSelector } from "react-redux";
-import { AlertTriangle, ArrowRight } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AlertTriangle } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
 import { RootState } from "@/store/store";
 import { getApiBaseUrl } from "@/lib/api-url";
 import { useI18n } from "@/hooks/useI18n";
@@ -20,18 +20,13 @@ import {
   StatsPayload,
   asNumber,
   buildAttentionItems,
-  buildRecommendations,
-  buildReviewQueue,
   clampScore,
-  downloadGovernanceReport,
   inversePercentage,
   percentage,
-  severityClassName,
   weightedScore,
 } from "./intelligence/helpers";
 import { MemoryIntelligenceSkeleton, SectionHeader } from "./intelligence/Primitives";
 import { HealthMetricsPanel } from "./intelligence/HealthMetricsPanel";
-import { ReviewFlowPanel } from "./intelligence/ReviewFlowPanel";
 import { CurationActivityPanel } from "./intelligence/CurationActivityPanel";
 import { SourceBreakdownPanel } from "./intelligence/SourceBreakdownPanel";
 
@@ -41,7 +36,6 @@ export function MemoryIntelligenceCenter() {
   const { messages } = useI18n();
   const t = messages.dashboard;
   const [state, setState] = useState<IntelligenceState>(INITIAL_STATE);
-  const [selectedReviewLabel, setSelectedReviewLabel] = useState<string | null>(null);
   const [llmRunning, setLlmRunning] = useState(false);
   const [localRefreshKey, setLocalRefreshKey] = useState(0);
 
@@ -153,7 +147,6 @@ export function MemoryIntelligenceCenter() {
   const byStatus = statusStats.by_status ?? {};
   const byType = statusStats.by_type ?? {};
   const totalMemories = asNumber(statusStats.total) || asNumber(state.stats?.total_memories) || state.recentMemories.length;
-  const totalApps = asNumber(state.stats?.total_apps);
   const active = asNumber(byStatus.active);
   const archived = asNumber(byStatus.archived);
   const candidates = asNumber(byStatus.candidate);
@@ -197,28 +190,6 @@ export function MemoryIntelligenceCenter() {
     { label: t.nonArchivedRatio, value: nonArchivedRatio, detail: t.nonArchivedRatioDetail(totalMemories - archived) },
     { label: t.llmGovernance, value: llmGovernanceScore, detail: llmStatus },
   ];
-  const recommendations = buildRecommendations({
-    t,
-    contradictionCount,
-    duplicateCount,
-    staleCount: staleActionCount,
-    neverAccessedRatio,
-    connectedCoverage,
-    llmStatus,
-  });
-  const reviewQueue = buildReviewQueue(attentionItems, curatorStatus, t);
-  const selectedReviewItem = reviewQueue.find((item) => item.label === selectedReviewLabel) ?? reviewQueue[0];
-  const governanceReport = {
-    generated_at: new Date().toISOString(),
-    quality_score: qualityScore,
-    totals: { total_memories: totalMemories, total_apps: totalApps, active, archived, candidates, link_count: linkCount },
-    risks: { contradictions: contradictionCount, duplicates: duplicateCount, stale: staleActionCount, never_accessed: neverAccessed },
-    health_signals: healthSignals,
-    review_queue: reviewQueue,
-    recommendations,
-    curator: curatorStatus?.curator,
-    llm_curator: curatorStatus?.llm_curator,
-  };
   const recentCount = state.recentMemories.filter((memory) => Date.now() - new Date(memory.created_at).getTime() <= 7 * DAY_MS).length;
   const oldCount = state.recentMemories.filter((memory) => Date.now() - new Date(memory.created_at).getTime() > 30 * DAY_MS).length;
   const typeEntries = Object.entries(byType)
@@ -237,7 +208,7 @@ export function MemoryIntelligenceCenter() {
 
   return (
     <section className="space-y-4">
-      <SectionHeader onExport={() => downloadGovernanceReport(governanceReport)} />
+      <SectionHeader />
 
       {state.error && (
         <Card className="border-amber-900/60 bg-amber-950/20">
@@ -248,35 +219,7 @@ export function MemoryIntelligenceCenter() {
         </Card>
       )}
 
-      {recommendations.length > 0 && (
-        <Card className="border-zinc-800 bg-zinc-900">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center justify-between text-sm font-medium text-zinc-300">
-              {t.recommendedActions}
-              <ArrowRight className="h-4 w-4 text-zinc-500" />
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {recommendations.map((item) => (
-              <div key={item.title} className={`rounded-xl border px-3 py-3 ${severityClassName[item.severity]}`}>
-                <p className="text-sm font-medium">{item.title}</p>
-                <p className="mt-1 text-xs leading-relaxed text-current/75">{item.detail}</p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
-        <HealthMetricsPanel qualityScore={qualityScore} healthSignals={healthSignals} t={t} />
-        <ReviewFlowPanel
-          reviewQueue={reviewQueue}
-          selectedReviewItem={selectedReviewItem}
-          onSelectLabel={setSelectedReviewLabel}
-          onExportReport={() => downloadGovernanceReport(governanceReport)}
-          t={t}
-        />
-      </div>
+      <HealthMetricsPanel qualityScore={qualityScore} healthSignals={healthSignals} t={t} />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
         <CurationActivityPanel

@@ -30,21 +30,21 @@ export function CurationActivityPanel({
       <CardContent className="space-y-3">
         <TimelineItem
           icon={<Workflow className="h-4 w-4" />}
-          title="Curator scan completed"
-          detail={`${curatorStatus?.curator?.scanned ?? totalMemories} memories scanned · ${curatorStatus?.service?.Result ?? "unknown"}`}
+          title={t.curationCuratorScan}
+          detail={t.curationCuratorScanDetail(curatorStatus?.curator?.scanned ?? totalMemories, curatorStatus?.service?.Result ?? t.unknown)}
           time={formatDate(curatorStatus?.curator?.generated_at)}
         />
         <TimelineItem
           icon={<Activity className="h-4 w-4" />}
-          title="Recent memory signal"
+          title={t.curationRecentSignal}
           detail={getMemoryTitle(recentMemories[0])}
           time={formatDate(recentMemories[0]?.created_at)}
         />
         <TimelineItem
           icon={<CheckCircle2 className="h-4 w-4" />}
-          title="Background schedule"
-          detail={`Next run ${formatDate(curatorStatus?.timer?.NextElapseUSecRealtime)}`}
-          time={curatorStatus?.timer?.ActiveState ?? "unknown"}
+          title={t.curationBackgroundSchedule}
+          detail={t.curationNextRun(formatDate(curatorStatus?.timer?.NextElapseUSecRealtime))}
+          time={curatorStatus?.timer?.ActiveState ?? t.unknown}
         />
       </CardContent>
     </Card>

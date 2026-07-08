@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { FlaskConical, Loader2, Search } from "lucide-react";
 import { getApiBaseUrl } from "@/lib/api-url";
+import { useI18n } from "@/hooks/useI18n";
 
 interface ContextLabItem {
   rank: number;
@@ -45,6 +46,8 @@ const SOURCE_COLORS: Record<string, string> = {
 };
 
 export function ContextLab() {
+  const { messages } = useI18n();
+  const t = messages.dashboard;
   const [query, setQuery] = useState("");
   const [tokenBudget, setTokenBudget] = useState(2000);
   const [loading, setLoading] = useState(false);
@@ -84,13 +87,13 @@ export function ContextLab() {
   }
 
   return (
-    <Card className="bg-[#1a1a2e]/80 border-white/10 backdrop-blur-sm">
+    <Card className="bg-zinc-900 border-zinc-800">
       <CardHeader className="pb-3">
         <CardTitle className="text-lg font-semibold flex items-center gap-2">
           <FlaskConical className="h-5 w-5 text-purple-400" />
-          Context Lab
+          {t.contextLabTitle}
           <Badge variant="outline" className="text-xs ml-2 border-purple-500/30 text-purple-400">
-            Recall Debugger
+            {t.contextLabBadge}
           </Badge>
         </CardTitle>
       </CardHeader>
@@ -99,15 +102,15 @@ export function ContextLab() {
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/40" />
             <Input
-              className="bg-white/5 border-white/10 text-white placeholder:text-white/30 pl-9"
-              placeholder="Enter a test prompt to debug recall quality..."
+              className="bg-zinc-800 border-zinc-700 text-zinc-200 placeholder:text-zinc-500 pl-9"
+              placeholder={t.contextLabPlaceholder}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleKeyDown}
             />
           </div>
           <Input
-            className="bg-white/5 border-white/10 text-white w-24 text-center"
+            className="bg-zinc-800 border-zinc-700 text-zinc-200 w-24 text-center"
             type="number"
             min={500}
             max={8000}
@@ -118,9 +121,9 @@ export function ContextLab() {
           <Button
             onClick={handleTest}
             disabled={loading || !query.trim()}
-            className="bg-purple-600 hover:bg-purple-700 text-white"
+            className="bg-zinc-700 hover:bg-zinc-600 text-zinc-200 border border-zinc-600"
           >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Test"}
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : t.contextLabTest}
           </Button>
         </div>
 
@@ -136,12 +139,12 @@ export function ContextLab() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-white/10 text-white/50 text-left">
-                    <th className="py-2 px-2 w-10">#</th>
-                    <th className="py-2 px-2">Title</th>
-                    <th className="py-2 px-2 w-28">Type</th>
-                    <th className="py-2 px-2 w-20 text-right">Importance</th>
-                    <th className="py-2 px-2 w-24 text-right">Vec Score</th>
-                    <th className="py-2 px-2 w-36">Sources</th>
+                    <th className="py-2 px-2 w-10">{t.contextLabTableRank}</th>
+                    <th className="py-2 px-2">{t.contextLabTableTitle}</th>
+                    <th className="py-2 px-2 w-28">{t.contextLabTableType}</th>
+                    <th className="py-2 px-2 w-20 text-right">{t.contextLabTableImportance}</th>
+                    <th className="py-2 px-2 w-24 text-right">{t.contextLabTableVecScore}</th>
+                    <th className="py-2 px-2 w-36">{t.contextLabTableSources}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -187,7 +190,7 @@ export function ContextLab() {
                   {result.items.length === 0 && (
                     <tr>
                       <td colSpan={6} className="py-6 text-center text-white/30">
-                        No memories matched this query
+                        {t.contextLabNoResults}
                       </td>
                     </tr>
                   )}

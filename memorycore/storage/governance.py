@@ -530,6 +530,17 @@ def create_governance_decision(
                 decision_dict = apply_res["decision"]
         except Exception as exc:
             logger.error("Failed to automatically apply auto-approved decision %s: %s", decision_id, exc, exc_info=True)
+            try:
+                with managed_conn() as conn:
+                    conn.execute(
+                        "UPDATE governance_decisions SET review_status='rejected', policy_reason=?, updated_at=? WHERE id=? AND review_status='auto_approved'",
+                        (f"auto-apply failed: {exc}", now(), decision_id),
+                    )
+                    updated_row = conn.execute("SELECT * FROM governance_decisions WHERE id=?", (decision_id,)).fetchone()
+                if updated_row:
+                    decision_dict = _decision_row_to_dict(updated_row)
+            except Exception as reject_exc:
+                logger.error("Failed to reject broken decision %s: %s", decision_id, reject_exc)
 
     _audit.log_audit_event("governance_decision_create", memory_id=source_ids[0] if source_ids else None, agent=source_agent, detail={"decision_id": decision_id, "review_status": gate["review_status"], "action": recommended_action, "policy_reasons": gate.get("policy_reasons", []), "policy_version": gate.get("policy_version", POLICY_VERSION)})
     return decision_dict

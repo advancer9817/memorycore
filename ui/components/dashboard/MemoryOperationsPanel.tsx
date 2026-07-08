@@ -47,78 +47,10 @@ type ApiEnvelope<T> = {
   error?: { message?: string } | string;
 };
 
-type LlmFindingCategory = "semantic_duplicates" | "contradictions" | "importance_reassessments" | "split_candidates";
-
-type RawFinding = Record<string, unknown>;
-
-type LlmFindingView = {
-  action: string;
-  reason: string;
-  title?: string;
-  decisionId?: string;
-  reviewStatus?: string;
-  decisionType?: string;
-  llm_thinking?: string;
-  llm_raw?: string;
-  llm_prompt?: string;
-  _category?: LlmFindingCategory;
-  _raw?: RawFinding;
-};
-
-type GovernanceDecision = {
-  id: string;
-  decision_type?: string;
-  recommended_action?: string;
-  review_status?: string;
-  finding?: RawFinding;
-  llm_trace?: {
-    prompt?: string;
-    response?: string;
-    thinking?: string;
-    rationale?: string;
-  };
-  policy_reason?: string;
-};
-
-type LlmJobProgress = {
-  stage?: string;
-  batch_index?: number;
-  candidate_count?: number;
-  decision_count?: number;
-  error?: string;
-};
-
-type LlmResultPayload = {
-  summary?: Record<string, number>;
-  errors?: string[];
-  semantic_duplicates?: RawFinding[];
-  contradictions?: RawFinding[];
-  importance_reassessments?: RawFinding[];
-  split_candidates?: RawFinding[];
-};
-
-type ApplyFindingState = {
-  state: "idle" | "succeeded" | "failed";
-  message?: string;
-};
-
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;
   return fallback;
-}
-
-function getPayloadErrorMessage(payload: unknown, fallback: string): string {
-  if (payload && typeof payload === "object" && "error" in payload) {
-    const error = (payload as { error?: { message?: unknown } | string }).error;
-    if (typeof error === "string") return error;
-    if (error?.message && typeof error.message === "string") return error.message;
-  }
-  return fallback;
-}
-
-function getString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
 }
 
 function ellipsize(value: string | undefined, maxChars: number): string | undefined {
@@ -135,6 +67,17 @@ type CuratorRunState = {
   elapsedMs?: number;
   summary?: Record<string, number>;
   actions?: Array<{ id: string; title?: string; action: string; reason?: string }>;
+  error?: string;
+};
+
+type LlmRunState = {
+  state: "idle" | "running" | "succeeded" | "failed";
+  jobId?: string;
+  startedAt?: number;
+  elapsedMs?: number;
+  summary?: Record<string, number>;
+  progress?: { stage?: string; batch_index?: number };
+  errors?: string[];
   error?: string;
 };
 
@@ -214,129 +157,15 @@ export const MemoryOperationsPanel = () => {
     }
   };
 
-  const [llmRunState, setLlmRunState] = useState<{
-    state: "idle" | "running" | "succeeded" | "failed";
-    jobId?: string;
-    startedAt?: number;
-    elapsedMs?: number;
-    summary?: Record<string, number>;
-    progress?: LlmJobProgress;
-    nextCursor?: string;
-    hasMore?: boolean;
-    loadedCount?: number;
-    errors?: string[];
-    error?: string;
-    findings?: LlmFindingView[];
-  }>({ state: "idle" });
+  const [llmRunState, setLlmRunState] = useState<LlmRunState>({ state: "idle" });
   const [llmRunning, setLlmRunning] = useState(false);
-  const [llmFindingsShowAll, setLlmFindingsShowAll] = useState(false);
-  const [llmDismissedIndices, setLlmDismissedIndices] = useState<Set<number>>(new Set());
-  const [acceptingAll, setAcceptingAll] = useState(false);
-  const [applyFindingStates, setApplyFindingStates] = useState<Record<number, ApplyFindingState>>({});
-  const [isRecovering, setIsRecovering] = useState(false);
   const llmPollRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const llmCursorRef = React.useRef<string | undefined>(undefined);
 
   const LLM_JOB_KEY = "mcore_llm_curator_job";
-
-  const _findingFromDecision = (decision: GovernanceDecision): LlmFindingView => {
-    const finding = decision.finding || {};
-    return {
-      action: decision.recommended_action || getString(finding.action) || "review",
-      title: getString(finding.title) || getString(finding.drop_title) || getString(finding.older_title),
-      reason: getString(finding.reason) || decision.policy_reason || decision.llm_trace?.rationale || "",
-      decisionId: decision.id,
-      reviewStatus: decision.review_status,
-      decisionType: decision.decision_type,
-      llm_thinking: decision.llm_trace?.thinking || getString(finding.llm_thinking),
-      llm_raw: decision.llm_trace?.response || getString(finding.llm_raw),
-      llm_prompt: decision.llm_trace?.prompt || getString(finding.llm_prompt),
-      _raw: finding,
-    };
-  };
-
-  const _parseLlmResult = (data: LlmResultPayload) => ({
-    summary: data.summary || {},
-    errors: data.errors || [],
-    findings: [
-      ...(data.semantic_duplicates || []).map((d) => ({
-        action: "archive duplicate",
-        title: getString(d.drop_title),
-        reason: getString(d.reason) ?? "",
-        llm_thinking: getString(d.llm_thinking),
-        llm_raw: getString(d.llm_raw),
-        llm_prompt: getString(d.llm_prompt),
-        _category: "semantic_duplicates" as const,
-        _raw: d,
-      })),
-      ...(data.contradictions || []).map((c) => ({
-        action: "mark contradicted",
-        title: getString(c.older_title),
-        reason: getString(c.reason) ?? "",
-        llm_thinking: getString(c.llm_thinking),
-        llm_raw: getString(c.llm_raw),
-        llm_prompt: getString(c.llm_prompt),
-        _category: "contradictions" as const,
-        _raw: c,
-      })),
-      ...(data.importance_reassessments || [])
-        .filter((r) => r.action !== "keep")
-        .map((r) => ({
-          action: getString(r.action) ?? "reassess",
-          title: getString(r.title),
-          reason: getString(r.reason) ?? "",
-          llm_thinking: getString(r.llm_thinking),
-          llm_raw: getString(r.llm_raw),
-          llm_prompt: getString(r.llm_prompt),
-          _category: "importance_reassessments" as const,
-          _raw: r,
-        })),
-      ...(data.split_candidates || []).map((s) => ({
-        action: "split",
-        title: getString(s.title),
-        reason: getString(s.reason) ?? "",
-        llm_thinking: getString(s.llm_thinking),
-        llm_raw: getString(s.llm_raw),
-        llm_prompt: getString(s.llm_prompt),
-        _category: "split_candidates" as const,
-        _raw: s,
-      })),
-    ],
-  });
-
-  const _loadJobDecisions = React.useCallback(async (jobId: string, after?: string) => {
-    const params = new URLSearchParams({ limit: "50", review_status: "actionable" });
-    if (after) params.set("after", after);
-    const response = await fetch(`${getApiBaseUrl()}/api/curator/llm/${jobId}/decisions?${params.toString()}`);
-    if (!response.ok) return;
-    const payload = await response.json();
-    const data = payload.data || payload;
-    const decisions = Array.isArray(data.items) ? data.items as GovernanceDecision[] : [];
-    const findings = decisions.map(_findingFromDecision);
-    llmCursorRef.current = data.next_cursor;
-    setLlmRunState((prev) => {
-      const existing = prev.findings || [];
-      const knownIds = new Set(existing.map((item) => item.decisionId).filter(Boolean));
-      const fresh = findings.filter((item) => !item.decisionId || !knownIds.has(item.decisionId));
-      return {
-        ...prev,
-        findings: after ? [...existing, ...fresh] : fresh,
-        nextCursor: data.next_cursor,
-        hasMore: Boolean(data.has_more),
-        loadedCount: (after ? existing.length : 0) + fresh.length,
-        summary: data.job?.summary || prev.summary,
-        progress: data.job?.progress || prev.progress,
-        errors: data.job?.errors || prev.errors,
-      };
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const _pollJob = React.useCallback(async (jobId: string, startedAt: number) => {
     try {
       const res = await fetch(`${getApiBaseUrl()}/api/curator/llm/${jobId}`);
-      setIsRecovering(false);
-      // Job not found (service restarted) — treat as stale, stop polling
       if (!res.ok) {
         setLlmRunState({ state: "idle" });
         setLlmRunning(false);
@@ -346,39 +175,32 @@ export const MemoryOperationsPanel = () => {
       const payload = await res.json();
       const pollData = payload.data || payload;
       if (pollData.status === "done" || pollData.status === "succeeded") {
-        await _loadJobDecisions(jobId, llmCursorRef.current);
-        const result = pollData.result;
-        const parsed = result ? _parseLlmResult(result) : { summary: pollData.summary || {}, errors: pollData.errors || [], findings: [] };
-        setLlmRunState((prev) => ({
-          ...prev,
+        setLlmRunState({
           state: "succeeded",
           jobId,
           startedAt,
           elapsedMs: Date.now() - startedAt,
-          summary: pollData.summary || parsed.summary || prev.summary,
-          errors: pollData.errors || parsed.errors || prev.errors,
-          progress: pollData.progress || prev.progress,
-          findings: prev.findings && prev.findings.length > 0 ? prev.findings : parsed.findings,
-        }));
+          summary: pollData.summary || pollData.result?.summary || {},
+          errors: pollData.errors || pollData.result?.errors || [],
+          progress: pollData.progress,
+        });
         setLlmRunning(false);
         localStorage.removeItem(LLM_JOB_KEY);
         fetchStatus();
       } else if (pollData.status === "error" || pollData.status === "failed") {
-        setLlmRunState((prev) => ({
-          ...prev,
+        setLlmRunState({
           state: "failed",
           jobId,
           startedAt,
           elapsedMs: Date.now() - startedAt,
-          summary: pollData.summary || prev.summary,
-          progress: pollData.progress || prev.progress,
-          errors: pollData.errors || prev.errors,
+          summary: pollData.summary,
+          progress: pollData.progress,
+          errors: pollData.errors,
           error: pollData.error || (Array.isArray(pollData.errors) ? pollData.errors.join("; ") : "LLM Curator job failed"),
-        }));
+        });
         setLlmRunning(false);
         localStorage.removeItem(LLM_JOB_KEY);
       } else {
-        await _loadJobDecisions(jobId, llmCursorRef.current);
         setLlmRunState((prev) => ({
           ...prev,
           state: "running",
@@ -388,21 +210,17 @@ export const MemoryOperationsPanel = () => {
           progress: pollData.progress || prev.progress,
           errors: pollData.errors || prev.errors,
         }));
-        // still running — schedule next poll
         llmPollRef.current = setTimeout(() => _pollJob(jobId, startedAt), 3000);
       }
     } catch {
-      setIsRecovering(false);
       llmPollRef.current = setTimeout(() => _pollJob(jobId, startedAt), 3000);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // On mount: check if a job was running before page reload
   useEffect(() => {
     const saved = localStorage.getItem(LLM_JOB_KEY);
     if (!saved) {
-      // Also check the backend for a running job
       fetch(`${getApiBaseUrl()}/api/curator/llm/latest`)
         .then((r) => r.json())
         .then((p) => {
@@ -410,8 +228,7 @@ export const MemoryOperationsPanel = () => {
           if (d.status === "running" && d.job_id) {
             const startedAt = Date.now();
             setLlmRunning(true);
-            setIsRecovering(true);
-            setLlmRunState({ state: "running", jobId: d.job_id, startedAt, summary: d.summary || {}, progress: d.progress || {}, errors: d.errors || [] });
+            setLlmRunState({ state: "running", jobId: d.job_id, startedAt, summary: d.summary || {}, progress: d.progress || {} });
             localStorage.setItem(LLM_JOB_KEY, JSON.stringify({ jobId: d.job_id, startedAt }));
             llmPollRef.current = setTimeout(() => _pollJob(d.job_id, startedAt), 2000);
           }
@@ -421,14 +238,11 @@ export const MemoryOperationsPanel = () => {
     }
     try {
       const { jobId, startedAt } = JSON.parse(saved);
-      // If the saved job is older than 2 hours, the server has likely restarted
-      // and the job no longer exists — discard it instead of showing stale state
       if (!jobId || Date.now() - startedAt > 2 * 60 * 60 * 1000) {
         localStorage.removeItem(LLM_JOB_KEY);
         return;
       }
       setLlmRunning(true);
-      setIsRecovering(true);
       setLlmRunState({ state: "running", jobId, startedAt });
       llmPollRef.current = setTimeout(() => _pollJob(jobId, startedAt), 500);
     } catch {
@@ -443,9 +257,7 @@ export const MemoryOperationsPanel = () => {
   const runLlmCurator = async () => {
     if (llmRunning) return;
     const startedAt = Date.now();
-    llmCursorRef.current = undefined;
     setLlmRunning(true);
-    setLlmDismissedIndices(new Set());
     setLlmRunState({ state: "running", startedAt });
     try {
       const response = await fetch(`${getApiBaseUrl()}/api/curator/llm`, {
@@ -473,88 +285,6 @@ export const MemoryOperationsPanel = () => {
       setLlmRunning(false);
       localStorage.removeItem(LLM_JOB_KEY);
     }
-  };
-
-  const acceptAllFindings = async () => {
-    const findings = llmRunState.findings ?? [];
-    const visible = findings.filter((_, i) => !llmDismissedIndices.has(i));
-    setAcceptingAll(true);
-    const results = await Promise.allSettled(
-      visible.map(async (f) => {
-        const globalIdx = findings.indexOf(f);
-        if (f.decisionId) {
-          const response = await fetch(`${getApiBaseUrl()}/api/governance/${f.decisionId}/apply`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ source_agent: "frontend" }),
-          });
-          const payload: ApiEnvelope<unknown> = await response.json();
-          if (!response.ok || payload.ok === false) {
-            throw new Error(getPayloadErrorMessage(payload, `${t.dashboard.applyError}: ${response.status}`));
-          }
-          return globalIdx;
-        }
-        if (!f._category || !f._raw) return undefined;
-        const response = await fetch(`${getApiBaseUrl()}/api/curator/llm/apply-single`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ category: f._category, finding: f._raw }),
-        });
-        const payload: ApiEnvelope<unknown> = await response.json();
-        if (!response.ok || payload.ok === false) {
-          throw new Error(getPayloadErrorMessage(payload, `${t.dashboard.applyError}: ${response.status}`));
-        }
-        return globalIdx;
-      })
-    );
-    const accepted = new Set<number>();
-    const failedStates: Record<number, ApplyFindingState> = {};
-    results.forEach((result, index) => {
-      const globalIdx = findings.indexOf(visible[index]);
-      if (result.status === "fulfilled" && result.value !== undefined) {
-        accepted.add(result.value);
-        return;
-      }
-      failedStates[globalIdx] = {
-        state: "failed",
-        message: result.status === "rejected" ? getErrorMessage(result.reason, t.dashboard.applyError) : t.dashboard.applyError,
-      };
-    });
-    setApplyFindingStates((prev) => ({ ...prev, ...failedStates }));
-    setLlmDismissedIndices((prev) => new Set([...prev, ...accepted]));
-    setAcceptingAll(false);
-    fetchStatus();
-  };
-
-  const dismissAllFindings = async () => {
-    const findings = llmRunState.findings ?? [];
-    const visible = findings.filter((_, i) => !llmDismissedIndices.has(i));
-    const rejected = new Set<number>();
-    const failures: Record<number, ApplyFindingState> = {};
-    const results = await Promise.allSettled(visible.map(async (f) => {
-      const globalIdx = findings.indexOf(f);
-      if (!f.decisionId) return globalIdx;
-      const response = await fetch(`${getApiBaseUrl()}/api/governance/${f.decisionId}/reject`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ source_agent: "frontend", reason: "dismissed from LLM Curator panel" }),
-      });
-      const payload: ApiEnvelope<unknown> = await response.json();
-      if (!response.ok || payload.ok === false) {
-        throw new Error(getPayloadErrorMessage(payload, `${t.dashboard.applyError}: ${response.status}`));
-      }
-      return globalIdx;
-    }));
-    results.forEach((result, index) => {
-      const globalIdx = findings.indexOf(visible[index]);
-      if (result.status === "fulfilled") {
-        rejected.add(result.value);
-      } else {
-        failures[globalIdx] = { state: "failed", message: getErrorMessage(result.reason, t.dashboard.applyError) };
-      }
-    });
-    setApplyFindingStates((prev) => ({ ...prev, ...failures }));
-    setLlmDismissedIndices((prev) => new Set([...prev, ...rejected]));
   };
 
   const summary = status?.curator.summary || {};
@@ -614,9 +344,8 @@ export const MemoryOperationsPanel = () => {
         </Card>
       </div>
 
-      {/* Schedule bar + Operations — unified compact strip */}
+      {/* Schedule bar + Operations */}
       <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm space-y-2">
-        {/* Row 1: schedule info left + buttons right */}
         <div className="flex items-center gap-3">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 flex-1 text-xs">
             <Badge variant="outline" className="border-emerald-700 bg-emerald-500/10 text-emerald-300 text-xs shrink-0">
@@ -664,7 +393,7 @@ export const MemoryOperationsPanel = () => {
           </div>
         </div>
 
-        {/* Manual run result — only when active */}
+        {/* Manual run result */}
         {runState.state !== "idle" && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-zinc-800 pt-2">
             <span className="text-zinc-500">{t.dashboard.manualRun}</span>
@@ -733,14 +462,9 @@ export const MemoryOperationsPanel = () => {
           </div>
         )}
 
-        {/* LLM Curator results */}
+        {/* LLM Curator summary */}
         {llmRunState.state !== "idle" && (
           <div className="border-t border-zinc-800 pt-2 text-sm space-y-2">
-            {isRecovering && (
-              <div className="flex items-center gap-2 text-sky-400 text-xs animate-pulse">
-                <span>{t.dashboard.recoveringJob}</span>
-              </div>
-            )}
             <div className="flex items-center gap-3">
               <span className="text-zinc-500">{t.dashboard.llmAnalysis}</span>
               <Badge
@@ -770,7 +494,6 @@ export const MemoryOperationsPanel = () => {
                     <span className="text-zinc-500 text-xs ml-1">
                       stage <span className="text-zinc-200">{llmRunState.progress.stage}</span>
                       {llmRunState.progress.batch_index !== undefined && <span> · batch <span className="text-zinc-200">{llmRunState.progress.batch_index}</span></span>}
-                      {llmRunState.loadedCount !== undefined && <span> · loaded <span className="text-zinc-200">{llmRunState.loadedCount}</span></span>}
                     </span>
                   )}
                 </span>
@@ -780,102 +503,11 @@ export const MemoryOperationsPanel = () => {
               <div className="space-y-1">
                 {llmRunState.errors.map((e, i) => (
                   <div key={`err-${i}-${e.slice(0,16)}`} className="rounded bg-amber-950/40 border border-amber-800/40 px-2 py-1 text-xs text-amber-300">
-                    ⚠ {e}
+                    {e}
                   </div>
                 ))}
               </div>
             )}
-            {llmRunState.findings && llmRunState.findings.length > 0 && (() => {
-              const visibleFindings = llmRunState.findings.filter((_, i) => !llmDismissedIndices.has(i));
-              const displayFindings = llmFindingsShowAll ? visibleFindings : visibleFindings.slice(0, 20);
-              return (
-                <div className="space-y-1 max-h-96 overflow-y-auto pr-1">
-                  <div className="flex gap-2 pb-1 sticky top-0 bg-zinc-900/95 z-10">
-                    <button
-                      onClick={acceptAllFindings}
-                      disabled={acceptingAll || visibleFindings.length === 0}
-                      className="rounded px-2 py-1 text-xs bg-emerald-800/60 text-emerald-300 hover:bg-emerald-700 disabled:opacity-50 transition-colors"
-                    >
-                      {acceptingAll ? t.dashboard.processing : t.dashboard.acceptAll(visibleFindings.length)}
-                    </button>
-                    <button
-                      onClick={dismissAllFindings}
-                      disabled={visibleFindings.length === 0}
-                      className="rounded px-2 py-1 text-xs bg-zinc-700 text-zinc-400 hover:bg-red-900/60 hover:text-red-300 disabled:opacity-50 transition-colors"
-                    >
-                      {t.dashboard.rejectAll(visibleFindings.length)}
-                    </button>
-                  </div>
-                  {displayFindings.map((f, displayIdx) => {
-                    const globalIdx = llmRunState.findings!.indexOf(f);
-                    return (
-                      <LlmFinding
-                        key={f.decisionId || globalIdx}
-                        finding={f}
-                        applyState={applyFindingStates[globalIdx]}
-                        labels={{ accept: t.dashboard.accept, reject: t.dashboard.reject, thinking: t.dashboard.thinking, raw: t.dashboard.raw, prompt: t.dashboard.prompt, applyError: t.dashboard.applyError, acceptFindingTitle: t.dashboard.acceptFindingTitle, dismissFindingTitle: t.dashboard.dismissFindingTitle, details: t.common.details }}
-                        onAccept={async () => {
-                          if (f.decisionId) {
-                            const response = await fetch(`${getApiBaseUrl()}/api/governance/${f.decisionId}/apply`, {
-                              method: "POST",
-                              headers: { "content-type": "application/json" },
-                              body: JSON.stringify({ source_agent: "frontend" }),
-                            });
-                            const payload: ApiEnvelope<unknown> = await response.json();
-                            if (!response.ok || payload.ok === false) {
-                              throw new Error(getPayloadErrorMessage(payload, `${t.dashboard.applyError}: ${response.status}`));
-                            }
-                          } else {
-                            if (!f._category || !f._raw) return;
-                            const response = await fetch(`${getApiBaseUrl()}/api/curator/llm/apply-single`, {
-                              method: "POST",
-                              headers: { "content-type": "application/json" },
-                              body: JSON.stringify({ category: f._category, finding: f._raw }),
-                            });
-                            const payload: ApiEnvelope<unknown> = await response.json();
-                            if (!response.ok || payload.ok === false) {
-                              throw new Error(getPayloadErrorMessage(payload, `${t.dashboard.applyError}: ${response.status}`));
-                            }
-                          }
-                          setApplyFindingStates((prev) => ({ ...prev, [globalIdx]: { state: "succeeded", message: t.dashboard.applySuccess } }));
-                          setLlmDismissedIndices((prev) => new Set([...prev, globalIdx]));
-                        }}
-                        onDismiss={async () => {
-                          if (f.decisionId) {
-                            const response = await fetch(`${getApiBaseUrl()}/api/governance/${f.decisionId}/reject`, {
-                              method: "POST",
-                              headers: { "content-type": "application/json" },
-                              body: JSON.stringify({ source_agent: "frontend", reason: "dismissed from LLM Curator panel" }),
-                            });
-                            const payload: ApiEnvelope<unknown> = await response.json();
-                            if (!response.ok || payload.ok === false) {
-                              throw new Error(getPayloadErrorMessage(payload, `${t.dashboard.applyError}: ${response.status}`));
-                            }
-                          }
-                          setLlmDismissedIndices((prev) => new Set([...prev, globalIdx]));
-                        }}
-                      />
-                    );
-                  })}
-                  {!llmFindingsShowAll && visibleFindings.length > 20 && (
-                    <button
-                      onClick={() => setLlmFindingsShowAll(true)}
-                      className="w-full text-center text-xs text-zinc-400 hover:text-zinc-200 py-1.5 rounded bg-zinc-800/50 hover:bg-zinc-800 transition-colors"
-                    >
-                      {t.dashboard.showAll(visibleFindings.length)}
-                    </button>
-                  )}
-                  {llmRunState.hasMore && llmRunState.jobId && (
-                    <button
-                      onClick={() => _loadJobDecisions(llmRunState.jobId!, llmCursorRef.current)}
-                      className="w-full text-center text-xs text-violet-300 hover:text-violet-200 py-1.5 rounded bg-violet-950/30 hover:bg-violet-900/40 transition-colors"
-                    >
-                      Load more results
-                    </button>
-                  )}
-                </div>
-              );
-            })()}
             {llmRunState.error && <div className="text-red-300">{llmRunState.error}</div>}
           </div>
         )}
@@ -896,134 +528,6 @@ function LlmElapsedTimer({ startedAt }: { startedAt: number }) {
   return (
     <div className="mt-1 text-sky-400 text-xs animate-pulse">
       {messages.dashboard.llmElapsed((elapsed / 1000).toFixed(1))}
-    </div>
-  );
-}
-
-function LlmFinding({ finding, applyState, labels, onAccept, onDismiss }: {
-  finding: LlmFindingView;
-  applyState?: ApplyFindingState;
-  labels: { accept: string; reject: string; thinking: string; raw: string; prompt: string; applyError: string; acceptFindingTitle: string; dismissFindingTitle: string; details: string };
-  onAccept?: () => Promise<void>;
-  onDismiss?: () => Promise<void> | void;
-}) {
-  const [expanded, setExpanded] = React.useState<null | "thinking" | "raw" | "prompt">(null);
-  const [accepting, setAccepting] = React.useState(false);
-  const [localApplyState, setLocalApplyState] = React.useState<ApplyFindingState>({ state: "idle" });
-  const hasDetail = finding.llm_thinking || finding.llm_raw || finding.llm_prompt;
-
-  const handleAccept = async () => {
-    if (!onAccept) return;
-    setAccepting(true);
-    try {
-      await onAccept();
-      setLocalApplyState({ state: "succeeded" });
-    } catch (error: unknown) {
-      setLocalApplyState({ state: "failed", message: getErrorMessage(error, labels.applyError) });
-    } finally {
-      setAccepting(false);
-    }
-  };
-
-  const handleDismiss = async () => {
-    if (!onDismiss) return;
-    try {
-      await onDismiss();
-    } catch (error: unknown) {
-      setLocalApplyState({ state: "failed", message: getErrorMessage(error, labels.applyError) });
-    }
-  };
-
-  let targetId: string | undefined;
-  if (finding._raw) {
-    targetId = (finding._raw.id || finding._raw.drop_id || finding._raw.older_id || finding._raw.source_id) as string | undefined;
-  }
-
-  return (
-    <div className="rounded bg-zinc-800 px-2 py-2 text-xs">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="truncate whitespace-nowrap" title={[finding.action, finding.title].filter(Boolean).join(" · ")}>
-            <span className="text-violet-300 font-medium">{ellipsize(finding.action, 54)}</span>
-            {finding.title && <span className="text-zinc-400"> · {ellipsize(finding.title, 72)}</span>}
-          </div>
-          {finding.reason && (
-            <div className="truncate whitespace-nowrap text-zinc-500 mt-0.5" title={finding.reason}>
-              {ellipsize(finding.reason, 120)}
-            </div>
-          )}
-        </div>
-        <div className="flex gap-1 shrink-0 mt-0.5 items-center">
-          {targetId && (
-            <Link href={`/memory/${targetId}`} className="rounded px-1.5 py-0.5 text-[10px] transition-colors bg-zinc-700/50 text-zinc-400 hover:text-zinc-200">
-              {labels.details}
-            </Link>
-          )}
-          {onAccept && (
-            <button
-              onClick={handleAccept}
-              disabled={accepting}
-              className="rounded px-1.5 py-0.5 text-[10px] transition-colors bg-emerald-800/60 text-emerald-300 hover:bg-emerald-700 disabled:opacity-50"
-              title={labels.acceptFindingTitle}
-            >
-              {accepting ? "..." : labels.accept}
-            </button>
-          )}
-          {onDismiss && (
-            <button
-              onClick={handleDismiss}
-              className="rounded px-1.5 py-0.5 text-[10px] transition-colors bg-zinc-700 text-zinc-400 hover:bg-red-900/60 hover:text-red-300"
-              title={labels.dismissFindingTitle}
-            >
-              {labels.reject}
-            </button>
-          )}
-          {hasDetail && (
-            <>
-              {finding.llm_thinking && (
-                <button
-                  onClick={() => setExpanded(expanded === "thinking" ? null : "thinking")}
-                  className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${expanded === "thinking" ? "bg-sky-700 text-sky-100" : "bg-zinc-700 text-zinc-400 hover:text-zinc-200"}`}
-                >
-                  {labels.thinking}
-                </button>
-              )}
-              {finding.llm_raw && (
-                <button
-                  onClick={() => setExpanded(expanded === "raw" ? null : "raw")}
-                  className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${expanded === "raw" ? "bg-violet-700 text-violet-100" : "bg-zinc-700 text-zinc-400 hover:text-zinc-200"}`}
-                >
-                  {labels.raw}
-                </button>
-              )}
-              {finding.llm_prompt && (
-                <button
-                  onClick={() => setExpanded(expanded === "prompt" ? null : "prompt")}
-                  className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${expanded === "prompt" ? "bg-zinc-500 text-zinc-100" : "bg-zinc-700 text-zinc-400 hover:text-zinc-200"}`}
-                >
-                  {labels.prompt}
-                </button>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-      {(applyState?.state === "failed" || localApplyState.state === "failed") && (
-        <div className="mt-2 rounded border border-red-800/50 bg-red-950/40 px-2 py-1 text-[10px] text-red-300">
-          {applyState?.message || localApplyState.message || labels.applyError}
-        </div>
-      )}
-      {expanded && (
-        <pre className={`mt-2 max-h-64 overflow-auto rounded p-2 text-[10px] leading-relaxed whitespace-pre-wrap break-words ${
-          expanded === "thinking" ? "bg-sky-950/50 text-sky-200 border border-sky-800/40" :
-          expanded === "raw" ? "bg-violet-950/50 text-violet-200 border border-violet-800/40" :
-          "bg-zinc-900 text-zinc-300 border border-zinc-700"
-        }`}>
-          {expanded === "thinking" ? finding.llm_thinking :
-           expanded === "raw" ? finding.llm_raw :
-           finding.llm_prompt}
-        </pre>
-      )}
     </div>
   );
 }
