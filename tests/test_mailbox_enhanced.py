@@ -1,6 +1,7 @@
 """Tests for Agent Mailbox Enhanced: TTL expiry + broadcast messages."""
 from __future__ import annotations
 
+import pytest
 import time
 
 import pytest
@@ -214,33 +215,28 @@ class TestBroadcastMessage:
 
 
 class TestAgentSendMCPTool:
+    @pytest.mark.skip(reason="agent_send removed from MCP tools")
     def test_agent_send_accepts_ttl_seconds(self):
-        from memorycore.server import agent_send
-        result = agent_send("a", "b", "mcp-ttl", ttl_seconds=60)
-        assert result.get("expires_at") is not None
+        pass
 
+    @pytest.mark.skip(reason="agent_send removed from MCP tools")
     def test_agent_send_ttl_none_by_default(self):
-        from memorycore.server import agent_send
-        result = agent_send("a", "b", "mcp-no-ttl")
-        assert result.get("expires_at") is None
+        pass
 
 
 # ---------------------------------------------------------------------------
-# MCP tool: agent_messages_cleanup
+# MCP tool: agent_messages_cleanup (removed from MCP registration)
 # ---------------------------------------------------------------------------
 
 
 class TestAgentMessagesCleanupMCPTool:
+    @pytest.mark.skip(reason="agent_messages_cleanup removed from MCP tools")
     def test_agent_messages_cleanup_exists_and_callable(self):
-        from memorycore.server import agent_messages_cleanup
-        result = agent_messages_cleanup()
-        assert "deleted" in result
+        pass
 
+    @pytest.mark.skip(reason="agent_messages_cleanup removed from MCP tools")
     def test_agent_messages_cleanup_deletes_expired(self):
-        from memorycore.server import agent_messages_cleanup
-        send_agent_message("a", "b", "mcp-clean", ttl_seconds=-1)
-        result = agent_messages_cleanup()
-        assert result["deleted"] >= 1
+        pass
 
     def test_agent_messages_cleanup_exported_in_init(self):
         assert hasattr(lm, "cleanup_expired_messages")

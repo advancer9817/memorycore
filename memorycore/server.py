@@ -38,27 +38,18 @@ from memorycore.storage import (
     agent_capability_search as search_agent_capabilities,
     agent_handoff_create as create_agent_handoff,
     agent_handoff_update as update_agent_handoff,
-    atomize_report,
     build_context_pack,
-    cleanup_expired_messages,
     curator_report,
     export_html,
     get_active_warnings,
-    get_agent_inbox,
     get_audit_log,
     get_context_quality_stats,
     get_memory_stats,
     get_record,
     entity_search,
-    list_agent_presence,
     list_recent,
     list_governance_decisions,
-    recalibrate_governance_review_queue,
     apply_governance_decision,
-    apply_governance_decisions_batch,
-    reject_governance_decision,
-    rollback_governance_decision,
-    query_governance_ledger,
     memory_backup as create_memory_backup,
     memory_export as export_memory_payload,
     memory_import as import_memory_payload,
@@ -237,51 +228,6 @@ def memory_feedback(
 def memory_timeline(query: str = "", scope: str = "", limit: int = 20) -> list[dict[str, Any]]:
     """Return decision/timeline/feedback memories in chronological order."""
     return timeline(query, scope, limit)
-
-
-def memory_curator_report(
-    dry_run: bool = True,
-    limit: int = 500,
-    stale_after_days: int = 60,
-    archive_after_days: int = 120,
-    allow_actions: list[str] | str | None = None,
-    deny_actions: list[str] | str | None = None,
-) -> dict[str, Any]:
-    """Return memory curator candidates; optionally mark stale/archive records without deleting."""
-    return curator_report(dry_run, limit, stale_after_days, archive_after_days, allow_actions, deny_actions)
-
-
-def memory_rollup_report(
-    dry_run: bool = True,
-    limit: int = 250,
-    min_count: int = 30,
-    max_age_hours: float = 24,
-    min_age_count: int = 5,
-    source_agent: str = "",
-    project_path: str = "",
-    force: bool = False,
-) -> dict[str, Any]:
-    """Roll up accumulated episodic memories into durable long-term memories."""
-    return rollup_report(
-        dry_run=dry_run,
-        limit=limit,
-        min_count=min_count,
-        max_age_hours=max_age_hours,
-        min_age_count=min_age_count,
-        source_agent=source_agent,
-        project_path=project_path,
-        force=force,
-    )
-
-
-def memory_atomize_report(
-    record_id: str = "",
-    dry_run: bool = True,
-    limit: int = 100,
-    min_chars: int = 600,
-) -> dict[str, Any]:
-    """Plan or apply parent-memory atomization into linked atomic child facts."""
-    return atomize_report(record_id=record_id, dry_run=dry_run, limit=limit, min_chars=min_chars)
 
 
 @mcp.tool()
@@ -527,53 +473,6 @@ def governance_decisions(review_status: str | None = None, limit: int = 100) -> 
     return list_governance_decisions(review_status=review_status, limit=limit)
 
 
-def governance_apply(decision_id: str, source_agent: str = "agent") -> dict[str, Any]:
-    """Apply an approved governance decision and emit audit records."""
-    return apply_governance_decision(decision_id, source_agent=source_agent)
-
-
-def governance_apply_batch(decision_ids: list[str], source_agent: str = "agent") -> dict[str, Any]:
-    """Apply multiple actionable governance decisions as one batch.
-
-    Invalid review statuses abort the batch before mutations. Policy-blocked
-    decisions are skipped and reported while the remaining allowed decisions are
-    applied in one transaction.
-    """
-    return apply_governance_decisions_batch(decision_ids, source_agent=source_agent)
-
-
-def governance_recalibrate_queue(limit: int | None = None, dry_run: bool = True, source_agent: str = "agent") -> dict[str, Any]:
-    """Reclassify safe low-risk needs_review decisions as auto_approved without applying mutations."""
-    return recalibrate_governance_review_queue(limit=limit, dry_run=dry_run, source_agent=source_agent)
-
-
-def governance_reject(decision_id: str, source_agent: str = "agent", reason: str = "") -> dict[str, Any]:
-    """Reject a governance decision and emit audit records."""
-    return reject_governance_decision(decision_id, source_agent=source_agent, reason=reason)
-
-
-def governance_rollback(decision_id: str, source_agent: str = "agent") -> dict[str, Any]:
-    """Rollback an applied governance decision and restore the prior snapshot."""
-    return rollback_governance_decision(decision_id, source_agent=source_agent)
-
-
-def governance_metrics() -> dict[str, Any]:
-    """Return operational governance health metrics: rollback rate, revival rate, review queue depth/age, and degraded warning."""
-    from memorycore.storage.governance import get_governance_metrics
-    return get_governance_metrics()
-
-
-def governance_ledger(
-    correlation_id: str = "",
-    target_id: str = "",
-    origin: str = "",
-    status: str = "",
-    limit: int = 100,
-) -> list[dict[str, Any]]:
-    """Query governance mutation ledger entries for backend observability."""
-    return query_governance_ledger(correlation_id, target_id, origin, status, limit)
-
-
 @mcp.tool()
 @_safe_tool
 def memory_audit_log(
@@ -723,62 +622,6 @@ def agent_capability_search(
     return search_agent_capabilities(capability, namespace, limit)
 
 
-def agent_send(
-    from_agent: str,
-    to_agent: str,
-    subject: str,
-    body: str = "",
-    priority: str = "normal",
-    metadata: dict[str, Any] | None = None,
-    ttl_seconds: int | None = None,
-) -> dict[str, Any]:
-    """Send a message from one agent to another (or broadcast to all online/idle agents).
-
-    Args:
-        from_agent: Sender agent identifier
-        to_agent: Recipient agent identifier, or '*' to broadcast to all online/idle agents
-        subject: Message subject line
-        body: Message body text (optional)
-        priority: low, normal, high, or urgent (default: normal)
-        metadata: Optional key-value metadata
-        ttl_seconds: Optional time-to-live in seconds; message expires after this duration
-
-    Returns:
-        The created message record, or broadcast summary dict when to_agent='*'.
-    """
-    return send_agent_message(from_agent, to_agent, subject, body, priority, metadata, ttl_seconds)
-
-
-def agent_messages_cleanup() -> dict[str, Any]:
-    """Delete all expired agent messages (where expires_at is set and in the past).
-
-    Returns:
-        Dict with 'deleted' count of removed messages.
-    """
-    deleted = cleanup_expired_messages()
-    return {"deleted": deleted}
-
-
-def agent_inbox(
-    agent_id: str,
-    status: str = "",
-    mark_read: bool = False,
-    limit: int = 50,
-) -> list[dict[str, Any]]:
-    """Retrieve messages for an agent, optionally filtering by status.
-
-    Args:
-        agent_id: The agent whose inbox to read
-        status: Filter by message status ('unread', 'read', or '' for all)
-        mark_read: If true, mark returned unread messages as read
-        limit: Maximum messages to return (default 50, max 500)
-
-    Returns:
-        List of message dicts, newest first.
-    """
-    return get_agent_inbox(agent_id, status=status, mark_read=mark_read, limit=limit)
-
-
 def agent_presence_update(
     agent_id: str,
     status: str = "online",
@@ -795,22 +638,6 @@ def agent_presence_update(
         The updated presence record.
     """
     return update_agent_presence(agent_id, status=status, metadata=metadata)
-
-
-def agent_presence_list(
-    status: str = "",
-    limit: int = 100,
-) -> list[dict[str, Any]]:
-    """List agent presence entries, optionally filtered by status.
-
-    Args:
-        status: Filter by presence status ('' for all)
-        limit: Maximum entries to return (default 100, max 500)
-
-    Returns:
-        List of presence dicts, most recently seen first.
-    """
-    return list_agent_presence(status=status, limit=limit)
 
 
 # ---------------------------------------------------------------------------
