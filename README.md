@@ -136,12 +136,12 @@ scripts/sync-memory.sh status
 ## 已验证功能
 
 1. **SQLite + FTS5 结构化记忆层**：支持 type/scope/tags/status/importance/confidence/source_agent/effectiveness 等字段，FTS5 全文检索。
-2. **HTTP MCP server**：25 个工具，任意 MCP 客户端可通过 `http://127.0.0.1:8318/mcp` 连接。
+2. **HTTP MCP server**：22 个工具，任意 MCP 客户端可通过 `http://127.0.0.1:8318/mcp` 连接。
 3. **Context Pack**：`memory_context` 按任务生成 compact 上下文包，支持 token budget 控制，按记忆类型分组，集成 active contradicts/supersedes warning，并将检索记忆标记为 untrusted data；命中注入特征的记忆会从普通 context body 过滤到 warnings。
 4. **Curator**：重复标题、低反馈、stale、archive、矛盾候选、skill_candidate 推广候选检测；默认 dry-run。
 5. **Feedback / effectiveness**：`memory_feedback` 记录反馈事件并更新 feedback_score、injected_count、ineffective_count、effectiveness_score。
 6. **Memory links / warnings**：支持 `related_to`、`supersedes`、`contradicts`、`supports`、`part_of`；`memory_warnings` 可根据 active links 产生冲突/替代提示。
-7. **Qdrant 语义检索**：`memory_vector_search` / `memory_vector_status` / `memory_vector_audit` 通过 `vector_store.py` 使用 Qdrant + 可配置 embedding API；`auto` provider 优先使用配置的 OpenAI-compatible API，未配置时尝试 Ollama API，最后使用 hashing fallback。
+7. **Qdrant 语义检索**：`memory_vector_search` / `memory_vector_status` 通过 `vector_store.py` 使用 Qdrant + 可配置 embedding API；`auto` provider 优先使用配置的 OpenAI-compatible API，未配置时尝试 Ollama API，最后使用 hashing fallback。
 8. **MemoryCore 控制台**：内置 Next.js 前端，展示记忆列表、agent 状态、curator 面板、配置管理（extraction LLM + embedding 模型直接写入 `config.yaml`）。
 9. **多客户端接入**：Hermes / Codex / Claude Code / Gemini / opencode 都作为普通 MCP 客户端接入；mcore 核心不依赖任一客户端配置仓库或私有 transcript。
 
@@ -166,10 +166,8 @@ Optional / degraded：
 | `memory_ingest` | 从显式传入的对话消息抽取并去重写入 candidate |
 | `memory_vector_search` | Qdrant 语义向量搜索 |
 | `memory_vector_status` | Qdrant 向量存储状态 |
-| `memory_vector_audit` | 检查 SQLite active memories 与 Qdrant points 的一致性 |
 | `memory_link_add` | 创建/更新记忆之间的有向关系 |
 | `memory_link_query` | 查询某条记忆 of incoming/outgoing links |
-| `memory_lineage` | 查询某条记忆的 supersession lineage |
 | `memory_supersede` | 将旧记忆标记为被新记忆替代并写入审计 |
 | `memory_warnings` | 根据 active links 返回冲突/替代 warning |
 | `memory_update` | 更新已有记忆的 title/content/status/confidence/importance |
@@ -177,7 +175,6 @@ Optional / degraded：
 | `memory_export` | 导出 schema-versioned JSON 记忆数据 |
 | `memory_import` | 导入记忆数据，支持 dry-run 冲突报告 |
 | `memory_backup` | 使用 SQLite backup API 创建数据库备份 |
-| `memory_rebuild_vectors` | 从 SQLite 记录重建 Qdrant 向量索引 |
 | `memory_stats` | 返回按 type/status/agent 分组的记忆统计与聚合分数 |
 
 ## CLI

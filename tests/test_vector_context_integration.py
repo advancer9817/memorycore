@@ -12,7 +12,7 @@ def test_vector_only_hits_retrieved():
     record = lm.add_memory_record(
         "project_memory",
         "A piece of information",
-        "Some random contents.",
+        "Some random contents that describe a piece of information in more detail for testing purposes.",
         importance=1.0,
         memory_id="38a2e1d7-d777-495f-a3d8-55a5b512c123",
     )

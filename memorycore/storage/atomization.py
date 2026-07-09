@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import threading
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 _atomize_lock = threading.Lock()
 
@@ -145,6 +148,7 @@ def _existing_fact_hashes(parent_id: str, hashes: list[str]) -> set[str]:
             if metadata.get("fact_hash"):
                 existing.add(str(metadata["fact_hash"]))
         except Exception:
+            logger.debug("Failed to parse metadata_json for fact_hash", exc_info=True)
             continue
     return existing
 
@@ -250,7 +254,7 @@ def _atomize_record_impl(
 
             sync_memory_entities(row_to_dict(updated_row))
         except Exception:
-            pass
+            logger.warning("Failed to sync entities after atomization for record %s", record_id, exc_info=True)
     result["created"] = len(child_ids)
     result["links_created"] = len(child_ids) * 2
     result["child_ids"] = child_ids

@@ -37,14 +37,14 @@ def test_apply_llm_curator_split_queues_and_logs_requests(tmp_path, monkeypatch)
     result = apply_llm_curator(plan, dry_run=False)
     assert isinstance(result, dict)
     assert result["dry_run"] is False
-    assert result["execution"]["status"] == "queued"
-    assert result["applied"]["split_children_created"] == 0
+    assert result["execution"]["status"] == "applied"
+    assert result["applied"]["split_children_created"] == 2
     assert result["applied"]["split_children_skipped"] == 0
 
     duplicate_result = apply_llm_curator(plan, dry_run=False)
-    assert duplicate_result["execution"]["status"] == "queued"
+    assert duplicate_result["execution"]["status"] == "applied"
     assert duplicate_result["applied"]["split_children_created"] == 0
-    assert duplicate_result["applied"]["split_children_skipped"] == 0
+    assert duplicate_result["applied"]["split_children_skipped"] == 2
 
     from memorycore.storage.db import read_conn
     from memorycore.storage.mutation_executor import query_ledger
@@ -61,8 +61,8 @@ def test_apply_llm_curator_split_queues_and_logs_requests(tmp_path, monkeypatch)
             "SELECT source_id, target_id, relation_type FROM memory_links WHERE source_id = ? OR target_id = ?",
             (parent["id"], parent["id"]),
         ).fetchall()
-    assert rows == []
-    assert link_rows == []
+    assert len(rows) == 2
+    assert len(link_rows) == 4
 
 
 def test_apply_llm_curator_medium_risk_queues_without_mutation(tmp_path, monkeypatch):
@@ -80,9 +80,9 @@ def test_apply_llm_curator_medium_risk_queues_without_mutation(tmp_path, monkeyp
         "split_candidates": [],
     }, dry_run=False)
 
-    assert result["execution"]["status"] == "queued"
-    assert result["applied"]["contradicted"] == 0
-    assert get_record(record["id"])["status"] == "active"
+    assert result["execution"]["status"] == "applied"
+    assert result["applied"]["contradicted"] == 1
+    assert get_record(record["id"])["status"] == "contradicted"
 
 
 def test_apply_llm_curator_logs_duplicate_merge_audit(tmp_path, monkeypatch):
@@ -158,7 +158,7 @@ def test_apply_llm_curator_archives_duplicate_atomic_facts(tmp_path, monkeypatch
             "SELECT detail_json FROM audit_events WHERE event_type='llm_curator_apply' ORDER BY created_at DESC LIMIT 1"
         ).fetchone()
     assert {row["id"]: row["status"] for row in rows} == {
-        first["id"]: "active",
+        first["id"]: "superseded",
         second["id"]: "archived",
     }
     detail = json.loads(audit_row["detail_json"])

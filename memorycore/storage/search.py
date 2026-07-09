@@ -109,7 +109,7 @@ _ensure_write_consumer()
 _GREETINGS = {"hi", "hello", "hey", "你好", "嗯", "好", "ok", "okay", "yes", "no"}
 _VECTOR_SEARCH_THRESHOLD = 0.35
 _MIN_CONTEXT_RELEVANCE_SCORE = 0.15
-_MIN_VECTOR_ONLY_RELEVANCE_SCORE = 0.30
+_MIN_VECTOR_ONLY_RELEVANCE_SCORE = 0.35
 _MIN_KEYWORD_LEXICAL_RELEVANCE_SCORE = 0.08
 _STOP_TERMS = {
     "a", "an", "and", "are", "as", "at", "be", "for", "from", "how", "i", "in",
@@ -704,11 +704,11 @@ def build_context_pack(
         mode = "strict"
     mode_settings = {
         "strict": {
-            "vector_top_k": 40,
+            "vector_top_k": 30,
             "entity_limit": 30,
             "min_context_score": _MIN_CONTEXT_RELEVANCE_SCORE,
             "min_vector_only_score": _MIN_VECTOR_ONLY_RELEVANCE_SCORE,
-            "vector_search_threshold": 0.32,
+            "vector_search_threshold": 0.35,
         },
         "balanced": {
             "vector_top_k": 30,
@@ -857,6 +857,8 @@ def build_context_pack(
         high_lexical_bonus = 0.15 if lexical >= 0.5 else 0.0
 
         parent_penalty = -0.05 if prefer_atomic and not include_parent and _metadata(r).get("kind") == "parent_memory" else 0.0
+        content_len = len(r.get("content") or "")
+        short_content_penalty = 0.5 if content_len < 50 else (0.85 if content_len < 80 else 1.0)
         candidate_discount = 0.85 if r.get("status") == "candidate" else 1.0
         feedback = max(-1.0, min(1.0, float(r.get("feedback_score") or 0)))
         usage_rate = min(1.0, float(r.get("injected_count") or 0) / 10.0)
@@ -875,6 +877,7 @@ def build_context_pack(
             + feedback * 0.03
             + _recency_score(r) * recency_weight)
             * candidate_discount
+            * short_content_penalty
         )
 
     fallback_used = False

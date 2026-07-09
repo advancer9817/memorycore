@@ -82,7 +82,10 @@ def test_run_llm_curator_applies_and_rebuilds_vectors(monkeypatch):
 
     report = {"summary": {"semantic_duplicates": 1}, "errors": []}
     governance = {"decisions_created": 1, "decisions": [], "auto_applied": [{"applied": {"downgraded": 1}}]}
-    monkeypatch.setattr(clm, "llm_curator_report", lambda **_: report)
+    monkeypatch.setattr(
+        "memorycore.storage.curator_llm.report.llm_curator_report",
+        lambda **_: report,
+    )
     monkeypatch.setattr(
         "memorycore.storage.governance.convert_llm_findings_to_decisions",
         lambda report, auto_apply: governance,
