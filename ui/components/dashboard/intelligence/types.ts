@@ -22,6 +22,7 @@ export interface GovernanceDecision {
   llm_confidence: number;
   risk_level: string;
   review_status: string;
+  approval_kind?: string | null;
   policy_reason: string;
   finding?: Record<string, unknown>;
   llm_trace?: Record<string, unknown>;

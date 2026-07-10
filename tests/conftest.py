@@ -6,11 +6,48 @@ import memorycore as lm
 @pytest.fixture(autouse=True)
 def isolated_memory_db(tmp_path, monkeypatch):
     db = tmp_path / "test_memory.sqlite3"
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "temporal:\n"
+        "  enabled: false\n"
+        "  auto_supersede_enabled: false\n"
+        "embedding:\n"
+        "  provider: hashing\n"
+        "qdrant:\n"
+        "  url: ''\n"
+        f"  path: {tmp_path / 'qdrant'}\n",
+        encoding="utf-8",
+    )
     monkeypatch.setenv("LOCAL_MEMORY_DB", str(db))
+    monkeypatch.setenv("LOCAL_MEMORY_CONFIG", str(config))
     lm._INITIALIZED_DB_PATHS.clear()
+
+    from memorycore.models import invalidate_config_cache
+    from memorycore import vector_store
+    invalidate_config_cache()
+    vector_store.reset_vector_store()
+
+    class IsolatedVectorStore:
+        available = False
+
+        def search(self, *_args, **_kwargs):
+            return []
+
+        def upsert(self, *_args, **_kwargs):
+            return True
+
+        def delete(self, *_args, **_kwargs):
+            return True
+
+        def status(self):
+            return {"available": False, "test_isolated": True, "count": 0}
+
+    isolated_vector_store = IsolatedVectorStore()
+    monkeypatch.setattr(vector_store, "get_vector_store", lambda _cfg=None: isolated_vector_store)
 
     # Invalidate stats cache
     import memorycore.storage.crud as crud
+    monkeypatch.setattr(crud, "_get_vector_store", lambda _cfg=None: isolated_vector_store)
     crud._stats_cache.clear()
     crud._stats_cache_ts = 0.0
 
@@ -77,6 +114,8 @@ def isolated_memory_db(tmp_path, monkeypatch):
     monkeypatch.setattr(crud, "_sync_to_vector", mock_sync_to_vector)
 
     yield db
+    vector_store.reset_vector_store()
+    invalidate_config_cache()
     lm._INITIALIZED_DB_PATHS.clear()
     crud._stats_cache.clear()
     crud._stats_cache_ts = 0.0

@@ -299,10 +299,10 @@ function GovernancePageInner() {
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <CheckCircle2 className="h-12 w-12 text-emerald-500 mb-4" />
             <p className="text-lg font-medium text-emerald-300">
-              {messages.governance.allClear}
+              {messages.governance.cockpit.allClear}
             </p>
             <p className="text-sm text-zinc-500 mt-1">
-              {messages.governance.allClearDetail}
+              {messages.governance.cockpit.allClearDetail}
             </p>
           </div>
         ) : (

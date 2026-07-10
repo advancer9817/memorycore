@@ -163,6 +163,42 @@ class TestIngest:
         assert call_kwargs.kwargs["status"] == "candidate"
         assert "extracted" in call_kwargs.kwargs["tags"]
 
+    def test_extracted_title_and_seed_feedback_are_used(self):
+        from memorycore.extraction import ExtractionConfig, ExtractedFact
+        from unittest.mock import patch
+
+        vs = self._make_mock_vs(search_results=[])
+        add_fn = MagicMock()
+        feedback_fn = MagicMock()
+        fact = ExtractedFact(
+            text="User uses Neovim with a Lua configuration and lazy.nvim plugin management.",
+            title="Neovim configuration preference",
+            importance=0.8,
+            memory_type="user_profile",
+        )
+
+        with patch("memorycore.dedup.extract_facts", return_value=([fact], 0.1)):
+            result = ingest(
+                [{"role": "user", "content": "I use Neovim"}],
+                _extraction_config=ExtractionConfig(api_key="sk-test"),
+                _vector_store=vs,
+                _add_memory_fn=add_fn,
+                _update_memory_fn=MagicMock(),
+                _find_title_match_fn=lambda *_: None,
+                _add_feedback_fn=feedback_fn,
+            )
+
+        assert result.added == 1
+        assert add_fn.call_args.kwargs["title"] == "Neovim configuration preference"
+        memory_id = add_fn.call_args.kwargs["memory_id"]
+        feedback_fn.assert_called_once_with(
+            memory_id,
+            0.4,
+            note="auto:seed",
+            source_agent="system",
+            count_as_injection=False,
+        )
+
     def test_duplicate_fact_skipped(self):
         from memorycore.extraction import ExtractionConfig, ExtractedFact
         from unittest.mock import patch
@@ -185,6 +221,67 @@ class TestIngest:
         assert result.skipped == 1
         assert result.added == 0
         add_fn.assert_not_called()
+
+    def test_exact_active_title_updates_existing_instead_of_adding(self):
+        from memorycore.extraction import ExtractionConfig, ExtractedFact
+        from unittest.mock import patch
+
+        vs = self._make_mock_vs(search_results=[])
+        add_fn = MagicMock()
+        upd_fn = MagicMock()
+        facts = [ExtractedFact(text="User uses Neovim with Lua configuration")]
+        title = "User uses Neovim with Lua configuration"
+
+        with patch("memorycore.dedup.extract_facts", return_value=(facts, 0.5)):
+            result = ingest(
+                [{"role": "user", "content": "I use Neovim"}],
+                _extraction_config=ExtractionConfig(api_key="sk-test"),
+                _vector_store=vs,
+                _add_memory_fn=add_fn,
+                _update_memory_fn=upd_fn,
+                _find_title_match_fn=lambda candidate, memory_type: {
+                    "id": "existing-id",
+                    "title": title,
+                    "content": "User uses Neovim",
+                    "type": memory_type,
+                } if candidate == title else None,
+            )
+
+        assert result.updated == 1
+        assert result.added == 0
+        add_fn.assert_not_called()
+        upd_fn.assert_called_once_with(
+            "existing-id",
+            new_title=title,
+            new_content="User uses Neovim with Lua configuration",
+        )
+        assert vs.upsert.call_args.args[0] == "existing-id"
+
+    def test_exact_active_title_and_content_is_skipped(self):
+        from memorycore.extraction import ExtractionConfig, ExtractedFact
+        from unittest.mock import patch
+
+        text = "User uses Neovim"
+        vs = self._make_mock_vs(search_results=[])
+        add_fn = MagicMock()
+        upd_fn = MagicMock()
+
+        with patch("memorycore.dedup.extract_facts", return_value=([ExtractedFact(text=text)], 0.5)):
+            result = ingest(
+                [{"role": "user", "content": text}],
+                _extraction_config=ExtractionConfig(api_key="sk-test"),
+                _vector_store=vs,
+                _add_memory_fn=add_fn,
+                _update_memory_fn=upd_fn,
+                _find_title_match_fn=lambda *_: {
+                    "id": "existing-id", "title": text, "content": text, "type": "episodic_memory"
+                },
+            )
+
+        assert result.skipped == 1
+        assert result.added == 0
+        add_fn.assert_not_called()
+        upd_fn.assert_not_called()
 
     def test_update_fact_adds_candidate_with_supersedes(self):
         from memorycore.extraction import ExtractionConfig, ExtractedFact

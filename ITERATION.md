@@ -5179,3 +5179,117 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 - governance.py (1,281行) 拆分 — P2
 - Phase 4 提取-召回闭环增强 — P2，ExtractedFact title 字段 + 种子反馈
 - Graph 模块样式统一 — P2
+
+---
+
+## 迭代 29 — 深度审计续作计划基线（2026-07-10）
+
+### 已完成
+
+1. 在 `docs/plans/2026-07-09-deep-audit-iteration-plan.md` 追加 R1-R7 续作执行计划，明确每批范围、顺序、验收门槛和数据安全约束。
+2. 在 `TODO.md` 建立对应的可勾选任务树，覆盖治理止血、测试隔离、召回闭环、后端拆分、前端整治、数据维护和最终验证。
+3. 明确迭代日志只记录已实现且已验证内容；后续每完成一个批次再追加实绩。
+
+### 基线
+
+- Git 工作区在计划写入前干净，分支为 `main`，与 `origin/main` 同步。
+- 当前数据库约 360 MiB；三天平均 hit_rate 0.876、cross_retrieval_rate 0.031。
+- 当前遗留：148 条 active governance_split 从未召回、1 组 active 重复标题、6 个 Qdrant 隔离 xfail。
+
+### R1 治理止血（已完成）
+
+1. `llm_curator.split_enabled` 默认设为 `false`；split 检测改为仅显式 opt-in 才执行，并增加开关回归测试。
+2. ingest 新增 active `title + type` 精确匹配：内容相同直接跳过，内容变化原位更新现有记录，不再创建重复记忆。
+3. 使用 SQLite backup API 创建 `backups/pre-iteration29-r1-20260710.sqlite3`，并保存 149 条变更对象的 JSON 回滚清单。
+4. 将 148 条未召回 `governance_split` 记忆降级为 stale，归档 1 条 active 重复记忆；同步删除对应 Qdrant points。
+5. 复核 `curator_llm/report.py` 的两个审计异常分支均已有 `logger.debug(..., exc_info=True)`，无需重复修改。
+
+### R1 验证
+
+- 数据指标：active governance_split 未召回 `148 -> 0`；active 重复标题组 `1 -> 0`。
+- 审计：本轮产生 150 条 `memory_update` 审计事件。
+- 测试：`31 passed, 3 skipped`；SQLite `PRAGMA quick_check` 返回 `ok`。
+
+### R2 测试可信度（已完成）
+
+1. 公共 pytest fixture 现在为每个用例提供独立 SQLite/config，并使用无外部状态的向量 stub；显式 Qdrant 测试继续使用自己的 mock。
+2. `temporal.enabled` 总开关接入写入时自动 supersession 流程，关闭后不再创建或应用时序治理决策。
+3. 移除 6 个 Qdrant 状态泄漏临时 `xfail`，并补 temporal master switch 回归测试。
+4. 强关键词、强向量或实体命中不再受短内容降权影响，避免高置信相关候选被边界阈值误杀。
+5. 为项目 `.venv` 补齐 `pytest==9.0.3` 与 `pytest-timeout==2.4.0`。
+
+### R2 验证
+
+- 定向测试：`108 passed`。
+- 后端全量：`495 passed, 7 skipped, 0 failed, 0 xfailed`，耗时 34.92 秒。
+
+### R3 召回闭环（已完成）
+
+1. 提取 prompt 改为 `title + content` 原子事实 schema；`ExtractedFact` 增加 title，解析器继续兼容旧 `text`/字符串格式。
+2. dedup 优先使用 LLM 语义标题，缺失时回退内容前 80 字符；extraction 来源跳过事后正则 atomize。
+3. 新记忆按 importance、关联、历史高召回类型和内容长度计算种子反馈；种子写入反馈与审计，但不增加真实 `injected_count`。
+4. 高召回类型缓存按数据库路径隔离并设 5 分钟 TTL。
+5. FTS 与向量双命中候选使用 1.5 倍融合权重；强关键词、强向量和实体证据豁免短内容惩罚。
+
+### R3 验证
+
+- 定向测试：`68 passed`。
+- 后端全量：`499 passed, 7 skipped, 0 failed`，耗时 37.69 秒。
+
+### R4 后端拆分（已完成）
+
+1. `search.py` 抽出 `context_pack.py`，保留原公开入口和 `_vector_search_ids` monkeypatch 兼容点。
+2. `governance.py` 抽出 `governance_ops.py` 与 `governance_mutations.py`，保留 storage re-export 和原调用路径。
+3. `server.py` 抽出 `server_runtime.py`，MCP 工具注册与 CLI/服务启动逻辑分离；CLI monkeypatch 接口保持兼容。
+4. `frontend.py` 拆为 `frontend_v1.py`、`frontend_helpers.py`、`frontend_metrics.py`、`frontend_http.py`；认证配置和 job registry 保持单实例共享。
+
+### R4 验证
+
+- 核心入口行数：frontend 589、governance 560、search 640、server 647，均低于 700 行。
+- 前端/API 定向测试：`42 passed`；搜索/治理/CLI 定向测试：`50 passed`。
+- 后端全量：`499 passed, 7 skipped, 0 failed`，耗时 37.79 秒。
+
+### R5 前端整治（已完成）
+
+1. Graph 样式集中到 `graph-theme.ts`；静态 JSX 样式改为 Tailwind，Three.js 背景、雾、灯光、选中和弱化颜色改用统一场景常量。
+2. Graph3D 使用 `three` 与 `3d-force-graph` 声明替换图实例、材质、几何体、缓存和节点坐标的 `any`，聚焦节点前完整收窄布局坐标。
+3. `FilterComponent.tsx` 抽出 `MemoryFilterDialog.tsx`；原文件和弹窗文件分别为 275、276 行。
+4. `MemoryOperationsPanel.tsx` 拆为状态容器、纯视图和类型模块，分别为 155、167、81 行，保留原轮询与 localStorage 任务恢复行为。
+5. `form-view.tsx` 拆为字段、基础/LLM、备份和策略模块，主文件降至 55 行；移除 `AnySettings = any`，改用 `unknown` 配置边界。
+
+### R5 验证
+
+- `pnpm exec tsc --noEmit`：通过，0 个类型错误；`pnpm build`：通过，10 个路由成功生成并完成 standalone 资源复制。
+- 显式 `any`：6 处，低于 20；Graph `style={{...}}`：4 处，低于 5。
+- 本轮所有目标及拆分组件均低于 300 行，最大为 `MemoryFilterDialog.tsx` 276 行。
+- Playwright 运行态检查：`/settings`、`/`、`/graph` 均返回 200，无 console/page error；Graph canvas 为 1440x796、1445 色，确认非空渲染。
+
+### R6 数据维护（已完成）
+
+1. 新增 `mcore maintenance`：默认 30 天 dry-run；`--apply` 时先使用 SQLite backup API 创建完整备份，再按表导出 gzip JSONL 和 SHA-256 manifest，数量校验通过后才在单事务中删除并执行 checkpoint/VACUUM。
+2. 归档范围限定为设备本地 `audit_events` 和 terminal governance decision/execution/mutation；待审、运行中和近期记录保持在线。manifest 明确标记 `device_local=true`、`import_supported=false`，不改变 audit 不跨设备导入策略。
+3. 新增 `maintenance --stats` 归档统计查询；无候选的 apply 快速返回，不重复制造整库备份和 VACUUM。
+4. 新增 `mcore-maintenance.service/.timer`，接入 systemd 与 cron 安装路径。本机 weekly timer 使用 14 天保留期；CLI 通用默认保持 30 天。
+5. 真实库 30 天 dry-run 仅估算约 19.8 MiB，无法满足体积门槛；选择能达到目标且比 7 天多保留一周在线历史的 14 天窗口执行首次压缩。
+
+### R6 数据与验证
+
+- 瘦身前备份：`backups/pre-maintenance-20260710T022853166414Z.sqlite3`，382,644,224 B，`quick_check=ok`。
+- 主归档：`backups/maintenance-archives/20260710T022853166414Z`，29,944 行，压缩文件合计 23,732,404 B；归档后 14 天 dry-run 候选为 0。
+- 删除：audit 14,391、decision 5,880、execution 3,820、mutation 5,853；VACUUM 后数据库 `382,644,224 -> 128,389,120 B`（约 122.4 MiB）。
+- 数据库 `PRAGMA integrity_check=ok`；维护/transfer 定向测试 `9 passed`，新增 maintenance 单测 `4 passed`。
+- `mcore.service`、`mcore-ui.service`、curator timer、maintenance timer 均为 active；后端与 UI 健康请求均返回 200。
+
+### R7 收尾验证（已完成部分）
+
+1. 后端全量测试：`503 passed, 7 skipped, 1 warning`，耗时 40.22 秒；无 failed、xfail 或 unexpected xpass。
+2. 前端：`pnpm exec tsc --noEmit` 通过；production build 在 maintenance timer 安装流程中再次通过，10 个路由成功生成。
+3. 数据状态：active 且从未注入的 `governance_split` 为 0；active `title + type` 重复组为 0；数据库 128,389,120 B，`integrity_check=ok`。
+4. 结构门槛：Python 核心文件最大 677 行；前端显式 `any` 6 处；Graph inline style 4 处。
+5. 运行状态：后端和 UI 健康请求均为 200；后端、UI、curator timer、maintenance timer 均 active。
+
+### R7 指标观察
+
+- 最近 1 天：29 个 context quality events，hit_rate 0.917、平均 used_count 9.66、cross_retrieval_rate 0.011、vector_avg_score 0.579。
+- 最近 3 天：90 个 events，hit_rate 0.883、平均 used_count 12.13、cross_retrieval_rate 0.032、vector_avg_score 0.524。
+- hit_rate 当前高于 0.85 基线，但 cross retrieval 尚未达到 0.15 目标；`TODO.md` 保留连续跟踪项，不将时间窗口指标标记为完成。

@@ -62,6 +62,9 @@ ADDITIVE_EXTRACTION_PROMPT = """\
 3. 保留细节：文件路径、配置值、版本号、端口号、命令参数
 4. 捕获变化：记录"从X改为Y"而非只记录最终状态
 5. 面向未来：问自己"下次对话时这条信息是否有用？"
+6. 原子化：每条事实只表达一个独立结论；复杂决策拆为决策、原因、影响等多条事实
+7. 标题完整：title 是不超过 80 字符的语义摘要，不得直接截取 content 开头
+8. 内容紧凑：content 通常控制在 50-300 字符，保留使事实自包含所需的具体细节
 
 # 输出格式
 
@@ -69,7 +72,8 @@ ADDITIVE_EXTRACTION_PROMPT = """\
   "memory": [
     {{
       "id": "0",
-      "text": "...",
+      "title": "...",
+      "content": "...",
       "type": "decision",
       "importance": 0.8,
       "linked_memory_ids": ["<existing-uuid>"]
@@ -99,15 +103,15 @@ ADDITIVE_EXTRACTION_PROMPT = """\
 
 Input: user: "mcore-context.sh 的 curl 超时 1.8s 太短了" / assistant: "根因是 Qdrant 向量查询偶发超过 1.5s，建议改为 2.5s" / user: "改了，同时 token_budget 从 1500 改到 2000"
 Output: {{"memory": [
-  {{"id": "0", "text": "mcore-context.sh 的 MCP 调用超时从 1.8s 改为 2.5s，根因是 Qdrant 向量查询偶发超过 1.5s", "type": "bug_fix", "importance": 0.7}},
-  {{"id": "1", "text": "mcore-context.sh 的 token_budget 从 1500 改为 2000", "type": "environment_fact", "importance": 0.6}}
+  {{"id": "0", "title": "mcore context hook 超时修复", "content": "mcore-context.sh 的 MCP 调用超时从 1.8s 改为 2.5s，根因是 Qdrant 向量查询偶发超过 1.5s", "type": "bug_fix", "importance": 0.7}},
+  {{"id": "1", "title": "mcore context token budget 调整", "content": "mcore-context.sh 的 token_budget 从 1500 改为 2000", "type": "environment_fact", "importance": 0.6}}
 ]}}
 
 Input: user: "不要在 PR 描述里加 emoji" / assistant: "好的，以后不加了"
-Output: {{"memory": [{{"id": "0", "text": "用户偏好：PR 描述中不使用 emoji", "type": "feedback", "importance": 0.8}}]}}
+Output: {{"memory": [{{"id": "0", "title": "PR 描述不使用 emoji", "content": "用户偏好：PR 描述中不使用 emoji", "type": "feedback", "importance": 0.8}}]}}
 
 Input: user: "决定用 SQLite 而不是 PostgreSQL，因为本项目是单机部署" / assistant: "合理的选择"
-Output: {{"memory": [{{"id": "0", "text": "项目选择 SQLite 而非 PostgreSQL 作为数据库，原因是单机部署场景", "type": "decision", "importance": 0.9}}]}}
+Output: {{"memory": [{{"id": "0", "title": "项目数据库选择 SQLite", "content": "项目选择 SQLite 而非 PostgreSQL 作为数据库，原因是单机部署场景", "type": "decision", "importance": 0.9}}]}}
 
 Input: user: "Hi" / assistant: "你好，有什么可以帮你的？"
 Output: {{"memory": []}}
@@ -212,6 +216,7 @@ def extraction_config_from_dict(cfg: dict[str, Any]) -> ExtractionConfig:
 @dataclass
 class ExtractedFact:
     text: str
+    title: str = ""
     linked_memory_ids: list[str] = field(default_factory=list)
     raw_id: str = ""          # sequential id from LLM response ("0", "1", ...)
     importance: float = 0.5   # LLM-assigned importance 0.0–1.0
@@ -438,7 +443,7 @@ def _parse_response(raw: str, *, min_importance: float = 0.3) -> list[ExtractedF
             if text:
                 facts.append(ExtractedFact(text=text))
         elif isinstance(item, dict):
-            text = item.get("text", "").strip()
+            text = str(item.get("content") or item.get("text") or "").strip()
             if not text:
                 continue
             linked = item.get("linked_memory_ids", [])
@@ -453,6 +458,7 @@ def _parse_response(raw: str, *, min_importance: float = 0.3) -> list[ExtractedF
                 continue
             facts.append(ExtractedFact(
                 text=text,
+                title=str(item.get("title") or "").strip(),
                 linked_memory_ids=[str(x) for x in linked if x],
                 raw_id=str(item.get("id", "")),
                 importance=imp,

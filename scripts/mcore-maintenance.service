@@ -1,0 +1,14 @@
+[Unit]
+Description=MemoryCore weekly audit and governance archive
+After=mcore.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=__ROOT__
+EnvironmentFile=-__ENV_FILE__
+Environment=PYTHONPATH=__ROOT__
+Environment=LOCAL_MEMORY_CONFIG=__CONFIG__
+Environment=LOCAL_MEMORY_DB=__DB__
+ExecStart=__PYTHON__ -m memorycore maintenance --retention-days __RETENTION_DAYS__ --apply
+StandardOutput=append:__ROOT__/logs/maintenance.log
+StandardError=append:__ROOT__/logs/maintenance.log

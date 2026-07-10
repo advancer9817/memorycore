@@ -74,6 +74,21 @@ class TestParseResponse:
         assert facts[0].text == "User uses Neovim"
         assert facts[0].raw_id == "0"
 
+    def test_title_and_content_schema(self):
+        raw = json.dumps({"memory": [{
+            "id": "0",
+            "title": "Editor preference",
+            "content": "User uses Neovim with Lua configuration",
+        }]})
+        facts = _parse_response(raw)
+        assert facts[0].title == "Editor preference"
+        assert facts[0].text == "User uses Neovim with Lua configuration"
+
+    def test_legacy_text_schema_keeps_empty_title(self):
+        facts = _parse_response('{"memory": [{"id": "0", "text": "Legacy fact"}]}')
+        assert facts[0].title == ""
+        assert facts[0].text == "Legacy fact"
+
     def test_multiple_facts(self):
         raw = json.dumps({"memory": [
             {"id": "0", "text": "User is a developer"},

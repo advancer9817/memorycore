@@ -77,8 +77,8 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
 
   useEffect(() => {
     if (memory) {
-      setValidFrom((memory as any).valid_from ? (memory as any).valid_from.slice(0, 10) : "");
-      setValidUntil((memory as any).valid_until ? (memory as any).valid_until.slice(0, 10) : "");
+      setValidFrom(memory.valid_from ? memory.valid_from.slice(0, 10) : "");
+      setValidUntil(memory.valid_until ? memory.valid_until.slice(0, 10) : "");
     }
   }, [memory?.id]);
 

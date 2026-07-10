@@ -3,7 +3,8 @@ from pathlib import Path
 import memorycore as lm
 
 
-def test_default_config_path_is_project_config():
+def test_default_config_path_is_project_config(monkeypatch):
+    monkeypatch.delenv("LOCAL_MEMORY_CONFIG", raising=False)
     assert lm.config_path() == Path(lm.DEFAULT_ROOT) / "config.yaml"
 
 

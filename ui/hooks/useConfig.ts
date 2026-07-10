@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import axios from 'axios';
+import { getErrorMessage } from '@/lib/errors';
 import { useDispatch } from 'react-redux';
 import { AppDispatch } from '@/store/store';
 import {
@@ -40,8 +41,8 @@ export const useConfig = (): UseConfigApiReturn => {
       const response = await axios.get(`${getApiBaseUrl()}/api/v1/config`);
       dispatch(setConfigSuccess(response.data));
       setIsLoading(false);
-    } catch (err: any) {
-      const errorMessage = err.response?.data?.detail || err.message || 'Failed to fetch configuration';
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err, 'Failed to fetch configuration');
       dispatch(setConfigError(errorMessage));
       setError(errorMessage);
       setIsLoading(false);
@@ -57,8 +58,8 @@ export const useConfig = (): UseConfigApiReturn => {
       dispatch(setConfigSuccess(response.data));
       setIsLoading(false);
       return response.data;
-    } catch (err: any) {
-      const errorMessage = err.response?.data?.detail || err.message || 'Failed to save configuration';
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err, 'Failed to save configuration');
       dispatch(setConfigError(errorMessage));
       setError(errorMessage);
       setIsLoading(false);
@@ -74,8 +75,8 @@ export const useConfig = (): UseConfigApiReturn => {
       dispatch(setConfigSuccess(response.data));
       setIsLoading(false);
       return response.data;
-    } catch (err: any) {
-      const errorMessage = err.response?.data?.detail || err.message || 'Failed to reset configuration';
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err, 'Failed to reset configuration');
       dispatch(setConfigError(errorMessage));
       setError(errorMessage);
       setIsLoading(false);
@@ -91,8 +92,8 @@ export const useConfig = (): UseConfigApiReturn => {
       dispatch(updateLLMProvider(response.data));
       setIsLoading(false);
       return response.data;
-    } catch (err: any) {
-      const errorMessage = err.response?.data?.detail || err.message || 'Failed to save LLM configuration';
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err, 'Failed to save LLM configuration');
       setError(errorMessage);
       setIsLoading(false);
       throw new Error(errorMessage);
@@ -107,8 +108,8 @@ export const useConfig = (): UseConfigApiReturn => {
       dispatch(updateEmbedderProvider(response.data));
       setIsLoading(false);
       return response.data;
-    } catch (err: any) {
-      const errorMessage = err.response?.data?.detail || err.message || 'Failed to save Embedder configuration';
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err, 'Failed to save Embedder configuration');
       setError(errorMessage);
       setIsLoading(false);
       throw new Error(errorMessage);

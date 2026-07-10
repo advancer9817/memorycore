@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 import memorycore as lm
@@ -26,6 +28,25 @@ def test_feedback_rejects_invalid_score_and_missing_memory():
 
     with pytest.raises(ValueError, match="memory not found"):
         lm.add_feedback("missing", 1)
+
+
+def test_seed_feedback_does_not_increment_injected_count():
+    record = lm.add_memory_record("project_memory", "Seed feedback", "Content")
+
+    result = lm.add_feedback(
+        record["id"],
+        0.4,
+        note="auto:seed",
+        source_agent="system",
+        count_as_injection=False,
+    )
+
+    assert result["memory"]["injected_count"] == 0
+    assert result["memory"]["feedback_score"] == 0.4
+    audits = lm.get_audit_log(memory_id=record["id"], event_type="memory_feedback")
+    detail = json.loads(audits[0]["detail_json"])
+    assert detail["note"] == "auto:seed"
+    assert detail["count_as_injection"] is False
 
 
 def test_update_status_validates_and_returns_record():

@@ -287,7 +287,7 @@ def add_memory_record(
         process_auto_supersession(result, source_agent=source_agent)
     except Exception as exc:
         logger.warning("process_auto_supersession: failed for id=%s: %s", result.get("id"), exc)
-    if should_atomize(result, atomize):
+    if source != "extraction" and should_atomize(result, atomize):
         try:
             atomize_record(
                 result["id"],
@@ -556,7 +556,11 @@ def memory_lineage(memory_id: str, limit: int = 100) -> dict[str, Any]:
 
 
 def add_feedback(
-    memory_id: str, score: float, note: str = "", source_agent: str = "agent"
+    memory_id: str,
+    score: float,
+    note: str = "",
+    source_agent: str = "agent",
+    count_as_injection: bool = True,
 ) -> dict[str, Any]:
     score_value = finite_float(score, "score", -10.0, 10.0)
     event_id = str(uuid.uuid4())
@@ -576,8 +580,9 @@ def add_feedback(
             (memory_id,),
         ).fetchone()
         inj, ineff, eff = int(cur[0] or 0), int(cur[1] or 0), float(cur[2] or 0.5)
-        if score_value > 0:
+        if score_value > 0 and count_as_injection:
             inj += 1
+        if score_value > 0:
             eff = min(1.0, eff + 0.05 * score_value)
         elif score_value < 0:
             ineff += 1
@@ -588,6 +593,16 @@ def add_feedback(
             (float(avg), inj, ineff, round(eff, 4), ts, memory_id),
         )
         row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
+    log_audit_event(
+        "memory_feedback",
+        memory_id=memory_id,
+        agent=source_agent,
+        detail={
+            "score": score_value,
+            "note": note or "",
+            "count_as_injection": bool(count_as_injection),
+        },
+    )
     return {"feedback_id": event_id, "memory": row_to_dict(row)}
 
 

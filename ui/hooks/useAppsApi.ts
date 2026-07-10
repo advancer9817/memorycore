@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import axios from 'axios';
+import { getErrorMessage } from '@/lib/errors';
 import { useDispatch, useSelector } from 'react-redux';
 import { AppDispatch, RootState } from '@/store/store';
 import {
@@ -123,8 +124,8 @@ export const useAppsApi = (): UseAppsApiReturn => {
         apps: response.data.apps,
         total: response.data.total
       };
-    } catch (err: any) {
-      const errorMessage = err.message || 'Failed to fetch apps';
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err, 'Failed to fetch apps');
       setError(errorMessage);
       dispatch(setAppsError(errorMessage));
       setIsLoading(false);
@@ -141,8 +142,8 @@ export const useAppsApi = (): UseAppsApiReturn => {
       );
       dispatch(setSelectedAppDetails(response.data));
       setIsLoading(false);
-    } catch (err: any) {
-      const errorMessage = err.message || 'Failed to fetch app details';
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err, 'Failed to fetch app details');
       dispatch(setSelectedAppError(errorMessage));
       setError(errorMessage);
       setIsLoading(false);
@@ -163,8 +164,8 @@ export const useAppsApi = (): UseAppsApiReturn => {
         page: response.data.page,
       }));
       setIsLoading(false);
-    } catch (err: any) {
-      const errorMessage = err.message || 'Failed to fetch app memories';
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err, 'Failed to fetch app memories');
       dispatch(setCreatedMemoriesError(errorMessage));
       setError(errorMessage);
       setIsLoading(false);
@@ -184,8 +185,8 @@ export const useAppsApi = (): UseAppsApiReturn => {
         page: response.data.page,
       }));
       setIsLoading(false);
-    } catch (err: any) {
-      const errorMessage = err.message || 'Failed to fetch accessed memories';
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err, 'Failed to fetch accessed memories');
       dispatch(setAccessedMemoriesError(errorMessage));
       setError(errorMessage);
       setIsLoading(false);

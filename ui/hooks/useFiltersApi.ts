@@ -12,6 +12,7 @@ import {
   setSelectedCategories
 } from '@/store/filtersSlice';
 import { getApiBaseUrl } from '@/lib/api-url';
+import { getErrorMessage } from '@/lib/errors';
 
 interface CategoriesResponse {
   categories: Category[];
@@ -46,8 +47,8 @@ export const useFiltersApi = (): UseFiltersApiReturn => {
         total: response.data.total
       }));
       setIsLoading(false);
-    } catch (err: any) {
-      const errorMessage = err.message || 'Failed to fetch categories';
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err, 'Failed to fetch categories');
       setError(errorMessage);
       dispatch(setCategoriesError(errorMessage));
       setIsLoading(false);

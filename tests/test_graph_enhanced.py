@@ -119,7 +119,6 @@ class TestWarningsForNewTypes:
             f"Expected 'failure_pattern' in warnings, got: {relation_types_in_warnings}"
         )
 
-    @pytest.mark.xfail(reason="Qdrant singleton state leaks between tests")
     def test_causes_warning_severity_is_medium(self):
         a = _add("Cause node")
         b = _add("Effect node")
@@ -152,7 +151,6 @@ class TestWarningsForNewTypes:
         relation_types = {w["relation_type"] for w in warnings}
         assert "contradicts" in relation_types, "contradicts should still trigger warnings"
 
-    @pytest.mark.xfail(reason="Qdrant singleton state leaks between tests")
     def test_existing_supersedes_still_triggers_warning(self):
         a = _add("New fact")
         b = _add("Old fact")
@@ -248,7 +246,6 @@ class TestGraphAPI:
         assert "edges" in payload
         assert isinstance(payload["edges"], list)
 
-    @pytest.mark.xfail(reason="Qdrant singleton state leaks between tests")
     def test_graph_api_status_all_includes_archived_part_of_edges(self):
         """status=all should keep links whose endpoints are not both active."""
         parent_id = _add("Archived graph parent")

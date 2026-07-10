@@ -8,6 +8,24 @@ from memorycore.storage.governance import rollback_governance_decision
 from memorycore.storage.db import managed_conn
 
 
+def test_temporal_master_switch_disables_write_path(monkeypatch, tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "temporal:\n"
+        "  enabled: false\n"
+        "  auto_supersede_enabled: true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("LOCAL_MEMORY_CONFIG", str(cfg))
+    invalidate_config_cache()
+
+    old = add_memory_record("feedback", "Retry limit", "Retry limit is three attempts")
+    add_memory_record("feedback", "Retry limit", "Retry limit is three attempts")
+
+    assert get_record(old["id"])["status"] == "active"
+    assert list_governance_decisions(limit=5) == []
+
+
 def _enable_auto(monkeypatch, tmp_path, auto_threshold: float = 0.94, review_threshold: float = 0.80) -> None:
     cfg = tmp_path / "config.yaml"
     cfg.write_text(

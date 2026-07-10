@@ -399,7 +399,7 @@ if [ "$INSTALL_SYSTEMD" -eq 1 ]; then
     QDRANT_SERVICE=""
   fi
 
-  msg systemd "Installing mcore.service and mcore-curator.timer"
+  msg systemd "Installing mcore.service, curator timer, and maintenance timer"
   cp "$ROOT/scripts/mcore.service" "$SYSTEMD_USER_DIR/mcore.service"
   replace_token "$SYSTEMD_USER_DIR/mcore.service" __ROOT__ "$ROOT"
   replace_token "$SYSTEMD_USER_DIR/mcore.service" __PYTHON__ "$PY"
@@ -425,9 +425,18 @@ if [ "$INSTALL_SYSTEMD" -eq 1 ]; then
   replace_token "$SYSTEMD_USER_DIR/mcore-curator.service" __LLM_CURATOR_SIM_THRESHOLD__ "$LLM_CURATOR_SIM_THRESHOLD"
   replace_token "$SYSTEMD_USER_DIR/mcore-curator.service" __MCORE_SERVICE__ "mcore.service"
 
+  cp "$ROOT/scripts/mcore-maintenance.service" "$SYSTEMD_USER_DIR/mcore-maintenance.service"
+  cp "$ROOT/scripts/mcore-maintenance.timer" "$SYSTEMD_USER_DIR/mcore-maintenance.timer"
+  replace_token "$SYSTEMD_USER_DIR/mcore-maintenance.service" __ROOT__ "$ROOT"
+  replace_token "$SYSTEMD_USER_DIR/mcore-maintenance.service" __PYTHON__ "$PY"
+  replace_token "$SYSTEMD_USER_DIR/mcore-maintenance.service" __ENV_FILE__ "$ROOT/.env"
+  replace_token "$SYSTEMD_USER_DIR/mcore-maintenance.service" __CONFIG__ "$CONFIG"
+  replace_token "$SYSTEMD_USER_DIR/mcore-maintenance.service" __DB__ "$DB"
+  replace_token "$SYSTEMD_USER_DIR/mcore-maintenance.service" __RETENTION_DAYS__ "14"
+
   systemctl --user daemon-reload
   if [ "$INSTALL_QDRANT" -eq 1 ]; then systemctl --user enable --now "$QDRANT_SERVICE"; fi
-  systemctl --user enable --now mcore.service mcore-curator.timer
+  systemctl --user enable --now mcore.service mcore-curator.timer mcore-maintenance.timer
   systemctl --user restart mcore.service
 fi
 

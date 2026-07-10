@@ -66,6 +66,7 @@ llm_curator:
   review_cooldown_seconds: 900
   reviewed_ids_max_age_seconds: 43200
   sim_threshold: 0.4
+  split_enabled: false
   split_content_threshold: 200
   temperature: 0.8
 output_language: zh

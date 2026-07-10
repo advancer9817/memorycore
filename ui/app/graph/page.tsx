@@ -73,7 +73,7 @@ export default function GraphPage() {
           {data && (
             <>
               {!graphReady && (
-                <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: "rgba(2,4,8,0.7)" }}>
+                <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#020408]/70">
                   <div className="flex items-center gap-2 font-mono text-xs text-cyan-700">
                     <span className="w-1 h-1 rounded-full bg-cyan-500 animate-pulse" />
                     {g.computingLayout}
@@ -101,8 +101,8 @@ export default function GraphPage() {
         {/* ══ Left panel: filters + list ══ */}
         {!listCollapsed && (
           <div
-            className="absolute left-0 top-0 bottom-0 z-20 flex flex-col overflow-hidden"
-            style={{ width: listPanel.size, background: "rgba(3,5,10,0.94)", backdropFilter: "blur(16px)", borderRight: "1px solid rgba(255,255,255,0.06)" }}
+            className="absolute left-0 top-0 bottom-0 z-20 flex flex-col overflow-hidden border-r border-white/5 bg-[#03050a]/95 backdrop-blur-2xl"
+            style={{ width: listPanel.size }}
           >
             <GraphFilterPanel
               allTypes={allTypes} allEdgeTypes={allEdgeTypes}

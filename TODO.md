@@ -430,3 +430,62 @@ Step 4（扩展能力）— 独立，可与 Step 1-3 并行
 - [x] Phase B 验证：`_find_candidate_pairs` 存在，旧函数已删除，`_llm_judge_*` 签名含 `config` 参数
 - [x] Phase D 验证：LLM curator 运行后 `link_discoveries > 0`，孤立记忆比例从 71% 下降
 - [x] 全量回归：`.venv/bin/python -m pytest tests/ -x -q` + `cd ui && npx tsc --noEmit`
+
+---
+
+## 深度审计续作 — 2026-07-10
+
+> 执行依据：`docs/plans/2026-07-09-deep-audit-iteration-plan.md` 第八节。按 R1 → R7 顺序推进，完成后在 `ITERATION.md` 记录实绩。
+
+### R1 治理止血（P0/P1）
+
+- [x] 从 LLM Curator stages 中关闭 `split`，并增加配置级开关与回归测试
+- [x] 将剩余符合规则的未召回 governance_split 记忆降级为 stale，并记录可回滚清单
+- [x] 在 ingest 写入前增加 active `title + type` 精确去重保护
+- [x] 清理当前 active 重复标题，并验证重复组为 0
+- [x] 补齐 `curator_llm/report.py` 两处静默异常日志（复核确认已有 `exc_info` 日志）
+
+### R2 测试可信度（P0）
+
+- [x] 在测试 fixture 中重置 Qdrant/vector store 单例状态
+- [x] 移除 6 个“singleton state leaks”临时 xfail
+- [x] 修复或重建项目 `.venv` 测试依赖
+- [x] 后端全量测试达到 0 failed、0 unexpected xpass
+
+### R3 召回闭环（P1/P2）
+
+- [x] `ExtractedFact` 增加 `title` 并兼容旧 LLM JSON schema
+- [x] dedup 优先使用提取标题，缺失时安全回退
+- [x] 新记忆写入后生成可解释的种子反馈并写审计
+- [x] FTS 与向量双命中候选增加融合权重
+- [x] 为提取、种子反馈和融合排序补回归测试
+
+### R4 后端拆分（P2）
+
+- [x] 拆分 `frontend.py`，保留 API app 与路由兼容入口
+- [x] 拆分 `governance.py`，保留 storage re-export 入口
+- [x] 拆分 `search.py`，保留 context pack 公开入口
+- [x] 拆分 `server.py`，分离 MCP 工具注册与启动逻辑
+- [x] 四个核心文件均压缩至 700 行以内并通过全量测试
+
+### R5 前端整治（P2）
+
+- [x] 提取 Graph theme 常量并将静态 inline style 降至 5 处以内
+- [x] 清理 TypeScript `any` 至 20 处以内
+- [x] 拆分 `form-view.tsx`、`MemoryOperationsPanel.tsx`、`FilterComponent.tsx`
+- [x] 所有目标组件控制在 300 行以内
+- [x] `pnpm build` 与 `tsc --noEmit` 通过
+
+### R6 数据维护（P3）
+
+- [x] 使用 SQLite backup API 创建瘦身前备份
+- [x] 实现 30 天前 audit/governance 日志归档命令，默认 dry-run
+- [x] 执行本机归档与 VACUUM，将数据库压缩至 200 MiB 以下
+- [x] 增加每周维护脚本/定时器与归档统计
+
+### R7 收尾验证（P0-P3）
+
+- [ ] 连续跟踪 hit_rate、used_count 与 cross_retrieval_rate
+- [x] 验证 governance_split 未召回目标和 active 重复标题均为 0
+- [x] 更新计划状态、TODO 勾选与 `ITERATION.md` 完成记录
+- [x] 最终执行后端全量测试、前端 build/tsc 和数据库完整性检查

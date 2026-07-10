@@ -19,6 +19,7 @@ _MAX_CANDIDATES = 50
 def _temporal_config() -> dict[str, Any]:
     cfg = load_config().get("temporal", {}) or {}
     return {
+        "enabled": bool(cfg.get("enabled", True)),
         "auto_supersede_enabled": bool(cfg.get("auto_supersede_enabled", True)),
         "auto_supersede_threshold": _clamp_threshold(cfg.get("auto_supersede_threshold", 0.88), 0.88),
         "review_similarity_threshold": _clamp_threshold(cfg.get("review_similarity_threshold", 0.72), 0.72),
@@ -136,6 +137,8 @@ def process_auto_supersession(new_record: dict[str, Any], source_agent: str = "a
         return {"checked": False, "reason": "new record is not active"}
 
     config = _temporal_config()
+    if not config["enabled"]:
+        return {"checked": False, "reason": "temporal governance is disabled"}
     review_threshold = min(config["review_similarity_threshold"], config["auto_supersede_threshold"])
     sqlite_candidates = _candidate_rows(new_record)
     candidate_ids = {r["id"] for r in sqlite_candidates}

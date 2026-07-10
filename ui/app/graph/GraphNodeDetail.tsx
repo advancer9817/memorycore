@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { type GraphNode, TYPE_COLORS, IMPORTANCE_THRESHOLD } from "./types";
+import { type GraphNode, IMPORTANCE_THRESHOLD, TYPE_BG_CLASSES, TYPE_TEXT_CLASSES } from "./types";
 import type { Messages } from "@/lib/i18n/types";
 
 interface GraphNodeDetailProps {
@@ -38,13 +38,13 @@ export function GraphNodeDetail({
   messages: g,
 }: GraphNodeDetailProps) {
   return (
-    <div className="flex-1 flex flex-col overflow-hidden" style={{ background: "rgba(3,5,10,0.95)", backdropFilter: "blur(16px)", borderLeft: "1px solid rgba(255,255,255,0.06)" }}>
+    <div className="flex flex-1 flex-col overflow-hidden border-l border-white/5 bg-[#03050a]/95 backdrop-blur-2xl">
 
       {/* Detail header */}
-      <div className="px-4 py-4 shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+      <div className="shrink-0 border-b border-white/5 px-4 py-4">
         <div className="flex items-start justify-between gap-2 mb-3">
           <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-mono uppercase tracking-[0.12em] mb-1" style={{ color: TYPE_COLORS[selectedNode.type] ?? "#64748B" }}>
+            <p className={`mb-1 font-mono text-[10px] uppercase tracking-[0.12em] ${TYPE_TEXT_CLASSES[selectedNode.type] ?? TYPE_TEXT_CLASSES.unknown}`}>
               {selectedNode.type.replace(/_/g, " ")}
             </p>
             <h2 className="text-sm font-semibold text-zinc-100 leading-snug">{selectedNode.title}</h2>
@@ -52,8 +52,7 @@ export function GraphNodeDetail({
           <div className="flex items-center gap-1 shrink-0 mt-0.5">
             {!isEditing && (
               <button onClick={() => setIsEditing(true)}
-                className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 rounded transition-all"
-                style={{ border: "1px solid rgba(255,255,255,0.07)" }}>
+                className="rounded border border-white/5 px-2 py-1 text-xs text-zinc-600 transition-all hover:text-zinc-300">
                 {g.edit}
               </button>
             )}
@@ -64,8 +63,8 @@ export function GraphNodeDetail({
 
         {/* Importance bar */}
         <div className="flex items-center gap-3">
-          <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
-            <div className="h-full rounded-full transition-all" style={{ width: `${selectedNode.importance * 100}%`, background: selectedNode.importance >= IMPORTANCE_THRESHOLD ? "#FBBF24" : TYPE_COLORS[selectedNode.type] ?? "#06B6D4" }} />
+          <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/5">
+            <div className={`h-full rounded-full transition-all ${selectedNode.importance >= IMPORTANCE_THRESHOLD ? "bg-amber-400" : TYPE_BG_CLASSES[selectedNode.type] ?? TYPE_BG_CLASSES.unknown}`} style={{ width: `${selectedNode.importance * 100}%` }} />
           </div>
           <span className="font-mono text-xs text-zinc-500 tabular-nums shrink-0 w-9 text-right">{(selectedNode.importance * 100).toFixed(0)}%</span>
         </div>
@@ -82,8 +81,7 @@ export function GraphNodeDetail({
             <div>
               <label className="text-[10px] text-zinc-600 block mb-2 font-mono uppercase tracking-widest">{g.statusLabel}</label>
               <select value={editStatus} onChange={e => setEditStatus(e.target.value)}
-                className="w-full text-sm rounded-lg px-3 py-2"
-                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", color: "#d4d4d8" }}>
+                className="w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-zinc-300">
                 {["active", "candidate", "stale", "archived"].map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
@@ -110,7 +108,7 @@ export function GraphNodeDetail({
                 [g.injected, `${selectedNode.injected_count}×`],
                 [g.statusLabel, selectedNode.status],
               ].map(([label, value]) => (
-                <div key={label} className="rounded-lg px-3 py-2.5" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                <div key={label} className="rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2.5">
                   <div className="text-[10px] text-zinc-600 font-mono uppercase tracking-wider">{label}</div>
                   <div className="text-sm text-zinc-200 font-medium mt-1">{value}</div>
                 </div>
@@ -124,12 +122,9 @@ export function GraphNodeDetail({
                 <div className="space-y-0.5">
                   {filteredNodes.filter(n => linked.has(n.id) && n.id !== selectedNode.id).slice(0, 8).map(n => (
                     <button key={n.id} onClick={() => handleNodeSelect(n)}
-                      className="w-full text-left px-2 py-2 rounded-lg flex items-center gap-2 transition-colors hover:bg-white/4"
-                      style={{ border: "1px solid transparent" }}
-                      onMouseEnter={e => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)")}
-                      onMouseLeave={e => (e.currentTarget.style.borderColor = "transparent")}
+                      className="flex w-full items-center gap-2 rounded-lg border border-transparent px-2 py-2 text-left transition-colors hover:border-white/5 hover:bg-white/[0.04]"
                     >
-                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: TYPE_COLORS[n.type] ?? "#64748B" }} />
+                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${TYPE_BG_CLASSES[n.type] ?? TYPE_BG_CLASSES.unknown}`} />
                       <span className="text-xs text-zinc-400 truncate">{n.title}</span>
                     </button>
                   ))}

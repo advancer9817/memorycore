@@ -293,6 +293,7 @@ export const en = {
       applied: "Applied",
       rejected: "Rejected",
       needs_review: "Pending",
+      rolled_back: "Rolled Back",
     },
     decisionTypeLabels: {
       contradiction: "Contradiction",

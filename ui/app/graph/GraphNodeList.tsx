@@ -2,7 +2,8 @@
 
 import { useRef } from "react";
 import type { Virtualizer } from "@tanstack/react-virtual";
-import { type GraphNode, TYPE_COLORS, IMPORTANCE_THRESHOLD } from "./types";
+import type { CSSProperties } from "react";
+import { type GraphNode, IMPORTANCE_THRESHOLD, TYPE_BG_CLASSES } from "./types";
 import type { Messages } from "@/lib/i18n/types";
 
 interface GraphNodeListProps {
@@ -24,10 +25,15 @@ export function GraphNodeList({
   handleNodeSelect,
   messages: g,
 }: GraphNodeListProps) {
+  const listStyle: CSSProperties = {
+    height: `${rowVirtualizer.getTotalSize()}px`,
+    width: "100%",
+    position: "relative",
+  };
   return (
     <>
       {/* Node list header */}
-      <div className="px-3 py-2 shrink-0 flex items-center" style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+      <div className="flex shrink-0 items-center border-b border-white/[0.04] px-3 py-2">
         <span className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest">
           {g.nodesHeading} <span className="text-zinc-400">{sortedListNodes.length}</span>
         </span>
@@ -40,32 +46,23 @@ export function GraphNodeList({
             <span className="text-zinc-800">{g.adjustFilters}</span>
           </div>
         )}
-        <div
-          style={{
-            height: `${rowVirtualizer.getTotalSize()}px`,
-            width: "100%",
-            position: "relative",
-          }}
-        >
+        <div style={listStyle}>
           {rowVirtualizer.getVirtualItems().map((virtualRow) => {
             const node = sortedListNodes[virtualRow.index];
-            const color = TYPE_COLORS[node.type] ?? "#64748B";
             const isSelected = selectedNode?.id === node.id;
             const isLinked = linked && !isSelected && linked.has(node.id);
+            const rowStyle: CSSProperties = {
+              transform: `translateY(${virtualRow.start}px)`,
+            };
             return (
               <div
                 key={node.id}
                 onClick={() => handleNodeSelect(node)}
-                className="px-3 py-2.5 cursor-pointer transition-all absolute top-0 left-0 right-0"
-                style={{
-                  transform: `translateY(${virtualRow.start}px)`,
-                  borderBottom: "1px solid rgba(255,255,255,0.03)",
-                  borderLeft: isSelected ? `2px solid ${color}` : "2px solid transparent",
-                  background: isSelected ? `${color}10` : isLinked ? "rgba(255,255,255,0.02)" : "transparent",
-                }}
+                className={`absolute left-0 right-0 top-0 cursor-pointer border-b border-l-2 border-b-white/[0.03] px-3 py-2.5 transition-all ${isSelected ? "border-l-cyan-500 bg-cyan-500/10" : isLinked ? "border-l-transparent bg-white/[0.02]" : "border-l-transparent bg-transparent"}`}
+                style={rowStyle}
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="w-2 h-2 rounded-full shrink-0 flex-none" style={{ background: color }} />
+                  <span className={`h-2 w-2 flex-none shrink-0 rounded-full ${TYPE_BG_CLASSES[node.type] ?? TYPE_BG_CLASSES.unknown}`} />
                   <p className="text-sm text-zinc-200 leading-tight truncate flex-1 min-w-0">{node.title}</p>
                   {node.importance >= IMPORTANCE_THRESHOLD && <span className="text-amber-400 text-xs shrink-0">★</span>}
                   <span className="text-xs text-zinc-500 shrink-0 font-mono tabular-nums">{node.importance.toFixed(2)}</span>

@@ -22,6 +22,7 @@ ingest(messages, config) -> IngestResult
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -30,6 +31,8 @@ from typing import Any
 from memorycore.extraction import extract_facts  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
+_high_recall_types_cache: tuple[str, float, set[str]] = ("", 0.0, set())
 
 # Base cosine similarity thresholds
 SKIP_THRESHOLD = 0.82       # near-identical or same-fact rewording → skip
@@ -77,6 +80,87 @@ def _batch_similar(text: str, seen: list[str], threshold: float = 0.55) -> bool:
         if jaccard >= threshold:
             return True
     return False
+
+
+def _find_active_title_match(title: str, memory_type: str) -> dict[str, Any] | None:
+    """Return the strongest active record with the same exact title and type."""
+    from memorycore.storage.db import _managed_query
+
+    rows = _managed_query(
+        """
+        SELECT id, title, content, type
+        FROM memories
+        WHERE status = 'active' AND type = ? AND title = ? COLLATE NOCASE
+        ORDER BY effectiveness_score DESC, updated_at DESC
+        LIMIT 1
+        """,
+        (memory_type, title.strip()),
+    )
+    return rows[0] if rows else None
+
+
+def _get_high_recall_types(ttl_seconds: float = 300.0) -> set[str]:
+    global _high_recall_types_cache
+    from memorycore.models import db_path
+
+    cache_key = str(db_path())
+    cached_key, cached_at, cached_types = _high_recall_types_cache
+    if cached_key == cache_key and time.monotonic() - cached_at < ttl_seconds:
+        return set(cached_types)
+
+    from memorycore.storage.db import _managed_query
+
+    rows = _managed_query(
+        """
+        SELECT type,
+               SUM(CASE WHEN injected_count > 0 THEN 1 ELSE 0 END) * 1.0 / COUNT(*) AS recall_rate
+        FROM memories
+        WHERE status IN ('active', 'candidate')
+        GROUP BY type
+        HAVING COUNT(*) >= 3
+        ORDER BY recall_rate DESC, COUNT(*) DESC
+        LIMIT 3
+        """,
+        (),
+    )
+    result = {str(row["type"]) for row in rows if float(row.get("recall_rate") or 0.0) > 0.0}
+    _high_recall_types_cache = (cache_key, time.monotonic(), result)
+    return set(result)
+
+
+def _seed_feedback(
+    memory_id: str,
+    fact: Any,
+    decision: "DedupDecision",
+    memory_type: str,
+    add_feedback_fn: Any,
+) -> float:
+    score = 0.0
+    if fact.importance >= 0.8:
+        score += 0.3
+    elif fact.importance >= 0.6:
+        score += 0.1
+    if decision.linked_ids:
+        score += 0.2
+    if memory_type in _get_high_recall_types():
+        score += 0.15
+    if 50 <= len(fact.text) <= 200:
+        score += 0.1
+    score = round(min(score, 1.0), 2)
+    if score <= 0:
+        return 0.0
+    try:
+        add_feedback_fn(
+            memory_id,
+            score,
+            note="auto:seed",
+            source_agent="system",
+            count_as_injection=False,
+        )
+    except Exception:
+        logger.warning("dedup: failed to seed feedback for %s", memory_id, exc_info=True)
+        return 0.0
+    return score
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +270,8 @@ def ingest(
     _vector_store=None,
     _add_memory_fn=None,
     _update_memory_fn=None,
+    _find_title_match_fn=None,
+    _add_feedback_fn=None,
 ) -> IngestResult:
     """Full pipeline: extract facts → dedup → write SQLite candidates.
 
@@ -233,10 +319,18 @@ def ingest(
     vs: VectorStore = _vector_store or get_vector_store(cfg)
 
     # Default SQLite write functions (lazy import from storage module — no circular risk)
+    using_default_storage = _add_memory_fn is None
     if _add_memory_fn is None:
         from memorycore.storage import add_memory_record as _add_memory_fn  # type: ignore[attr-defined]
     if _update_memory_fn is None:
         from memorycore.storage import update_memory_content as _update_memory_fn  # type: ignore[attr-defined]
+    if _find_title_match_fn is None:
+        _find_title_match_fn = _find_active_title_match
+    if _add_feedback_fn is None:
+        if using_default_storage:
+            from memorycore.storage import add_feedback as _add_feedback_fn  # type: ignore[attr-defined]
+        else:
+            _add_feedback_fn = lambda *_args, **_kwargs: None
 
     result = IngestResult()
 
@@ -281,6 +375,43 @@ def ingest(
                 continue
 
             fact_type = fact.memory_type if fact.memory_type else mem_type
+            fact_title = str(getattr(fact, "title", "") or fact.text[:title_max]).strip()[:title_max]
+            title_match = _find_title_match_fn(fact_title, fact_type)
+            if title_match:
+                existing_id = str(title_match["id"])
+                if str(title_match.get("content") or "").strip() == fact.text.strip():
+                    result.skipped += 1
+                    result.decisions.append(DedupDecision(
+                        action="skip",
+                        fact_text=fact.text,
+                        existing_id=existing_id,
+                        existing_text=str(title_match.get("content") or ""),
+                        similarity=1.0,
+                    ))
+                else:
+                    _update_memory_fn(
+                        existing_id,
+                        new_title=fact_title,
+                        new_content=fact.text,
+                    )
+                    if vs.available:
+                        vs.upsert(existing_id, fact.text, {
+                            "status": "active",
+                            "user_id": user_id,
+                            "agent_id": agent_id,
+                        })
+                    result.updated += 1
+                    result.decisions.append(DedupDecision(
+                        action="update",
+                        fact_text=fact.text,
+                        existing_id=existing_id,
+                        existing_text=str(title_match.get("content") or ""),
+                        similarity=1.0,
+                    ))
+                batch_texts.append(fact.text)
+                logger.debug("dedup: TITLE_MATCH %s %s", existing_id, fact_title[:60])
+                continue
+
             type_link = TYPE_THRESHOLDS.get(fact_type, (base_skip, base_update, base_link))[2]
             similar = []
             if vs.available:
@@ -341,7 +472,7 @@ def ingest(
                 _add_memory_fn(
                     memory_id=new_id,
                     memory_type=fact_type,
-                    title=fact.text[:title_max],
+                    title=fact_title,
                     content=fact.text,
                     scope=mem_scope,
                     tags=["extracted", f"agent:{agent_id}", "supersedes:" + decision.existing_id],
@@ -361,6 +492,7 @@ def ingest(
                         "user_id": user_id,
                         "agent_id": agent_id,
                     })
+                _seed_feedback(new_id, fact, decision, fact_type, _add_feedback_fn)
                 result.updated += 1
                 batch_texts.append(fact.text)
                 logger.debug("dedup: UPDATE [%.3f] %s", decision.similarity, fact.text[:60])
@@ -370,7 +502,7 @@ def ingest(
                 _add_memory_fn(
                     memory_id=new_id,
                     memory_type=fact_type,
-                    title=fact.text[:title_max],
+                    title=fact_title,
                     content=fact.text,
                     scope=mem_scope,
                     tags=["extracted", f"agent:{agent_id}"],
@@ -390,6 +522,7 @@ def ingest(
                         "user_id": user_id,
                         "agent_id": agent_id,
                     })
+                _seed_feedback(new_id, fact, decision, fact_type, _add_feedback_fn)
                 result.added += 1
                 batch_texts.append(fact.text)
                 logger.debug("dedup: ADD    [%.3f] %s", decision.similarity, fact.text[:60])

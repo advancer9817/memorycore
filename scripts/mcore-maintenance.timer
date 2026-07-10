@@ -1,0 +1,11 @@
+[Unit]
+Description=MemoryCore weekly audit and governance archive
+Requires=mcore-maintenance.service
+
+[Timer]
+OnCalendar=weekly
+RandomizedDelaySec=1800
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -36,7 +36,7 @@ type Category = string;
 
 const defaultIcon = <CircleHelp className="w-4 h-4 mr-2" />;
 
-const iconMap: Record<string, any> = {
+const iconMap: Record<string, React.ReactNode> = {
   // Core themes
   health: <HeartPulse className="w-4 h-4 mr-2" />,
   wellness: <Heart className="w-4 h-4 mr-2" />,
@@ -77,7 +77,7 @@ const iconMap: Record<string, any> = {
   places: <Globe className="w-4 h-4 mr-2" />,
 };
 
-const getClosestIcon = (label: string): any => {
+const getClosestIcon = (label: string): React.ReactNode => {
   const normalized = label.toLowerCase().split(/[\s\-_.]+/);
 
   let bestMatch: string | null = null;

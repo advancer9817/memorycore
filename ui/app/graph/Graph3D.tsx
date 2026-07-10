@@ -1,7 +1,9 @@
 "use client";
 
 import { useRef, useEffect } from "react";
-import { type GraphNode, type GraphEdge, TYPE_COLORS, EDGE_COLORS, IMPORTANCE_THRESHOLD } from "./types";
+import type { ForceGraph3DInstance, LinkObject, NodeObject } from "3d-force-graph";
+import type { BufferGeometry, CanvasTexture, ShaderMaterial, Sprite, SpriteMaterial } from "three";
+import { type GraphNode, type GraphEdge, TYPE_COLORS, EDGE_COLORS, GRAPH_SCENE, IMPORTANCE_THRESHOLD } from "./types";
 
 export interface Graph3DHandle {
   focusNode: (id: string) => void;
@@ -27,7 +29,13 @@ const LARGE_GRAPH_THRESHOLD = 200;
 
 // Fresnel glow shader — all nodes are spheres for best visual quality.
 // On large graphs, pulse animation is skipped for non-important nodes (uTime stays 0).
-function createCoreMaterial(THREE: any, color: number, importance: number): any {
+type ThreeModule = typeof import("three");
+type ForceGraphNode = GraphNode & NodeObject;
+type ForceGraphLink = GraphEdge & LinkObject<ForceGraphNode>;
+type GraphInstance = ForceGraph3DInstance<ForceGraphNode, ForceGraphLink>;
+type ForceGraphFactory = () => (element: HTMLElement) => GraphInstance;
+
+function createCoreMaterial(THREE: ThreeModule, color: number, importance: number): ShaderMaterial {
   return new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: true,
@@ -65,17 +73,17 @@ function createCoreMaterial(THREE: any, color: number, importance: number): any 
 
 // Cache key: hex color string — glow appearance depends only on color, not radius.
 // Radius is applied via Sprite.scale at the call site so a single texture covers all sizes.
-type GlowCache = Map<string, { texture: any; material: any }>;
+type GlowCache = Map<string, { texture: CanvasTexture; material: SpriteMaterial }>;
 
 // Soft radial glow using Sprite + canvas radial gradient — no hard sphere edge.
 // CanvasTexture and SpriteMaterial are cached by hex color to avoid redundant GPU uploads.
 // Each call creates a new Sprite (cheap) that shares the cached texture+material.
 function createGlowSprite(
-  THREE: any,
+  THREE: ThreeModule,
   color: number,
   radius: number,
   glowCache: GlowCache,
-): any {
+): Sprite {
   const c = new THREE.Color(color);
   const hex = `#${c.getHexString()}`;
 
@@ -112,7 +120,7 @@ function createGlowSprite(
 }
 
 // Floating label: no background box, just clean text with soft shadow
-function createSpriteLabel(THREE: any, text: string, color: string, size: number): any {
+function createSpriteLabel(THREE: ThreeModule, text: string, color: string, size: number): Sprite {
   const W = 512, H = 48;
   const canvas = document.createElement("canvas");
   canvas.width = W;
@@ -139,16 +147,16 @@ function Graph3DInner({
   onNodeClick, onBackgroundClick, onReady, onMount,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const graphRef = useRef<any>(null);
+  const graphRef = useRef<GraphInstance | null>(null);
   // Keep latest callbacks in refs so the mount-time graph handlers do not go stale.
   const onNodeClickRef = useRef(onNodeClick);
   const onBackgroundClickRef = useRef(onBackgroundClick);
   const onReadyRef = useRef(onReady);
   const onMountRef = useRef(onMount);
   // Shader materials that need per-frame uTime updates (important nodes only on large graphs)
-  const animatedMatsRef = useRef<Set<any>>(new Set());
+  const animatedMatsRef = useRef<Set<ShaderMaterial>>(new Set());
   // Geometry cache: keyed by Math.round(size * 2) to bucket by size
-  const geoCacheRef = useRef<Map<number, any>>(new Map());
+  const geoCacheRef = useRef<Map<number, BufferGeometry>>(new Map());
   // Glow sprite cache: keyed by hex color — CanvasTexture + SpriteMaterial shared across nodes
   const glowCacheRef = useRef<GlowCache>(new Map());
   // Keep large-graph mode aligned with the latest graphData rebuild.
@@ -163,7 +171,7 @@ function Graph3DInner({
 
   useEffect(() => {
     if (!containerRef.current) return;
-    let fg: any;
+    let fg: GraphInstance | undefined;
     let rafId = 0;
     let cancelled = false;
 
@@ -172,39 +180,37 @@ function Graph3DInner({
       import("three"),
     ]).then(([mod, THREE_mod]) => {
       if (cancelled) return;
-      const ForceGraph3D = mod.default;
-      const THREE = THREE_mod as any;
+      const createForceGraph = mod.default as unknown as ForceGraphFactory;
+      const THREE = THREE_mod;
       const animatedMats = animatedMatsRef.current;
       const geoCache = geoCacheRef.current;
       const glowCache = glowCacheRef.current;
       isLargeGraphRef.current = nodes.length >= LARGE_GRAPH_THRESHOLD;
 
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      fg = ForceGraph3D()(containerRef.current!)
+      fg = createForceGraph()(containerRef.current!)
         .width(width)
         .height(height)
-        .backgroundColor("#020408")
+        .backgroundColor(GRAPH_SCENE.background)
         .nodeRelSize(5)
         .nodeVal((n: GraphNode) => Math.max(1, 1 + (n.importance ?? 0.5) * 3))
         // nodeColor is used for fallback; actual color is in ShaderMaterial
         .nodeColor((n: GraphNode) => {
-          if (n.importance >= IMPORTANCE_THRESHOLD) return "#FBBF24";
+          if (n.importance >= IMPORTANCE_THRESHOLD) return GRAPH_SCENE.important;
           return TYPE_COLORS[n.type] ?? TYPE_COLORS.unknown;
         })
         .nodeLabel((n: GraphNode) => {
-          const color = TYPE_COLORS[n.type] ?? "#888";
+          const color = TYPE_COLORS[n.type] ?? GRAPH_SCENE.tooltipFallback;
           return `<div style="background:rgba(5,7,12,.95);padding:8px 12px;border-radius:6px;font-size:11px;max-width:320px;border:1px solid ${color};font-family:'SF Mono',monospace">
             <b style="color:${color};text-transform:uppercase;letter-spacing:0.08em">${n.type.replace(/_/g, " ")}</b>
-            ${n.importance >= IMPORTANCE_THRESHOLD ? ' <span style="color:#FBBF24">★</span>' : ''}
+            ${n.importance >= IMPORTANCE_THRESHOLD ? ` <span style="color:${GRAPH_SCENE.important}">★</span>` : ''}
             <br/>${(n.title ?? n.id).slice(0, 140)}
-            <br/><span style="color:#475569;font-size:10px">IMP ${(n.importance ?? 0).toFixed(2)} · INJ ${n.injected_count ?? 0}× · 0x${n.id.replace(/-/g,"").slice(0,8).toUpperCase()}</span>
+            <br/><span style="color:${GRAPH_SCENE.tooltipMuted};font-size:10px">IMP ${(n.importance ?? 0).toFixed(2)} · INJ ${n.injected_count ?? 0}× · 0x${n.id.replace(/-/g,"").slice(0,8).toUpperCase()}</span>
           </div>`;
         })
         .nodeThreeObject((n: GraphNode) => {
           const isImportant = (n.importance ?? 0) >= IMPORTANCE_THRESHOLD;
           const hexColor = isImportant
-            ? 0xFBBF24
+            ? Number.parseInt(GRAPH_SCENE.important.slice(1), 16)
             : parseInt((TYPE_COLORS[n.type] ?? TYPE_COLORS.unknown).slice(1), 16);
           const typeColor = TYPE_COLORS[n.type] ?? TYPE_COLORS.unknown;
           const size = 2 + (n.importance ?? 0.5) * 3;
@@ -245,8 +251,8 @@ function Graph3DInner({
         })
         .nodeThreeObjectExtend(false)
         // Edge: color + per-type particle flow; reduced on large graphs
-        .linkColor((l: GraphEdge) => EDGE_COLORS[l.relation_type] ?? "#3F3F46")
-        .linkOpacity((l: GraphEdge) => l.relation_type === "related_to" ? 0.25 : 0.55)
+        .linkColor((l: GraphEdge) => EDGE_COLORS[l.relation_type] ?? GRAPH_SCENE.fallbackEdge)
+        .linkOpacity(((l: GraphEdge) => l.relation_type === "related_to" ? 0.25 : 0.55) as unknown as number)
         .linkWidth((l: GraphEdge) => Math.min(4, 0.8 + (l.weight ?? 1) * 1.2))
         .linkDirectionalParticles((l: GraphEdge) => {
           // Disable particles entirely on large graphs to avoid per-link rAF cost
@@ -264,7 +270,7 @@ function Graph3DInner({
           if (l.relation_type === "causes") return 0.007;
           return 0.0045;
         })
-        .linkDirectionalParticleColor((l: GraphEdge) => EDGE_COLORS[l.relation_type] ?? "#9ca3af")
+        .linkDirectionalParticleColor((l: GraphEdge) => EDGE_COLORS[l.relation_type] ?? GRAPH_SCENE.particle)
         .onNodeClick((n: GraphNode) => onNodeClickRef.current(n))
         .onBackgroundClick(() => onBackgroundClickRef.current())
         .onEngineStop(() => { onReadyRef.current?.(); })
@@ -276,12 +282,12 @@ function Graph3DInner({
       // Scene: fog + lighting for depth
       const scene = fg.scene();
       const renderer = fg.renderer();
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      scene.fog = new THREE.FogExp2("#020408", 0.0015);
-      const ambient = new THREE.AmbientLight(0x06B6D4, 0.5);
-      const keyLight = new THREE.PointLight(0x7dd3fc, 2.0, 1000);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, GRAPH_SCENE.maxPixelRatio));
+      scene.fog = new THREE.FogExp2(GRAPH_SCENE.background, GRAPH_SCENE.fogDensity);
+      const ambient = new THREE.AmbientLight(GRAPH_SCENE.ambientLight, 0.5);
+      const keyLight = new THREE.PointLight(GRAPH_SCENE.keyLight, 2.0, 1000);
       keyLight.position.set(80, 120, 120);
-      const fillLight = new THREE.PointLight(0xFBBF24, 0.4, 600);
+      const fillLight = new THREE.PointLight(GRAPH_SCENE.fillLight, 0.4, 600);
       fillLight.position.set(-80, -60, 60);
       scene.add(ambient, keyLight, fillLight);
 
@@ -315,14 +321,15 @@ function Graph3DInner({
           const fgCurrent = graphRef.current;
           if (!fgCurrent) return;
           const graphData = fgCurrent.graphData();
-          const node = graphData.nodes.find((n: any) => n.id === id);
-          if (!node || node.x == null) return;
+          const node = graphData.nodes.find((candidate) => candidate.id === id);
+          if (!node || node.x == null || node.y == null || node.z == null) return;
+          const position = { x: node.x, y: node.y, z: node.z };
           const distance = 120;
-          const mag = Math.hypot(node.x, node.y, node.z) || 1;
+          const mag = Math.hypot(position.x, position.y, position.z) || 1;
           const distRatio = 1 + distance / mag;
           fgCurrent.cameraPosition(
-            { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
-            node,
+            { x: position.x * distRatio, y: position.y * distRatio, z: position.z * distRatio },
+            position,
             800
           );
         },
@@ -413,17 +420,17 @@ function Graph3DInner({
 
     fg.nodeColor((n: GraphNode) => {
       if (selectedNodeId) {
-        if (n.id === selectedNodeId) return "#60A5FA";
+        if (n.id === selectedNodeId) return GRAPH_SCENE.selected;
         if (linkedNodeIds?.has(n.id)) {
-          if (highlightImportant && (n.importance ?? 0) >= IMPORTANCE_THRESHOLD) return "#FBBF24";
+          if (highlightImportant && (n.importance ?? 0) >= IMPORTANCE_THRESHOLD) return GRAPH_SCENE.important;
           return TYPE_COLORS[n.type] ?? TYPE_COLORS.unknown;
         }
-        return "rgba(30,30,35,0.10)";
+        return GRAPH_SCENE.dimNode;
       }
       if (hitIds) {
-        if (!hitIds.has(n.id)) return "rgba(30,30,35,0.08)";
+        if (!hitIds.has(n.id)) return GRAPH_SCENE.hiddenNode;
       }
-      if (highlightImportant && (n.importance ?? 0) >= IMPORTANCE_THRESHOLD) return "#FBBF24";
+      if (highlightImportant && (n.importance ?? 0) >= IMPORTANCE_THRESHOLD) return GRAPH_SCENE.important;
       return TYPE_COLORS[n.type] ?? TYPE_COLORS.unknown;
     });
   }, [search, highlightImportant, selectedNodeId, linkedNodeIds, nodes]);

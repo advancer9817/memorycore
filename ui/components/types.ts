@@ -4,7 +4,7 @@ export type Client = "chrome" | "chatgpt" | "cursor" | "windsurf" | "terminal" |
 export interface Memory {
   id: string
   memory: string
-  metadata: any
+  metadata: Record<string, unknown>
   client: Client
   categories: Category[]
   created_at: number

@@ -5,6 +5,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { AppDispatch, RootState } from '@/store/store';
 import { setAccessLogs, setMemoriesSuccess, setSelectedMemory, setRelatedMemories } from '@/store/memoriesSlice';
 import { getApiBaseUrl } from '@/lib/api-url';
+import { getErrorMessage } from '@/lib/errors';
 
 const CACHE_TTL_MS = 30_000;
 
@@ -16,6 +17,8 @@ export interface SimpleMemory {
   state: string;
   categories: string[];
   app_name: string;
+  valid_from?: string;
+  valid_until?: string;
 }
 
 // Define the shape of the API response item
@@ -26,7 +29,7 @@ interface ApiMemoryItem {
   state: string;
   app_id: string;
   categories: string[];
-  metadata_?: Record<string, any>;
+  metadata_?: Record<string, unknown>;
   app_name: string;
 }
 
@@ -178,7 +181,7 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
         memory: item.content,
         created_at: new Date(item.created_at).getTime(),
         state: item.state as "active" | "paused" | "archived" | "deleted",
-        metadata: item.metadata_,
+        metadata: item.metadata_ ?? {},
         categories: item.categories as Category[],
         client: 'api',
         app_name: item.app_name
@@ -190,8 +193,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
         total: response.data.total,
         pages: response.data.pages
       };
-    } catch (err: any) {
-      const errorMessage = err.message || 'Failed to fetch memories';
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err, 'Failed to fetch memories');
       setError(errorMessage);
       setIsLoading(false);
       throw new Error(errorMessage);
@@ -207,8 +210,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
         app: "memorycore",
       }
       await axios.post<ApiMemoryItem>(`${getApiBaseUrl()}/api/v1/memories/`, memoryData);
-    } catch (err: any) {
-      const errorMessage = err.message || 'Failed to create memory';
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err, 'Failed to create memory');
       setError(errorMessage);
       setIsLoading(false);
       throw new Error(errorMessage);
@@ -221,8 +224,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
         data: { memory_ids, user_id }
       });
       dispatch(setMemoriesSuccess(memories.filter((memory: Memory) => !memory_ids.includes(memory.id))));
-    } catch (err: any) {
-      const errorMessage = err.message || 'Failed to delete memories';
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err, 'Failed to delete memories');
       setError(errorMessage);
       setIsLoading(false);
       throw new Error(errorMessage);
@@ -241,8 +244,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
       );
       setIsLoading(false);
       dispatch(setSelectedMemory(response.data));
-    } catch (err: any) {
-      const errorMessage = err.message || 'Failed to fetch memory';
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err, 'Failed to fetch memory');
       setError(errorMessage);
       setIsLoading(false);
       throw new Error(errorMessage);
@@ -261,8 +264,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
       );
       setIsLoading(false);
       dispatch(setAccessLogs(response.data.logs));
-    } catch (err: any) {
-      const errorMessage = err.message || 'Failed to fetch access logs';
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err, 'Failed to fetch access logs');
       setError(errorMessage);
       setIsLoading(false);
       throw new Error(errorMessage);
@@ -293,8 +296,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
 
       setIsLoading(false);
       dispatch(setRelatedMemories(adaptedMemories));
-    } catch (err: any) {
-      const errorMessage = err.message || 'Failed to fetch related memories';
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err, 'Failed to fetch related memories');
       setError(errorMessage);
       setIsLoading(false);
       throw new Error(errorMessage);
@@ -315,8 +318,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
       });
       setIsLoading(false);
       setHasUpdates(hasUpdates + 1);
-    } catch (err: any) {
-      const errorMessage = err.message || 'Failed to update memory';
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err, 'Failed to update memory');
       setError(errorMessage);
       setIsLoading(false);
       throw new Error(errorMessage);
@@ -355,8 +358,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
 
       setIsLoading(false);
       setHasUpdates(hasUpdates + 1);
-    } catch (err: any) {
-      const errorMessage = err.message || 'Failed to update memory state';
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err, 'Failed to update memory state');
       setError(errorMessage);
       setIsLoading(false);
       throw new Error(errorMessage);
@@ -373,12 +376,12 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
       if (validUntil) body.valid_until = validUntil;
       await axios.patch(`${getApiBaseUrl()}/memories/${memoryId}`, body);
       if (selectedMemory?.id === memoryId) {
-        dispatch(setSelectedMemory({ ...selectedMemory, valid_from: validFrom, valid_until: validUntil } as any));
+        dispatch(setSelectedMemory({ ...selectedMemory, valid_from: validFrom, valid_until: validUntil }));
       }
       setIsLoading(false);
       setHasUpdates(hasUpdates + 1);
-    } catch (err: any) {
-      const errorMessage = err.message || 'Failed to update validity range';
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err, 'Failed to update validity range');
       setError(errorMessage);
       setIsLoading(false);
       throw new Error(errorMessage);

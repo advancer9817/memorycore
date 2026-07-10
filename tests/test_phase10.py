@@ -186,7 +186,6 @@ def test_memory_warnings_returns_empty_for_no_links():
     assert result == []
 
 
-@pytest.mark.xfail(reason="Qdrant singleton state leaks between tests, causing spurious supersession")
 def test_memory_warnings_detects_contradicts_link():
     a = lm.add_memory_record("project_memory", "Warn A", "content A")
     b = lm.add_memory_record("project_memory", "Warn B", "content B")
@@ -214,7 +213,6 @@ def test_memory_warnings_detects_supersedes_link():
     assert warnings[0]["severity"] == "medium"  # weight 0.5 < 0.7
 
 
-@pytest.mark.xfail(reason="Qdrant singleton state leaks between tests, causing spurious supersession")
 def test_memory_warnings_respects_min_weight():
     a = lm.add_memory_record("project_memory", "Warn low weight A", "content")
     b = lm.add_memory_record("project_memory", "Warn low weight B", "content")

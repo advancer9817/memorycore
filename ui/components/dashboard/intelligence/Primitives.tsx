@@ -148,7 +148,7 @@ export function BreakdownList({
 export function MemoryIntelligenceSkeleton() {
   return (
     <section className="space-y-4">
-      <SectionHeader onExport={() => undefined} />
+      <SectionHeader />
       {/* Health panel skeleton */}
       <Card className="border-zinc-800 bg-zinc-900">
         <CardHeader>

@@ -158,7 +158,7 @@ def test_apply_llm_curator_archives_duplicate_atomic_facts(tmp_path, monkeypatch
             "SELECT detail_json FROM audit_events WHERE event_type='llm_curator_apply' ORDER BY created_at DESC LIMIT 1"
         ).fetchone()
     assert {row["id"]: row["status"] for row in rows} == {
-        first["id"]: "superseded",
+        first["id"]: "active",
         second["id"]: "archived",
     }
     detail = json.loads(audit_row["detail_json"])

@@ -295,6 +295,7 @@ export const zh = {
       applied: "已应用",
       rejected: "已拒绝",
       needs_review: "待审批",
+      rolled_back: "已回滚",
     },
     decisionTypeLabels: {
       contradiction: "矛盾",

@@ -6,6 +6,7 @@
 #   mcore-ui.service       — Next.js Web UI
 #   mcore-curator.service  — 定时 curator oneshot
 #   mcore-curator.timer    — hourly 触发器
+#   mcore-maintenance.timer — weekly 审计/治理归档与 VACUUM
 #   ~/.local/bin/mcore     — 快捷管理命令
 #
 # 用法：
@@ -107,17 +108,29 @@ install_systemd() {
   # --- mcore-curator.timer ---
   cp "$ROOT/scripts/mcore-curator.timer" "$SYSTEMD_USER_DIR/mcore-curator.timer"
 
+  # --- mcore-maintenance.service/timer ---
+  sed \
+    -e "s|__ROOT__|$ROOT|g" \
+    -e "s|__PYTHON__|$PYTHON_BIN|g" \
+    -e "s|__ENV_FILE__|$ENV_FILE|g" \
+    -e "s|__CONFIG__|$CONFIG|g" \
+    -e "s|__DB__|$DB|g" \
+    -e "s|__RETENTION_DAYS__|14|g" \
+    "$ROOT/scripts/mcore-maintenance.service" \
+    > "$SYSTEMD_USER_DIR/mcore-maintenance.service"
+  cp "$ROOT/scripts/mcore-maintenance.timer" "$SYSTEMD_USER_DIR/mcore-maintenance.timer"
+
   # --- mcore CLI ---
   install_mcore_cmd
 
   systemctl --user daemon-reload
   systemctl --user enable --now mcore.service
-  systemctl --user enable --now mcore-curator.timer
+  systemctl --user enable --now mcore-curator.timer mcore-maintenance.timer
 
   _log "Done. Status:"
   systemctl --user status mcore.service --no-pager | head -8
   echo ""
-  systemctl --user list-timers mcore-curator.timer --no-pager
+  systemctl --user list-timers mcore-curator.timer mcore-maintenance.timer --no-pager
 }
 
 # ── mcore CLI install ─────────────────────────────────────────────────────────
@@ -144,8 +157,10 @@ install_mcore_cmd() {
 install_cron() {
   mkdir -p "$ROOT/logs"
   CRON_LINE="17 * * * * $ROOT/run_curator.sh >> $ROOT/logs/curator.log 2>&1"
-  ( crontab -l 2>/dev/null | grep -v "run_curator.sh"; echo "$CRON_LINE" ) | crontab -
+  MAINTENANCE_CRON="43 3 * * 0 LOCAL_MEMORY_DB=$DB PYTHONPATH=$ROOT $PYTHON_BIN -m memorycore maintenance --retention-days 14 --apply >> $ROOT/logs/maintenance.log 2>&1"
+  ( crontab -l 2>/dev/null | grep -v -e "run_curator.sh" -e "memorycore maintenance"; echo "$CRON_LINE"; echo "$MAINTENANCE_CRON" ) | crontab -
   _log "cron job installed: $CRON_LINE"
+  _log "cron job installed: $MAINTENANCE_CRON"
   _log "Note: mcore.service requires systemd. Start manually: bash start.sh --daemon"
 }
 

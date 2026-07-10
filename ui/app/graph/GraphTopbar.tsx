@@ -42,13 +42,12 @@ export function GraphTopbar({
   messages: g,
 }: GraphTopbarProps) {
   return (
-    <div className="flex items-center gap-3 px-4 h-12 shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", background: "#05070c" }}>
+    <div className="flex h-12 shrink-0 items-center gap-3 border-b border-white/5 bg-[#05070c] px-4">
 
       {/* List collapse toggle — in topbar, left of brand */}
       <button
         onClick={() => setListCollapsed(v => !v)}
-        className="shrink-0 w-7 h-7 flex items-center justify-center rounded-md transition-all hover:bg-white/5"
-        style={{ border: "1px solid rgba(255,255,255,0.07)", color: "#52525b", fontSize: 12 }}
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/5 text-xs text-zinc-600 transition-all hover:bg-white/5"
         title={listCollapsed ? g.expandList : g.collapseList}
       >{listCollapsed ? "›" : "‹"}</button>
 
@@ -66,8 +65,7 @@ export function GraphTopbar({
       {/* Search — takes remaining space, centered feel */}
       <div className="flex-1 max-w-lg mx-auto">
         <Input
-          className="w-full h-8 rounded-lg text-sm text-zinc-200 placeholder:text-zinc-600"
-          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+          className="h-8 w-full rounded-lg border-white/10 bg-white/[0.04] text-sm text-zinc-200 placeholder:text-zinc-600"
           placeholder={g.searchPlaceholder}
           value={searchInput}
           onChange={e => setSearchInput(e.target.value)}
@@ -91,12 +89,7 @@ export function GraphTopbar({
 
         <button
           onClick={() => setHighlightImportant(v => !v)}
-          className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md transition-all"
-          style={{
-            color: highlightImportant ? "#FBBF24" : "#52525b",
-            background: highlightImportant ? "rgba(251,191,36,0.08)" : "transparent",
-            border: `1px solid ${highlightImportant ? "rgba(251,191,36,0.2)" : "rgba(255,255,255,0.06)"}`,
-          }}
+          className={`flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs transition-all ${highlightImportant ? "border-amber-400/20 bg-amber-400/[0.08] text-amber-400" : "border-white/5 text-zinc-600"}`}
         >
           <span>★</span>
           <span className="font-mono tabular-nums">{importantCount}</span>
@@ -104,20 +97,13 @@ export function GraphTopbar({
 
         <button
           onClick={resetAll}
-          className="text-xs text-zinc-500 hover:text-zinc-200 px-2.5 py-1.5 rounded-md hover:bg-white/5 transition-all"
-          style={{ border: "1px solid rgba(255,255,255,0.06)" }}
+          className="rounded-md border border-white/5 px-2.5 py-1.5 text-xs text-zinc-500 transition-all hover:bg-white/5 hover:text-zinc-200"
         >{g.reset}</button>
 
         <select
           value={limit}
           onChange={(e) => setLimit(Number(e.target.value))}
-          className="text-xs text-zinc-400 px-2 py-1.5 rounded-md transition-all"
-          style={{
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            color: "#a1a1aa",
-            outline: "none",
-          }}
+          className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1.5 text-xs text-zinc-400 outline-none transition-all"
           title={g.limitTitle}
         >
           {GRAPH_LIMIT_OPTIONS.map((n) => (
@@ -131,8 +117,7 @@ export function GraphTopbar({
 
         <button
           onClick={handleExportJson}
-          className="text-xs text-zinc-500 hover:text-zinc-200 px-2.5 py-1.5 rounded-md hover:bg-white/5 transition-all"
-          style={{ border: "1px solid rgba(255,255,255,0.06)" }}
+          className="rounded-md border border-white/5 px-2.5 py-1.5 text-xs text-zinc-500 transition-all hover:bg-white/5 hover:text-zinc-200"
         >{g.export}</button>
       </div>
     </div>

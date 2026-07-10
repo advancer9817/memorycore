@@ -130,7 +130,6 @@ def test_supersede_memory_record_marks_old_and_links_lineage():
     assert audit is not None
 
 
-@pytest.mark.xfail(reason="Qdrant singleton state leaks between tests")
 def test_lineage_reports_branch_when_multiple_active_heads_share_root():
     root = add_memory_record("feedback", "Fact", "root fact")
     left = add_memory_record("feedback", "Fact", "left update")

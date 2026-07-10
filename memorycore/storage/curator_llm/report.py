@@ -19,6 +19,7 @@ from .judges import (
     _llm_judge_contradictions,
     _llm_judge_duplicates,
 )
+from .split_detector import _llm_detect_splittable
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +155,30 @@ def llm_curator_report(
 
     # --- Long-content split detection ---
     split_candidates: list[dict] = []
+    if cfg.get("split_enabled", False):
+        split_threshold = int(cfg.get("split_content_threshold", 200))
+        max_split = int(cfg.get("max_split_candidates", 100))
+        split_memories = [
+            memory for memory in memories
+            if len(str(memory.get("content") or "")) >= split_threshold
+        ][:max_split]
+        diagnostics["split_candidates_checked"] = len(split_memories)
+        if split_memories:
+            try:
+                t0 = _time.monotonic()
+                split_candidates = _llm_detect_splittable(
+                    split_memories,
+                    llm_config,
+                    batch_size=batch_size,
+                    content_max_chars=content_max_chars,
+                    prompt_style=prompt_style,
+                    config=full_config,
+                )
+                all_evaluated_ids.update(str(memory.get("id") or "") for memory in split_memories)
+                timing["split_detection_ms"] = int((_time.monotonic() - t0) * 1000)
+            except Exception as exc:
+                errors.append(f"Split detection failed: {exc}")
+                logger.error("split detection error: %s", exc, exc_info=True)
 
     # Full cooldown: mark ALL evaluated memories
     all_evaluated_ids.discard("")
