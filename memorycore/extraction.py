@@ -182,7 +182,8 @@ class ExtractionConfig:
         # Resolve API key from env if not set
         if not self.api_key:
             self.api_key = (
-                os.environ.get("MEM0_LLM_API_KEY")
+                os.environ.get("LOCAL_MEMORY_LLM_API_KEY")
+                or os.environ.get("MEM0_LLM_API_KEY")
                 or os.environ.get("DEEPSEEK_API_KEY")
                 or os.environ.get("ANTHROPIC_AUTH_TOKEN")
                 or ""
@@ -198,6 +199,7 @@ def extraction_config_from_dict(cfg: dict[str, Any]) -> ExtractionConfig:
     extraction = cfg.get("extraction", {})
     return ExtractionConfig(
         api_key=extraction.get("api_key", "")
+               or os.environ.get("LOCAL_MEMORY_LLM_API_KEY", "")
                or os.environ.get("MEM0_LLM_API_KEY", "")
                or os.environ.get("DEEPSEEK_API_KEY", ""),
         base_url=extraction.get("base_url", "https://api.deepseek.com/v1"),

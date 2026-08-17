@@ -66,6 +66,18 @@ def test_update_status_non_active_triggers_delete(isolated_memory_db):
     mock_vs.upsert.assert_not_called()
 
 
+def test_candidate_status_triggers_upsert_not_delete(isolated_memory_db):
+    """Candidate records stay in the vector index (match curator's active set)."""
+    from memorycore.storage import add_memory_record
+
+    mock_vs = make_mock_vs()
+    with patch("memorycore.storage.crud._get_vector_store", return_value=mock_vs):
+        add_memory_record("feedback", "Candidate", "candidate body", status="candidate")
+
+    mock_vs.upsert.assert_called_once()
+    mock_vs.delete.assert_not_called()
+
+
 def test_sync_failure_does_not_raise(isolated_memory_db):
     """Vector sync failure must never propagate to caller."""
     from memorycore.storage import add_memory_record

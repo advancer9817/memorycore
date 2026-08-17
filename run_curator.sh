@@ -71,6 +71,22 @@ except Exception:
   fi
 fi
 
+# Rollup: episodic-memory condensation. Runs here (dedicated curator process),
+# not inside the serve process, so its LLM call never stalls API responses.
+ROLLUP_ENABLED="${LOCAL_MEMORY_ROLLUP_ENABLED:-1}"
+if truthy_flag "$ROLLUP_ENABLED"; then
+  ROLLUP_APPLY_FLAG=()
+  append_apply_flag \
+    "LOCAL_MEMORY_ROLLUP_APPLY" \
+    "${LOCAL_MEMORY_ROLLUP_APPLY:-${LOCAL_MEMORY_CURATOR_APPLY:-}}" \
+    ROLLUP_APPLY_FLAG
+  "$PY" "$SERVER" rollup --limit "${LOCAL_MEMORY_ROLLUP_LIMIT:-250}" \
+    --min-count "${LOCAL_MEMORY_ROLLUP_MIN_COUNT:-30}" \
+    --max-age-hours "${LOCAL_MEMORY_ROLLUP_MAX_AGE_HOURS:-24}" \
+    "${ROLLUP_APPLY_FLAG[@]}" > "$OUT_DIR/rollup-$TS.log" 2>&1 || \
+    echo "[mcore] rollup failed (non-fatal)" >&2
+fi
+
 "$PY" "$SERVER" html "$ROOT/dashboard.html" >/dev/null
 
 python3 - "$REPORT" "${LLM_REPORT:-}" "$LLM_ENABLED" <<'PY'

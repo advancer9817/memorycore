@@ -47,36 +47,40 @@ def _lexical_similarity(left_text: str, right_text: str) -> float:
     return round((sequence_score * 0.65) + (lexical_score * 0.35), 4)
 
 
-def _vector_similarity(new_record: dict[str, Any], old_id: str, candidate_ids: set[str] | None = None) -> float | None:
-    """Try Qdrant cosine similarity between new_record text and old_id's stored vector.
+def _vector_scores(query_text: str, candidate_ids: set[str]) -> dict[str, float]:
+    """Return {id: cosine score} for trusted candidates from a single Qdrant search.
 
-    candidate_ids: if provided, only scores that match a known SQLite candidate are trusted.
-    This prevents false positives from unrelated records in a shared Qdrant store.
+    The query text is the new record's title+content. Previously each candidate
+    triggered its own ``vs.search`` with the SAME query text — identical results,
+    N redundant Ollama embeds — and this runs on the synchronous memory_add path.
+    Hoisting to one search removes N-1 redundant embeds while preserving the exact
+    result set (Qdrant is deterministic for a fixed query). Only ids in
+    candidate_ids are returned, which prevents false positives from unrelated
+    records in a shared Qdrant store.
     """
+    if not query_text:
+        return {}
     try:
         from memorycore.vector_store import get_vector_store
         vs = get_vector_store(load_config())
-        query_text = f"{new_record.get('title', '')} {new_record.get('content', '')}".strip()
-        if not query_text:
-            return None
         results = vs.search(query_text, top_k=50, filters={})
+        scores: dict[str, float] = {}
         for r in results:
-            if str(r.id) == str(old_id):
-                # Only trust this score if old_id is in the SQLite candidate set
-                if candidate_ids is not None and str(old_id) not in candidate_ids:
-                    return None
-                return float(r.score)
-        return None
+            rid = str(r.id)
+            if rid in candidate_ids:
+                scores[rid] = float(r.score)
+        return scores
     except Exception as exc:
         logger.debug("vector similarity lookup failed: %s", exc)
-        return None
+        return {}
 
 
-def _similarity(left: dict[str, Any], right: dict[str, Any], candidate_ids: set[str] | None = None) -> float:
+def _similarity(left: dict[str, Any], right: dict[str, Any], vector_scores: dict[str, float] | None = None) -> float:
     """Compute similarity: vector cosine preferred, lexical fallback.
 
-    candidate_ids: trusted SQLite candidate id set, passed to _vector_similarity to avoid
-    false positives from unrelated records in a shared Qdrant store.
+    vector_scores: precomputed {id: cosine score} from a single search, restricted
+    to trusted SQLite candidates to avoid false positives from unrelated records in
+    a shared Qdrant store.
 
     When vector score is available, it is blended with lexical similarity to prevent
     false positives where records share identical embed content (e.g. same boilerplate)
@@ -85,7 +89,7 @@ def _similarity(left: dict[str, Any], right: dict[str, Any], candidate_ids: set[
     left_text = f"{left.get('title', '')} {left.get('content', '')}".strip().lower()
     right_text = f"{right.get('title', '')} {right.get('content', '')}".strip().lower()
     lex_score = _lexical_similarity(left_text, right_text)
-    vec_score = _vector_similarity(left, right["id"], candidate_ids=candidate_ids)
+    vec_score = vector_scores.get(str(right["id"])) if vector_scores is not None else None
     if vec_score is not None:
         # Blend: vector carries 60% weight, lexical 40%.
         # This prevents auto-supersession when records share identical embed content
@@ -142,9 +146,11 @@ def process_auto_supersession(new_record: dict[str, Any], source_agent: str = "a
     review_threshold = min(config["review_similarity_threshold"], config["auto_supersede_threshold"])
     sqlite_candidates = _candidate_rows(new_record)
     candidate_ids = {r["id"] for r in sqlite_candidates}
+    query_text = f"{new_record.get('title', '')} {new_record.get('content', '')}".strip()
+    vector_scores = _vector_scores(query_text, candidate_ids)
     candidates = []
     for old_record in sqlite_candidates:
-        score = _similarity(new_record, old_record, candidate_ids=candidate_ids)
+        score = _similarity(new_record, old_record, vector_scores=vector_scores)
         if score >= review_threshold:
             candidates.append({"record": old_record, "similarity": score})
     if not candidates:

@@ -105,6 +105,24 @@ def _context_lab_test(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _mask_secret(value: str) -> str:
+    """Return a masked view of a secret; empty stays empty.
+
+    Used so the unauthenticated /api/v1/config endpoint never leaks the full
+    API key (e.g. 'sk-****abcd'). Values containing the mask are rejected on
+    write so a GET→PUT round-trip cannot overwrite the real key.
+    """
+    if not value:
+        return ""
+    if len(value) <= 8:
+        return "****"
+    return f"{value[:3]}****{value[-4:]}"
+
+
+def _is_masked_secret(value: Any) -> bool:
+    return isinstance(value, str) and "****" in value
+
+
 def _read_memorycore_config() -> dict[str, Any]:
     cfg = load_config()
     extraction = cfg.get("extraction", {})
@@ -117,7 +135,7 @@ def _read_memorycore_config() -> dict[str, Any]:
         "llm": {
             "extraction": {
                 "base_url": extraction.get("base_url", ""),
-                "api_key": extraction.get("api_key", ""),
+                "api_key": _mask_secret(str(extraction.get("api_key", ""))),
                 "model": extraction.get("model", ""),
                 "temperature": extraction.get("temperature", 0.1),
                 "max_tokens": extraction.get("max_tokens", 2000),
@@ -128,7 +146,7 @@ def _read_memorycore_config() -> dict[str, Any]:
                 "model": embedding.get("model", "nomic-embed-text"),
                 "ollama_url": embedding.get("ollama_url", "http://127.0.0.1:11434"),
                 "api_url": embedding.get("api_url", ""),
-                "api_key": embedding.get("api_key", ""),
+                "api_key": _mask_secret(str(embedding.get("api_key", ""))),
                 "dim": embedding.get("dim", 768),
                 "timeout": embedding.get("timeout", 30),
             },
@@ -154,11 +172,11 @@ def _write_memorycore_config(body: dict[str, Any]) -> dict[str, Any]:
 
     if extraction_patch:
         existing.setdefault("extraction", {}).update({
-            k: v for k, v in extraction_patch.items() if v is not None and v != ""
+            k: v for k, v in extraction_patch.items() if v is not None and v != "" and not _is_masked_secret(v)
         })
     if embedding_patch:
         existing.setdefault("embedding", {}).update({
-            k: v for k, v in embedding_patch.items() if v is not None and v != ""
+            k: v for k, v in embedding_patch.items() if v is not None and v != "" and not _is_masked_secret(v)
         })
 
     strategy_patch = body.get("strategy", {})
@@ -392,6 +410,17 @@ def _delete_app_memories(app_id: str) -> dict[str, Any]:
             f"UPDATE memories SET status='archived', updated_at=? WHERE id IN ({placeholders})",
             [ts, *target_ids],
         )
+        archived_rows = conn.execute(
+            f"SELECT * FROM memories WHERE id IN ({placeholders})", target_ids
+        ).fetchall()
+    # Archive must remove the vectors too, otherwise stale points leak into
+    # Qdrant (the curator's rebuild is a dry-run and never cleans them up).
+    from memorycore.storage.crud import _sync_record_indexes
+    for archived_row in archived_rows:
+        try:
+            _sync_record_indexes(row_to_dict(archived_row))
+        except Exception:
+            pass
     return {"app_id": app_id, "archived_count": len(target_ids), "archived_ids": target_ids}
 
 

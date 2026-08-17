@@ -22,12 +22,31 @@ import atexit
 import json
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Monotonic count of embedding degradations (real provider failed -> fallback).
+# Hashing-fallback vectors live in a different semantic space than the configured
+# model, so a rising count flags silent vector-index corruption under contention.
+_embedding_degraded_count = 0
+_embedding_degraded_lock = threading.Lock()
+
+
+def _record_embedding_degraded(provider: str, error: str, fallback: str) -> None:
+    """Count and audit an embedding degradation. Never raises."""
+    global _embedding_degraded_count
+    with _embedding_degraded_lock:
+        _embedding_degraded_count += 1
+    try:
+        from memorycore.storage.audit import log_audit_event
+        log_audit_event("embedding_degraded", detail={"provider": provider, "error": error, "fallback": fallback})
+    except Exception:
+        pass
 
 # Module-level httpx connection pools — avoids TCP handshake per embed call
 _ollama_client: "Any" = None
@@ -156,11 +175,7 @@ def embed_text(text: str, config: EmbedConfig | None = None) -> list[float]:
             return _embed_ollama(text, config)
         except Exception as exc:
             logger.warning("embed_text: Ollama failed (%s), using %s fallback", exc, config.fallback_provider)
-            try:
-                from memorycore.storage.audit import log_audit_event
-                log_audit_event("embedding_degraded", detail={"provider": "ollama", "error": str(exc), "fallback": config.fallback_provider})
-            except Exception:
-                pass
+            _record_embedding_degraded("ollama", str(exc), config.fallback_provider)
             return _embed_fallback(text, config)
     if provider == "hashing":
         return _embed_hashing(text, config.dim)
@@ -169,20 +184,24 @@ def embed_text(text: str, config: EmbedConfig | None = None) -> list[float]:
             return _embed_sentence_transformers(text, config)
         except Exception as exc:
             logger.warning("embed_text: sentence-transformers failed (%s), using hashing fallback", exc)
+            _record_embedding_degraded("sentence-transformers", str(exc), "hashing")
             return _embed_hashing(text, config.dim)
     if provider == "openai":
         try:
             return _embed_openai(text, config)
         except Exception as exc:
             logger.warning("embed_text: OpenAI-compatible embedding failed (%s), using hashing fallback", exc)
+            _record_embedding_degraded("openai", str(exc), "hashing")
             return _embed_hashing(text, config.dim)
     if provider != "ollama":
         logger.warning("embed_text: unknown provider %r, using hashing fallback", config.provider)
+        _record_embedding_degraded(str(config.provider), "unknown provider", "hashing")
         return _embed_hashing(text, config.dim)
     try:
         return _embed_ollama(text, config)
     except Exception as exc:
         logger.warning("embed_text: Ollama failed (%s), using %s fallback", exc, config.fallback_provider)
+        _record_embedding_degraded("ollama", str(exc), config.fallback_provider)
         return _embed_fallback(text, config)
 
 
@@ -579,6 +598,7 @@ class VectorStore:
             "embedding_api_url": self.config.embed.api_url,
             "sentence_transformers_model": self.config.embed.sentence_transformers_model,
             "ollama_url": self.config.embed.ollama_url,
+            "embed_fallback_count": _embedding_degraded_count,
             "count": self.count(),
         }
 
@@ -588,18 +608,23 @@ class VectorStore:
 # ---------------------------------------------------------------------------
 
 _store: VectorStore | None = None
+_store_lock = threading.Lock()
 
 
 def get_vector_store(config: dict[str, Any] | None = None) -> VectorStore:
     global _store
-    if _store is None:
-        vs_cfg = vector_store_config_from_dict(config or {})
-        _store = VectorStore(vs_cfg)
+    if _store is not None:
+        return _store
+    with _store_lock:
+        if _store is None:
+            vs_cfg = vector_store_config_from_dict(config or {})
+            _store = VectorStore(vs_cfg)
     return _store
 
 
 def reset_vector_store() -> None:
     global _store
-    if _store is not None:
-        _store.close()
-    _store = None
+    with _store_lock:
+        if _store is not None:
+            _store.close()
+        _store = None

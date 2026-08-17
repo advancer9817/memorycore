@@ -147,7 +147,7 @@ class TestExtractFacts:
     def test_no_api_key_returns_empty(self):
         import os
         # Temporarily clear all key env vars so __post_init__ finds nothing
-        keys = ("MEM0_LLM_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+        keys = ("LOCAL_MEMORY_LLM_API_KEY", "MEM0_LLM_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_AUTH_TOKEN")
         saved = {k: os.environ.pop(k, None) for k in keys}
         try:
             cfg = ExtractionConfig(api_key="")

@@ -222,3 +222,33 @@ def test_different_project_paths_skip_auto_supersession(monkeypatch, tmp_path):
         after_count = conn.execute("SELECT COUNT(*) FROM governance_decisions").fetchone()[0]
     assert get_record(old["id"])["status"] == "active"
     assert after_count == before_count
+
+
+def test_vector_search_hoisted_to_single_call(monkeypatch, tmp_path):
+    """One Qdrant search per add, not one per candidate (removes N-1 redundant embeds)."""
+    _enable_auto(monkeypatch, tmp_path)
+    import memorycore.vector_store as vs_mod
+
+    search_calls: list[str] = []
+
+    class CountingVectorStore:
+        def search(self, query_text, top_k=None, filters=None):
+            search_calls.append(query_text)
+            return []
+
+        def upsert(self, *_args, **_kwargs):
+            return True
+
+        def delete(self, *_args, **_kwargs):
+            return True
+
+    monkeypatch.setattr(vs_mod, "get_vector_store", lambda _cfg=None: CountingVectorStore())
+
+    # Seed three same-scope records so the final add has three candidates.
+    for i in range(3):
+        add_memory_record("feedback", f"Preference {i}", f"Some preference {i}", importance=0.4, atomize=False)
+    search_calls.clear()
+
+    add_memory_record("feedback", "New preference", "A different preference", importance=0.4, atomize=False)
+
+    assert len(search_calls) == 1

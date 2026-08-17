@@ -24,6 +24,11 @@ from memorycore.storage.entities import sync_memory_entities
 
 _LINEAGE_RELEVANT_STATUSES = {"active", "stale", "contradicted", "superseded"}
 
+# Statuses whose records belong in the vector index. Mirrors
+# curator_llm.core._fetch_active_memories ("active"/"candidate"); any other
+# status (stale/archived/contradicted/superseded) must be deleted from Qdrant.
+_VECTOR_RETAIN_STATUSES = {"active", "candidate"}
+
 logger = logging.getLogger(__name__)
 
 
@@ -44,16 +49,18 @@ except Exception:
 
 
 def _sync_to_vector(record: dict[str, Any]) -> None:
-    """Sync memory to Qdrant: upsert for active, delete for non-active.
+    """Sync memory to Qdrant: upsert for active/candidate, delete otherwise.
 
     Deletions run synchronously to prevent vector leaks when the service
     restarts before an async thread completes.  Upserts remain async
-    (fire-and-forget) since a stale-but-present vector is harmless.
+    (fire-and-forget) since a stale-but-present vector is harmless, but the
+    upsert thread re-checks the record's current status before writing so a
+    concurrent archive cannot resurrect the vector.
     """
     import threading as _threading
 
     status = record.get("status", "active")
-    if status != "active":
+    if status not in _VECTOR_RETAIN_STATUSES:
         try:
             if _get_vector_store is None:
                 return
@@ -68,13 +75,21 @@ def _sync_to_vector(record: dict[str, Any]) -> None:
         try:
             if _get_vector_store is None:
                 return
+            # Re-check current status: a record archived between the write and
+            # this thread's run must be deleted, not upserted (resurrect race).
+            with read_conn() as conn:
+                row = conn.execute("SELECT status FROM memories WHERE id=?", (record["id"],)).fetchone()
+            current_status = row["status"] if row is not None else None
             vs = _get_vector_store(load_config())
+            if current_status not in _VECTOR_RETAIN_STATUSES:
+                vs.delete(record["id"])
+                return
             text = f"{record.get('title', '')} {record.get('content', '')}".strip()
             metadata = record.get("metadata") or {}
             payload = {
                 "type": record.get("type", ""),
                 "scope": record.get("scope", ""),
-                "status": status,
+                "status": current_status,
                 "source_agent": record.get("source_agent", ""),
                 "tags": record.get("tags", []),
                 "kind": metadata.get("kind", ""),
@@ -140,7 +155,7 @@ def _drain_vector_sync_queue() -> dict[str, int]:
                         conn.execute("DELETE FROM vector_sync_queue WHERE id=?", (queue_id,))
                     continue
                 record = row_to_dict(mem_row)
-                if record.get("status") != "active":
+                if record.get("status") not in _VECTOR_RETAIN_STATUSES:
                     vs.delete(memory_id)
                 else:
                     text = f"{record.get('title', '')} {record.get('content', '')}".strip()

@@ -358,3 +358,73 @@ def test_frontend_vector_search_passes_score_threshold_as_keyword(monkeypatch):
         "filters": None,
         "score_threshold": 0.72,
     }]
+
+
+def test_delete_app_memories_syncs_vectors():
+    """Archiving an app's memories must delete their Qdrant vectors (no stale leak)."""
+    from unittest.mock import MagicMock, patch
+
+    source_agent = "frontend-delete-sync-test"
+    r1 = add_memory_record("project_memory", "App one", "first record", source_agent=source_agent, atomize=False)
+    r2 = add_memory_record("project_memory", "App two", "second record", source_agent=source_agent, atomize=False)
+
+    mock_vs = MagicMock()
+    mock_vs.upsert.return_value = True
+    mock_vs.delete.return_value = True
+
+    with patch("memorycore.storage.crud._get_vector_store", return_value=mock_vs):
+        with _client() as client:
+            resp = client.delete(f"/api/v1/apps/{source_agent}")
+
+    assert resp.status_code == 200
+    assert resp.json()["archived_count"] == 2
+    deleted_ids = {call.args[0] for call in mock_vs.delete.call_args_list}
+    assert r1["id"] in deleted_ids
+    assert r2["id"] in deleted_ids
+
+
+def test_frontend_config_redacts_api_keys(monkeypatch, tmp_path):
+    """The unauthenticated /api/v1/config endpoint must never leak full keys."""
+    import json as _json
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "extraction:\n"
+        "  api_key: sk-testsecret1234567890\n"
+        "embedding:\n"
+        "  api_key: emb-secret-abcdef\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("LOCAL_MEMORY_CONFIG", str(cfg))
+    from memorycore.models import invalidate_config_cache
+    invalidate_config_cache()
+
+    with _client() as client:
+        config = client.get("/api/v1/config")
+
+    data = config.json()
+    assert data["llm"]["extraction"]["api_key"] == "sk-****7890"
+    assert data["llm"]["embedding"]["api_key"] == "emb****cdef"
+    assert "sk-testsecret1234567890" not in _json.dumps(config.json())
+
+
+def test_frontend_config_write_ignores_masked_keys(monkeypatch, tmp_path):
+    """A GET→PUT round-trip of the masked key must not overwrite the real key."""
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "extraction:\n"
+        "  api_key: sk-testsecret1234567890\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("LOCAL_MEMORY_CONFIG", str(cfg))
+    from memorycore.models import invalidate_config_cache
+    invalidate_config_cache()
+
+    with _client() as client:
+        client.put("/api/v1/config", json={"llm": {"extraction": {"api_key": "sk-****7890"}}})
+        config = client.get("/api/v1/config")
+
+    assert config.json()["llm"]["extraction"]["api_key"] == "sk-****7890"
+    import yaml
+    raw = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+    assert raw["extraction"]["api_key"] == "sk-testsecret1234567890"

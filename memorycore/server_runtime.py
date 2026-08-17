@@ -32,7 +32,12 @@ _OBS_START_TIME = __import__("time").time()
 
 
 def _start_auto_curator(interval_hours: float = 6.0) -> None:
-    """Background thread: run curator(dry_run=False) every interval_hours."""
+    """Background thread: cheap maintenance every interval_hours.
+
+    Heavy batch work (rule curator, LLM curator, rollup) runs in the separate
+    systemd mcore-curator service, never inside the serve process — a rollup
+    pass previously ran here and could stall API responses on its LLM call.
+    """
     import time
 
     def _loop() -> None:
@@ -45,16 +50,12 @@ def _start_auto_curator(interval_hours: float = 6.0) -> None:
                 from memorycore.storage.governance import auto_expire_stale_reviews
                 handoff_cleanup = cleanup_expired_handoffs()
                 sync_result = _drain_vector_sync_queue()
-                rollup = rollup_report(dry_run=False)
-                rollup_summary = rollup.get("summary", {})
                 expire_result = auto_expire_stale_reviews(stale_days=14, dry_run=False)
                 logger.info(
-                    "[auto-curator] handoff_cleaned=%s sync_retried=%s/%s rollup_created=%s rollup_archived=%s expired_reviews=%s",
+                    "[auto-curator] handoff_cleaned=%s sync_retried=%s/%s expired_reviews=%s",
                     handoff_cleanup.get("cleaned", 0),
                     sync_result.get("succeeded", 0),
                     sync_result.get("failed", 0),
-                    rollup_summary.get("created", 0),
-                    rollup_summary.get("archived_sources", 0),
                     expire_result.get("expired", 0),
                 )
             except Exception as exc:

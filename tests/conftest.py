@@ -93,7 +93,7 @@ def isolated_memory_db(tmp_path, monkeypatch):
         try:
             vs = crud._get_vector_store(crud.load_config())
             status = record.get("status", "active")
-            if status != "active":
+            if status not in ("active", "candidate"):
                 vs.delete(record["id"])
                 return
             text = f"{record.get('title', '')} {record.get('content', '')}".strip()
@@ -110,7 +110,7 @@ def isolated_memory_db(tmp_path, monkeypatch):
             vs.upsert(record["id"], text, payload)
         except Exception as exc:
             crud.logger.warning("_sync_to_vector: failed for id=%s, enqueuing for retry: %s", record.get("id"), exc)
-            crud._enqueue_vector_sync(record["id"], "upsert" if record.get("status") == "active" else "delete", str(exc))
+            crud._enqueue_vector_sync(record["id"], "upsert" if record.get("status") in ("active", "candidate") else "delete", str(exc))
     monkeypatch.setattr(crud, "_sync_to_vector", mock_sync_to_vector)
 
     yield db

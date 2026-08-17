@@ -333,14 +333,16 @@ def memory_backup(path: str | None = None) -> dict[str, Any]:
 
 
 def memory_rebuild_vectors(dry_run: bool = True, limit: int = 5000) -> dict[str, Any]:
-    from memorycore.storage.crud import row_to_dict
+    from memorycore.storage.crud import _VECTOR_RETAIN_STATUSES, row_to_dict
     from memorycore.vector_store import get_vector_store
 
     cap = max(1, min(int(limit), 5000))
+    retain = sorted(_VECTOR_RETAIN_STATUSES)
+    placeholders = ",".join("?" for _ in retain)
     with managed_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM memories WHERE status != 'archived' ORDER BY updated_at DESC LIMIT ?",
-            (cap,),
+            f"SELECT * FROM memories WHERE status IN ({placeholders}) ORDER BY updated_at DESC LIMIT ?",
+            (*retain, cap),
         ).fetchall()
     if dry_run:
         return {"dry_run": True, "planned": len(rows), "rebuilt": 0}
@@ -368,8 +370,46 @@ def memory_rebuild_vectors(dry_run: bool = True, limit: int = 5000) -> dict[str,
             import logging as _logging
             _logging.getLogger(__name__).warning("rebuild_vectors: failed for %s: %s", record["id"], exc)
             errors += 1
-    log_audit_event("memory_vector_rebuild", detail={"rebuilt": rebuilt, "errors": errors})
-    return {"dry_run": False, "planned": len(rows), "rebuilt": rebuilt, "errors": errors}
+    deleted_stale = _delete_stale_vector_points(vs)
+    log_audit_event("memory_vector_rebuild", detail={"rebuilt": rebuilt, "errors": errors, "deleted_stale": deleted_stale})
+    return {"dry_run": False, "planned": len(rows), "rebuilt": rebuilt, "errors": errors, "deleted_stale": deleted_stale}
+
+
+def _delete_stale_vector_points(vs: Any) -> int:
+    """Delete Qdrant points whose payload status is not retained (active/candidate).
+
+    The rebuild only upserts retained records; without this pass, points for
+    archived/superseded/contradicted/stale records would accumulate forever and
+    keep being returned by status-unfiltered vector searches. Returns the number
+    of matching points counted before deletion (best effort; 0 on failure).
+    """
+    try:
+        from qdrant_client.models import FieldCondition, Filter, FilterSelector, MatchValue
+        from memorycore.models import STATUSES
+        from memorycore.storage.crud import _VECTOR_RETAIN_STATUSES
+        client = getattr(vs, "_client", None)
+        if client is None:
+            return 0
+        conditions = [
+            FieldCondition(key="status", match=MatchValue(value=status))
+            for status in sorted(STATUSES - _VECTOR_RETAIN_STATUSES)
+        ]
+        stale_filter = Filter(should=conditions)
+        count = client.count(
+            collection_name=vs.config.collection,
+            count_filter=stale_filter,
+            exact=False,
+        ).count
+        if count:
+            client.delete(
+                collection_name=vs.config.collection,
+                points_selector=FilterSelector(filter=stale_filter),
+            )
+        return int(count)
+    except Exception as exc:
+        import logging as _logging
+        _logging.getLogger(__name__).warning("rebuild_vectors: stale-point cleanup failed: %s", exc)
+        return 0
 
 
 def memory_vector_audit(dry_run: bool = True, limit: int = 100) -> dict[str, Any]:
