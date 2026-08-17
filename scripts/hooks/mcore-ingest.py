@@ -495,7 +495,10 @@ def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:
                     "clientInfo": {"name": "mcore-ingest-hook", "version": "1.0"},
                 },
             },
-            timeout=5,
+            # initialize can be starved while mcore serially processes a
+            # concurrent memory_add/ingest (LLM extraction + embedding chain);
+            # 5s was too tight and failed the whole write-back.
+            timeout=20,
         )
         session_id = headers.get("mcp-session-id", "")
         if not session_id:

@@ -331,44 +331,55 @@ def register_hooks_claude(path: Path, backup_dir: Path, dry_run: bool) -> bool:
 
 
 def register_hooks_hermes(path: Path, backup_dir: Path, dry_run: bool) -> bool:
-    """Register hooks in Hermes config.yaml."""
+    """Hermes 记忆集成由 mcore-memory 插件负责，不再注册 shell hooks。
+
+    Since 2026-08-17: hermes serve does not register config shell hooks at
+    all (serve is not in _AGENT_COMMANDS), while the Python plugin system
+    loads on both serve and CLI paths. mcore-memory plugin registers
+    pre_llm_call (inject) / post_llm_call (per-turn ingest) / on_session_end
+    (session fallback). This function therefore only:
+      1. removes stale mcore/lmmcp shell-hook entries from config.yaml
+         (written by older versions of this script);
+      2. clears stale allowlist approvals;
+      3. deploys mcore-ingest.py (still used by the plugin's on_session_end
+         fallback to read the full state.db transcript).
+    """
     if yaml is None:
-        log("  ! PyYAML not available; skipping Hermes hook registration")
+        log("  ! PyYAML not available; skipping Hermes hook cleanup")
         return False
     old_raw = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
     data = yaml.safe_load(old_raw) if old_raw.strip() else {}
     data = data or {}
-    hooks = data.setdefault("hooks", {})
+    # Remove every mcore/lmmcp shell-hook entry, then drop now-empty
+    # events and the hooks block itself.  Never touch unrelated hooks.
+    hooks = data.get("hooks")
+    changed = False
+    if isinstance(hooks, dict):
+        fragments = (*OLD_HOOK_FRAGMENTS, *MCORE_INGEST_FRAGMENTS, *CODEX_MCORE_CONTEXT_FRAGMENTS)
+        for event in list(hooks):
+            entries = hooks.get(event)
+            if not isinstance(entries, list):
+                continue
+            filtered = [
+                entry for entry in entries
+                if not any(fragment in str(entry) for fragment in fragments)
+            ]
+            if len(filtered) != len(entries):
+                changed = True
+            if filtered:
+                hooks[event] = filtered
+            else:
+                hooks.pop(event, None)
+        if not hooks:
+            data.pop("hooks", None)
     hermes_hook_dir = HOME / ".hermes" / "agent-hooks"
     hermes_ingest_hook = hermes_hook_dir / "mcore-ingest.py"
-    hermes_context_hook = hermes_hook_dir / "mcore-context.sh"
-    ingest_command = f"python3 {hermes_ingest_hook} --agent hermes --background"
-    context_command = f"MCORE_AGENT_ID=hermes bash {hermes_context_hook}"
-    changed = _upsert_hermes_hook_entry(
-        hooks,
-        "on_session_end",
-        ingest_command,
-        10,
-        (*OLD_HOOK_FRAGMENTS, *MCORE_INGEST_FRAGMENTS),
-    )
-    changed = _upsert_hermes_hook_entry(
-        hooks,
-        "pre_llm_call",
-        context_command,
-        5,
-        CODEX_MCORE_CONTEXT_FRAGMENTS,
-    ) or changed
-    changed = _update_hermes_allowlist(
-        [("on_session_end", ingest_command), ("pre_llm_call", context_command)],
-        backup_dir,
-        dry_run,
-    ) or changed
+    # Clear stale mcore/lmmcp allowlist approvals (no new ones are added).
+    changed = _update_hermes_allowlist([], backup_dir, dry_run) or changed
     if not dry_run:
         hermes_hook_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(HOOK_MCORE_INGEST, hermes_ingest_hook)
-        shutil.copy2(HOOK_MCORE_CONTEXT, hermes_context_hook)
         hermes_ingest_hook.chmod(0o755)
-        hermes_context_hook.chmod(0o755)
     if not changed:
         return False
     if dry_run:

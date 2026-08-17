@@ -92,7 +92,10 @@ def llm_curator_report(
             timing["vector_search_ms"] = int((_time.monotonic() - t0) * 1000)
 
             dup_pairs = [p for p in all_pairs if p[2] >= effective_sim][:max_dedup]
-            contra_pairs = [p for p in all_pairs if p[2] >= effective_sim * 0.8][:max_contra]
+            # Contradiction candidates need a stricter bar than the vector
+            # scan floor (sim*0.8): a loose bar flooded every hourly run
+            # with low-similarity pairs and ~40 LLM judge calls.
+            contra_pairs = [p for p in all_pairs if p[2] >= effective_sim * 0.92][:max_contra]
             diagnostics["dedup_pairs_found"] = len(dup_pairs)
             diagnostics["contradiction_pairs_found"] = len(contra_pairs)
         except Exception as exc:
@@ -347,7 +350,10 @@ def run_llm_curator_incremental(
         try:
             all_pairs = _find_candidate_pairs(vs, memories, effective_sim)
             dup_pairs = [p for p in all_pairs if p[2] >= effective_sim][:max_dedup]
-            contra_pairs = [p for p in all_pairs if p[2] >= effective_sim * 0.8][:max_contra]
+            # Contradiction candidates need a stricter bar than the vector
+            # scan floor (sim*0.8): a loose bar flooded every hourly run
+            # with low-similarity pairs and ~40 LLM judge calls.
+            contra_pairs = [p for p in all_pairs if p[2] >= effective_sim * 0.92][:max_contra]
             counts["dedup_pairs_found"] = len(dup_pairs)
             counts["contradiction_pairs_found"] = len(contra_pairs)
             progress("vector_scan", {"dedup_pairs_found": len(dup_pairs), "contradiction_pairs_found": len(contra_pairs)})
@@ -390,7 +396,13 @@ def run_llm_curator_incremental(
             errors.append(f"Vector rebuild failed: {exc}")
 
     summary = _summary_from_counts(counts)
-    status = "failed" if errors and counts.get("decisions_created", 0) == 0 else "succeeded" if counts.get("decisions_created", 0) else "done"
+    decisions_created = counts.get("decisions_created", 0)
+    if errors and decisions_created == 0:
+        status = "failed"
+    elif decisions_created:
+        status = "succeeded"
+    else:
+        status = "done"
     _diag(f"CURATOR_END: job={job_id} status={status} elapsed={int(_time.monotonic()-t_start)}s decisions={counts.get('decisions_created',0)} errors={len(errors)}")
     update_llm_curator_job(job_id, status=status, progress={"stage": "finished", "pid": _owner_pid}, summary=summary, errors=errors, finished=True)
     try:

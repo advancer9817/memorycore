@@ -203,21 +203,33 @@ def test_opencode_session_end_uses_background_ingest():
 
 
 def test_hermes_hooks_register_pre_llm_context_injection():
+    """Hermes 记忆集成走 mcore-memory 插件（serve/CLI 均加载插件）。
+
+    hermes serve 不注册 config shell hooks，注册脚本只做两件事：
+    清理旧 mcore/lmmcp shell-hook 配置与 allowlist 条目，并部署
+    mcore-ingest.py（插件 on_session_end 兜底读取 state.db 用）。
+    """
     setup = (ROOT / "scripts" / "setup-hooks.sh").read_text(encoding="utf-8")
     connect_agents = (ROOT / "scripts" / "connect_agents.py").read_text(encoding="utf-8")
 
-    assert 'HERMES_CONTEXT_DEST="$HERMES_HOOK_DIR/mcore-context.sh"' in setup
-    assert 'cp "$HERMES_CONTEXT_SRC" "$HERMES_CONTEXT_DEST"' in setup
-    assert 'context_command = f"MCORE_AGENT_ID=hermes bash {hermes_context_dest}"' in setup
-    assert 'hooks_cfg["pre_llm_call"] = [{"command": context_command, "timeout": 5}]' in setup
-    assert '"event": "pre_llm_call"' in setup
-    assert '--agent hermes --background' in setup
+    # 部署 mcore-ingest.py（插件兜底使用）
+    assert 'HERMES_INGEST_DEST="$HERMES_HOOK_DIR/mcore-ingest.py"' in setup
+    assert 'cp "$HERMES_INGEST_SRC" "$HERMES_INGEST_DEST"' in setup
+    assert '--agent hermes' in setup
 
-    assert "hermes_context_hook = hermes_hook_dir / \"mcore-context.sh\"" in connect_agents
-    assert 'context_command = f"MCORE_AGENT_ID=hermes bash {hermes_context_hook}"' in connect_agents
-    assert '"pre_llm_call",' in connect_agents
-    assert '"on_session_end", ingest_command' in connect_agents
-    assert '--agent hermes --background' in connect_agents
+    # 不再注册 shell hooks：清理旧配置，而不是写入 pre_llm_call/on_session_end
+    assert 'mcore-context.sh' in setup  # 旧条目清理片段仍引用
+    assert '"event": "pre_llm_call"' not in setup
+    assert 'hooks_cfg["pre_llm_call"]' not in setup
+    assert 'context_command = f"env MCORE_AGENT_ID=hermes bash {hermes_context_dest}"' not in setup
+
+    # connect_agents.py：清理模式，不再 upsert shell hooks
+    assert "hermes_ingest_hook = hermes_hook_dir / \"mcore-ingest.py\"" in connect_agents
+    assert 'shutil.copy2(HOOK_MCORE_INGEST, hermes_ingest_hook)' in connect_agents
+    assert 'mcore-ingest.py --agent hermes' not in connect_agents
+    assert '"pre_llm_call",' not in connect_agents
+    assert '"on_session_end", ingest_command' not in connect_agents
+    assert 'mcore-context.sh' in connect_agents  # 清理逻辑仍引用旧脚本名
 
 
 def test_opencode_plugin_registers_pre_llm_context_injection():

@@ -118,12 +118,35 @@ def _safe_tool(fn):
     return wrapper
 
 
+def _threaded_tool(mcp: Any):
+    """Register a sync MCP tool body on a worker thread.
+
+    The vendored mcp SDK (1.27.1) invokes sync tool functions directly on the
+    uvicorn event loop (``call_fn_with_arg_validation``), so a long pipeline
+    (LLM extraction, embedding, atomize) blocks every concurrent HTTP request —
+    hooks and clients alike stall with 0 bytes until the tool finishes. This
+    factory registers an async wrapper (which runs the body via
+    ``anyio.to_thread``) on the FastMCP instance while returning the original
+    sync function, so in-process callers and tests keep the sync contract.
+    Signature introspection follows ``__wrapped__``, so the tool schema is
+    unchanged.
+    """
+    def decorator(fn):
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            import anyio
+            return await anyio.to_thread.run_sync(lambda: fn(*args, **kwargs))
+        mcp.add_tool(wrapper, name=fn.__name__)
+        return fn
+    return decorator
+
+
 # ---------------------------------------------------------------------------
 # MCP tools
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_add(
     type: str,
@@ -153,7 +176,7 @@ def memory_add(
     )
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_search(
     query: str = "",
@@ -168,7 +191,7 @@ def memory_search(
     return search_memory_records(query, types, scope, project_path, tags, status, limit)
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_context(
     task: str,
@@ -193,28 +216,28 @@ def memory_context(
     )
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_context_stats(limit: int = 500) -> dict[str, Any]:
     """Return context pack quality trend metrics."""
     return get_context_quality_stats(limit=limit)
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_get(id: str) -> dict[str, Any] | None:
     """Get one memory record by id."""
     return get_record(id)
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_list_recent(limit: int = 10) -> list[dict[str, Any]]:
     """List recently updated memory records."""
     return list_recent(limit, cap=100)
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_feedback(
     id: str, score: float, note: str = "", source_agent: str = "agent"
@@ -223,21 +246,21 @@ def memory_feedback(
     return add_feedback(id, score, note, source_agent)
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_timeline(query: str = "", scope: str = "", limit: int = 20) -> list[dict[str, Any]]:
     """Return decision/timeline/feedback memories in chronological order."""
     return timeline(query, scope, limit)
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_entity_search(query: str, limit: int = 20) -> list[dict[str, Any]]:
     """Search active memories by deterministic entity and alias index."""
     return entity_search(query, limit=limit)
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_ingest(
     messages: list[dict[str, str]],
@@ -317,7 +340,7 @@ def memory_ingest(
     }
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_vector_search(
     query: str,
@@ -347,7 +370,7 @@ def memory_vector_search(
         return [{"degraded": True, "reason": f"vector store unavailable: {type(exc).__name__}: {exc}"}]
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_vector_status() -> dict[str, Any]:
     """Return Qdrant vector store status (availability, collection, count)."""
@@ -366,7 +389,7 @@ def memory_vector_audit(dry_run: bool = True, limit: int = 100) -> dict[str, Any
     return audit_memory_vectors(dry_run=dry_run, limit=limit)
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_link_add(
     source_id: str,
@@ -404,7 +427,7 @@ def memory_link_add(
         return {"error": str(exc)}
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_link_query(
     memory_id: str,
@@ -435,7 +458,7 @@ def memory_lineage(memory_id: str, limit: int = 100) -> dict[str, Any]:
     return get_memory_lineage(memory_id, limit=limit)
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_supersede(
     old_id: str,
@@ -447,7 +470,7 @@ def memory_supersede(
     return supersede_memory_record(old_id, new_id, source_agent=source_agent, note=note)
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_warnings(
     memory_ids: list[str],
@@ -473,7 +496,7 @@ def governance_decisions(review_status: str | None = None, limit: int = 100) -> 
     return list_governance_decisions(review_status=review_status, limit=limit)
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_audit_log(
     memory_id: str | None = None,
@@ -493,7 +516,7 @@ def memory_audit_log(
     return get_audit_log(memory_id=memory_id, event_type=event_type, limit=limit)
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_update(
     id: str,
@@ -524,7 +547,7 @@ def memory_update(
         return {"error": str(exc)}
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_export(
     include_audit: bool = False,
@@ -538,7 +561,7 @@ def memory_export(
     return export_memory_payload(include_audit=include_audit, memories_only=memories_only)
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_import(
     payload: dict[str, Any],
@@ -553,7 +576,7 @@ def memory_import(
     return import_memory_payload(payload, dry_run=dry_run, conflict_policy=conflict_policy)
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_backup(path: str | None = None) -> dict[str, Any]:
     """Create a SQLite backup using the SQLite backup API."""
@@ -566,7 +589,7 @@ def memory_rebuild_vectors(dry_run: bool = True, limit: int = 5000) -> dict[str,
     return rebuild_memory_vectors(dry_run=dry_run, limit=limit)
 
 
-@mcp.tool()
+@_threaded_tool(mcp)
 @_safe_tool
 def memory_stats() -> dict[str, Any]:
     """Return memory statistics grouped by type, status, and agent, with aggregate scores."""

@@ -16,10 +16,10 @@ embedding:
   sentence_transformers_model: sentence-transformers/all-mpnet-base-v2
   timeout: 30
 extraction:
-  api_key: nk
-  base_url: http://127.0.0.1:8317
-  max_tokens: 32000
-  model: gemini-pro-agent
+  api_key: sk-c5cf5fc22a1e41659da302027c88aabe
+  base_url: https://api.deepseek.com
+  max_tokens: 8000
+  model: deepseek-v4-flash
   temperature: 1
   timeout: 600
 extraction_strategy:
@@ -53,21 +53,21 @@ governance:
   - project_memory
   review_confidence_threshold: 0.55
 llm_curator:
-  batch_size: 5
+  batch_size: 10
   content_max_chars: 5000
   importance_limit: 2000
   keep_threshold: 0.01
-  max_contradiction_pairs: 200
-  max_dedup_pairs: 200
-  max_link_pairs: 100
+  max_contradiction_pairs: 60
+  max_dedup_pairs: 60
+  max_link_pairs: 40
   max_split_candidates: 100
   preset: deep
   prompt_style: aggressive
-  review_cooldown_seconds: 900
+  review_cooldown_seconds: 3600
   reviewed_ids_max_age_seconds: 43200
   sim_threshold: 0.4
-  split_enabled: false
   split_content_threshold: 200
+  split_enabled: false
   temperature: 0.8
 output_language: zh
 qdrant:

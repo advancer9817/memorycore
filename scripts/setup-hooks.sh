@@ -296,50 +296,35 @@ try:
 except Exception:
     yaml = None
 
+# Hermes 记忆集成由 mcore-memory 插件负责（serve/CLI 均加载插件，注册
+# pre_llm_call 注入 + post_llm_call 每轮写回 + on_session_end 会话兜底）。
+# hermes serve 不注册 config shell hooks，因此这里只做两件事：
+#   1. 清理旧版本脚本写入的 mcore/lmmcp shell-hook 配置与 allowlist 条目；
+#   2. mcore-ingest.py 仍部署（插件 on_session_end 兜底读取 state.db 用）。
 if hermes_config.exists() and yaml is not None:
     data = yaml.safe_load(hermes_config.read_text(encoding="utf-8") or "{}") or {}
-    hooks_cfg = data.setdefault("hooks", {})
-    context_command = f"MCORE_AGENT_ID=hermes bash {hermes_context_dest}"
-    context_entries = hooks_cfg.get("pre_llm_call")
-    if context_entries is None:
-        hooks_cfg["pre_llm_call"] = [{"command": context_command, "timeout": 5}]
-    elif isinstance(context_entries, list):
-        context_entries = [
-            entry for entry in context_entries
-            if "mcore-context.sh" not in str(entry)
-        ]
-        if not any(context_command in str(entry) for entry in context_entries):
-            context_entries.append({"command": context_command, "timeout": 5})
-        hooks_cfg["pre_llm_call"] = context_entries
-    elif isinstance(context_entries, str):
-        hooks_cfg["pre_llm_call"] = [{"command": context_command, "timeout": 5}]
-
-    # Hermes stores current CLI transcripts in ~/.hermes/state.db.  The hook
-    # runs in the background and carries stdin metadata to the detached child via
-    # MCORE_HERMES_HOOK_PAYLOAD so session_id is not lost.
-    command = f"python3 {hermes_ingest_dest} --agent hermes --background"
-    entries = hooks_cfg.get("on_session_end")
-    if entries is None:
-        hooks_cfg["on_session_end"] = [{"command": command, "timeout": 10}]
-    elif isinstance(entries, list):
-        entries = [
-            entry for entry in entries
-            if not (
-                any(fragment in str(entry) for fragment in old_hook_fragments)
-                or ("mcore-ingest.py" in str(entry) and "--agent hermes" in str(entry))
-            )
-        ]
-        if not any(command in str(entry) for entry in entries):
-            entries.append({"command": command, "timeout": 10})
-        hooks_cfg["on_session_end"] = entries
-    elif isinstance(entries, str):
-        hooks_cfg["on_session_end"] = [{"command": command, "timeout": 10}]
-    hermes_config.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    hooks_cfg = data.get("hooks")
+    if isinstance(hooks_cfg, dict):
+        for event in list(hooks_cfg):
+            entries = hooks_cfg.get(event)
+            if not isinstance(entries, list):
+                continue
+            filtered = [
+                entry for entry in entries
+                if not any(fragment in str(entry) for fragment in old_hook_fragments)
+                and not ("mcore-ingest.py" in str(entry) and "--agent hermes" in str(entry))
+                and "mcore-context.sh" not in str(entry)
+            ]
+            if filtered:
+                hooks_cfg[event] = filtered
+            else:
+                hooks_cfg.pop(event, None)
+        if not hooks_cfg:
+            data.pop("hooks", None)
+        hermes_config.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 allow = load_json(hermes_allowlist)
 approvals = allow.setdefault("approvals", [])
-command = f"python3 {hermes_ingest_dest} --agent hermes --background"
-context_command = f"MCORE_AGENT_ID=hermes bash {hermes_context_dest}"
 approvals[:] = [
     item for item in approvals
     if not (
@@ -351,18 +336,6 @@ approvals[:] = [
         )
     )
 ]
-if not any(item.get("command") == command and item.get("event") == "on_session_end" for item in approvals if isinstance(item, dict)):
-    approvals.append({
-        "command": command,
-        "event": "on_session_end",
-        "script_mtime_at_approval": None,
-    })
-if not any(item.get("command") == context_command and item.get("event") == "pre_llm_call" for item in approvals if isinstance(item, dict)):
-    approvals.append({
-        "command": context_command,
-        "event": "pre_llm_call",
-        "script_mtime_at_approval": None,
-    })
 write_json(hermes_allowlist, allow)
 PY
 

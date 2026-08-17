@@ -27,6 +27,10 @@ def _actual_mcp_tools() -> set[str]:
                 and func.attr == "tool"
                 and isinstance(func.value, ast.Name)
                 and func.value.id == "mcp"
+            ) or (
+                isinstance(decorator, ast.Call)
+                and isinstance(decorator.func, ast.Name)
+                and decorator.func.id == "_threaded_tool"
             ):
                 tools.add(node.name)
     return tools
