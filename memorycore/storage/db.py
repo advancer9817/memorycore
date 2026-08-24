@@ -130,6 +130,28 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
+def _drop_dead_tables(conn: sqlite3.Connection, table_names: list[str]) -> None:
+    """Drop tables that may be vec0 virtual tables or shadow tables.
+
+    sqlite-vec's vec0 module is no longer loaded; DROP TABLE on a vec0 virtual
+    table raises OperationalError("no such module: vec0"). We instead delete the
+    sqlite_master rows (with writable_schema) — safe for empty dead tables that
+    no code references.
+    """
+    for name in table_names:
+        try:
+            conn.execute(f'DROP TABLE IF EXISTS "{name}"')
+            continue
+        except sqlite3.OperationalError:
+            pass  # likely vec0 virtual table — fall through to sqlite_master removal
+        try:
+            conn.execute("PRAGMA writable_schema=ON")
+            conn.execute('DELETE FROM sqlite_master WHERE type IN ("table","index","trigger","view") AND name=?', (name,))
+            conn.execute("PRAGMA writable_schema=OFF")
+        except Exception:
+            logger.warning("failed to remove dead table %s from sqlite_master", name, exc_info=True)
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
@@ -499,6 +521,15 @@ def init_db(conn: sqlite3.Connection) -> None:
         "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES (?, ?)",
         (1, now()),
     )
+
+    # Dead tables from the sqlite-vec era (Qdrant is the vector backend now).
+    # memory_vec is a vec0 virtual table; the vec0 module is gone, so DROP TABLE
+    # fails with "no such module" — remove the sqlite_master rows directly.
+    _drop_dead_tables(conn, [
+        "memory_vec", "memory_vec_chunks", "memory_vec_info",
+        "memory_vec_rowids", "memory_vec_vector_chunks00",
+        "memory_embedding_index",
+    ])
     _ensure_column(conn, "memories", "injected_count", "INTEGER NOT NULL DEFAULT 0")
     _ensure_column(conn, "memories", "ineffective_count", "INTEGER NOT NULL DEFAULT 0")
     _ensure_column(conn, "memories", "effectiveness_score", "REAL NOT NULL DEFAULT 0.5")

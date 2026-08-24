@@ -5392,3 +5392,26 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 ### 风险 / 说明
 - 从未被访问的记忆仍由 rule curator（纯规则、无 LLM）处理归档，治理不空缺。
 - 默认 CLI 仍为 False（向后兼容）；仅定时 run_curator.sh 显式开启。
+
+---
+
+## [迭代 11] 2026-08-24 — 清理 sqlite-vec 死表（业务表 27→21）
+
+> I9.2 of governance-slimming plan（docs/plans/2026-08-24-governance-slimming.md）
+
+### 背景
+- SQLite 中存在 6 张 sqlite-vec 时代的死表：memory_vec*(5) + memory_embedding_index，全部 0 行、无代码引用、vec0 模块已移除。
+
+### 变更
+- `memorycore/storage/db.py`：
+  - 新增 `_drop_dead_tables(conn, names)`：先尝试 `DROP TABLE IF EXISTS`；vec0 虚拟表会报 "no such module" → 回退 `PRAGMA writable_schema=ON` + 从 sqlite_master 删除行。
+  - `init_db` 在 schema_version 后调用 `_drop_dead_tables` 清理 6 张表。
+- 移除 6 张表：memory_vec / memory_vec_chunks / memory_vec_info / memory_vec_rowids / memory_vec_vector_chunks00 / memory_embedding_index。
+
+### 验证
+- 业务表 27 → 21；`integrity_check ok`；memories 7987 行完整。
+- mcore.service 重启后 journal 无 vec0/error，画像注入正常。
+- 快照备份：backups/pre-drop-deadtables-20260824T160610.sqlite3（56.6 MB）。
+
+### 风险 / 说明
+- agent_messages / agent_permissions 虽有 0 行，但存在代码引用（handoff.py/dashboard.py/transfer.py），推迟到 I9.3 先删引用代码再 DROP。
