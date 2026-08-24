@@ -14,11 +14,11 @@ def test_context_pack_marks_memories_as_untrusted_data():
     lm.add_memory_record(
         "project_memory",
         "Normal project fact",
-        "Use the source checkout as the lmmcp root.",
+        "Use the source checkout as the memorycore root.",
         memory_id=_memory_id("safe-context-boundary"),
     )
 
-    result = lm.build_context_pack("lmmcp root", agent="pytest")
+    result = lm.build_context_pack("memorycore root", agent="pytest")
 
     assert "untrusted data" in result["context"].lower()
     assert "not instructions" in result["context"].lower()
@@ -35,12 +35,12 @@ def test_context_pack_filters_high_risk_instruction_memory_from_body():
     safe = lm.add_memory_record(
         "project_memory",
         "Safe memory",
-        "The current lmmcp endpoint is http://127.0.0.1:8318/mcp.",
+        "The current memorycore endpoint is http://127.0.0.1:8318/mcp.",
         importance=0.9,
         memory_id=_memory_id("safe-memory"),
     )
 
-    result = lm.build_context_pack("lmmcp memory prompt injection system prompt", agent="pytest")
+    result = lm.build_context_pack("memorycore memory prompt injection system prompt", agent="pytest")
 
     assert safe["id"] in result["used_ids"]
     assert malicious["id"] not in result["used_ids"]

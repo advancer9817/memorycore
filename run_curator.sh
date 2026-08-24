@@ -107,7 +107,7 @@ llm_enabled = sys.argv[3]
 with open(path, 'r', encoding='utf-8') as f:
     data = json.load(f)
 summary = data.get('summary', {})
-print(f"local-memory curator report: {path}")
+print(f"memorycore curator report: {path}")
 print(json.dumps(summary, ensure_ascii=False, indent=2))
 if data.get('skill_promotion_candidates'):
     print('\nskill_candidate promotion candidates:')
@@ -120,7 +120,7 @@ if data.get('contradiction_candidates'):
 if llm_enabled.lower() in {'1', 'true', 'yes', 'y', 'on'} and llm_path:
     with open(llm_path, 'r', encoding='utf-8') as f:
         llm_data = json.load(f)
-    print(f"\nlocal-memory LLM curator report: {llm_path}")
+    print(f"\nmemorycore LLM curator report: {llm_path}")
     print(json.dumps(llm_data.get('summary', {}), ensure_ascii=False, indent=2))
     if llm_data.get('errors'):
         print('\nLLM curator warnings/errors:')

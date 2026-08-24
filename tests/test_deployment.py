@@ -206,7 +206,7 @@ def test_hermes_hooks_register_pre_llm_context_injection():
     """Hermes 记忆集成走 mcore-memory 插件（serve/CLI 均加载插件）。
 
     hermes serve 不注册 config shell hooks，注册脚本只做两件事：
-    清理旧 mcore/lmmcp shell-hook 配置与 allowlist 条目，并部署
+    清理旧 mcore shell-hook 配置与 allowlist 条目，并部署
     mcore-ingest.py（插件 on_session_end 兜底读取 state.db 用）。
     """
     setup = (ROOT / "scripts" / "setup-hooks.sh").read_text(encoding="utf-8")

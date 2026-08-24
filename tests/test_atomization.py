@@ -15,16 +15,16 @@ def _mock_vector_store():
 
 def test_memory_add_atomizes_parent_into_linked_child_facts():
     content = "\n".join([
-        "- lmmcp source path is /home/advancer/project/local-memory-mcp and it is the service root.",
-        "- MCP endpoint is http://127.0.0.1:8318/mcp for local-memory-mcp clients.",
-        "- SQLite DB is /home/advancer/project/local-memory-mcp/memory.sqlite3 for durable facts.",
+        "- memorycore source path is /home/advancer/project/memorycore and it is the service root.",
+        "- MCP endpoint is http://127.0.0.1:8318/mcp for memorycore clients.",
+        "- SQLite DB is /home/advancer/project/memorycore/memory.sqlite3 for durable facts.",
         "- Qdrant endpoint is http://127.0.0.1:6333 and collection is agent_memory.",
     ])
 
     with patch("memorycore.storage.crud._get_vector_store", return_value=_mock_vector_store()):
         parent = lm.add_memory_record(
             "project_memory",
-            "Long lmmcp operating facts",
+            "Long memorycore operating facts",
             content,
             memory_id="atom-parent",
             atomize=True,
@@ -71,9 +71,9 @@ def test_memory_add_atomizes_parent_into_linked_child_facts():
 
 def test_atomize_report_is_idempotent():
     content = "\n".join([
-        "- lmmcp service root is /home/advancer/project/local-memory-mcp.",
-        "- local-memory-mcp MCP endpoint is http://127.0.0.1:8318/mcp.",
-        "- memory.sqlite3 is the SQLite database for local-memory-mcp.",
+        "- memorycore service root is /home/advancer/project/memorycore.",
+        "- memorycore MCP endpoint is http://127.0.0.1:8318/mcp.",
+        "- memory.sqlite3 is the SQLite database for memorycore.",
     ])
     parent = lm.add_memory_record(
         "project_memory",

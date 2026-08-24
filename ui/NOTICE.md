@@ -11,5 +11,5 @@ This directory vendors and adapts the OpenMemory UI from the Mem0 repository.
 
 Local changes:
 
-- API calls are adapted to local-memory-mcp's `/api/v1/*` compatibility layer.
+- API calls are adapted to memorycore's `/api/v1/*` compatibility layer.
 - The UI remains a client of mcore SQLite/Qdrant APIs; it does not import or run the Mem0 backend SDK.

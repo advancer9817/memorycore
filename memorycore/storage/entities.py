@@ -9,7 +9,7 @@ from memorycore.models import as_json, now, row_to_dict
 from memorycore.storage.db import managed_conn, read_conn
 
 _ALIAS_GROUPS = [
-    ("mcore", ["mcore", "lmmcp", "local_memory", "local-memory-mcp", "memorycore", "local memory", "local memory mcp"]),
+    ("mcore", ["mcore", "memorycore"]),
     ("qdrant", ["qdrant", "vector store", "vector_store"]),
     ("sqlite", ["sqlite", "sqlite3", "memory.sqlite3", "fts5"]),
     ("ollama", ["ollama", "nomic-embed-text", "nomic embed text"]),
@@ -71,7 +71,7 @@ def extract_entities(text: str, tags: list[str] | None = None) -> list[dict[str,
     candidates.extend(re.findall(r"(?<!\w)/(?:[\w.@+-]+/)*[\w.@+-]+", source))
     candidates.extend(re.findall(r"\b[\w.-]+\.(?:sqlite3?|ya?ml|toml|json|db|py|md)\b", source, flags=re.I))
     candidates.extend(re.findall(r"(?::|port\s+|端口\s*)(\d{2,5})\b", source, flags=re.I))
-    candidates.extend(re.findall(r"\b(?:lmmcp|local[_ -]?memory(?:[_ -]?mcp)?|local-memory-mcp|memory\.sqlite3|qdrant|ollama|nomic-embed-text|openmemory|mem0|mcp|fts5)\b", source, flags=re.I))
+    candidates.extend(re.findall(r"\b(?:mcore|memorycore|memory\.sqlite3|qdrant|ollama|nomic-embed-text|openmemory|mem0|mcp|fts5)\b", source, flags=re.I))
     candidates.extend(tags or [])
 
     by_norm: dict[str, dict[str, Any]] = {}

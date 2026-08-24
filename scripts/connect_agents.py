@@ -338,7 +338,7 @@ def register_hooks_hermes(path: Path, backup_dir: Path, dry_run: bool) -> bool:
     loads on both serve and CLI paths. mcore-memory plugin registers
     pre_llm_call (inject) / post_llm_call (per-turn ingest) / on_session_end
     (session fallback). This function therefore only:
-      1. removes stale mcore/lmmcp shell-hook entries from config.yaml
+      1. removes stale mcore shell-hook entries from config.yaml
          (written by older versions of this script);
       2. clears stale allowlist approvals;
       3. deploys mcore-ingest.py (still used by the plugin's on_session_end
@@ -350,7 +350,7 @@ def register_hooks_hermes(path: Path, backup_dir: Path, dry_run: bool) -> bool:
     old_raw = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
     data = yaml.safe_load(old_raw) if old_raw.strip() else {}
     data = data or {}
-    # Remove every mcore/lmmcp shell-hook entry, then drop now-empty
+    # Remove every mcore shell-hook entry, then drop now-empty
     # events and the hooks block itself.  Never touch unrelated hooks.
     hooks = data.get("hooks")
     changed = False
@@ -374,7 +374,7 @@ def register_hooks_hermes(path: Path, backup_dir: Path, dry_run: bool) -> bool:
             data.pop("hooks", None)
     hermes_hook_dir = HOME / ".hermes" / "agent-hooks"
     hermes_ingest_hook = hermes_hook_dir / "mcore-ingest.py"
-    # Clear stale mcore/lmmcp allowlist approvals (no new ones are added).
+    # Clear stale mcore allowlist approvals (no new ones are added).
     changed = _update_hermes_allowlist([], backup_dir, dry_run) or changed
     if not dry_run:
         hermes_hook_dir.mkdir(parents=True, exist_ok=True)

@@ -62,7 +62,7 @@ def test_extract_opencode_from_sqlite_db(tmp_path, monkeypatch):
     )
     conn.execute(
         "INSERT INTO part VALUES (?, ?, ?, ?, ?)",
-        ("part-assistant", "msg-assistant", "ses-new", 3, json.dumps({"type": "text", "text": "已记录并会写回 lmmcp"})),
+        ("part-assistant", "msg-assistant", "ses-new", 3, json.dumps({"type": "text", "text": "已记录并会写回 memorycore"})),
     )
     conn.commit()
     conn.close()
@@ -72,7 +72,7 @@ def test_extract_opencode_from_sqlite_db(tmp_path, monkeypatch):
 
     assert messages == [
         {"role": "user", "content": "请记住这个 opencode 测试偏好"},
-        {"role": "assistant", "content": "已记录并会写回 lmmcp"},
+        {"role": "assistant", "content": "已记录并会写回 memorycore"},
     ]
 
 

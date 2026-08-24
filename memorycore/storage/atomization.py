@@ -22,7 +22,7 @@ AddMemoryFn = Callable[..., dict[str, Any]]
 
 _SIGNAL_RE = re.compile(
     r"(/[\w.@+-]+(?:/[\w.@+-]+)*|https?://|:\d{2,5}\b|\b\d{2,5}\b|"
-    r"\b(?:lmmcp|local[_ -]?memory(?:[_ -]?mcp)?|local-memory-mcp|memory\.sqlite3|"
+    r"\b(?:mcore|memorycore|memory\.sqlite3|"
     r"qdrant|ollama|nomic-embed-text|mcp|sqlite|fts5|service|endpoint|"
     r"config|pyproject|docker|systemd|数据库|端口|路径|服务)\b)",
     re.I,

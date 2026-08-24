@@ -480,9 +480,9 @@ class VectorStoreConfig:
 def vector_store_config_from_dict(cfg: dict[str, Any]) -> VectorStoreConfig:
     qs = cfg.get("qdrant", {})
     embed_cfg = embed_config_from_dict(cfg)
-    env_url = _env_first("LOCAL_MEMORY_QDRANT_URL", "QDRANT_URL")
-    env_path = _env_first("LOCAL_MEMORY_QDRANT_PATH", "QDRANT_PATH")
-    env_collection = _env_first("LOCAL_MEMORY_QDRANT_COLLECTION", "QDRANT_COLLECTION")
+    env_url = _env_first("MCORE_QDRANT_URL", "QDRANT_URL")
+    env_path = _env_first("MCORE_QDRANT_PATH", "QDRANT_PATH")
+    env_collection = _env_first("MCORE_QDRANT_COLLECTION", "QDRANT_COLLECTION")
     return VectorStoreConfig(
         path=env_path if env_path is not None else qs.get("path", ""),
         url=env_url if env_url is not None else qs.get("url", ""),

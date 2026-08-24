@@ -236,7 +236,7 @@ Hermes：
 
 ```yaml
 mcp_servers:
-  local_memory:
+  mcore:
     enabled: true
     type: http
     url: http://127.0.0.1:8318/mcp
@@ -245,7 +245,7 @@ mcp_servers:
 Codex `~/.codex/config.toml`：
 
 ```toml
-[mcp_servers.local_memory]
+[mcp_servers.mcore]
 type = "http"
 url = "http://127.0.0.1:8318/mcp"
 ```
@@ -254,7 +254,7 @@ Claude Code `~/.claude/settings.json`（user scope，全局可用）：
 
 ```json
 "mcpServers": {
-  "local_memory": {
+  "mcore": {
     "type": "http",
     "url": "http://127.0.0.1:8318/mcp"
   }

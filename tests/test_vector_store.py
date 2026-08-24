@@ -215,11 +215,11 @@ class TestVectorStoreConfig:
         assert cfg.url == "http://qdrant:6333"
         assert cfg.collection == "compose_memory"
 
-    def test_from_dict_prefers_local_memory_qdrant_env(self, monkeypatch):
+    def test_from_dict_prefers_mcore_qdrant_env(self, monkeypatch):
         monkeypatch.setenv("QDRANT_URL", "http://qdrant:6333")
-        monkeypatch.setenv("LOCAL_MEMORY_QDRANT_URL", "http://custom-qdrant:6333")
+        monkeypatch.setenv("MCORE_QDRANT_URL", "http://custom-qdrant:6333")
         monkeypatch.setenv("QDRANT_COLLECTION", "compose_memory")
-        monkeypatch.setenv("LOCAL_MEMORY_QDRANT_COLLECTION", "custom_memory")
+        monkeypatch.setenv("MCORE_QDRANT_COLLECTION", "custom_memory")
 
         cfg = vector_store_config_from_dict({"qdrant": {}})
 

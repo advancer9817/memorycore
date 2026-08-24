@@ -93,16 +93,16 @@ def test_frontend_v1_memory_compat_routes():
         created = client.post("/api/v1/memories", json={
             "type": "project_memory",
             "title": "OpenMemory compat",
-            "content": "lmmcp mcore local_memory compat API content",
+            "content": "mcore memorycore compat API content",
             "atomize": False,
         })
         memory_id = created.json()["id"]
-        listed = client.get("/api/v1/memories?query=lmmcp")
+        listed = client.get("/api/v1/memories?query=memorycore")
         filtered = client.post("/api/v1/memories/filter", json={"search_query": "mcore", "page": 1, "size": 5})
         detail = client.get(f"/api/v1/memories/{memory_id}")
-        updated = client.put(f"/api/v1/memories/{memory_id}", json={"memory_content": "updated lmmcp mcore local_memory compat API content"})
+        updated = client.put(f"/api/v1/memories/{memory_id}", json={"memory_content": "updated mcore memorycore compat API content"})
         categories = client.get("/api/v1/memories/categories?user_id=test")
-        entities = client.get("/api/v1/entities?query=local_memory")
+        entities = client.get("/api/v1/entities?query=memorycore")
         stats = client.get("/api/v1/stats")
         apps = client.get("/api/v1/apps/?sort_by=last_activity&sort_direction=desc&page_size=100")
         curator_status = client.get("/api/curator/status?limit=5")
