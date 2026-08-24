@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import subprocess
+import threading
 import time
 import yaml
 from dataclasses import dataclass, field
@@ -56,6 +57,27 @@ from memorycore.frontend_helpers import (
     _write_memorycore_config,
 )
 from memorycore.frontend_http import _bool_q, _int_q, _list_q, _str_q
+
+# In-process mirror of maintenance job results (thread → GET {job_id} polling).
+_maintenance_jobs: dict[str, dict[str, Any]] = {}
+_maintenance_jobs_lock = threading.Lock()
+
+
+def _run_data_maintenance_job_thread(job_id: str, plan_token: str) -> None:
+    from memorycore.storage.maintenance import run_data_maintenance_job
+    try:
+        result = run_data_maintenance_job(job_id, plan_token)
+    except Exception as exc:  # run_* already records failures; keep a final fallback
+        result = {
+            "job_id": job_id,
+            "plan_token": plan_token,
+            "status": "failed",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    with _maintenance_jobs_lock:
+        _maintenance_jobs[job_id] = result
+
+
 def _dispatch_v1_compat(
     method: str,
     parts: list[str],
@@ -315,4 +337,37 @@ def _dispatch_v1_compat(
         # Dry-run preview without writing to the store.
         result = extract_profile(apply=False)
         return result
+    if parts == ["maintenance", "plan"] and method == "GET":
+        from memorycore.storage.maintenance import plan_data_maintenance
+        return plan_data_maintenance(limit=_int_q(query, "limit", 500))
+    if parts == ["maintenance", "latest"] and method == "GET":
+        from memorycore.storage.maintenance import get_latest_maintenance_job
+        return get_latest_maintenance_job() or {"job_id": None, "status": "none"}
+    if parts == ["maintenance", "execute"] and method == "POST":
+        plan_token = str(body.get("plan_token") or "").strip()
+        if not plan_token:
+            raise ValueError("plan_token is required (GET /api/v1/maintenance/plan first)")
+        from memorycore.storage.maintenance import (
+            create_maintenance_job,
+            run_data_maintenance_job,
+        )
+        job = create_maintenance_job(plan_token)
+        thread = threading.Thread(
+            target=_run_data_maintenance_job_thread,
+            args=(job["job_id"], plan_token),
+            daemon=True,
+        )
+        thread.start()
+        return job
+    if len(parts) == 2 and parts[0] == "maintenance" and method == "GET":
+        job_id = parts[1]
+        with _maintenance_jobs_lock:
+            memory_job = _maintenance_jobs.get(job_id)
+        if memory_job is not None:
+            return memory_job
+        from memorycore.storage.maintenance import get_maintenance_job
+        job = get_maintenance_job(job_id)
+        if job is None:
+            raise LookupError(f"maintenance job not found: {job_id}")
+        return job
     raise LookupError(f"route not found: /api/v1/{'/'.join(parts)}")

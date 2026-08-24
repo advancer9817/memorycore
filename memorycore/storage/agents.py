@@ -133,6 +133,35 @@ def update_agent_presence(
     return {"agent_id": agent_id, "status": status, "last_seen_at": ts, "metadata": metadata or {}}
 
 
+def _ttl_degrade(status: str, last_seen_at: str | None) -> str:
+    """Downgrade a stale presence status: online/busy → idle after 24h, → offline after 7d.
+
+    Raw DB status is kept untouched; only the read view degrades, so a fresh
+    heartbeat (session-start/Stop hooks) restores the original status.
+    """
+    from datetime import datetime, timezone
+
+    from memorycore.models import load_config
+
+    if not last_seen_at:
+        return status
+    cfg = load_config().get("agents", {})
+    idle_hours = int(cfg.get("presence_idle_after_hours", 24))
+    offline_days = int(cfg.get("presence_offline_after_days", 7))
+    try:
+        ts = datetime.fromisoformat(last_seen_at.replace("Z", "+00:00"))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        age = datetime.now(timezone.utc) - ts
+        if age >= timedelta(days=offline_days):
+            return "offline"
+        if status in ("online", "busy") and age >= timedelta(hours=idle_hours):
+            return "idle"
+    except (ValueError, TypeError):
+        pass
+    return status
+
+
 def list_agent_presence(status: str = "", limit: int = 100) -> list[dict[str, Any]]:
     limit = max(1, min(int(limit), 500))
     clauses: list[str] = []
@@ -151,6 +180,7 @@ def list_agent_presence(status: str = "", limit: int = 100) -> list[dict[str, An
     for r in rows:
         d = dict(r)
         d["metadata"] = from_json(d.pop("metadata_json", "{}"), {})
+        d["status"] = _ttl_degrade(d.get("status", "offline"), d.get("last_seen_at"))
         results.append(d)
     return results
 

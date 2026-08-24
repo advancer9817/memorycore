@@ -6,6 +6,15 @@ SERVER="$ROOT/memorycore"
 OUT_DIR="$ROOT/reports"
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 mkdir -p "$OUT_DIR"
+# Mutual exclusion with the manual maintenance API (D1): both sides flock the
+# same lockfile (logs/maintenance.lock). The loser skips this round — a
+# maintenance execute and the timer curator never touch the DB concurrently.
+LOCK_FILE="$ROOT/logs/maintenance.lock"
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  echo "[mcore] maintenance lock held by another process (manual maintenance or curator) — skipping this round" >&2
+  exit 0
+fi
 # Auto-cleanup: remove reports older than 7 days
 find "$OUT_DIR" -name "*.json" -mtime +7 -delete 2>/dev/null || true
 TS="$(date -u +%Y%m%dT%H%M%SZ)"

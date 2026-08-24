@@ -144,7 +144,9 @@ def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
     llm_errors = latest_job.get("errors", []) if isinstance(latest_job.get("errors"), list) else []
 
     llm_last_run_at = latest_job.get("started_at", "")
-    if latest_job.get("status") == "succeeded":
+    if latest_job.get("status") in ("succeeded", "done"):
+        # "done" = completed with zero decisions and no errors — still a
+        # healthy, successful LLM curation pass, so surface it as success.
         llm_last_result = "success"
     elif latest_job.get("status") == "failed":
         llm_last_result = "failed"

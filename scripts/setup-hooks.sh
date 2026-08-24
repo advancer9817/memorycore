@@ -18,7 +18,7 @@ HERMES_HOOK_DIR="$HOME/.hermes/agent-hooks"
 HERMES_INGEST_DEST="$HERMES_HOOK_DIR/mcore-ingest.py"
 HERMES_CONTEXT_DEST="$HERMES_HOOK_DIR/mcore-context.sh"
 
-chmod +x "$HOOKS_DIR/mcore-context.sh" "$HOOKS_DIR/mcore-ingest.py" "$HOOKS_DIR/session-start.sh" 2>/dev/null || true
+chmod +x "$HOOKS_DIR/mcore-context.sh" "$HOOKS_DIR/mcore-ingest.py" "$HOOKS_DIR/session-start.sh" "$HOOKS_DIR/session-end.sh" 2>/dev/null || true
 mkdir -p "$HERMES_HOOK_DIR"
 cp "$HERMES_INGEST_SRC" "$HERMES_INGEST_DEST"
 cp "$HERMES_CONTEXT_SRC" "$HERMES_CONTEXT_DEST"
@@ -50,11 +50,13 @@ hermes_context_dest = Path(sys.argv[11])
 mcore_context = repo_root / "scripts" / "hooks" / "mcore-context.sh"
 mcore_ingest = repo_root / "scripts" / "hooks" / "mcore-ingest.py"
 mcore_session_start = repo_root / "scripts" / "hooks" / "session-start.sh"
+mcore_session_end = repo_root / "scripts" / "hooks" / "session-end.sh"
 endpoint = "http://127.0.0.1:8318/mcp"
-old_hook_fragments = ("session-end.sh", "codex-session-end.sh", "mcore-session-end.py")
+old_hook_fragments = ("codex-session-end.sh", "mcore-session-end.py")
 codex_mcore_context_fragments = ("mcore-context.sh",)
 mcore_ingest_fragments = ("mcore-ingest.py",)
 mcore_session_start_fragments = ("session-start.sh",)
+mcore_session_end_fragments = ("session-end.sh",)
 
 
 def load_json(path: Path) -> dict:
@@ -205,11 +207,13 @@ settings = load_json(claude_settings)
 hooks = settings.setdefault("hooks", {})
 remove_hook_entries(hooks, "Stop", old_hook_fragments)
 remove_hook_entries(hooks, "Stop", mcore_ingest_fragments)
+remove_hook_entries(hooks, "Stop", mcore_session_end_fragments)
 remove_hook_entries(hooks, "UserPromptSubmit", codex_mcore_context_fragments)
 remove_hook_entries(hooks, "SessionStart", mcore_session_start_fragments)
 add_hook(hooks, "SessionStart", f"MCORE_AGENT_ID=claude bash {mcore_session_start}", 5)
 add_hook(hooks, "UserPromptSubmit", f"MCORE_AGENT_ID=claude bash {mcore_context}", 5)
 add_hook(hooks, "Stop", f"python3 {mcore_ingest} --agent claude --background", 30)
+add_hook(hooks, "Stop", f"MCORE_AGENT_ID=claude bash {mcore_session_end}", 10)
 env = settings.setdefault("env", {})
 env.setdefault("MCORE_PORT", "8318")
 env.setdefault("MCORE_AGENT_ID", "claude")
@@ -272,8 +276,10 @@ remove_hook_entries(codex_hook_root, "UserPromptSubmit", codex_mcore_context_fra
 remove_hook_entries(codex_hook_root, "SessionStart", mcore_session_start_fragments)
 remove_hook_entries(codex_hook_root, "Stop", old_hook_fragments)
 remove_hook_entries(codex_hook_root, "Stop", mcore_ingest_fragments)
+remove_hook_entries(codex_hook_root, "Stop", mcore_session_end_fragments)
 add_hook(codex_hook_root, "SessionStart", f"MCORE_AGENT_ID=codex bash {mcore_session_start}", 5)
 add_hook(codex_hook_root, "Stop", f"python3 {mcore_ingest} --agent codex --background", 30)
+add_hook(codex_hook_root, "Stop", f"MCORE_AGENT_ID=codex bash {mcore_session_end}", 10)
 write_json(codex_hooks, codex_data)
 trust_codex_hooks(codex_config, codex_hooks)
 
@@ -285,10 +291,12 @@ remove_hook_entries(gemini_hooks, "SessionStart", mcore_session_start_fragments)
 remove_hook_entries(gemini_hooks, "BeforeAgent", codex_mcore_context_fragments)
 remove_hook_entries(gemini_hooks, "AfterAgent", mcore_ingest_fragments)
 remove_hook_entries(gemini_hooks, "SessionEnd", mcore_ingest_fragments)
+remove_hook_entries(gemini_hooks, "SessionEnd", mcore_session_end_fragments)
 add_hook(gemini_hooks, "SessionStart", f"MCORE_AGENT_ID=gemini bash {mcore_session_start}", 5000)
 add_hook(gemini_hooks, "BeforeAgent", f"MCORE_AGENT_ID=gemini bash {mcore_context}", 5000)
 add_hook(gemini_hooks, "AfterAgent", f"python3 {mcore_ingest} --agent gemini --background", 30000)
 add_hook(gemini_hooks, "SessionEnd", f"python3 {mcore_ingest} --agent gemini --background", 30000)
+add_hook(gemini_hooks, "SessionEnd", f"MCORE_AGENT_ID=gemini bash {mcore_session_end}", 5000)
 write_json(gemini_settings, gemini_data)
 
 try:

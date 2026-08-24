@@ -251,17 +251,29 @@ _KNOWN_AGENTS = {
     "memory-rollup",
     "default-router",
     "memorycore-ui",
+    "llm_curator", "frontend", "memorycore-smoke-test",
 }
 
+# Raw source_agent → display/app id. Alias groups collapse onto one canonical
+# name; entries below cover every distinct source_agent seen in production
+# (17 raw names as of 2026-08-25). Anything else displays verbatim.
 _AGENT_DISPLAY_NAME: dict[str, str] = {
+    # Alias groups — Claude / Hermes families.
     "agent": "claude",
     "claude-code": "claude",
     "hermes-cli": "hermes",
     "hermes-default": "hermes",
     "hermes-default-router": "hermes",
     "hermes-research": "hermes",
-    "gpt-5.5-router": "gpt-5.5",
     "default-router": "hermes",
+    # gpt-5.5 family.
+    "gpt-5.5-router": "gpt-5.5",
+    # Cosmetic rename for the system curator agent (raw name is machine-ish).
+    "llm_curator": "llm-curator",
+    # Self-explanatory raw names shown verbatim: claude, hermes, codex, gemini,
+    # gpt-5.5, frontend, memory-rollup, memorycore-ui, opencode,
+    # memorycore-smoke-test, … (memorycore-smoke-test MUST stay unmapped:
+    # tests assert its app id equals the raw source_agent).
 }
 
 

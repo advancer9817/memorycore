@@ -325,6 +325,20 @@ def init_db(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_llm_curator_jobs_status_updated ON llm_curator_jobs(status, updated_at);
         CREATE INDEX IF NOT EXISTS idx_llm_curator_jobs_started ON llm_curator_jobs(started_at);
 
+        CREATE TABLE IF NOT EXISTS maintenance_jobs (
+          id TEXT PRIMARY KEY,
+          plan_token TEXT NOT NULL DEFAULT '',
+          kind TEXT NOT NULL DEFAULT 'archive',
+          status TEXT NOT NULL DEFAULT 'running',
+          summary_json TEXT NOT NULL DEFAULT '{}',
+          backup_path TEXT NOT NULL DEFAULT '',
+          error TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          finished_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_maintenance_jobs_plan_token ON maintenance_jobs(plan_token);
+        CREATE INDEX IF NOT EXISTS idx_maintenance_jobs_created ON maintenance_jobs(created_at);
+
         CREATE TABLE IF NOT EXISTS llm_curator_batches (
           id TEXT PRIMARY KEY,
           job_id TEXT NOT NULL,
