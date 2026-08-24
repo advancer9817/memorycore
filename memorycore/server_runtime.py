@@ -291,8 +291,16 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "profile-extract":
         from memorycore.storage.profile import extract_profile
         report = extract_profile(apply=args.apply, limit=args.limit or None)
-        payload = report["summary"] if getattr(args, "summary_only", False) else report
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        if getattr(args, "summary_only", False):
+            report = {
+                "dry_run": report.get("dry_run", True),
+                "scanned": report.get("scanned", 0),
+                "updated": report.get("updated", 0),
+                "attribute_count": len(report.get("attributes", [])),
+                "errors": report.get("errors", []),
+                "elapsed_s": report.get("elapsed_s"),
+            }
+        print(json.dumps(report, ensure_ascii=False, indent=2))
     elif args.cmd == "profile-get":
         from memorycore.models import load_config as _lc
         from memorycore.storage.profile import get_user_profile, profile_snapshot

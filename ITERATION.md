@@ -5452,3 +5452,29 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 ### 验证
 - 相关定向测试：governance 54 passed、frontend/search 22 passed、curator 6 passed。
 - 全量测试见提交时结果。
+
+---
+
+## [迭代 13] 2026-08-24 — LLM 模型 API 切换：DeepSeek 官方 → 百炼专属端点
+
+### 背景
+用户要求 mcore 的 LLM 调用（extraction / LLM curator / profile extraction）从 DeepSeek 官方端点切到百炼（Bailian）连接，默认模型 `deepseek-v4-flash-0731`。注意：不是 Coding Plan 端点、不是 DeepSeek 官方，而是用户已在 Hermes 配置的百炼专属 MaaS 连通点。
+
+### 变更
+- `config.yaml`：
+  - `extraction.base_url`: `https://api.deepseek.com` → `https://ws-mvh9ls93gkzn2s2p.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`（与 Hermes `providers.bailian.base_url` 一致）
+  - `extraction.api_key`: 改用 `HERMES_CUSTOM_BAILIAN_API_KEY`（标准百炼 key，非 Coding Plan key）
+  - `extraction.model`: `deepseek-v4-flash` → `deepseek-v4-flash-0731`
+  - `max_tokens` 保持 8000（推理模型需要 ≥4096）
+- `memorycore/server_runtime.py`：修复 `profile-extract --summary-only` 崩溃（`report["summary"]` KeyError → 显式构造 summary dict）。
+
+### 验证
+- 专属端点连通：HTTP 200，`deepseek-v4-flash-0731` 正常返回（注意含 `reasoning_content`，max_tokens 需足够）。
+- `profile-extract --summary-only`：scanned 96、8 属性、errors=[]、5.07s。
+- `profile-extract --apply`：updated 6（写库走百炼端点）。
+- 服务重启后 `/health` ok（8003 memories）。
+
+### 风险 / 说明
+- 该模型为推理模型（reasoning），`extraction.max_tokens=8000` 已足够（远高于 4096）。
+- 配置不热加载：改后必须 `systemctl --user restart mcore.service`。
+- key 明文存于 config.yaml（与之前一致；如需脱敏可后续改 env 引用）。

@@ -16,10 +16,10 @@ embedding:
   sentence_transformers_model: sentence-transformers/all-mpnet-base-v2
   timeout: 30
 extraction:
-  api_key: sk-c5cf5fc22a1e41659da302027c88aabe
-  base_url: https://api.deepseek.com
+  api_key: sk-ws-H.EEPIHLH.pUKR.MEQCIBSQydOcDAJTHrFvpKrjPbEDxbnDw441_X_-pvgNp6FwAiAFDwSYL-YBw4Zx3svDd8IPUZGmlJQ7LvWlvZdVAZ2OdQ
+  base_url: https://ws-mvh9ls93gkzn2s2p.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
   max_tokens: 8000
-  model: deepseek-v4-flash
+  model: deepseek-v4-flash-0731
   temperature: 1
   timeout: 600
 extraction_strategy:
@@ -118,20 +118,20 @@ user_profile:
   max_snapshot_chars: 800
   min_confidence: 0.6
   schema:
-    - name: 姓名
-      description: 用户的姓名
-    - name: 职业
-      description: 用户的职业/岗位
-    - name: 雇主
-      description: 用户所在公司或雇主名称
-    - name: 工作领域
-      description: 用户日常工作涉及的领域、平台、系统
-    - name: 技术栈
-      description: 用户的技术背景、技能与开发环境
-      immutable: true
-    - name: 沟通偏好
-      description: 用户偏好的回答语言、风格、格式、交互方式
-    - name: 模型偏好
-      description: 用户偏好的模型/供应商/路由
-    - name: 学习方向
-      description: 用户当前的学习重点与转型目标
+  - name: 姓名
+    description: 用户的姓名
+  - name: 职业
+    description: 用户的职业/岗位
+  - name: 雇主
+    description: 用户所在公司或雇主名称
+  - name: 工作领域
+    description: 用户日常工作涉及的领域、平台、系统
+  - name: 技术栈
+    description: 用户的技术背景、技能与开发环境
+    immutable: true
+  - name: 沟通偏好
+    description: 用户偏好的回答语言、风格、格式、交互方式
+  - name: 模型偏好
+    description: 用户偏好的模型/供应商/路由
+  - name: 学习方向
+    description: 用户当前的学习重点与转型目标
