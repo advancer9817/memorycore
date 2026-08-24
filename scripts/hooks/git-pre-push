@@ -1,40 +1,32 @@
 #!/usr/bin/env bash
-# git pre-push hook — 推送前导出本地记忆到 memory-sync/memories.json 并随本次推送一起提交。
+# git pre-push hook — 备份到 Google Drive + 提示 memory-sync 用 git syncpush
 #
-# 触发时机：git push 之前（含 push 的所有分支）
-# 行为：
-#   1. 调用 memorycore export --memories-only 生成 memory-sync/memories.json
-#   2. 如有变更，自动 git add + git commit（附在本次 push 里）
-#   3. 非阻塞：导出失败只打 warning，不中断 push
+# 注意：memory-sync 的「导出+commit」已移到 git syncpush（scripts/hooks/git-push.sh）。
+# 原因（2026-08-24 实测）：git 在运行 pre-push hook 前已锁定要发送的对象集合，
+# hook 内新 commit 无法被当次 push 携带（外层 push 用 hook 前捕获的 SHA），
+# 会产生遗留 commit 需要二次推送。前置 commit（wrapper）才能一次 push 全带上。
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 MCORE_DIR="${MCORE_DIR:-$HOME/project/memorycore}"
-PYTHON="${MCORE_PYTHON:-$MCORE_DIR/.venv/bin/python}"
 SYNC_FILE="memory-sync/memories.json"
-SYNC_PATH="$MCORE_DIR/$SYNC_FILE"
 
-# 只对 memorycore 仓库本身生效
 [[ "$REPO_ROOT" == "$MCORE_DIR" ]] || exit 0
-[[ -x "$PYTHON" ]] || { echo "[pre-push] WARNING: python not found at $PYTHON, skipping memory export" >&2; exit 0; }
 
-echo "[pre-push] Exporting memories before push ..." >&2
-mkdir -p "$(dirname "$SYNC_PATH")"
-if "$PYTHON" -m memorycore export "$SYNC_PATH" --memories-only >/dev/null 2>&1; then
-    cd "$MCORE_DIR"
-    # 检查是否有变更（新文件或内容变化）
-    if ! git diff --quiet "$SYNC_FILE" 2>/dev/null || ! git ls-files --error-unmatch "$SYNC_FILE" &>/dev/null; then
-        git add "$SYNC_FILE"
-        DEVICE="$(hostname -s 2>/dev/null || echo unknown)"
-        TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        COUNT="$(python3 -c "import json; d=json.load(open('$SYNC_FILE')); print(d.get('counts',{}).get('memories','?'))" 2>/dev/null || echo '?')"
-        git commit -m "chore(memory-sync): $DEVICE @ $TIMESTAMP — ${COUNT} memories" --no-verify
-        echo "[pre-push] Memory export committed (${COUNT} memories)." >&2
-    else
-        echo "[pre-push] Memory unchanged, skipping commit." >&2
-    fi
-else
-    echo "[pre-push] WARNING: memory export failed, push continues without sync." >&2
+# ── 1. 提示：memory-sync 有未提交变更时提醒用 git syncpush ──────────────
+if cd "$MCORE_DIR" 2>/dev/null; then
+  if ! git diff --quiet "$SYNC_FILE" 2>/dev/null || ! git ls-files --error-unmatch "$SYNC_FILE" &>/dev/null; then
+    echo "[pre-push] NOTE: memory-sync 有未提交变更，本次 push 不会携带记忆导出。" >&2
+    echo "[pre-push]       请使用: git syncpush origin main（先导出记忆再推送，一次完成）" >&2
+  fi
+fi
+
+# ── 2. 全量备份到 Google Drive（后台执行）────────────────────────────────
+GDRIVE_BACKUP="$MCORE_DIR/scripts/gdrive-backup.sh"
+if [[ -x "$GDRIVE_BACKUP" ]]; then
+  echo "[pre-push] Starting Google Drive full backup (background)..." >&2
+  mkdir -p "$MCORE_DIR/logs"
+  nohup "$GDRIVE_BACKUP" >> "$MCORE_DIR/logs/gdrive-backup.log" 2>&1 &
 fi
 
 exit 0

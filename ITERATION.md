@@ -5549,3 +5549,24 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 ### 验证
 - 文档校验：两份 plan 全部路径/函数/行号与实际代码核对一致。
 - 工作区仅 2 个新文档，无代码改动。
+
+---
+
+## [迭代 17] 2026-08-24 — push 前置 memory-sync 机制改造（git syncpush）
+
+### 背景
+git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实测：外层 push 使用 hook 运行前捕获的 SHA，已知对象集合不可变），产生遗留 commit 需二次推送。
+
+### 变更
+- `scripts/hooks/git-push.sh`（新增）：`git syncpush` 包装命令 —— 在调用 **push 之前**先导出 memory-sync 并 commit（有变化才提交），随后 `git push "$@"`，使当次 push 一次携带全部内容。
+- `scripts/hooks/git-pre-push`（重写）+ `.git/hooks/pre-push`（同步）：移除「导出+commit」逻辑（避免遗留 commit 与双重提交），仅保留 Google Drive 备份；检测到 memory-sync 未提交变更时提示改用 `git syncpush`。
+- git 全局别名：`git config --global alias.syncpush '!bash $HOME/project/memorycore/scripts/hooks/git-push.sh'`。
+
+### 实测（机制验证实验，/tmp/hooklab*）
+- 实验1（现状复现）：hook 内 commit 后外层 push 推 hook 前 SHA → 新 commit 留本地。
+- 实验2（hook 内 `--no-verify` 补推）：数据能推上但**外层 push 必冲突失败**（`cannot lock ref ... but expected`）→ hook 内 commit 方案不可行。
+- 结论：memory-sync commit 必须前置到 push 调用之前（wrapper），pre-push hook 只做备份/提示。
+
+### 验证
+- `git syncpush origin main` 一次完成：导出 8063 条记忆 → commit cceb1ad → `1e3da13..cceb1ad main -> main`，无遗留（`git log origin/main..HEAD` 为空）。
+- 推送后 Google Drive 备份照常后台启动。
