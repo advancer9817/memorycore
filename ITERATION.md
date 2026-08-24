@@ -5366,3 +5366,29 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 - 注入固定 ~400-600 token/次，max_snapshot_chars 控制上限。
 - 成本：随 curator 2x/天聚合 ≈ ¥0.2/周（当前 ¥3/周 的 ~7%）。
 - 未新增 MCP 工具面（保持 22 个）；画像表为结论层，user_profile 记忆为证据层。
+
+---
+
+## [迭代 10] 2026-08-24 — LLM curator require-accessed（治理域收缩 26%）
+
+> I9.1 of governance-slimming plan（docs/plans/2026-08-24-governance-slimming.md）
+
+### 背景
+- LLM curator 每轮对全部 active+candidate 记忆（1178 条）做向量扫描 + LLM 判定，其中 306 条从未被召回，纯浪费 deepseek token。
+- 目标：只治理被使用过（last_accessed_at 非空）的记忆。
+
+### 变更
+- `memorycore/storage/curator_llm/core.py`：`_fetch_active_memories(limit, require_accessed=False)` 新增过滤 `AND last_accessed_at IS NOT NULL`（默认 False 向后兼容）。
+- `memorycore/storage/curator_llm/report.py`：`llm_curator_report` / `run_llm_curator` / `run_llm_curator_incremental` 增加 `require_accessed` 参数并透传。
+- `memorycore/server_runtime.py`：`llm-curator` 新增 `--require-accessed` 标志并传入。
+- `run_curator.sh`：llm-curator 调用追加 `--require-accessed`（定时任务默认启用）。
+- `tests/test_curator_llm_jobs.py`：新增 `test_run_llm_curator_incremental_passes_require_accessed`、`test_run_llm_curator_report_passes_require_accessed`。
+
+### 验证
+- 治理域实测：1178 → 872（缩减 26%）；`require_accessed=True` 返回值均含 last_accessed_at。
+- 相关测试 6 passed；全量（见提交时结果）。
+- 预期：LLM curator 的候选扫描与判定量缩减约 26%，周 token 花费再降约 1/4。
+
+### 风险 / 说明
+- 从未被访问的记忆仍由 rule curator（纯规则、无 LLM）处理归档，治理不空缺。
+- 默认 CLI 仍为 False（向后兼容）；仅定时 run_curator.sh 显式开启。

@@ -17,7 +17,7 @@ def _prepare(monkeypatch) -> MagicMock:
     detector = MagicMock(return_value=[{"action": "split", "id": "memory-1"}])
     monkeypatch.setattr(report, "_load_extraction_config", lambda _: SimpleNamespace(temperature=0.0))
     monkeypatch.setattr(report, "_get_vector_store", lambda _: SimpleNamespace(available=False))
-    monkeypatch.setattr(report, "_fetch_active_memories", lambda _: [_memory()])
+    monkeypatch.setattr(report, "_fetch_active_memories", lambda _, require_accessed=False: [_memory()])
     monkeypatch.setattr(report, "_cleanup_reviewed_ids", lambda: None)
     monkeypatch.setattr(report, "_mark_reviewed", lambda *_, **__: None)
     monkeypatch.setattr(report, "_llm_detect_splittable", detector)

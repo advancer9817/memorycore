@@ -154,3 +154,42 @@ def test_llm_curator_cli_summary_only(monkeypatch, capsys):
 
     assert server.main(["llm-curator", "--limit", "5", "--summary-only"]) == 0
     assert '"split_candidates": 2' in capsys.readouterr().out
+
+
+def test_run_llm_curator_incremental_passes_require_accessed(monkeypatch, tmp_path):
+    """require_accessed flag should propagate into _fetch_active_memories calls."""
+    import memorycore.storage.curator_llm.report as report_mod
+
+    calls: list[bool] = []
+
+    def fake_fetch(limit, require_accessed=False):
+        calls.append(bool(require_accessed))
+        return []
+
+    monkeypatch.setattr(report_mod, "_fetch_active_memories", fake_fetch)
+    monkeypatch.setattr(report_mod, "_get_vector_store", lambda *a, **k: type("VS", (), {"available": False})())
+    monkeypatch.setattr(report_mod, "_load_extraction_config", lambda *a, **k: type("LC", (), {"temperature": 0.6})())
+
+    report_mod.run_llm_curator_incremental(
+        job_id="j-require", config={}, limit=50, sim_threshold=0.8,
+        apply=False, rebuild_vectors=False, require_accessed=True,
+    )
+    assert calls and all(calls), f"require_accessed not propagated: {calls}"
+
+
+def test_run_llm_curator_report_passes_require_accessed(monkeypatch):
+    """llm_curator_report should forward require_accessed into memory fetch."""
+    import memorycore.storage.curator_llm.report as report_mod
+
+    calls: list[bool] = []
+
+    def fake_fetch(limit, require_accessed=False):
+        calls.append(bool(require_accessed))
+        return []
+
+    monkeypatch.setattr(report_mod, "_fetch_active_memories", fake_fetch)
+    monkeypatch.setattr(report_mod, "_get_vector_store", lambda *a, **k: type("VS", (), {"available": False})())
+    monkeypatch.setattr(report_mod, "_load_extraction_config", lambda *a, **k: type("LC", (), {"temperature": 0.6})())
+
+    report_mod.llm_curator_report(config={}, limit=50, require_accessed=True)
+    assert calls == [True]

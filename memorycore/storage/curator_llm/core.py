@@ -352,13 +352,14 @@ def _get_vector_store(config: dict[str, Any]) -> Any:
     return get_vector_store(cfg)
 
 
-def _fetch_active_memories(limit: int) -> list[dict[str, Any]]:
+def _fetch_active_memories(limit: int, require_accessed: bool = False) -> list[dict[str, Any]]:
     from memorycore.storage.db import _managed_query
+    accessed_clause = " AND last_accessed_at IS NOT NULL" if require_accessed else ""
     return _managed_query(
         "SELECT id, title, content, type, importance, confidence, feedback_score, "
         "injected_count, updated_at, created_at, valid_from, valid_until, "
-        "last_accessed_at, last_injected_at FROM memories "
-        "WHERE status IN ('active', 'candidate') "
+        f"last_accessed_at, last_injected_at FROM memories "
+        f"WHERE status IN ('active', 'candidate'){accessed_clause} "
         "ORDER BY updated_at DESC LIMIT ?",
         (limit,),
     )

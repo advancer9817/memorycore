@@ -68,6 +68,7 @@ except Exception:
     "$PY" "$SERVER" llm-curator --limit "${LOCAL_MEMORY_LLM_CURATOR_LIMIT:-200}" \
       --sim-threshold "${LOCAL_MEMORY_LLM_CURATOR_SIM_THRESHOLD:-0.8}" \
       --no-rebuild \
+      --require-accessed \
       "${LLM_APPLY_FLAG[@]}" > "$LLM_REPORT"
   fi
 fi

@@ -144,6 +144,8 @@ def main(argv: list[str] | None = None) -> int:
     p_llm_curator.add_argument("--summary-only", action="store_true")
     p_llm_curator.add_argument("--no-rebuild", action="store_true",
                                help="skip full vector rebuild after curation (curator only mutates status/decisions; text unchanged -> rebuild is pure waste)")
+    p_llm_curator.add_argument("--require-accessed", action="store_true",
+                               help="only curate memories with last_accessed_at set (skip never-used active memories)")
     p_rollup = sub.add_parser("rollup")
     p_rollup.add_argument("--apply", action="store_true", help="create durable memories and archive source episodic records")
     p_rollup.add_argument("--limit", type=int, default=250)
@@ -269,6 +271,7 @@ def main(argv: list[str] | None = None) -> int:
             sim_threshold=args.sim_threshold,
             apply=args.apply,
             rebuild_vectors=not args.no_rebuild,
+            require_accessed=args.require_accessed,
         )
         payload = report.get("summary", report) if args.summary_only else report
         print(json.dumps(payload, ensure_ascii=False, indent=2))

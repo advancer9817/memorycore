@@ -28,6 +28,7 @@ def llm_curator_report(
     config: dict[str, Any] | None = None,
     limit: int = 10000,
     sim_threshold: float | None = None,
+    require_accessed: bool = False,
 ) -> dict[str, Any]:
     """Run LLM-enhanced curation analysis. Returns structured report (no writes)."""
     t_start = _time.monotonic()
@@ -71,7 +72,7 @@ def llm_curator_report(
         vs_available = False
         errors.append(f"Vector store unavailable: {exc}")
 
-    memories = _fetch_active_memories(limit)
+    memories = _fetch_active_memories(limit, require_accessed=require_accessed)
     diagnostics["total_memories_fetched"] = len(memories)
     if not memories:
         return {"errors": errors, "diagnostics": diagnostics, "semantic_duplicates": [], "contradictions": [],
@@ -257,6 +258,7 @@ def run_llm_curator_incremental(
     sim_threshold: float | None = None,
     apply: bool = False,
     rebuild_vectors: bool = False,
+    require_accessed: bool = False,
 ) -> dict[str, Any]:
     """Run LLM curation and persist decisions after each completed batch."""
     from memorycore.storage.llm_curator_jobs import _diag
@@ -335,7 +337,7 @@ def run_llm_curator_incremental(
         vs_available = False
         errors.append(f"Vector store unavailable: {exc}")
 
-    memories = _fetch_active_memories(limit)
+    memories = _fetch_active_memories(limit, require_accessed=require_accessed)
     counts["total_memories"] = len(memories)
     if not memories:
         summary = _summary_from_counts(counts)
@@ -419,9 +421,10 @@ def run_llm_curator(
     sim_threshold: float | None = None,
     apply: bool = False,
     rebuild_vectors: bool = False,
+    require_accessed: bool = False,
 ) -> dict[str, Any]:
     """Run LLM curation, optionally apply findings, and record run metadata."""
-    report = llm_curator_report(config=config, limit=limit, sim_threshold=sim_threshold)
+    report = llm_curator_report(config=config, limit=limit, sim_threshold=sim_threshold, require_accessed=require_accessed)
     applied: dict[str, Any] | None = None
     governance: dict[str, Any] | None = None
     try:
