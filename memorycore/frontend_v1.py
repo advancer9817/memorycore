@@ -274,4 +274,19 @@ def _dispatch_v1_compat(
         return _write_memorycore_config(body)
     if len(parts) >= 2 and parts[0] == "config" and method in {"PUT", "POST"}:
         return body
+    if parts == ["profile"] and method == "GET":
+        from memorycore.storage.profile import profile_detail
+        return profile_detail(include_sources=True)
+    if parts == ["profile", "extract"] and method == "POST":
+        from memorycore.storage.profile import extract_profile, profile_detail
+        apply = bool(body.get("apply", False))
+        result = extract_profile(apply=apply)
+        if result.get("errors"):
+            return result
+        return {**result, "profile": profile_detail(include_sources=True)}
+    if parts == ["profile", "extract"] and method == "GET":
+        from memorycore.storage.profile import extract_profile
+        # Dry-run preview without writing to the store.
+        result = extract_profile(apply=False)
+        return result
     raise LookupError(f"route not found: /api/v1/{'/'.join(parts)}")

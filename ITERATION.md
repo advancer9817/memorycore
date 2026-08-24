@@ -5493,3 +5493,31 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 
 ### 说明
 - 与 Hermes providers.bailian 默认模型保持一致。
+
+---
+
+## [迭代 15] 2026-08-24 — 用户画像增强 + 前端独立 Profile Tab
+
+### 背景
+用户要求：画像维度更丰富，并作为 mcore 前端专门展示模块，独立 tab，样式与现有 UI 融合。
+
+### 变更（后端）
+- `config.yaml` user_profile.schema：8 → **14 维**（新增 语言、常用工具、当前项目、兴趣关注、时间偏好、输出偏好）。
+- `storage/profile.py` 新增 `profile_detail()`：返回 schema 定义 + 属性（置信度/不可变/来源数/更新时间）+ 来源记忆预览 + 统计（覆盖度、置信度分组 high/medium/low、immutable 锁定、最近提取时间）。
+- `server_runtime.py` 新增 `profile-detail` CLI 子命令（--no-sources）。
+- `frontend_v1.py` 新增路由：
+  - `GET /api/v1/profile` → profile_detail
+  - `POST /api/v1/profile/extract`（body.apply）→ 提取并返回刷新后的 profile
+  - `GET /api/v1/profile/extract` → dry-run 预览
+
+### 变更（前端）
+- `app/profile/page.tsx`（新增）：独立 Profile tab 页 —— 覆盖度进度条、置信度分组卡、属性卡片网格（高/中/低置信度徽章、不可变锁标、来源记忆数、更新时间、可展开来源记忆预览）、重新提取（dry-run）与提取并保存按钮；沿用 dark mica/graphite 风格（zinc-950/800、violet 点缀、PageShell 骨架）。
+- `components/Navbar.tsx`：新增 Profile tab（UserRound 图标）+ 刷新联动。
+- i18n：en.ts / zh.ts 同步新增 `nav.profile` 与 `profilePage.*` 全部 key。
+
+### 验证
+- `pnpm tsc --noEmit` 零错误。
+- `pnpm build` 成功，/profile 路由生成（4.82 kB），standalone 资产复制完成。
+- 后端：GET /api/v1/profile 200（14 维、coverage 0.571、置信度分组、来源预览）；extract dry-run 200；stats 200。
+- 真实提取：profile-extract --apply --limit 200 → updated 11（新增 语言/常用工具/当前项目/兴趣关注/输出偏好 等维度），errors=[]。
+- UI：:18318 /profile 200、SSR 代理 v1/profile 200，mcore-ui/mcore 均 active。

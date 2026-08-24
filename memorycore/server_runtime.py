@@ -162,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
     p_profile.add_argument("--summary-only", action="store_true")
     p_profile_get = sub.add_parser("profile-get", help="show current user profile snapshot")
     p_profile_get.add_argument("--json", action="store_true", help="output raw JSON rows")
+    p_profile_detail = sub.add_parser("profile-detail", help="show rich profile (schema, stats, sources) as JSON")
+    p_profile_detail.add_argument("--no-sources", action="store_true", help="omit source memory previews")
     p_profile_status = sub.add_parser("profile-status", help="show profile config, schema, and stored attribute counts")
     p_sem_index = sub.add_parser("semantic-index")
     p_sem_index.add_argument("--limit", type=int, default=1000)
@@ -309,6 +311,9 @@ def main(argv: list[str] | None = None) -> int:
         else:
             snap = profile_snapshot(cfg=_lc())
             print(snap if snap else "(no profile attributes stored)")
+    elif args.cmd == "profile-detail":
+        from memorycore.storage.profile import profile_detail
+        print(json.dumps(profile_detail(include_sources=not args.no_sources), ensure_ascii=False, indent=2))
     elif args.cmd == "profile-status":
         from memorycore.models import load_config as _lc
         from memorycore.storage.profile import get_user_profile, schema_from_config

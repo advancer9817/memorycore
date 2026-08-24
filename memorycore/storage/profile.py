@@ -81,6 +81,120 @@ def get_user_profile(user_id: str = "default") -> list[dict[str, Any]]:
     return rows
 
 
+def profile_detail(
+    user_id: str = "default",
+    cfg: dict[str, Any] | None = None,
+    include_sources: bool = True,
+    source_preview_limit: int = 5,
+) -> dict[str, Any]:
+    """Return a rich profile payload for the UI profile page.
+
+    Includes schema definitions (name/description/immutable), stored attributes
+    (value/confidence/source count/updated_at), per-attribute source memory
+    previews, coverage stats, and the latest extract diagnostics.
+    """
+    cfg = cfg or load_config()
+    schema = schema_from_config(cfg)
+    up = cfg.get("user_profile") or {}
+    attrs = get_user_profile(user_id)
+
+    schema_by_name = {str(e["name"]).strip(): e for e in schema}
+    attr_by_name = {str(a["attribute"]): a for a in attrs}
+
+    # Enrich each attribute with schema metadata + source previews
+    enriched: list[dict[str, Any]] = []
+    for attr in attrs:
+        name = str(attr["attribute"])
+        entry = {
+            "attribute": name,
+            "value": attr.get("value", ""),
+            "confidence": round(float(attr.get("confidence") or 0), 3),
+            "immutable": bool(attr.get("immutable")),
+            "description": (schema_by_name.get(name) or {}).get("description", ""),
+            "source_count": len(attr.get("source_ids") or []),
+            "updated_at": attr.get("updated_at", ""),
+        }
+        if include_sources and attr.get("source_ids"):
+            ids = (attr.get("source_ids") or [])[:source_preview_limit]
+            entry["sources"] = _profile_source_previews(ids)
+        enriched.append(entry)
+
+    # Schema entries with no stored value yet
+    missing = [
+        {
+            "attribute": name,
+            "value": "",
+            "confidence": 0,
+            "immutable": bool(entry.get("immutable", False)),
+            "description": str(entry.get("description", "")).strip(),
+            "source_count": 0,
+            "updated_at": "",
+            "filled": False,
+        }
+        for name, entry in schema_by_name.items()
+        if name not in attr_by_name
+    ]
+    for entry in missing:
+        enriched.append(entry)
+    # Sort: filled first (schema order), then unfilled
+    def _fill_rank(e):
+        return 0 if e.get("value") else 1
+    enriched.sort(key=_fill_rank)
+
+    filled = [e for e in enriched if e.get("value")]
+    coverage = round(len(filled) / len(schema), 3) if schema else 0
+    conf_groups = {
+        "high": len([e for e in filled if e["confidence"] >= 0.8]),
+        "medium": len([e for e in filled if 0.6 <= e["confidence"] < 0.8]),
+        "low": len([e for e in filled if e["confidence"] < 0.6]),
+    }
+    immutable_locked = [e["attribute"] for e in enriched if e.get("immutable") and e.get("value")]
+    update_times = [e["updated_at"] for e in enriched if e.get("updated_at")]
+    latest_extract = max(update_times) if update_times else ""
+
+    return {
+        "enabled": bool(up.get("enabled", False)),
+        "user_id": user_id,
+        "schema_count": len(schema),
+        "covered": len(filled),
+        "coverage": coverage,
+        "confidence_groups": conf_groups,
+        "immutable_locked": immutable_locked,
+        "latest_extract_at": latest_extract,
+        "extract_limit": int(up.get("extract_limit", 200)),
+        "min_confidence": float(up.get("min_confidence", 0.6)),
+        "max_snapshot_chars": int(up.get("max_snapshot_chars", 800)),
+        "attributes": enriched,
+    }
+
+
+def _profile_source_previews(ids: list[str], limit: int = 5) -> list[dict[str, Any]]:
+    """Brief previews of source memories for an attribute (id + title + snippet)."""
+    if not ids:
+        return []
+    ids = ids[:limit]
+    ph = ",".join("?" for _ in ids)
+    rows = _managed_query(
+        f"SELECT id, title, content, updated_at FROM memories WHERE id IN ({ph})",
+        ids,
+    )
+    by_id = {str(r["id"]): r for r in rows}
+    out: list[dict[str, Any]] = []
+    for mid in ids:
+        row = by_id.get(mid)
+        if not row:
+            continue
+        content = str(row.get("content") or "")
+        snippet = content[:160] + ("…" if len(content) > 160 else "")
+        out.append({
+            "id": mid,
+            "title": row.get("title", ""),
+            "snippet": snippet,
+            "updated_at": row.get("updated_at", ""),
+        })
+    return out
+
+
 def profile_snapshot(
     user_id: str = "default",
     cfg: dict[str, Any] | None = None,

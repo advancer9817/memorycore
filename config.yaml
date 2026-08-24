@@ -135,3 +135,15 @@ user_profile:
     description: 用户偏好的模型/供应商/路由
   - name: 学习方向
     description: 用户当前的学习重点与转型目标
+  - name: 语言
+    description: 用户主要使用的语言（沟通、文档、代码注释）
+  - name: 常用工具
+    description: 用户常用的开发/办公/流程工具链
+  - name: 当前项目
+    description: 用户正在推进的项目/产品/任务焦点
+  - name: 兴趣关注
+    description: 用户关注的技术方向、行业趋势与话题
+  - name: 时间偏好
+    description: 工作时区、作息节奏、会议/响应时间偏好
+  - name: 输出偏好
+    description: 用户偏好的产出物格式（报告/图表/代码/演示等）

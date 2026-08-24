@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode, useCallback, useEffect, useState } from "react";
-import { AppWindow, Home, Layers3, Menu, Network, RefreshCcw, Settings, ShieldCheck } from "lucide-react";
+import { AppWindow, Home, Layers3, Menu, Network, RefreshCcw, Settings, ShieldCheck, UserRound } from "lucide-react";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -39,6 +39,8 @@ async function refreshForPath(pathname: string): Promise<void> {
   } else if (pathname.startsWith("/governance")) {
     fetches.push(fetch(`${base}/api/governance/metrics`));
     fetches.push(fetch(`${base}/api/governance/decisions?review_status=actionable&limit=500`));
+  } else if (pathname.startsWith("/profile")) {
+    fetches.push(fetch(`${base}/api/v1/profile`));
   }
 
   await Promise.allSettled(fetches);
@@ -121,6 +123,7 @@ export function Navbar() {
     { href: "/apps", label: messages.nav.apps, icon: <AppWindow /> },
     { href: "/graph", label: messages.nav.graph, icon: <Network className="h-4 w-4" /> },
     { href: "/governance", label: messages.nav.governance, icon: <ShieldCheck className="h-4 w-4" /> },
+    { href: "/profile", label: messages.nav.profile, icon: <UserRound className="h-4 w-4" /> },
     { href: "/settings", label: messages.nav.settings, icon: <Settings className="h-4 w-4" /> },
   ];
 
