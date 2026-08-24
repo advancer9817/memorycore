@@ -205,6 +205,108 @@ def embed_text(text: str, config: EmbedConfig | None = None) -> list[float]:
         return _embed_fallback(text, config)
 
 
+# ---------------------------------------------------------------------------
+# Content-hash embedding cache (vector_cache table) + batched embed
+# ---------------------------------------------------------------------------
+
+_EMBED_CACHE_MODEL = ""  # model tag for cache key; set once per process
+
+
+def _embed_text_hash(text: str) -> str:
+    import hashlib
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _embed_cache_conn():
+    """Open a connection to the main SQLite DB for vector_cache reads/writes."""
+    from memorycore.storage.db import connect
+    return connect()
+
+
+def embed_text_cached(text: str, config: EmbedConfig | None = None) -> list[float]:
+    """embed_text with a content-hash cache in the vector_cache table.
+
+    Same text → same vector, so unchanged memories never need re-embedding.
+    Cache failures are non-fatal: we fall back to a live embed.
+    """
+    if config is None:
+        config = EmbedConfig()
+    cache_key = _embed_text_hash(text)
+    try:
+        with _embed_cache_conn() as conn:
+            row = conn.execute(
+                "SELECT vector_json FROM vector_cache WHERE text_hash=? AND model=?",
+                (cache_key, config.model),
+            ).fetchone()
+        if row is not None:
+            return json.loads(row["vector_json"])
+    except Exception as exc:
+        logger.debug("embed_text_cached: cache read failed, embedding live: %s", exc)
+    vec = embed_text(text, config)
+    try:
+        with _embed_cache_conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO vector_cache(text_hash, model, vector_json, updated_at) VALUES (?,?,?,?)",
+                (cache_key, config.model, json.dumps(vec), time.strftime("%Y-%m-%dT%H:%M:%S")),
+            )
+    except Exception as exc:
+        logger.debug("embed_text_cached: cache write failed (non-fatal): %s", exc)
+    return vec
+
+
+def embed_text_batch_cached(
+    texts: list[str],
+    config: EmbedConfig | None = None,
+    batch_size: int = 32,
+) -> list[list[float]]:
+    """Batch embed many texts: cache hits skipped, misses embedded in batches.
+
+    Returns one vector per input text, in the same order.
+    """
+    if config is None:
+        config = EmbedConfig()
+    if not texts:
+        return []
+    # Phase 1: look up cache for all texts.
+    hashes = [_embed_text_hash(t) for t in texts]
+    cache: dict[str, list[float]] = {}
+    try:
+        with _embed_cache_conn() as conn:
+            for h in hashes:
+                row = conn.execute(
+                    "SELECT vector_json FROM vector_cache WHERE text_hash=? AND model=?",
+                    (h, config.model),
+                ).fetchone()
+                if row is not None:
+                    cache[h] = json.loads(row["vector_json"])
+    except Exception as exc:
+        logger.debug("embed_text_batch_cached: cache read failed: %s", exc)
+    results: list[list[float] | None] = [cache.get(h) for h in hashes]
+    miss_idx = [i for i, v in enumerate(results) if v is None]
+    # Phase 2: embed misses in batches.
+    for start in range(0, len(miss_idx), batch_size):
+        chunk = miss_idx[start:start + batch_size]
+        chunk_texts = [texts[i] for i in chunk]
+        try:
+            vecs = _embed_ollama_batch(chunk_texts, config)
+        except Exception as exc:
+            logger.debug("embed_text_batch_cached: batch ollama failed (%s), falling back per-text", exc)
+            vecs = [embed_text(t, config) for t in chunk_texts]
+        for idx, vec in zip(chunk, vecs):
+            results[idx] = vec
+    # Phase 3: persist misses.
+    try:
+        with _embed_cache_conn() as conn:
+            now = time.strftime("%Y-%m-%dT%H:%M:%S")
+            conn.executemany(
+                "INSERT OR REPLACE INTO vector_cache(text_hash, model, vector_json, updated_at) VALUES (?,?,?,?)",
+                [(hashes[i], config.model, json.dumps(results[i]), now) for i in miss_idx],
+            )
+    except Exception as exc:
+        logger.debug("embed_text_batch_cached: cache write failed (non-fatal): %s", exc)
+    return [v for v in results if v is not None]
+
+
 def _normalize_provider(provider: str) -> str:
     value = str(provider or "").strip().lower().replace("_", "-")
     if value in {"sentence-transformer", "sentence-transformers", "st"}:
@@ -253,6 +355,31 @@ def _embed_ollama(text: str, config: EmbedConfig) -> list[float]:
     else:
         vec = data["embedding"]
     return _fit_dim([float(x) for x in vec], config.dim)
+
+
+def _embed_ollama_batch(texts: list[str], config: EmbedConfig) -> list[list[float]]:
+    """Call Ollama /api/embed with an array input — one request for N texts."""
+    if not texts:
+        return []
+    try:
+        import httpx
+        url = config.ollama_url.rstrip("/") + "/api/embed"
+        client = _get_ollama_client(config)
+        resp = client.post(url, json={"model": config.model, "input": texts})
+        resp.raise_for_status()
+        data = resp.json()
+    except ImportError:
+        import urllib.request
+        url = config.ollama_url.rstrip("/") + "/api/embed"
+        payload = json.dumps({"model": config.model, "input": texts}).encode()
+        req = urllib.request.Request(url, data=payload,
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=config.timeout) as r:
+            data = json.loads(r.read())
+
+    if "embeddings" not in data:
+        raise ValueError(f"Ollama batch embed response missing 'embeddings': {list(data)}")
+    return [_fit_dim([float(x) for x in v], config.dim) for v in data["embeddings"]]
 
 
 def _embed_openai(text: str, config: EmbedConfig) -> list[float]:
@@ -456,7 +583,7 @@ class VectorStore:
             return False
         try:
             from qdrant_client.models import PointStruct
-            vec = embed_text(text, self.config.embed)
+            vec = embed_text_cached(text, self.config.embed)
             p = dict(payload or {})
             p["text"] = text
             # Qdrant needs integer or UUID point ids; use UUID string directly
@@ -470,18 +597,25 @@ class VectorStore:
             return False
 
     def upsert_batch(self, items: list[tuple[str, str, dict]]) -> bool:
-        """Batch upsert multiple points in a single Qdrant request."""
+        """Batch upsert multiple points in a single Qdrant request.
+
+        Embeddings are computed with a content-hash cache and in batches,
+        so repeated identical texts are never re-embedded.
+        """
         if not self.available or not items:
             return False
         try:
             from qdrant_client.models import PointStruct
+            ids = [str(item_id) for item_id, _, _ in items]
+            texts = [text for _, text, _ in items]
+            vectors = embed_text_batch_cached(texts, self.config.embed)
             points = [
                 PointStruct(
-                    id=str(item_id),
-                    vector=embed_text(text, self.config.embed),
+                    id=item_id,
+                    vector=vec,
                     payload={"text": text, **payload},
                 )
-                for item_id, text, payload in items
+                for (item_id, text, payload), vec in zip(items, vectors)
             ]
             self._client.upsert(
                 collection_name=self.config.collection,

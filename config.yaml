@@ -35,7 +35,7 @@ extraction_strategy:
   default_status: active
   link_threshold: 0.55
   max_related_ids: 10
-  min_importance: 0.3
+  min_importance: 0.5
   skip_threshold: 0.88
   title_max_length: 80
   update_threshold: 0.82
@@ -65,7 +65,7 @@ llm_curator:
   prompt_style: aggressive
   review_cooldown_seconds: 3600
   reviewed_ids_max_age_seconds: 43200
-  sim_threshold: 0.4
+  sim_threshold: 0.8
   split_content_threshold: 200
   split_enabled: false
   temperature: 0.8

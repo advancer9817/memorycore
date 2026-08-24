@@ -77,7 +77,7 @@ def test_large_pool_sampling_limit():
 
 
 def test_run_llm_curator_applies_and_rebuilds_vectors(monkeypatch):
-    """Scheduled and manual LLM curator paths should share the governance runner."""
+    """Explicit rebuild_vectors=True path should run the governance runner and rebuild."""
     import memorycore.storage.curator_llm as clm
 
     report = {"summary": {"semantic_duplicates": 1}, "errors": []}
@@ -101,13 +101,45 @@ def test_run_llm_curator_applies_and_rebuilds_vectors(monkeypatch):
         lambda *args, **kwargs: None,
     )
 
-    result = clm.run_llm_curator(config={}, limit=10, sim_threshold=0.7, apply=True)
+    result = clm.run_llm_curator(config={}, limit=10, sim_threshold=0.7, apply=True, rebuild_vectors=True)
 
     assert result["summary"] == {"semantic_duplicates": 1}
     assert result["governance"] == governance
     assert result["applied"] == {"governance_auto_applied": 1}
     assert result["rebuild_vectors"] == {"rebuilt": 1}
     assert rebuild_calls == [True]
+
+
+def test_run_llm_curator_skips_rebuild_by_default(monkeypatch):
+    """Default rebuild_vectors=False: curator must NOT trigger full vector rebuild."""
+    import memorycore.storage.curator_llm as clm
+
+    report = {"summary": {"semantic_duplicates": 0}, "errors": []}
+    governance = {"decisions_created": 0, "decisions": [], "auto_applied": []}
+    monkeypatch.setattr(
+        "memorycore.storage.curator_llm.report.llm_curator_report",
+        lambda **_: report,
+    )
+    monkeypatch.setattr(
+        "memorycore.storage.governance.convert_llm_findings_to_decisions",
+        lambda report, auto_apply: governance,
+    )
+
+    rebuild_calls = []
+    monkeypatch.setattr(
+        "memorycore.storage.memory_rebuild_vectors",
+        lambda: rebuild_calls.append(True) or {"rebuilt": 1},
+    )
+    monkeypatch.setattr(
+        "memorycore.storage.audit.log_audit_event",
+        lambda *args, **kwargs: None,
+    )
+
+    result = clm.run_llm_curator(config={}, limit=10, sim_threshold=0.7, apply=True)
+
+    assert result["summary"] == {"semantic_duplicates": 0}
+    assert "rebuild_vectors" not in result
+    assert rebuild_calls == []
 
 
 def test_llm_curator_cli_summary_only(monkeypatch, capsys):

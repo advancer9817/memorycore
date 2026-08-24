@@ -473,6 +473,14 @@ def init_db(conn: sqlite3.Connection) -> None:
           error TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_vector_sync_queue_memory ON vector_sync_queue(memory_id);
+
+        CREATE TABLE IF NOT EXISTS vector_cache (
+          text_hash TEXT NOT NULL,
+          model TEXT NOT NULL DEFAULT '',
+          vector_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (text_hash, model)
+        );
         """
     )
     conn.execute(

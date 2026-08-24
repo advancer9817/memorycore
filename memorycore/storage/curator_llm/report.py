@@ -256,7 +256,7 @@ def run_llm_curator_incremental(
     limit: int = 200,
     sim_threshold: float | None = None,
     apply: bool = False,
-    rebuild_vectors: bool = True,
+    rebuild_vectors: bool = False,
 ) -> dict[str, Any]:
     """Run LLM curation and persist decisions after each completed batch."""
     from memorycore.storage.llm_curator_jobs import _diag
@@ -418,7 +418,7 @@ def run_llm_curator(
     limit: int = 200,
     sim_threshold: float | None = None,
     apply: bool = False,
-    rebuild_vectors: bool = True,
+    rebuild_vectors: bool = False,
 ) -> dict[str, Any]:
     """Run LLM curation, optionally apply findings, and record run metadata."""
     report = llm_curator_report(config=config, limit=limit, sim_threshold=sim_threshold)

@@ -334,7 +334,7 @@ def memory_backup(path: str | None = None) -> dict[str, Any]:
 
 def memory_rebuild_vectors(dry_run: bool = True, limit: int = 5000) -> dict[str, Any]:
     from memorycore.storage.crud import _VECTOR_RETAIN_STATUSES, row_to_dict
-    from memorycore.vector_store import get_vector_store
+    from memorycore.vector_store import get_vector_store, embed_text_batch_cached
 
     cap = max(1, min(int(limit), 5000))
     retain = sorted(_VECTOR_RETAIN_STATUSES)
@@ -348,12 +348,22 @@ def memory_rebuild_vectors(dry_run: bool = True, limit: int = 5000) -> dict[str,
         return {"dry_run": True, "planned": len(rows), "rebuilt": 0}
     cfg = load_config()
     vs = get_vector_store(cfg)
+    records = [row_to_dict(row) for row in rows]
+    # Batch-embed all texts in one pass (content-hash cached -> only changed
+    # texts hit Ollama; identical text returns the cached vector).
+    texts = [f"{r.get('title', '')} {r.get('content', '')}".strip() for r in records]
+    try:
+        vectors = embed_text_batch_cached(texts, vs.config.embed)
+    except Exception as exc:
+        # Last-resort fallback: per-record embed (keeps old behavior working).
+        import logging as _logging
+        _logging.getLogger(__name__).warning("batch embed failed (%s), falling back to per-record", exc)
+        vectors = [embed_text_cached(t, vs.config.embed) for t in texts]
     rebuilt = 0
     errors = 0
-    for row in rows:
-        record = row_to_dict(row)
+    items: list[tuple[str, str, dict]] = []
+    for record, text, vec in zip(records, texts, vectors):
         try:
-            text = f"{record.get('title', '')} {record.get('content', '')}".strip()
             metadata = record.get("metadata") or {}
             payload = {
                 "type": record.get("type", ""),
@@ -364,12 +374,14 @@ def memory_rebuild_vectors(dry_run: bool = True, limit: int = 5000) -> dict[str,
                 "kind": metadata.get("kind", ""),
                 "parent_id": metadata.get("parent_id", ""),
             }
-            vs.upsert(record["id"], text, payload)
+            items.append((record["id"], text, payload))
             rebuilt += 1
         except Exception as exc:
             import logging as _logging
             _logging.getLogger(__name__).warning("rebuild_vectors: failed for %s: %s", record["id"], exc)
             errors += 1
+    if items:
+        vs.upsert_batch(items)
     deleted_stale = _delete_stale_vector_points(vs)
     log_audit_event("memory_vector_rebuild", detail={"rebuilt": rebuilt, "errors": errors, "deleted_stale": deleted_stale})
     return {"dry_run": False, "planned": len(rows), "rebuilt": rebuilt, "errors": errors, "deleted_stale": deleted_stale}

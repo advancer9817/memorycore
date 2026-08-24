@@ -5293,3 +5293,44 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 - 最近 1 天：29 个 context quality events，hit_rate 0.917、平均 used_count 9.66、cross_retrieval_rate 0.011、vector_avg_score 0.579。
 - 最近 3 天：90 个 events，hit_rate 0.883、平均 used_count 12.13、cross_retrieval_rate 0.032、vector_avg_score 0.524。
 - hit_rate 当前高于 0.85 基线，但 cross retrieval 尚未达到 0.15 目标；`TODO.md` 保留连续跟踪项，不将时间窗口指标标记为完成。
+
+---
+
+## [迭代 8] 2026-08-24 — 降本增效：curator 降频 + 全量重嵌入根治（¥20/周 → ≤¥5/周）
+
+> 承接 A/B 评测结论（mcore 胜出保留），执行 HANDOFF.md 降本增效 P0+P1。
+> 目标：LLM curator 花费从 ¥20/周（10M token、45 次/周）降至 ≤¥5/周。
+
+### 变更（P0 配置降频）
+
+- `~/.config/systemd/user/mcore-curator.timer`：`OnCalendar=hourly` → `*-*-* 03,15:00:00`（每天 2 次，错峰），`RandomizedDelaySec=600`。
+- `~/.config/systemd/user/mcore-curator.service`：新增 `Nice=10`、`CPUWeight=10`、`IOWeight=10`；`LOCAL_MEMORY_LLM_CURATOR_SIM_THRESHOLD=0.72` → `0.8`。
+- `config.yaml`：`llm_curator.sim_threshold: 0.4 → 0.8`；`extraction_strategy.min_importance: 0.3 → 0.5`。
+
+### 变更（P1 结构性优化 — 根治全量重嵌入）
+
+- `server_runtime.py`：`llm-curator` 新增 `--no-rebuild` 参数；默认 `sim-threshold` 0.72 → 0.8；调用 `run_llm_curator(rebuild_vectors=not args.no_rebuild)`。
+- `run_curator.sh`：llm-curator 调用加 `--no-rebuild`，`sim-threshold` 默认 0.72 → 0.8。
+- `report.py`：`run_llm_curator` / `run_llm_curator_incremental` 的 `rebuild_vectors` 默认 `True` → `False`（curator 只改状态/决策，文本未变，全量重嵌入纯浪费；UI 触发的 incremental 路径同步免除）。
+- `vector_store.py`：
+  - 新增 `embed_text_cached()`：content-hash（sha256）embed 缓存，相同文本直接复用向量。
+  - 新增 `embed_text_batch_cached()`：批量 embed（Ollama `/api/embed` input 数组），缓存命中跳过，仅缺失项按 32/批嵌入。
+  - `VectorStore.upsert` / `upsert_batch` 改用缓存批量路径。
+- `storage/db.py`：新增 `vector_cache(text_hash, model, vector_json, updated_at)` 表（`CREATE TABLE IF NOT EXISTS`，自动迁移）。
+- `storage/transfer.py`：`memory_rebuild_vectors` 改为批量 + 缓存（增量重建；手动 `semantic-index --force` 时仅缺失文本调用 Ollama）。
+- `tests/test_curator_llm_jobs.py`：`test_run_llm_curator_applies_and_rebuilds_vectors` 改为显式 `rebuild_vectors=True`；新增 `test_run_llm_curator_skips_rebuild_by_default`。
+
+### 验证
+
+- 全量测试：`509 passed, 7 skipped`。
+- 缓存实测：首次 embed 141.3ms → 二次命中 0.3ms；batch 3 条仅 1 条缺失走 Ollama。
+- `--no-rebuild` 验证：dry-run summary 不再含 `rebuild_vectors` 字段，一轮仅 ~5s（此前 17+ 分钟全量重嵌入）。
+- `memory_rebuild_vectors(limit=5)` 增量路径通过；顺带清理 Qdrant 历史 stale 向量点 14,166 个。
+- `mcore.service` 重启后 `/health` ok（total_memories 7919）；`/api/context` 混合检索正常。
+- 定时器确认每天 2 次（NEXT 15:06），服务 `Nice=10/CPUWeight=10/IOWeight=10` 生效。
+
+### 风险 / 说明
+
+- Qdrant payload 的 status 在 curator 决策后不再立即同步（依赖 SQLite 层过滤），混合检索最终在 SQLite 过滤 `status IN ('active','candidate')`，不会误召回；手动 `semantic-index --force` 会刷新并清理 stale 点。
+- 阿里云侧 923 条测试记忆保留为后备方案（用户已确认暂不清理）。
+- 待观察：一周后核对 deepseek 账单 token 是否降至原 1/5 以下。
