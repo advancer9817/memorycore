@@ -148,17 +148,23 @@ export function MemoryIntelligenceCenter() {
   const byType = statusStats.by_type ?? {};
   const totalMemories = asNumber(statusStats.total) || asNumber(state.stats?.total_memories) || state.recentMemories.length;
   const active = asNumber(byStatus.active);
-  const archived = asNumber(byStatus.archived);
-  const candidates = asNumber(byStatus.candidate);
   const linkCount = asNumber(statusStats.link_count);
-  const neverAccessed = asNumber(statusStats.never_accessed_count);
+  const uniqueLinkedMemories = asNumber(statusStats.unique_linked_memories);
+  const activeNeverAccessed = asNumber(statusStats.active_never_accessed_count);
   const contradicted = asNumber(byStatus.contradicted);
   const stale = asNumber(byStatus.stale);
-  const connectedCoverage = percentage(Math.max(totalMemories - neverAccessed, 0), totalMemories);
-  const neverAccessedRatio = percentage(neverAccessed, totalMemories);
-  const activeRatio = percentage(active, totalMemories);
-  const archivedRatio = percentage(archived, totalMemories);
-  const nonArchivedRatio = inversePercentage(archived, totalMemories);
+  const superseded = asNumber(byStatus.superseded);
+  const pendingCleanup =
+    stale + superseded + contradicted;
+  const usablePool =
+    active + stale + contradicted + superseded;
+  // B2: reuse coverage over the active pool only (archived dead data excluded)
+  const activeReuseCoverage = active > 0 ? percentage(active - activeNeverAccessed, active) : 0;
+  // B3: linked coverage uses real memory_links unique-coverage ratio, decoupled from reuse
+  const linkedCoverageRatio = active > 0 ? percentage(uniqueLinkedMemories, active) : 0;
+  // B4: non-archived ratio becomes "pending cleanup share of usable pool"
+  const nonArchivedRatio = usablePool > 0 ? percentage(pendingCleanup, usablePool) : 0;
+  const connectedCoverage = linkedCoverageRatio;
   const attentionItems = useMemo(
     () => buildAttentionItems(curatorStatus, t, llmRunning ? null : handleRunLlm, state.governanceCounts),
     [curatorStatus, t, llmRunning, handleRunLlm, state.governanceCounts]
@@ -173,22 +179,39 @@ export function MemoryIntelligenceCenter() {
     ? state.governanceCounts.semantic_duplicate
     : asNumber(curatorSummary.duplicates) + asNumber(llmSummary.semantic_duplicates);
   const staleActionCount = stale + asNumber(curatorSummary.archive) + asNumber(curatorSummary.stale);
+  void staleActionCount;
   const llmStatus = curatorStatus?.llm_curator?.last_result ?? curatorStatus?.llm_curator?.latest_job?.status ?? "unknown";
+  const llmNeverRun = llmStatus === "unknown" || llmStatus === "idle";
   const riskScore = clampScore(100 - highRiskCount * 18 - Math.min(duplicateCount, 100) * 0.28 - Math.min(contradictionCount, 20) * 2);
-  const llmGovernanceScore = llmStatus === "success" ? 100 : llmStatus === "running" ? 62 : 45;
+  // B1: LLM governance score — neutral when never run (no hard-coded 45 penalty);
+  // when run, recent success is 100 and running is a transient 62.
+  const llmGovernanceScore = llmNeverRun
+    ? 50
+    : llmStatus === "success"
+      ? 100
+      : llmStatus === "running"
+        ? 62
+        : 50;
   const qualityScore = weightedScore([
     { value: riskScore, weight: 0.34 },
-    { value: nonArchivedRatio, weight: 0.16 },
-    { value: connectedCoverage, weight: 0.18 },
-    { value: inversePercentage(neverAccessed, totalMemories), weight: 0.18 },
+    { value: inversePercentage(pendingCleanup, usablePool), weight: 0.16 },
+    { value: connectedCoverage, weight: 0.08 },
+    { value: activeReuseCoverage, weight: 0.24 },
     { value: llmGovernanceScore, weight: 0.14 },
   ]);
   const healthSignals = [
-    { label: t.riskControl, value: riskScore, detail: t.riskControlDetail(contradictionCount, duplicateCount) },
-    { label: t.reuseCoverage, value: inversePercentage(neverAccessed, totalMemories), detail: t.reuseCoverageDetail(neverAccessed) },
-    { label: t.linkedCoverage, value: connectedCoverage, detail: t.linkedCoverageDetail(linkCount) },
-    { label: t.nonArchivedRatio, value: nonArchivedRatio, detail: t.nonArchivedRatioDetail(totalMemories - archived) },
-    { label: t.llmGovernance, value: llmGovernanceScore, detail: llmStatus },
+    // B5: when LLM detection is unavailable, flag that risk numbers may be stale
+    {
+      label: t.riskControl,
+      value: riskScore,
+      detail: llmNeverRun || llmStatus !== "success"
+        ? `${t.riskControlDetail(contradictionCount, duplicateCount)} · ${t.llmDataMayBeStale}`
+        : t.riskControlDetail(contradictionCount, duplicateCount),
+    },
+    { label: t.reuseCoverage, value: activeReuseCoverage, detail: t.reuseCoverageDetail(activeNeverAccessed, active) },
+    { label: t.linkedCoverage, value: linkedCoverageRatio, detail: t.linkedCoverageDetail(linkCount, uniqueLinkedMemories) },
+    { label: t.nonArchivedRatio, value: nonArchivedRatio, detail: t.nonArchivedRatioDetail(pendingCleanup, usablePool) },
+    { label: t.llmGovernance, value: llmGovernanceScore, detail: llmNeverRun ? t.llmNeverRun : llmStatus },
   ];
   const recentCount = state.recentMemories.filter((memory) => Date.now() - new Date(memory.created_at).getTime() <= 7 * DAY_MS).length;
   const oldCount = state.recentMemories.filter((memory) => Date.now() - new Date(memory.created_at).getTime() > 30 * DAY_MS).length;

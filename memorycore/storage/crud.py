@@ -674,7 +674,14 @@ def get_memory_stats() -> dict[str, Any]:
         never_accessed = conn.execute(
             "SELECT COUNT(*) FROM memories WHERE last_accessed_at IS NULL"
         ).fetchone()[0]
+        active_never_accessed = conn.execute(
+            "SELECT COUNT(*) FROM memories WHERE status IN ('active', 'candidate') AND last_accessed_at IS NULL"
+        ).fetchone()[0]
         link_count = conn.execute("SELECT COUNT(*) FROM memory_links").fetchone()[0]
+        unique_linked_memories = conn.execute(
+            "SELECT COUNT(DISTINCT id) FROM ("
+            "SELECT source_id AS id FROM memory_links UNION SELECT target_id AS id FROM memory_links)"
+        ).fetchone()[0]
     result = {
         "total": agg["total"],
         "by_type": type_dist,
@@ -684,7 +691,9 @@ def get_memory_stats() -> dict[str, Any]:
         "avg_importance": round(float(agg["avg_imp"] or 0), 3),
         "avg_feedback_score": round(float(agg["avg_fb"] or 0), 3),
         "never_accessed_count": never_accessed,
+        "active_never_accessed_count": active_never_accessed,
         "link_count": link_count,
+        "unique_linked_memories": unique_linked_memories,
     }
     import time as _time
     _stats_cache = result

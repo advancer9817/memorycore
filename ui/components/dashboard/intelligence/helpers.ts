@@ -17,7 +17,9 @@ export interface CuratorStatusPayload {
     by_status?: Record<string, number>;
     by_type?: Record<string, number>;
     never_accessed_count?: number;
+    active_never_accessed_count?: number;
     link_count?: number;
+    unique_linked_memories?: number;
   };
   curator?: {
     generated_at?: string;

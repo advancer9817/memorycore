@@ -292,6 +292,12 @@ def _apps_list(
             "SELECT source_agent, COUNT(*) as cnt, MAX(COALESCE(updated_at, created_at)) as last_at"
             " FROM memories WHERE status='active' GROUP BY source_agent"
         ).fetchall()
+        accessed_rows = conn.execute(
+            "SELECT source_agent, COUNT(*) as cnt FROM memories"
+            " WHERE last_accessed_at IS NOT NULL GROUP BY source_agent"
+        ).fetchall()
+
+    accessed_by_agent = {str(row["source_agent"] or "manual"): int(row["cnt"]) for row in accessed_rows}
 
     apps_by_id: dict[str, dict[str, Any]] = {}
     for row in agg_rows:
@@ -305,7 +311,7 @@ def _apps_list(
                 "id": app,
                 "name": app,
                 "total_memories_created": int(row["cnt"]),
-                "total_memories_accessed": 0,
+                "total_memories_accessed": accessed_by_agent.get(agent_raw, 0),
                 "is_active": False,
                 "status": "offline",
                 "last_activity_at": str(row["last_at"] or ""),
@@ -366,19 +372,25 @@ def _apps_list(
 def _app_details(app_id: str) -> dict[str, Any]:
     from memorycore.storage.db import read_conn as _rc
     source_agents = _source_agents_for_app_id(app_id)
-    placeholders = ",".join("?" for _ in source_agents)
+    placeholders = ", ".join("?" for _ in source_agents)
     with _rc() as conn:
         row = conn.execute(
             f"SELECT COUNT(*) as cnt FROM memories WHERE status='active' AND source_agent IN ({placeholders})",
             tuple(source_agents),
         ).fetchone()
+        accessed = conn.execute(
+            f"SELECT COUNT(*) as cnt, MIN(last_accessed_at) as first_ts, MAX(last_accessed_at) as last_ts "
+            f"FROM memories WHERE source_agent IN ({placeholders}) AND last_accessed_at IS NOT NULL",
+            tuple(source_agents),
+        ).fetchone()
     total = int(row["cnt"]) if row else 0
+    accessed_count = int(accessed["cnt"]) if accessed else 0
     return {
         "is_active": True,
         "total_memories_created": total,
-        "total_memories_accessed": 0,
-        "first_accessed": None,
-        "last_accessed": None,
+        "total_memories_accessed": accessed_count,
+        "first_accessed": str(accessed["first_ts"] or "") or None,
+        "last_accessed": str(accessed["last_ts"] or "") or None,
     }
 
 

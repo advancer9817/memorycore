@@ -5594,3 +5594,52 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 - 方案中引用的代码定位（crud.py:30/51、transfer.py:390、server_runtime.py:112、MemoryOperationsView.tsx 等）均已核对存在；
 - 数据量均为当日实审值（Qdrant 14,725 向量、archived 5,556 条等）；
 - 工作区本次仅新增 1 个方案文档，无代码改动（实施待下一迭代）。
+
+---
+
+## [迭代 19] 2026-08-24 — 面板口径修复（A4+B组评分）+ C2 数据收敛
+
+> 承接 2026-08-24-unified-iteration-plan.md（A/B/C 组），实现批次 1。
+
+### 背景
+- 应用页/看板统计口径失真：A4 accessed 硬编码 0；B 组健康度评分写死/同公式/口径错误（总分 56 不可信）。
+- 数据层实测：stale 954、superseded 67、contradicted 231、active 从未访问 382。
+- 本次 mcore 已重建 + 358 条数据收敛后基线：memories 8100。
+
+### 变更（A4 — 已访问统计接真实数据）
+- `memorycore/frontend_helpers.py`：
+  - `_app_details`：按 app 的 source_agents 聚合 `last_accessed_at`（COUNT/MIN/MAX），替换硬编码 `total_memories_accessed: 0 / first_accessed: None / last_accessed: None`。
+  - `_apps_list`：新增 `accessed_by_agent` 聚合，apps 列表 `total_memories_accessed` 接真实数据（替换硬编码 0）。
+- `memorycore/frontend_v1.py`：`GET /api/v1/apps/{id}/accessed` 查询 `last_accessed_at IS NOT NULL` 记录分页返回（替换空占位）。
+
+### 变更（B 组 — 健康度评分修复）
+- `memorycore/storage/crud.py` `get_memory_stats`：新增 `active_never_accessed_count`、`unique_linked_memories` 字段。
+- `ui/components/dashboard/MemoryIntelligenceCenter.tsx`：
+  - B1：`llmGovernanceScore` 去掉写死 45 分 → 未运行中性 50；运行 success=100 / running=62。
+  - B2：复用覆盖改 active 池口径 `(active - active_never_accessed) / active`（替代全库分母）。
+  - B3：链接覆盖改为真实 `unique_linked_memories / active`，与复用覆盖解耦；评分权重 0.18 → 0.08。
+  - B4：非归档比例 → 「待清理占比 `(stale+superseded+contradicted) / (active+stale+contradicted+superseded)`」；评分用其反比（干净比例）。
+  - B5：LLM 检测不可用时 risk 卡附「检测数据可能过期」角标。
+  - 权重重分配：risk 0.34 + 干净比例 0.16 + 链接 0.08 + active 复用 0.24 + LLM 0.14。
+- `ui/components/dashboard/intelligence/helpers.ts`：`CuratorStatusPayload.stats` 增加新字段类型。
+- i18n（zh/en）：reuseCoverageDetail/linkedCoverageDetail/nonArchivedRatioDetail 改为双参数；新增 llmDataMayBeStale、llmNeverRun。
+
+### 变更（C2 — 数据收敛，一次性）
+- 按规划规则全库扫描（rule curator 仅扫最新 1000 条，覆盖不到存量）：
+  - stale 且从未访问 → archived（294 条）；superseded → archived（67）；contradicted 超 90 天无访问 → archived（5）；
+  - active 从未访问超 14 天 → candidate（1 条；其余 379 条为本次导入新数据、未满观察期，保守保留）。
+  - 状态变更合计 367 条；Qdrant 已同步（`update_status_batch` 级联）。
+- 安全：执行前 full export 备份 `backups/memory-export-before-c2-20260824.json`；dry-run 先行。
+
+### 验证
+- `_app_details("claude")`：accessed 613 / first 2026-05-20 / last 2026-08-24（真实数据）。
+- `/api/v1/stats`：apps accessed 96/82/453（claude/codex/frontend）。
+- 收敛后状态：archived 5931 / active 1287 / stale 658 / contradicted 223 / candidate 1；active 从未访问剩 379（观察期内的新数据）。
+- 全量测试：518 passed / 7 skipped（与基线一致，无回归）。
+- 前端：`pnpm tsc --noEmit` 零错误；`pnpm build` 成功。
+- mcore.service / mcore-ui.service 重启后 `/health` ok、`/api/v1/stats` 200。
+
+### 风险 / 说明
+- C2 收敛后 active 池 count 下降属预期（从未访问的 downgrade）；context hit rate 基线 79.7% 待观察回归。
+- 剩余 stale 658 条多数为「曾被访问但可复检」的记忆，留给后续 D1（手动维护）按需处理，未盲目归档。
+- 本迭代未实现 D 组（手动维护）与 F 组（画像召回融合），按规划留到批次 2/3。

@@ -261,7 +261,33 @@ def _dispatch_v1_compat(
             "page_size": page_size,
         }
     if len(parts) == 3 and parts[0] == "apps" and parts[2] == "accessed" and method == "GET":
-        return {"memories": [], "total": 0, "page": _int_q(query, "page", 1), "page_size": _int_q(query, "page_size", 50)}
+        page = _int_q(query, "page", 1)
+        page_size = min(_int_q(query, "page_size", 50), 200)
+        from memorycore.storage.db import read_conn as _rc2
+        from memorycore.models import row_to_dict as _rtd2
+        source_agents = _source_agents_for_app_id(parts[1])
+        if not source_agents:
+            return {"memories": [], "total": 0, "page": page, "page_size": page_size}
+        sph = ", ".join("?" for _ in source_agents)
+        offset = max(page - 1, 0) * page_size
+        with _rc2() as conn:
+            total_row = conn.execute(
+                f"SELECT COUNT(*) as cnt FROM memories "
+                f"WHERE source_agent IN ({sph}) AND last_accessed_at IS NOT NULL",
+                tuple(source_agents),
+            ).fetchone()
+            rows = conn.execute(
+                f"SELECT * FROM memories "
+                f"WHERE source_agent IN ({sph}) AND last_accessed_at IS NOT NULL "
+                f"ORDER BY last_accessed_at DESC LIMIT ? OFFSET ?",
+                (*source_agents, page_size, offset),
+            ).fetchall()
+        return {
+            "memories": [_memory_item(_rtd2(row)) for row in rows],
+            "total": int(total_row["cnt"] if total_row else 0),
+            "page": page,
+            "page_size": page_size,
+        }
     if len(parts) == 2 and parts[0] == "apps" and method == "DELETE":
         return _delete_app_memories(parts[1])
     if len(parts) == 2 and parts[0] == "apps" and method == "PUT":
