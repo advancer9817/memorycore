@@ -5334,3 +5334,35 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 - Qdrant payload 的 status 在 curator 决策后不再立即同步（依赖 SQLite 层过滤），混合检索最终在 SQLite 过滤 `status IN ('active','candidate')`，不会误召回；手动 `semantic-index --force` 会刷新并清理 stale 点。
 - 阿里云侧 923 条测试记忆保留为后备方案（用户已确认暂不清理）。
 - 待观察：一周后核对 deepseek 账单 token 是否降至原 1/5 以下。
+
+---
+
+## [迭代 9] 2026-08-24 — 用户画像层（借鉴阿里云长期记忆 User Profile，落地 mcore）
+
+> 设计：docs/plans/2026-08-24-user-profile-layer.md；决策记忆 7bd604fd。
+
+### 背景
+- 借鉴阿里云百炼长期记忆用户画像机制：CreateProfileSchema（固定属性 schema）→ AddMemory 抽取 → GetUserProfile → 注入 Prompt。
+- 差距：mcore 只有自由文本 user_profile 记忆（91 条 active），靠向量召回注入，画像字段不保证覆盖、旧记忆可能淹没新事实。
+
+### 变更
+- `config.yaml`：新增 `user_profile:` 段（enabled, extract_limit=200, max_snapshot_chars=800, min_confidence=0.6, schema 8 属性含 immutable 技术栈）。
+- `memorycore/models.py`：DEFAULT_CONFIG 增加 user_profile 默认值；validate_config 增加 schema 校验（属性语义唯一/重复告警）。
+- `memorycore/storage/db.py`：新增 `user_profile_attrs` 表（user_id, attribute, value, confidence, immutable, source_ids_json, updated_at，主键 user_id+attribute）。
+- `memorycore/storage/profile.py`（新增 ~330 行）：schema_from_config / get_user_profile / profile_snapshot / extract_profile；LLM 聚合抽取 prompt `_PROFILE_EXTRACT_PROMPT`；`_parse_profile_response` 白名单+confidence 夹取；`_upsert_profile_attrs` 冲突规则（高 conf 覆盖、低 conf 保留、immutable 锁定、非 schema 过滤）。
+- `memorycore/storage/context_pack.py`：build_context_pack 头部注入 `## user_profile_snapshot` 固定块（不依赖召回，必达；无画像零注入）。
+- `memorycore/server_runtime.py`：新增 profile-extract / profile-get / profile-status 子命令。
+- `run_curator.sh`：结尾挂载 profile-extract --apply（随 curator 2x/天，非致命）。
+- `tests/test_profile.py`（新增 7 case）：schema 默认空/置信度覆盖规则/immutable 锁定/白名单解析/快照格式/空画像/dry-run vs apply。
+
+### 验证
+- 真实抽取：91 条 active user_profile 记忆 → LLM 聚合为 8 属性（姓名 杜鹏洋 0.95、雇主 广域 0.9、模型偏好 0.9、学习方向 0.9 等），耗时 24-38s。
+- `/api/context` 注入实测：`## user_profile_snapshot` 块固定出现在 context 头部（服务重启后生效）。
+- profile-status / profile-get CLI 正常。
+- 全量测试：516 passed / 7 skipped（原 509 + 新增 7）。
+
+### 风险 / 说明
+- 抽取依赖 LLM 质量；min_confidence 0.6 门槛兜底；`enabled: false` 一键关闭。
+- 注入固定 ~400-600 token/次，max_snapshot_chars 控制上限。
+- 成本：随 curator 2x/天聚合 ≈ ¥0.2/周（当前 ¥3/周 的 ~7%）。
+- 未新增 MCP 工具面（保持 22 个）；画像表为结论层，user_profile 记忆为证据层。

@@ -90,6 +90,14 @@ fi
 
 "$PY" "$SERVER" html "$ROOT/dashboard.html" >/dev/null
 
+# Structured user profile aggregation (low-frequency; enabled via config/env)
+PROFILE_ENABLED="${LOCAL_MEMORY_PROFILE_EXTRACT:-1}"
+if [ "$PROFILE_ENABLED" = "1" ]; then
+  "$PY" "$SERVER" profile-extract --apply --limit "${LOCAL_MEMORY_PROFILE_EXTRACT_LIMIT:-200}" \
+    >> "$OUT_DIR/profile-extract.log" 2>&1 || \
+    echo "[mcore] profile-extract failed (non-fatal)" >&2
+fi
+
 python3 - "$REPORT" "${LLM_REPORT:-}" "$LLM_ENABLED" <<'PY'
 import json, sys
 path = sys.argv[1]

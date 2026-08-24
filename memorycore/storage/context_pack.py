@@ -394,6 +394,15 @@ def build_context_pack(
         f"safety: {BOUNDARY_NOTICE}",
         "",
     ]
+    # Fixed structured user-profile snapshot — always injected (no retrieval dependency)
+    try:
+        from memorycore.storage.profile import profile_snapshot
+        if cfg.get("user_profile", {}).get("enabled", False):
+            snap = profile_snapshot(user_id="default", cfg=cfg, max_chars=int(cfg.get("user_profile", {}).get("max_snapshot_chars", 800)))
+            if snap:
+                lines.append(f"{snap}\n")
+    except Exception as exc:
+        logger.debug("user_profile snapshot injection skipped: %s", exc)
     used_ids: list[str] = []
     filtered_ids: list[str] = []
     injection_warnings: list[dict[str, Any]] = []

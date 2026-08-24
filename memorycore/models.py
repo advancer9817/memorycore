@@ -159,6 +159,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "title_max_length": 80,
         "default_scope": "global",
     },
+    "user_profile": {
+        "enabled": False,
+        "extract_limit": 200,
+        "max_snapshot_chars": 800,
+        "min_confidence": 0.6,
+        "schema": [],
+    },
 }
 
 MEMORY_TYPES: set[str] = {
@@ -408,6 +415,31 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
         _warn(f"extraction_strategy.default_decay_policy={es['default_decay_policy']!r} unknown")
     if "default_scope" in es and es["default_scope"] not in {"global", "session", "agent"}:
         _warn(f"extraction_strategy.default_scope={es['default_scope']!r} unknown")
+
+    # user_profile
+    up = cfg.get("user_profile", {})
+    if not isinstance(up.get("enabled", False), bool):
+        _warn(f"user_profile.enabled must be a bool (got {up.get('enabled')!r})")
+    for key in ("extract_limit", "max_snapshot_chars"):
+        if key in up:
+            _pos_int("user_profile", key, up[key])
+    min_conf = up.get("min_confidence", 0.6)
+    if not (isinstance(min_conf, (int, float)) and 0 <= min_conf <= 1):
+        _warn(f"user_profile.min_confidence must be a 0-1 float (got {min_conf!r})")
+    schema = up.get("schema")
+    if schema is not None:
+        if not isinstance(schema, list):
+            _warn("user_profile.schema must be a list")
+        else:
+            seen_names: set[str] = set()
+            for entry in schema:
+                if not isinstance(entry, dict) or not str(entry.get("name", "")).strip():
+                    _warn(f"user_profile.schema entries must be dicts with a non-empty 'name' (got {entry!r})")
+                    continue
+                name = str(entry["name"]).strip()
+                if name in seen_names:
+                    _warn(f"user_profile.schema: duplicate attribute name {name!r} (阿里云建议属性名语义唯一)")
+                seen_names.add(name)
 
     return warnings
 

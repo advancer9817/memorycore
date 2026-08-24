@@ -154,6 +154,13 @@ def main(argv: list[str] | None = None) -> int:
     p_rollup.add_argument("--project-path", default="")
     p_rollup.add_argument("--force", action="store_true")
     p_rollup.add_argument("--summary-only", action="store_true")
+    p_profile = sub.add_parser("profile-extract", help="aggregate active user_profile memories into structured user profile attrs")
+    p_profile.add_argument("--apply", action="store_true", help="actually write attributes to user_profile_attrs (default dry-run)")
+    p_profile.add_argument("--limit", type=int, default=0, help="max user_profile memories to scan (0 = config user_profile.extract_limit)")
+    p_profile.add_argument("--summary-only", action="store_true")
+    p_profile_get = sub.add_parser("profile-get", help="show current user profile snapshot")
+    p_profile_get.add_argument("--json", action="store_true", help="output raw JSON rows")
+    p_profile_status = sub.add_parser("profile-status", help="show profile config, schema, and stored attribute counts")
     p_sem_index = sub.add_parser("semantic-index")
     p_sem_index.add_argument("--limit", type=int, default=1000)
     p_sem_index.add_argument("--force", action="store_true")
@@ -278,6 +285,36 @@ def main(argv: list[str] | None = None) -> int:
         )
         payload = report["summary"] if args.summary_only else report
         print(json.dumps(payload, ensure_ascii=False, indent=2))
+    elif args.cmd == "profile-extract":
+        from memorycore.storage.profile import extract_profile
+        report = extract_profile(apply=args.apply, limit=args.limit or None)
+        payload = report["summary"] if getattr(args, "summary_only", False) else report
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    elif args.cmd == "profile-get":
+        from memorycore.models import load_config as _lc
+        from memorycore.storage.profile import get_user_profile, profile_snapshot
+        if args.json:
+            print(json.dumps(get_user_profile(), ensure_ascii=False, indent=2))
+        else:
+            snap = profile_snapshot(cfg=_lc())
+            print(snap if snap else "(no profile attributes stored)")
+    elif args.cmd == "profile-status":
+        from memorycore.models import load_config as _lc
+        from memorycore.storage.profile import get_user_profile, schema_from_config
+        cfg = _lc()
+        up = cfg.get("user_profile", {})
+        schema = schema_from_config(cfg)
+        attrs = get_user_profile()
+        print(json.dumps({
+            "enabled": up.get("enabled", False),
+            "extract_limit": up.get("extract_limit", 200),
+            "max_snapshot_chars": up.get("max_snapshot_chars", 800),
+            "min_confidence": up.get("min_confidence", 0.6),
+            "schema_count": len(schema),
+            "schema_names": [e["name"] for e in schema],
+            "stored_count": len(attrs),
+            "stored_attributes": [a["attribute"] for a in attrs],
+        }, ensure_ascii=False, indent=2))
     elif args.cmd == "semantic-status":
         from memorycore.vector_store import get_vector_store
 

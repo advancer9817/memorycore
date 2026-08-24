@@ -481,6 +481,18 @@ def init_db(conn: sqlite3.Connection) -> None:
           updated_at TEXT NOT NULL,
           PRIMARY KEY (text_hash, model)
         );
+
+        CREATE TABLE IF NOT EXISTS user_profile_attrs (
+          user_id        TEXT NOT NULL DEFAULT 'default',
+          attribute      TEXT NOT NULL,
+          value          TEXT NOT NULL,
+          confidence     REAL NOT NULL DEFAULT 0.5,
+          immutable      INTEGER NOT NULL DEFAULT 0,
+          source_ids_json TEXT NOT NULL DEFAULT '[]',
+          updated_at     TEXT NOT NULL,
+          PRIMARY KEY (user_id, attribute)
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_profile_attrs_user ON user_profile_attrs(user_id);
         """
     )
     conn.execute(
