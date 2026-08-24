@@ -345,9 +345,9 @@ def main(argv: list[str] | None = None) -> int:
             payload = [{"degraded": True, "reason": f"vector store unavailable: {type(exc).__name__}: {exc}"}]
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     elif args.cmd == "semantic-index":
-        from memorycore import server as _server
+        from memorycore.storage import memory_rebuild_vectors
 
-        payload = _server.rebuild_memory_vectors(dry_run=not args.force, limit=args.limit)
+        payload = memory_rebuild_vectors(dry_run=not args.force, limit=args.limit)
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     elif args.cmd == "html":
         export_html(Path(args.out))

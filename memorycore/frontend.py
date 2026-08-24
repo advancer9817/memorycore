@@ -21,23 +21,16 @@ from memorycore.storage import (
     add_feedback,
     add_link,
     add_memory_record,
-    agent_capability_register,
-    agent_capability_search,
-    agent_handoff_create,
-    agent_handoff_update,
     atomize_report,
     build_context_pack,
-    cleanup_expired_messages,
     curator_report,
     dashboard_payload,
     get_active_warnings,
-    get_agent_inbox,
     get_audit_log,
     get_context_quality_stats,
     get_memory_stats,
     get_record,
     entity_search,
-    list_agent_presence,
     list_recent,
     memory_lineage,
     memory_backup,
@@ -47,9 +40,7 @@ from memorycore.storage import (
     memory_vector_audit,
     query_links,
     search_memory_records,
-    send_agent_message,
     timeline,
-    update_agent_presence,
     update_memory_content,
     update_status,
 )
@@ -259,8 +250,15 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
     if parts == ["schema", "enums"] and method == "GET":
         return {"memory_types": sorted(MEMORY_TYPES), "statuses": sorted(STATUSES), "relation_types": sorted(VALID_RELATION_TYPES)}
 
+    # /api/v1/* — native v1 routes first; legacy-only namespaces (curator,
+    # governance, lineage, graph) delegate to the legacy handler below so the
+    # v1 surface is a complete superset for future frontend migration.
     if parts[:1] == ["v1"]:
-        return _dispatch_v1_compat(method, parts[1:], query, body)
+        _V1_LEGACY_FALLBACK = {"curator", "governance", "lineage", "graph"}
+        if parts[1:2] and parts[1] in _V1_LEGACY_FALLBACK:
+            parts = parts[1:]
+        else:
+            return _dispatch_v1_compat(method, parts[1:], query, body)
 
     if parts == ["memories"] and method == "GET":
         return search_memory_records(
@@ -433,25 +431,6 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
         return query_links(parts[1], _str_q(query, "direction", "both"), _str_q(query, "relation_type", ""), _int_q(query, "limit", 50))
     if parts == ["warnings"] and method == "POST":
         return get_active_warnings(body.get("memory_ids", []), body.get("min_weight", 0.4), body.get("max_warnings", 5))
-
-    if parts == ["agents", "presence"] and method == "GET":
-        return list_agent_presence(_str_q(query, "status", ""), _int_q(query, "limit", 100))
-    if parts == ["agents", "presence"] and method == "POST":
-        return update_agent_presence(body.get("agent_id", ""), body.get("status", "online"), body.get("metadata"))
-    if len(parts) == 3 and parts[0] == "agents" and parts[2] == "inbox" and method == "GET":
-        return get_agent_inbox(parts[1], _str_q(query, "status", ""), _bool_q(query, "mark_read", False), _int_q(query, "limit", 50))
-    if parts == ["agents", "messages"] and method == "POST":
-        return send_agent_message(body.get("from_agent", "frontend"), body.get("to_agent", ""), body.get("subject", ""), body.get("body", ""), body.get("priority", "normal"), body.get("metadata"), body.get("ttl_seconds"))
-    if parts == ["agents", "messages", "cleanup"] and method == "POST":
-        return {"deleted": cleanup_expired_messages()}
-    if len(parts) == 3 and parts[0] == "agents" and parts[2] == "capabilities" and method == "POST":
-        return agent_capability_register(parts[1], body.get("capabilities", []), body.get("namespace", "default"), body.get("metadata"))
-    if parts == ["agents", "capabilities"] and method == "GET":
-        return agent_capability_search(_str_q(query, "capability", ""), _str_q(query, "namespace", ""), _int_q(query, "limit", 50))
-    if parts == ["handoffs"] and method == "POST":
-        return agent_handoff_create(body.get("from_agent", "frontend"), body.get("to_agent", ""), body.get("task", ""), body.get("payload"), body.get("correlation_id"), body.get("priority", "normal"), body.get("ttl_seconds"))
-    if len(parts) == 2 and parts[0] == "handoffs" and method == "PATCH":
-        return agent_handoff_update(parts[1], body.get("from_agent", "frontend"), body.get("status", ""), body.get("result"), body.get("error", ""))
 
     if parts == ["governance", "decisions"] and method == "GET":
         from memorycore.storage.governance import list_governance_decisions

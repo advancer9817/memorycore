@@ -5415,3 +5415,40 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 
 ### 风险 / 说明
 - agent_messages / agent_permissions 虽有 0 行，但存在代码引用（handoff.py/dashboard.py/transfer.py），推迟到 I9.3 先删引用代码再 DROP。
+
+---
+
+## [迭代 12] 2026-08-24 — governance-slimming I9.3/I9.4/I10 执行（agent 死代码 + governance 噪音 + MCP/前端收敛）
+
+> 承接 docs/plans/2026-08-24-governance-slimming.md（I9-I10）
+
+### I9.3 — 删除 agent 死代码
+- `frontend.py`：删除 `/api/agents/*`（presence/inbox/messages/capabilities）与 `/api/handoffs` HTTP 路由（前端 0 调用）；清理 agent 相关 import。
+- `server.py`：删除未注册 MCP 的 `agent_handoff_create/update`、`agent_capability_register/search`、`agent_presence_update` 5 个 wrapper 函数 + import。
+- `frontend_helpers/http/metrics.py`：清理 agent import-only 残留（保留 `list_agent_presence`，Apps 页经 `_apps_list` 使用）。
+- 验证：`/api/agents/presence`、`/api/handoffs` 均 404；MCP 22 工具不变。
+- ⚠️ agent_messages/agent_permissions 空表因 dashboard/handoff 代码引用暂保留（后续 I11 处理）。
+
+### I9.4 — governance_runs 噪音治理
+- `governance_ops.py` batch 路径：`all_requests_with_decisions` 为空（决策全被 policy 拦截）时跳过 `INSERT INTO governance_runs`，不再创建空 run。
+- 存量清理：删除 6,278 条无 execution 引用的 dangling running run；442 条被引用 run 收尾为 finished。
+- 结果：governance_runs 6,720 → 457 条（全部 finished）。
+
+### I10.1 — API 收敛（v1 委派）
+- `frontend.py`：`/api/v1/*` 前缀若为 legacy-only 命名空间（curator/governance/lineage/graph）则委派到 legacy handler；其余走原生 v1。v1 面成为完整超集，前端未来迁移零成本、本次零前端改动。
+- `frontend_v1.py`：清理 agent import 残留。
+- 验证：`/api/v1/curator/status`、`/api/v1/governance/counts`、`/api/v1/stats` 均 200。
+
+### I10.3 — MCP 死函数清理
+- `server.py`：删除未注册 MCP 的 `memory_vector_audit`、`memory_lineage`、`governance_decisions`、`memory_rebuild_vectors` 4 个 wrapper（frontend/CLI 均用 storage 版本证实无引用）+ 对应 import alias。
+- MCP 工具面保持 22 个不变。
+
+### I10.4 — 死前端组件
+- 删除 `ui/components/dashboard/IterationMetricsPanel.tsx`（0 引用）。
+
+### I10.2 — frontend 碎片合并（决策：不合并）
+- 实测 5 个 frontend 文件为**正向依赖**（frontend.py → helpers/metrics/http），职责清晰、无 import 死循环、22+ 测试全绿；强行合并风险高收益低。按"只做必要修改"原则记录不合并，保留现状。
+
+### 验证
+- 相关定向测试：governance 54 passed、frontend/search 22 passed、curator 6 passed。
+- 全量测试见提交时结果。

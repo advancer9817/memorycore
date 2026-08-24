@@ -34,10 +34,6 @@ from memorycore.storage import (
     add_memory_record,
     add_feedback,
     add_link,
-    agent_capability_register as register_agent_capability,
-    agent_capability_search as search_agent_capabilities,
-    agent_handoff_create as create_agent_handoff,
-    agent_handoff_update as update_agent_handoff,
     build_context_pack,
     curator_report,
     export_html,
@@ -53,16 +49,11 @@ from memorycore.storage import (
     memory_backup as create_memory_backup,
     memory_export as export_memory_payload,
     memory_import as import_memory_payload,
-    memory_rebuild_vectors as rebuild_memory_vectors,
-    memory_vector_audit as audit_memory_vectors,
-    memory_lineage as get_memory_lineage,
     query_links,
     rollup_report,
     supersede_memory_record,
     search_memory_records,
-    send_agent_message,
     timeline,
-    update_agent_presence,
     update_memory_content,
     update_status,
 )
@@ -383,12 +374,6 @@ def memory_vector_status() -> dict[str, Any]:
         return {"available": False, "degraded": True, "reason": f"{type(exc).__name__}: {exc}"}
 
 
-@_safe_tool
-def memory_vector_audit(dry_run: bool = True, limit: int = 100) -> dict[str, Any]:
-    """Audit SQLite active memories against Qdrant points and optionally rebuild missing vectors."""
-    return audit_memory_vectors(dry_run=dry_run, limit=limit)
-
-
 @_threaded_tool(mcp)
 @_safe_tool
 def memory_link_add(
@@ -452,12 +437,6 @@ def memory_link_query(
         return {"error": str(exc)}
 
 
-@_safe_tool
-def memory_lineage(memory_id: str, limit: int = 100) -> dict[str, Any]:
-    """Return the supersession lineage for a memory without mutating records."""
-    return get_memory_lineage(memory_id, limit=limit)
-
-
 @_threaded_tool(mcp)
 @_safe_tool
 def memory_supersede(
@@ -489,11 +468,6 @@ def memory_warnings(
         sorted by severity (high first) then weight descending.
     """
     return get_active_warnings(memory_ids, min_weight=min_weight, max_warnings=max_warnings)
-
-
-def governance_decisions(review_status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
-    """Return governance decisions ordered by newest first."""
-    return list_governance_decisions(review_status=review_status, limit=limit)
 
 
 @_threaded_tool(mcp)
@@ -583,84 +557,11 @@ def memory_backup(path: str | None = None) -> dict[str, Any]:
     return create_memory_backup(path)
 
 
-@_safe_tool
-def memory_rebuild_vectors(dry_run: bool = True, limit: int = 5000) -> dict[str, Any]:
-    """Rebuild Qdrant vectors from SQLite memory rows."""
-    return rebuild_memory_vectors(dry_run=dry_run, limit=limit)
-
-
 @_threaded_tool(mcp)
 @_safe_tool
 def memory_stats() -> dict[str, Any]:
     """Return memory statistics grouped by type, status, and agent, with aggregate scores."""
     return get_memory_stats()
-
-
-def agent_handoff_create(
-    from_agent: str,
-    to_agent: str,
-    task: str,
-    payload: dict[str, Any] | None = None,
-    correlation_id: str | None = None,
-    priority: str = "normal",
-    ttl_seconds: int | None = 3600,
-    auto_route: bool = False,
-) -> dict[str, Any]:
-    """Create a structured agent handoff request message.
-
-    Set auto_route=True to automatically select the best online agent whose
-    capabilities match the task keywords, ignoring the to_agent value.
-    ttl_seconds defaults to 3600 (1 hour); set to None to disable expiry.
-    """
-    return create_agent_handoff(from_agent, to_agent, task, payload, correlation_id, priority, ttl_seconds, auto_route)
-
-
-def agent_handoff_update(
-    message_id: str,
-    from_agent: str,
-    status: str,
-    result: dict[str, Any] | None = None,
-    error: str = "",
-) -> dict[str, Any]:
-    """Acknowledge, complete, or fail an agent handoff request."""
-    return update_agent_handoff(message_id, from_agent, status, result, error)
-
-
-def agent_capability_register(
-    agent_id: str,
-    capabilities: list[str] | str,
-    namespace: str = "default",
-    metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Register an agent's capabilities for handoff routing."""
-    return register_agent_capability(agent_id, capabilities, namespace, metadata)
-
-
-def agent_capability_search(
-    capability: str = "",
-    namespace: str = "",
-    limit: int = 50,
-) -> list[dict[str, Any]]:
-    """Find agents by capability and optional namespace."""
-    return search_agent_capabilities(capability, namespace, limit)
-
-
-def agent_presence_update(
-    agent_id: str,
-    status: str = "online",
-    metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Update an agent's presence status (heartbeat).
-
-    Args:
-        agent_id: The agent identifier
-        status: online, idle, busy, or offline
-        metadata: Optional key-value metadata (e.g. current task)
-
-    Returns:
-        The updated presence record.
-    """
-    return update_agent_presence(agent_id, status=status, metadata=metadata)
 
 
 # ---------------------------------------------------------------------------

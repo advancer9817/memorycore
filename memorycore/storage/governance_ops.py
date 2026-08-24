@@ -322,6 +322,17 @@ def apply_governance_decisions_batch(decision_ids: list[str], source_agent: str 
     run_id = f"batch-run-{uuid.uuid4()}"
     ts = now()
 
+    # No decision survived policy evaluation — do not create an empty run row.
+    if not all_requests_with_decisions:
+        return {
+            "applied_count": 0,
+            "decisions": [],
+            "skipped_count": len(skipped_decisions),
+            "skipped": skipped_decisions,
+            "already_applied": [d["id"] for d in already_applied],
+            "skipped_run": True,
+        }
+
     # Import mutation executor helper functions
     from memorycore.storage.mutation_executor import _apply_request, _sync_results
 

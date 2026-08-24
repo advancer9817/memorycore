@@ -92,7 +92,7 @@ def test_semantic_cli_uses_qdrant_vector_store(monkeypatch, capsys):
 
 
 def test_semantic_index_rebuilds_vectors_only_with_force(monkeypatch, capsys):
-    import memorycore.server as srv
+    import memorycore.storage as storage_mod
 
     calls = []
 
@@ -100,7 +100,7 @@ def test_semantic_index_rebuilds_vectors_only_with_force(monkeypatch, capsys):
         calls.append({"dry_run": dry_run, "limit": limit})
         return {"dry_run": dry_run, "planned": 2, "rebuilt": 0 if dry_run else 2}
 
-    monkeypatch.setattr(srv, "rebuild_memory_vectors", fake_rebuild)
+    monkeypatch.setattr(storage_mod, "memory_rebuild_vectors", fake_rebuild)
 
     assert lm.main(["semantic-index", "--limit", "2"]) == 0
     dry_run = read_json(capsys)
