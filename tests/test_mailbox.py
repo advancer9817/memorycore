@@ -188,3 +188,61 @@ class TestMailboxSchema:
                 ).fetchall()
             }
         assert "agent_presence" in tables
+
+
+# ---------------------------------------------------------------------------
+# Presence TTL degradation (A1): online/busy → idle after 24h, → offline after 7d
+# ---------------------------------------------------------------------------
+
+
+class TestPresenceTtlDegrade:
+    def _rewrite_last_seen(self, agent_id: str, age_days: int) -> None:
+        import datetime
+
+        old_ts = (
+            datetime.datetime.now().astimezone() - datetime.timedelta(days=age_days)
+        ).isoformat(timespec="seconds")
+        with managed_conn() as conn:
+            conn.execute(
+                "UPDATE agent_presence SET last_seen_at=? WHERE agent_id=?",
+                (old_ts, agent_id),
+            )
+
+    def test_online_degrades_to_idle_after_24h(self):
+        update_agent_presence("ttl-2d", status="online")
+        self._rewrite_last_seen("ttl-2d", age_days=2)
+        entries = {e["agent_id"]: e for e in list_agent_presence()}
+        assert entries["ttl-2d"]["status"] == "idle"
+
+    def test_online_degrades_to_offline_after_7d(self):
+        update_agent_presence("ttl-30d", status="online")
+        self._rewrite_last_seen("ttl-30d", age_days=30)
+        entries = {e["agent_id"]: e for e in list_agent_presence()}
+        assert entries["ttl-30d"]["status"] == "offline"
+
+    def test_busy_degrades_to_idle(self):
+        update_agent_presence("ttl-busy", status="busy")
+        self._rewrite_last_seen("ttl-busy", age_days=2)
+        entries = {e["agent_id"]: e for e in list_agent_presence()}
+        assert entries["ttl-busy"]["status"] == "idle"
+
+    def test_fresh_online_stays_online(self):
+        update_agent_presence("ttl-fresh", status="online")
+        entries = {e["agent_id"]: e for e in list_agent_presence()}
+        assert entries["ttl-fresh"]["status"] == "online"
+
+    def test_offline_stays_offline(self):
+        update_agent_presence("ttl-off", status="offline")
+        self._rewrite_last_seen("ttl-off", age_days=2)
+        entries = {e["agent_id"]: e for e in list_agent_presence()}
+        assert entries["ttl-off"]["status"] == "offline"
+
+    def test_raw_status_untouched_in_db(self):
+        update_agent_presence("ttl-raw", status="online")
+        self._rewrite_last_seen("ttl-raw", age_days=2)
+        list_agent_presence()  # the read path degrades only
+        with managed_conn() as conn:
+            row = conn.execute(
+                "SELECT status FROM agent_presence WHERE agent_id='ttl-raw'"
+            ).fetchone()
+        assert row["status"] == "online"

@@ -55,6 +55,46 @@ export type LlmRunState = {
   error?: string;
 };
 
+export type MaintenanceGroup = {
+  reason: string;
+  count: number;
+  samples?: Array<{ id: string; title?: string }>;
+};
+
+export type MaintenancePlan = {
+  dry_run: boolean;
+  generated_at: string;
+  scanned: number;
+  plan_token: string;
+  archive_count: number;
+  archive_ids: string[];
+  groups: MaintenanceGroup[];
+  summary: Record<string, number>;
+};
+
+export type MaintenanceJob = {
+  job_id?: string | null;
+  plan_token?: string;
+  kind?: string;
+  status: "running" | "succeeded" | "failed" | "none";
+  created_at?: string;
+  finished_at?: string;
+  summary?: Record<string, number>;
+  backup_path?: string | null;
+  error?: string | null;
+  replayed?: boolean;
+};
+
+export type MaintenanceRunState = {
+  state: "idle" | "planning" | "planReady" | "running" | "succeeded" | "failed";
+  plan?: MaintenancePlan | null;
+  jobId?: string;
+  startedAt?: number;
+  elapsedMs?: number;
+  result?: MaintenanceJob;
+  error?: string;
+};
+
 export function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;

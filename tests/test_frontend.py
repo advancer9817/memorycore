@@ -156,6 +156,46 @@ def test_frontend_apps_include_unknown_source_agent_with_stable_routes():
     assert any(item["id"] == record["id"] for item in memories.json()["memories"])
 
 
+def test_frontend_apps_alias_groups_and_curator_display_name():
+    """A3 — hermes aliases collapse onto 'hermes'; llm_curator shows as 'llm-curator'."""
+    add_memory_record(
+        "project_memory", "Hermes default alias", "hermes-default alias content",
+        source_agent="hermes-default",
+    )
+    add_memory_record(
+        "project_memory", "Hermes router alias", "hermes-default-router alias content",
+        source_agent="hermes-default-router",
+    )
+    add_memory_record(
+        "project_memory", "LLM curator record", "llm curator content",
+        source_agent="llm_curator",
+    )
+    add_memory_record(
+        "project_memory", "Plain gemini record", "gemini content",
+        source_agent="gemini",
+    )
+
+    with _client() as client:
+        apps = client.get("/api/v1/apps/?page_size=100")
+
+    rows = {row["id"]: row for row in apps.json()["apps"]}
+    assert "hermes" in rows
+    assert rows["hermes"]["total_memories_created"] >= 2  # both aliases grouped
+    assert "hermes-default" not in rows
+    assert "hermes-default-router" not in rows
+    assert "llm-curator" in rows
+    assert rows["llm-curator"]["total_memories_created"] >= 1
+    assert "gemini" in rows  # identity display, still present
+    # App detail resolves alias sources back to raw rows.
+    detail = apps_detail("hermes")
+    assert detail["total_memories_created"] >= 2
+
+
+def apps_detail(app_id: str) -> dict:
+    from memorycore.frontend_helpers import _app_details
+    return _app_details(app_id)
+
+
 def test_frontend_invalid_json_returns_400():
     with _client() as client:
         response = client.post("/api/memories", data="{bad", headers={"content-type": "application/json"})

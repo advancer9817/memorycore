@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { Activity, Archive, Database, Play, Sparkles, type LucideIcon } from "lucide-react";
+import { Activity, Archive, Database, Play, Sparkles, Wrench, type LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +12,7 @@ import {
   type CuratorRunState,
   type CuratorStatus,
   type LlmRunState,
+  type MaintenanceRunState,
   ellipsize,
   formatTime,
 } from "./memory-operations-types";
@@ -25,9 +26,13 @@ type MemoryOperationsViewProps = {
   runState: CuratorRunState;
   runActionsShowAll: boolean;
   llmRunState: LlmRunState;
+  maintenanceRunState: MaintenanceRunState;
+  maintenanceBusy: boolean;
   onApplyCurator: () => void;
   onRunLlmCurator: () => void;
   onShowAllActions: () => void;
+  onGenerateMaintenancePlan: () => void;
+  onExecuteMaintenance: () => void;
 };
 
 export function MemoryOperationsView({
@@ -39,9 +44,13 @@ export function MemoryOperationsView({
   runState,
   runActionsShowAll,
   llmRunState,
+  maintenanceRunState,
+  maintenanceBusy,
   onApplyCurator,
   onRunLlmCurator,
   onShowAllActions,
+  onGenerateMaintenancePlan,
+  onExecuteMaintenance,
 }: MemoryOperationsViewProps) {
   const byStatus = status?.stats.by_status || {};
   const nextRun = status?.timer.NextElapseUSecRealtime;
@@ -151,6 +160,52 @@ export function MemoryOperationsView({
             {llmRunState.error && <div className="text-red-300">{llmRunState.error}</div>}
           </div>
         )}
+
+        {/* D1 — one-click manual maintenance (archive only, preview → confirm → execute) */}
+        <div className="border-t border-zinc-800 pt-2 mt-2">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="text-zinc-500 text-sm">{t.dashboard.maintenanceRun}</span>
+            <Button onClick={onGenerateMaintenancePlan} disabled={maintenanceBusy} variant="outline" size="sm" className="h-7 text-xs border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors">
+              <Wrench className="h-3 w-3 mr-1" />{maintenanceRunState.state === "planning" ? t.dashboard.maintenancePlanning : t.dashboard.maintenancePlan}
+            </Button>
+            <Button onClick={onExecuteMaintenance} disabled={maintenanceBusy || maintenanceRunState.state !== "planReady" || (maintenanceRunState.plan?.archive_count ?? 0) === 0} variant="outline" size="sm" className="h-7 text-xs border-amber-700/40 bg-amber-900/20 text-amber-300 hover:bg-amber-900/40 transition-colors">
+              <Archive className="h-3 w-3 mr-1" />{maintenanceRunState.state === "running" ? t.dashboard.maintenanceExecuting : t.dashboard.maintenanceExecute(maintenanceRunState.plan?.archive_count ?? 0)}
+            </Button>
+            {maintenanceRunState.state === "running" && <span className="text-xs text-sky-300 animate-pulse">{t.dashboard.maintenanceExecuting}...</span>}
+          </div>
+
+          {maintenanceRunState.state === "planReady" && maintenanceRunState.plan && (
+            <div className="mt-2 rounded bg-zinc-800/60 px-2 py-1.5 text-xs space-y-1">
+              <div className="flex items-center gap-2 text-zinc-300">
+                <Badge variant="outline" className="border-sky-700 bg-sky-500/10 text-sky-300 text-xs shrink-0">{t.dashboard.maintenancePreview}</Badge>
+                <span>{t.dashboard.maintenanceGroups}: {maintenanceRunState.plan.groups.map((group) => `${group.reason} ${group.count}`).join(" · ")}</span>
+              </div>
+              {maintenanceRunState.plan.groups.slice(0, 3).map((group) => {
+                const titles = (group.samples ?? []).map((sample) => sample.title).filter((title): title is string => Boolean(title)).slice(0, 3);
+                return (
+                  <div key={group.reason} className="text-zinc-400">
+                    <span className="text-zinc-300">{group.reason}</span> ({group.count})
+                    {titles.length > 0 && <span className="text-zinc-500"> — {titles.join(" / ")}</span>}
+                  </div>
+                );
+              })}
+              {maintenanceRunState.plan.archive_count === 0 && <div className="text-emerald-300">{t.dashboard.maintenanceNoCandidates}</div>}
+            </div>
+          )}
+
+          {maintenanceRunState.state === "succeeded" && maintenanceRunState.result && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+              <Badge variant="outline" className="border-emerald-700 bg-emerald-500/10 text-emerald-300 text-xs">✓ {t.dashboard.maintenanceRun}</Badge>
+              <span className="text-zinc-400">{t.dashboard.archive} <span className="text-zinc-200">{maintenanceRunState.result.summary?.archive ?? 0}</span></span>
+              {maintenanceRunState.elapsedMs !== undefined && <span className="text-zinc-500">{((maintenanceRunState.elapsedMs) / 1000).toFixed(1)}s</span>}
+              {maintenanceRunState.result.replayed && <span className="text-zinc-500">{t.dashboard.maintenanceReplayed}</span>}
+              {maintenanceRunState.result.backup_path && <div className="min-w-0 flex-1 truncate text-zinc-500">{t.dashboard.maintenanceBackup}: <span className="text-zinc-300 truncate">{maintenanceRunState.result.backup_path}</span></div>}
+            </div>
+          )}
+          {maintenanceRunState.state === "failed" && (
+            <div className="mt-2 text-xs text-red-300">{maintenanceRunState.error || t.dashboard.maintenanceStale}</div>
+          )}
+        </div>
       </div>
     </div>
   );

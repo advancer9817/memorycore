@@ -83,7 +83,7 @@ export function AppGrid() {
   const summary = [
     { label: t.connectedAgents, value: apps.length, icon: Users },
     { label: t.activeAgents, value: activeAgents, icon: Radio },
-    { label: t.totalMemories, value: totalMemories, icon: Database },
+    { label: t.activeMemories, value: totalMemories, icon: Database },
     { label: t.lastActivity, value: formatActivity(lastActivity), icon: Activity },
   ];
 

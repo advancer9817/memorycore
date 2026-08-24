@@ -8,6 +8,8 @@ import {
   type CuratorRunState,
   type CuratorStatus,
   type LlmRunState,
+  type MaintenanceJob,
+  type MaintenanceRunState,
   getErrorMessage,
 } from "./memory-operations-types";
 
@@ -22,6 +24,10 @@ export const MemoryOperationsPanel = () => {
   const [llmRunState, setLlmRunState] = useState<LlmRunState>({ state: "idle" });
   const [llmRunning, setLlmRunning] = useState(false);
   const llmPollRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [maintenanceRunState, setMaintenanceRunState] = useState<MaintenanceRunState>({ state: "idle", plan: null });
+  const [maintenanceBusy, setMaintenanceBusy] = useState(false);
+  const maintenancePollRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const maintenancePollErrorsRef = React.useRef(0);
 
   const fetchStatus = React.useCallback(async () => {
     const response = await fetch(`${getApiBaseUrl()}/api/curator/status`);
@@ -149,7 +155,91 @@ export const MemoryOperationsPanel = () => {
     }
   };
 
-  return <MemoryOperationsView messages={messages} locale={locale} status={status} applying={applying} llmRunning={llmRunning} runState={runState} runActionsShowAll={runActionsShowAll} llmRunState={llmRunState} onApplyCurator={() => void applyCurator()} onRunLlmCurator={() => void runLlmCurator()} onShowAllActions={() => setRunActionsShowAll(true)} />;
+  const fetchMaintenancePlan = async () => {
+    if (maintenanceBusy) return;
+    setMaintenanceBusy(true);
+    setMaintenanceRunState({ state: "planning", plan: null });
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/v1/maintenance/plan`);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.error?.message || `Maintenance plan failed with ${response.status}`);
+      setMaintenanceRunState({ state: "planReady", plan: payload });
+    } catch (error: unknown) {
+      setMaintenanceRunState({ state: "failed", plan: null, error: getErrorMessage(error, "Maintenance plan failed") });
+    } finally {
+      setMaintenanceBusy(false);
+    }
+  };
+
+  const pollMaintenanceJob = React.useCallback(async (jobId: string, startedAt: number) => {
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/v1/maintenance/${jobId}`);
+      if (!response.ok) throw new Error(`Maintenance job request failed with ${response.status}`);
+      const data = (await response.json()) as MaintenanceJob;
+      maintenancePollErrorsRef.current = 0;
+      if (data.status === "succeeded" || data.status === "failed") {
+        const finalStatus: "succeeded" | "failed" = data.status;
+        setMaintenanceRunState((previous) => ({ ...previous, state: finalStatus, jobId, startedAt, elapsedMs: Date.now() - startedAt, result: data, error: data.error || previous.error }));
+        setMaintenanceBusy(false);
+        return;
+      }
+      setMaintenanceRunState((previous) => ({ ...previous, state: "running", jobId, startedAt, result: data }));
+      maintenancePollRef.current = setTimeout(() => void pollMaintenanceJob(jobId, startedAt), 2000);
+    } catch (error: unknown) {
+      maintenancePollErrorsRef.current += 1;
+      if (maintenancePollErrorsRef.current >= 5) {
+        setMaintenanceRunState((previous) => ({ ...previous, state: "failed", jobId, startedAt, elapsedMs: Date.now() - startedAt, error: getErrorMessage(error, "Maintenance job failed") }));
+        setMaintenanceBusy(false);
+        return;
+      }
+      maintenancePollRef.current = setTimeout(() => void pollMaintenanceJob(jobId, startedAt), 3000);
+    }
+  }, []);
+
+  const executeMaintenance = async () => {
+    const plan = maintenanceRunState.plan;
+    if (!plan || maintenanceBusy) return;
+    const startedAt = Date.now();
+    setMaintenanceBusy(true);
+    setMaintenanceRunState({ state: "running", plan, startedAt });
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/v1/maintenance/execute`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ plan_token: plan.plan_token }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.error?.message || `Maintenance execute failed with ${response.status}`);
+      const jobId = payload?.job_id;
+      if (!jobId) throw new Error("No job_id returned from server");
+      maintenancePollErrorsRef.current = 0;
+      setMaintenanceRunState((previous) => ({ ...previous, state: "running", jobId, startedAt }));
+      maintenancePollRef.current = setTimeout(() => void pollMaintenanceJob(jobId, startedAt), 1500);
+    } catch (error: unknown) {
+      const message = getErrorMessage(error, "Maintenance execute failed");
+      const busyHint = messages.dashboard.maintenanceBusy;
+      const staleHint = messages.dashboard.maintenanceStale;
+      const isBusy = /lock|another curator|running/i.test(message);
+      const isStale = /stale|plan_token/i.test(message) && !isBusy;
+      setMaintenanceRunState((previous) => ({ ...previous, state: "failed", startedAt, elapsedMs: Date.now() - startedAt, error: isBusy ? busyHint : isStale ? staleHint : message }));
+      setMaintenanceBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    fetch(`${getApiBaseUrl()}/api/v1/maintenance/latest`).then((response) => response.json()).then((payload) => {
+      const data = payload as MaintenanceJob;
+      if (data?.status === "running" && data.job_id) {
+        const startedAt = Date.now();
+        setMaintenanceBusy(true);
+        setMaintenanceRunState({ state: "running", jobId: data.job_id, startedAt, result: data });
+        maintenancePollRef.current = setTimeout(() => void pollMaintenanceJob(data.job_id as string, startedAt), 1000);
+      }
+    }).catch(() => undefined);
+    return () => { if (maintenancePollRef.current) clearTimeout(maintenancePollRef.current); };
+  }, [pollMaintenanceJob]);
+
+  return <MemoryOperationsView messages={messages} locale={locale} status={status} applying={applying} llmRunning={llmRunning} runState={runState} runActionsShowAll={runActionsShowAll} llmRunState={llmRunState} maintenanceRunState={maintenanceRunState} maintenanceBusy={maintenanceBusy} onApplyCurator={() => void applyCurator()} onRunLlmCurator={() => void runLlmCurator()} onShowAllActions={() => setRunActionsShowAll(true)} onGenerateMaintenancePlan={() => void fetchMaintenancePlan()} onExecuteMaintenance={() => void executeMaintenance()} />;
 };
 
 export default MemoryOperationsPanel;

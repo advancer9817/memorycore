@@ -51,6 +51,7 @@ export function AppCard({ app }: AppCardProps) {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <p className="text-zinc-400 text-sm mb-1">{t.totalMemoriesCreated}</p>
+            <p className="text-[11px] text-zinc-500 -mt-0.5 mb-1">{t.activeMemoriesHint}</p>
             <p className="text-xl font-medium">
               {app.total_memories_created.toLocaleString()} {t.memoriesUnit}
             </p>

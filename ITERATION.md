@@ -5643,3 +5643,47 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 - C2 收敛后 active 池 count 下降属预期（从未访问的 downgrade）；context hit rate 基线 79.7% 待观察回归。
 - 剩余 stale 658 条多数为「曾被访问但可复检」的记忆，留给后续 D1（手动维护）按需处理，未盲目归档。
 - 本迭代未实现 D 组（手动维护）与 F 组（画像召回融合），按规划留到批次 2/3。
+
+## [迭代 20] 2026-08-25 — 批次 2:手动维护 D1 + C1 LLM 链路验证 + A1/A2/A3 修补
+
+### 背景
+- 批次 1(A4+B 组评分+C2 收敛)完成后,按执行规划推进批次 2(P1 功能闭环)。
+- 本迭代实现 D 组手动维护 M1 闭环、A 组三项修补,并完成 C1 LLM curator 链路重建后的重跑验证(受百炼免费额度限制,详见「风险」)。
+
+### 变更(D1 — 手动维护最小闭环,archive 版)
+- `memorycore/storage/maintenance.py` 新增数据维护段(原模块为统计归档,新增部分互不干扰):
+  - `plan_data_maintenance`:只读复用 `curator_report`(dry-run)的 action_plan,仅取 archive 过渡;产出 `plan_token`(= 排序 archive_ids 的 sha256 前 24 位)与分组样本(每组 ≤5 标题),零写入。
+  - `execute_data_maintenance`:plan_token 幂等(同 token 已有 succeeded job → replay,不重复写);执行顺序 **备份(memory_backup)→ archive(update_status_batch 单事务)→ 向量同步(级联)→ 审计**;候选集变化 → 409 stale。
+  - `maintenance_lock`:与定时 curator 共用 `logs/maintenance.lock`(flock 非阻塞),互斥。
+  - `maintenance_jobs` 表 CRUD(create/update/get/get_by_token/latest)。
+- `memorycore/storage/db.py`:新增 `maintenance_jobs` 表(CREATE TABLE IF NOT EXISTS,服务启动自动建表)。
+- `run_curator.sh`:开头 flock 同一锁文件,锁被占则本轮跳过(互斥闭环)。
+- `memorycore/frontend_v1.py`:新增 `/api/v1/maintenance/plan|execute|latest|{job_id}` 四路由 + 后台线程任务(in-process 镜像 + DB 双读)。
+- 前端:MemoryOperationsPanel/View 增加「一键维护」区(生成计划→预览(原因分组+样本)→执行→结果+备份路径+幂等重放标识),i18n en/zh 全量。
+
+### 变更(C1 — LLM curator 链路重跑验证)
+- 重建后 llm_curator_jobs/batches/governance_decisions 全空,按规划重跑:
+  - `llm-curator --limit 200 --sim-threshold 0.8 --require-accessed --no-rebuild --summary-only` ✅
+  - `llm-curator ... --apply` ✅ 退出 0,审计事件落库。
+  - API 增量路径 POST /api/curator/llm 验证 job 记录机制(⟶ 见风险)。
+- `frontend_metrics.py`:`done` 状态(= 无发现且无错误的完整成功轮)识别为 `success`,Dashboard 不再误判为 unknown。
+
+### 变更(A 组修补)
+- **A1 agent_presence 生命周期**:
+  - 新增 `scripts/hooks/session-end.sh`(MCP `agent_presence_update` status=idle);`setup-hooks.sh` 为 claude/codex/gemini 注册 Stop/SessionEnd 钩子(已部署,settings/hooks 验证就位)。
+  - `storage/agents.py list_agent_presence` 读路径 TTL 降级:online/busy 超 24h→idle、超 7d→offline(原始 DB 值不动,可配置 `agents.presence_idle_after_hours/offline_after_days`)。
+- **A2 应用页口径标签**:apps 卡片/详情/汇总卡 + 排序标签改「活跃记忆/Active Memories」,副标题「仅统计未归档/Active (non-archived) only」,i18n en/zh。
+- **A3 source_agent 映射补全**:`_AGENT_DISPLAY_NAME` 覆盖全部 17 个生产原始名(hermes 家族 7 别名→hermes、gpt-5.5-router→gpt-5.5、llm_curator→llm-curator;memorycore-smoke-test 保持原样——测试断言 app id==原始名);`_KNOWN_AGENTS` 补 llm_curator/frontend/memorycore-smoke-test。
+
+### 验证
+- 全量 pytest:**532 passed / 7 skipped**(基线 518+14 新增,零回归)。
+- 新增测试:tests/test_maintenance.py(D1 8 项:plan 只读/分组/执行/幂等/stale token/锁/API 闭环)、test_mailbox.py TTL 6 项、test_frontend.py A3 别名分组 1 项。
+- 前端:`pnpm tsc --noEmit` 零错误;`pnpm build` 成功(standalone 资产已复制)。
+- 服务:mcore.service/mcore-ui.service 重启后 `/health` ok(8100)、`/api/v1/maintenance/plan|latest|execute` 实测通过(含幂等重放 replayed=true)、apps 列表 hermes 别名归并生效、presence 全部 TTL 降级为 idle。
+- 远端:`git syncpush origin main` 已推送 ea6b868/6732556 + memory-sync 310d5cd(remote 已更新为 github.com/advancer9817/memorycore.git)。
+
+### 风险 / 说明
+- **C1 阻塞点(外部)**:百炼端点返回 `403 insufficient_quota: Free quota exhausted`(dry-run 早期批次 judge 成功≈正常,额度在会话中段耗尽)。LLM 链路(Qdrant/ollama/百炼 HTTP)已验证畅通,但 judge 调用被计费拦截止。**处置**:百炼控制台充值或关闭「仅免费额度」;或临时切换 `config.yaml extraction.base_url/model`(需重启 mcore.service)。恢复前 Dashboard LLM 指标为中性 unknown + 「检测数据可能过期」角标(批次 1 B1/B5 设计内行为)。
+- D1 当前真实库 plan 为 0 候选(C2 已收敛 + 规则 curator 只扫最新 500),UI 显示「无待归档」属正常。
+- 手动维护与规则 curator 的互斥基于 flock;若未来并发验证碰撞,检查 `logs/maintenance.lock` 残留。
+- 交接文档已同步更新(/mnt/c/Users/Advancer/Desktop/output/mcore-handoff-2026-08-25.md)。
