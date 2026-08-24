@@ -5478,3 +5478,18 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 - 该模型为推理模型（reasoning），`extraction.max_tokens=8000` 已足够（远高于 4096）。
 - 配置不热加载：改后必须 `systemctl --user restart mcore.service`。
 - key 明文存于 config.yaml（与之前一致；如需脱敏可后续改 env 引用）。
+
+---
+
+## [迭代 14] 2026-08-24 — 默认模型替换：deepseek-v4-flash-0731 → qwen3.7-plus
+
+### 变更
+- `config.yaml` extraction.model: `deepseek-v4-flash-0731` → `qwen3.7-plus`（其余不变：百炼专属 base_url + HERMES_CUSTOM_BAILIAN_API_KEY + max_tokens 8000）。
+
+### 验证
+- qwen3.7-plus 专属端点连通：HTTP 200（Reasoning 模型，带 reasoning_content）。
+- profile-extract dry-run：scanned 96、8 属性、errors=[]、34.7s。
+- 服务重启后 /health ok（8004 memories）。
+
+### 说明
+- 与 Hermes providers.bailian 默认模型保持一致。

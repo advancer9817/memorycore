@@ -19,7 +19,7 @@ extraction:
   api_key: sk-ws-H.EEPIHLH.pUKR.MEQCIBSQydOcDAJTHrFvpKrjPbEDxbnDw441_X_-pvgNp6FwAiAFDwSYL-YBw4Zx3svDd8IPUZGmlJQ7LvWlvZdVAZ2OdQ
   base_url: https://ws-mvh9ls93gkzn2s2p.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
   max_tokens: 8000
-  model: deepseek-v4-flash-0731
+  model: qwen3.7-plus
   temperature: 1
   timeout: 600
 extraction_strategy:
