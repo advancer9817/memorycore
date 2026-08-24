@@ -5570,3 +5570,27 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 ### 验证
 - `git syncpush origin main` 一次完成：导出 8063 条记忆 → commit cceb1ad → `1e3da13..cceb1ad main -> main`，无遗留（`git log origin/main..HEAD` 为空）。
 - 推送后 Google Drive 备份照常后台启动。
+
+---
+
+## [迭代 18] 2026-08-24 — 记忆库瘦身清理功能（详细实现方案定稿）
+
+### 背景
+用户提出"mcore 归档数据能否只留统合记忆、删除无意义碎片"，经实审确认：
+- Qdrant 共 14,725 个向量，其中 **14,082 个孤儿**（95.6%）——id 不在 SQLite 或指向 archived 状态；
+- SQLite 共 8,071 条记忆，其中 **archived 5,556 条**（68.8%）可安全删除（用户确认含非碎片的独立归档）；
+- 级联垃圾：archived↔archived 死链 3,079 条、低价值 feedback（score=0.5）6,177 条。
+
+### 根因结论
+孤儿向量**不是召回策略问题，也不是数据质量问题**，而是：
+1. Qdrant 同步是**单向（只增不减）**的架构缺陷——`_sync_to_vector`/`memory_rebuild_vectors` 只做 upsert，`_delete_stale_vector_points` 仅按 payload.status 过滤，无法覆盖"id 已不在 SQLite"的孤儿；
+2. 测试数据（pytest / thread-N 并发测试）直接写入 Qdrant 未清理；
+3. lmmcp→mcore 迁移与历史瘦身（382MB→122MB）删除 SQLite 行时未同步删 Qdrant。
+
+### 变更（文档）
+- `docs/plans/2026-08-24-memory-cleanup-plan.md`（新增）：完整实现方案——三阶段推进（Phase 1 一次性根治 / Phase 2 可复用功能 CLI+API+前端+自动触发 / Phase 3 防复发双向同步+周对账+测试隔离）；核心模块 `memorycore/storage/cleanup.py` 函数签名；CLI/REST/前端/run_curator.sh 挂载点；硬安全护栏（只删 archived + 白名单对照 + 删除前备份 + dry-run 默认）；10 条验收标准；风险矩阵；实施顺序。
+
+### 验证
+- 方案中引用的代码定位（crud.py:30/51、transfer.py:390、server_runtime.py:112、MemoryOperationsView.tsx 等）均已核对存在；
+- 数据量均为当日实审值（Qdrant 14,725 向量、archived 5,556 条等）；
+- 工作区本次仅新增 1 个方案文档，无代码改动（实施待下一迭代）。
