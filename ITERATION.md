@@ -5521,3 +5521,31 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 - 后端：GET /api/v1/profile 200（14 维、coverage 0.571、置信度分组、来源预览）；extract dry-run 200；stats 200。
 - 真实提取：profile-extract --apply --limit 200 → updated 11（新增 语言/常用工具/当前项目/兴趣关注/输出偏好 等维度），errors=[]。
 - UI：:18318 /profile 200、SSR 代理 v1/profile 200，mcore-ui/mcore 均 active。
+
+---
+
+## [迭代 16] 2026-08-24 — 统合迭代规划：面板口径 + 健康度评分 + 手动维护 + 画像召回融合
+
+### 背景
+基于应用页四张截图诊断 + 记忆健康度指标分析 + 用户画像需求，统合全部问题点为 A-F 组可执行迭代项，并完成手动维护功能设计方案。
+
+### 变更（文档）
+- `docs/plans/2026-08-24-manual-data-maintenance.md`（新增）：手动「清理·合并·归档」数据维护功能方案 —— 两阶段 API（plan 预览 → execute 幂等）+ Dashboard「一键维护」入口；动作模型 archive/merge/clean（clean 白名单硬删 + 强制备份 + UI 确认）；执行顺序 备份→归档→合并→清理→向量同步；合并产物绝不设 active（避免污染检索命中率）。
+- `docs/plans/2026-08-24-unified-iteration-plan.md`（新增）：统合迭代规划，21 个迭代项分 5 组——
+  - A 组（面板口径）：A1 presence 生命周期闭环、A2 应用页记忆总数口径、A3 source_agent 映射补全、A4 已访问统计接真实数据（修复硬编码 0 占位）；
+  - B 组（健康度评分）：B1 LLM 治理评分去掉写死 45、B2 复用覆盖改 active 池口径（真实 81.5%）、B3 链接覆盖公式 bug（与复用同公式）+ 接入真实 link 数据、B4 非归档比例方向修正、B5 风险控制「检测断供」提示；
+  - C 组（链路+收敛）：C1 恢复 LLM curator（6/29 job 被重启打断卡 failed）、C2 数据收敛（stale 883 + superseded 47 + contradicted ~231 归档、active 226 从未访问降级）、C3 195 条 semantic_duplicate 候补合并；
+  - D 组（手动维护）：D1 archive 闭环 + Dashboard 入口、D2 merge、D3 clean、D4 审计（= 手动维护方案 M1-M4）；
+  - F 组（画像召回融合，本轮新需求）：F1 画像参与召回排序（个性化 rerank，纯本地）、F2 画像驱动查询扩展、F3 画像自动更新闭环（新鲜度检测 + 增量刷新 + soft 属性衰减）、F4 画像冲突过滤（矛盾记忆转 warnings）、F5 画像贡献度度量（可选）；
+  - E 组：E1 前端 8→4 页重设（I11 遗留）。
+
+### 关键诊断结论（数据支撑）
+- 应用页「记忆总数 1210」= active 池（= 看板「活跃」1207-1210）；看板「记忆总数 8010」= 全量含归档 —— 同名不同义，A2 修正。
+- agent_presence「online」是 session-start hook 写入的陈旧记录（claude 最近真实心跳 07-02 仍显示 online），无 session-end/无 TTL —— A1 修正。
+- 健康度总分 56 的构成：risk 100×0.34 + nonArchived 31×0.16 + 复用 29×0.18 + 链接 29×0.18 + LLM 45×0.14；其中链接与复用同公式（图 29%/29% 即证据）、LLM 45 为写死惩罚分 —— B 组修正。
+- `GET /api/v1/apps/{id}/accessed` 与 `_app_details` 硬编码 0/None —— A4 接 `last_accessed_at` 真实数据。
+- 画像层已落地（迭代 9/15：14 维 schema + 必达注入 + Profile Tab），但与召回排序/查询扩展割裂 —— F1/F2 补齐。
+
+### 验证
+- 文档校验：两份 plan 全部路径/函数/行号与实际代码核对一致。
+- 工作区仅 2 个新文档，无代码改动。
