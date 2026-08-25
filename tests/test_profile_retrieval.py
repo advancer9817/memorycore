@@ -124,6 +124,20 @@ def test_profile_query_expansion_max_terms(profile_cfg, monkeypatch):
     assert len(exps) <= 3
 
 
+def test_profile_query_expansion_max_terms_name_hit_boundary(profile_cfg, monkeypatch):
+    """Attribute-name hits must also respect max_terms (regression: old code
+    `continue`d past the cap for name hits, returning > max_terms)."""
+    _patch_attrs(monkeypatch, [
+        {"attribute": "技术栈", "value": "Java", "confidence": 0.9},
+        {"attribute": "工作领域", "value": "千帆", "confidence": 0.9},
+        {"attribute": "当前项目", "value": "mcore", "confidence": 0.9},
+        {"attribute": "学习方向", "value": "AI 应用", "confidence": 0.9},
+    ])
+    # task contains 4 attribute names → only max_terms values may be returned
+    exps = profile_query_expansion("技术栈 工作领域 当前项目 学习方向", cfg=profile_cfg, max_terms=2)
+    assert len(exps) == 2
+
+
 # ---------------------------------------------------------------------------
 # F4 helpers
 # ---------------------------------------------------------------------------

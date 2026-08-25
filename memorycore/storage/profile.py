@@ -560,6 +560,8 @@ def profile_query_expansion(
         if name_in_task:
             expansions.append(value)
             seen.add(value)
+            if len(expansions) >= max_terms:
+                break
             continue
         tokens = _tokenize_value(value)
         overlap = sum(1 for token in tokens if len(token) >= 2 and token.lower() in task_lower)
