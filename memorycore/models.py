@@ -76,6 +76,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "recency_weight": 0.05,
         "cluster_similarity_threshold": 0.85,
         "cluster_enabled": True,
+        "profile_boost_weight": 0.15,
+        "profile_conflict_penalty": 0.6,
+        "profile_query_expand_enabled": True,
+        "profile_query_expand_min_overlap": 1,
+        "profile_query_expand_max_terms": 3,
+        "profile_conflict_filter_enabled": True,
     },
     "temporal": {
         "enabled": True,

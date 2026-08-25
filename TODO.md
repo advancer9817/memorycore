@@ -59,6 +59,15 @@
 - [x] `start.sh` 增加 venv 路径漂移检测：若 `.venv/bin/pytest` / `.venv/bin/pip` shebang 指向旧 checkout 路径，或 `.venv/bin/python` 不可运行，则自动重建 `.venv`，避免 bad interpreter。
 - [x] 收敛 MCP 工具面但不引入 admin profile：已删除 `agent_permission_*`、`memory_update_status`、`memory_consolidate`，将状态更新并入 `memory_update`，将去重/低反馈报告并入 `memory_curator_report`，避免新增角色/权限复杂度。
 
+## 画像召回融合（2026-08-24 unified plan F 组）
+
+> 画像层基础（user_profile_attrs 表 + profile.py + 快照注入 + Profile Tab）已落地于前迭代；本批为画像参与检索的 F 组增强。
+
+- [x] **[F1]** 画像参与召回排序：纯本地 rerank（零 LLM）——`profile_feature_words()` 从高置信画像属性提取特征词；`profile_overlap_ratio()` 计算记录与画像特征词重叠度（3 词封顶 1.0）；`_rank_score` 加 `overlap × profile_boost_weight`（config `context_pack.profile_boost_weight`，默认 0.15 可调可关）；user_profile 型记忆与画像矛盾时 `× profile_conflict_penalty`（默认 0.6）
+- [x] **[F2]** 画像驱动查询扩展：`profile_query_expansion()` 从任务与画像属性值词重叠推导 ≤3 个扩展短语（属性名命中或值 token 重叠 ≥ min_overlap）；FTS 按扩展短语**独立检索**再合并去重（不收紧 AND 查询），记录标 `profile_expand` 源
+- [x] **[F4]** 画像冲突过滤：`profile_conflict_for_record()` 启发式检测（属性名出现但画像值 token 全缺席 → 矛盾候补）；`build_context_pack` 对矛盾 user_profile 记忆不注入正文、转入 `type=profile_conflict` warnings（带属性名与当前画像值）；默认只查高置信属性，`only_immutable` 可收紧
+- [x] F1/F2/F4 trace 诊断字段：`profile_boost_weight` / `profile_query_expansions` / `profile_conflict_filtered`
+
 ## 发布与部署
 
 - [x] PyPI 首次发布（打 tag 触发 publish workflow，验证安装可用）：v0.25.0 已通过 GitHub Actions `Publish to PyPI` run `26746195311` 发布成功；`pip index versions local-memory-mcp` 显示 `0.25.0`，临时 Python 3.11 venv 执行 `pip install "local-memory-mcp[all]==0.25.0"` 成功，import 路径为 venv `site-packages/local_memory_mcp/__init__.py`。Trusted Publishing 路线仍可后续补配；当前发布使用 GitHub Secret `PYPI_API_TOKEN`，不得将明文 token 写入仓库。

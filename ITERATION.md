@@ -5687,3 +5687,41 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 - D1 当前真实库 plan 为 0 候选(C2 已收敛 + 规则 curator 只扫最新 500),UI 显示「无待归档」属正常。
 - 手动维护与规则 curator 的互斥基于 flock;若未来并发验证碰撞,检查 `logs/maintenance.lock` 残留。
 - 交接文档已同步更新(/mnt/c/Users/Advancer/Desktop/output/mcore-handoff-2026-08-25.md)。
+
+---
+
+## [迭代 21] 2026-08-25 — 批次 3:画像召回融合 F1+F2+F4（纯本地，零 LLM）
+
+### 背景
+- 统合迭代规划 F 组：画像基础层（user_profile_attrs + profile.py + snapshot 注入 + Profile Tab）已在前迭代落地，但画像只作为固定块注入，与检索排序/查询扩展/冲突过滤完全割裂。
+- 本迭代实现 F1（画像参与召回排序）、F2（画像驱动查询扩展）、F4（画像冲突过滤）——全部纯本地字符串匹配，**零 LLM 调用**，不依赖被百炼额度阻塞的 C1 链路。
+
+### 变更（F1 — 画像参与召回排序，纯本地 rerank）
+- `memorycore/storage/profile.py` 新增：
+  - `_tokenize_value()`：画像值轻量分词（拉丁 token + CJK 整段/2-3 gram，与 search._query_terms 对称，去重）。
+  - `profile_feature_words(user_id, cfg, min_conf=0.6)`：从 `_PROFILE_SIGNAL_ATTRS`（技术栈/工作领域/当前项目/雇主/常用工具/兴趣关注/学习方向/职业/模型偏好）高置信属性值提取特征词，数量封顶 200 防噪声画像主导评分。
+  - `profile_overlap_ratio(text, words)`：记录文本与画像特征词重叠度，3 词封顶 1.0（单条长记录无法饱和）。
+  - `profile_query_expansion(task, user_id, cfg, max_terms=3, min_overlap=1)`：任务与画像属性重叠推导扩展短语——属性名命中任务 → 取整值；或值 token 重叠 ≥ min_overlap → 取整值；无重叠返回 []（防漂移）。
+  - `profile_conflict_for_record(record, profile, min_conf=0.8, only_immutable=False)`：启发式矛盾检测（user_profile 型记忆属性名出现但画像值 token 全缺席 → 矛盾候补），返回 {attribute, profile_value}。
+- `memorycore/storage/context_pack.py`：
+  - build_context_pack 前置加载画像配置（`profile_boost_weight` 默认 0.15 / `profile_conflict_penalty` 默认 0.6 / `profile_query_expand_enabled` / `profile_conflict_filter_enabled`，均 config 可调可关）。
+  - `_rank_score`：F1 加分 `overlap × profile_boost_weight`；user_profile 型记忆矛盾时 `× profile_conflict_penalty`，矛盾信息写 `_profile_conflict`。
+  - `_fetch_fts`：F2 按扩展短语**独立检索**（不进 AND 主查询）再合并去重，记录标 `profile_expand` 检索源——保证 AND 多词查询不因扩展变严。
+  - 注入循环：F4 对矛盾 user_profile 记忆不注入正文，转入 `type=profile_conflict` warnings（medium，带 attribute + profile_value + memory_id）。
+  - trace 新增：`profile_boost_weight` / `profile_query_expansions` / `profile_conflict_filtered`。
+- `memorycore/models.py` DEFAULT_CONFIG / `config.yaml` context_pack 段：新增 5 个画像配置项及默认值。
+
+### 验证
+- 新增 `tests/test_profile_retrieval.py` 13 项：分词（拉丁/CJK/空/URL 过滤）、特征词仅信号属性+置信门槛、overlap 封顶、查询扩展（属性名命中/值重叠/无重叠空/≤3 上限）、冲突检测（值匹配无冲突/矛盾识别/非 user_profile 忽略/置信与 immutable 门槛）、build_context_pack 集成（Java 记忆被 boost 注入、矛盾 Python 记忆被 F4 过滤进 warnings、trace 字段正确）。
+- 全量测试：**545 passed / 7 skipped**（基线 532 + 13 新增，零回归）。
+- 实测（真实库，13 画像属性）：
+  - `profile_feature_words()` 正确提取 ai/prompt/rag/mcp/千帆 等特征词；
+  - task「技术栈 方案」→ 扩展 `['Java, Python, React, WSL/Ubuntu, systemd']`；task「千帆 那边的事」→ `['千帆平台、得帆AI网关、动力AI门户、MaxKB']`；
+  - build_context_pack「千帆 技术栈 方案」：快照注入正常、扩展词 2 条、boost=0.15、18 条注入；
+  - `user_profile.enabled=false` 兜底：扩展 []、boost 0、行为与未启用前一致；
+  - 真实库前 30 条 active user_profile 记忆与画像冲突扫描 = 0（画像与记忆一致性良好）。
+
+### 风险 / 说明
+- F1 boost 系数保守（0.15 × 封顶 1.0 = 最多 +0.15 分），conflict 惩罚 0.6 保底，均有 config 开关；未改动召回集合（F2 扩展独立检索、F4 只过滤不扩集）→ 不影响 79.7% hit rate 基线，但需持续观察 context_quality_events 回归。
+- F4 冲突检测为启发式（属性名出现 + 值 token 全缺席），可能误判「追加性」记忆（提及属性但侧重不同方面）；默认仅查高置信属性（≥0.8），`only_immutable=True` 可进一步收紧；误过滤会体现在 warnings 中可人工复核。
+- 本批不涉及 LLM/百炼 → 不受 C1 额度阻塞影响；F3（画像自动更新闭环）仍依赖 C1 LLM 健康，本次未做。

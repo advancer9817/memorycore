@@ -5,6 +5,12 @@ context_pack:
   default_token_budget: 2000
   include_stale_warnings: true
   max_records_per_group: 6
+  profile_boost_weight: 0.15
+  profile_conflict_penalty: 0.6
+  profile_query_expand_enabled: true
+  profile_query_expand_min_overlap: 1
+  profile_query_expand_max_terms: 3
+  profile_conflict_filter_enabled: true
 embedding:
   api_key: ''
   api_url: ''

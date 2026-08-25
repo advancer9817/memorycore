@@ -143,6 +143,40 @@ def build_context_pack(
         },
     }[mode]
 
+    # --- Profile-driven retrieval config (F1 rerank / F2 query expansion / F4 conflict filter) ---
+    _pcfg = load_config()  # module-level name — overridable in tests
+    _profile_enabled = bool((_pcfg.get("user_profile") or {}).get("enabled", False))
+    _cp_profile = _pcfg.get("context_pack", {}) if _pcfg.get("context_pack") else {}
+    _profile_boost_weight = float(_cp_profile.get("profile_boost_weight", 0.15) or 0.0) if _profile_enabled else 0.0
+    _profile_conflict_penalty = float(_cp_profile.get("profile_conflict_penalty", 0.6) or 1.0) if _profile_enabled else 1.0
+    _profile_expand_on = bool(_cp_profile.get("profile_query_expand_enabled", True)) if _profile_enabled else False
+    _profile_conflict_filter = bool(_cp_profile.get("profile_conflict_filter_enabled", True)) if _profile_enabled else False
+
+    _profile_words: list[str] = []
+    _profile_expansions: list[str] = []
+    _profile_overlap_ratio: Any = lambda *a, **k: 0.0
+    _profile_conflict_for_record: Any = lambda *a, **k: None
+    if _profile_enabled:
+        try:
+            from memorycore.storage.profile import (
+                profile_query_expansion,
+                profile_overlap_ratio as _profile_overlap_ratio,
+                profile_conflict_for_record as _profile_conflict_for_record,
+            )
+            if _profile_boost_weight > 0.0:
+                from memorycore.storage.profile import profile_feature_words
+                _profile_words = profile_feature_words(cfg=_pcfg)
+            if _profile_expand_on:
+                _profile_expansions = profile_query_expansion(
+                    task,
+                    cfg=_pcfg,
+                    max_terms=int(_cp_profile.get("profile_query_expand_max_terms", 3)),
+                    min_overlap=int(_cp_profile.get("profile_query_expand_min_overlap", 1)),
+                )
+        except Exception as _prof_exc:
+            logger.debug("profile retrieval aids disabled: %s", _prof_exc)
+            _profile_words, _profile_expansions = [], []
+
     # --- Hybrid retrieval: FTS5 + Qdrant vector search + entity aliases (concurrent) ---
     import concurrent.futures as _cf
 
@@ -167,6 +201,24 @@ def build_context_pack(
             rows.extend(candidate_rows)
         if not rows:
             rows = _keyword_records(task, scope=scope, project_path=project_path, limit=40)
+        # F2: profile-driven query expansion — run a SEPARATE retrieval with the
+        # expansion phrase and merge results, so short AND-queries are not made
+        # stricter (which would shrink recall instead of expanding it).
+        if _profile_expansions and rows:
+            try:
+                expand_query = " ".join(_profile_expansions)
+                ext_rows = _search_memory_records(
+                    expand_query, scope=scope, project_path=project_path,
+                    status="active", limit=12,
+                )
+                ext_ids = {r["id"] for r in rows}
+                for r in ext_rows:
+                    if r["id"] not in ext_ids:
+                        ext_ids.add(r["id"])
+                        r["_retrieval_sources"] = (r.get("_retrieval_sources") or []) + ["profile_expand"]
+                        rows.append(r)
+            except Exception:
+                logger.debug("profile query expansion merge failed", exc_info=True)
         return rows
 
     def _fetch_vector():
@@ -285,6 +337,24 @@ def build_context_pack(
         feedback = max(-1.0, min(1.0, float(r.get("feedback_score") or 0)))
         usage_rate = min(1.0, float(r.get("injected_count") or 0) / 10.0)
 
+        # F1: profile-driven rerank (pure-local).  Records whose text overlaps
+        # stored profile signal words get a bounded additive boost; a
+        # user_profile memory that contradicts the current profile is punished.
+        profile_boost = 0.0
+        if _profile_boost_weight > 0.0 and _profile_words:
+            haystack = f"{r.get('title') or ''} {r.get('content') or ''}"
+            profile_boost = _profile_overlap_ratio(haystack, _profile_words) * _profile_boost_weight
+
+        profile_multiplier = 1.0
+        if _profile_conflict_penalty < 1.0 and r.get("type") == "user_profile":
+            try:
+                conflict = _profile_conflict_for_record(r, user_id="default")
+                if conflict is not None:
+                    profile_multiplier = _profile_conflict_penalty
+                    r["_profile_conflict"] = conflict
+            except Exception:
+                pass
+
         return max(
             0.0,
             (vector_score * 0.30
@@ -297,10 +367,12 @@ def build_context_pack(
             + usage_rate * 0.08
             + float(r.get("effectiveness_score") or 0) * 0.04
             + feedback * 0.03
-            + _recency_score(r) * recency_weight)
+            + _recency_score(r) * recency_weight
+            + profile_boost)
             * candidate_discount
             * short_content_penalty
             * cross_retrieval_multiplier
+            * profile_multiplier
         )
 
     fallback_used = False
@@ -354,8 +426,7 @@ def build_context_pack(
             pruned.append(record)
         records = pruned
     # Optional: cluster highly similar records to save token budget
-    from memorycore.models import load_config
-    cfg = load_config()
+    cfg = load_config()  # module-level (top of file) — overridable in tests
     cp_cfg = cfg.get("context_pack", {})
     cluster_enabled = cp_cfg.get("cluster_enabled", True)
     cluster_threshold = cp_cfg.get("cluster_similarity_threshold", 0.85)
@@ -413,6 +484,28 @@ def build_context_pack(
             filtered_ids.append(item["id"])
             injection_warnings.append(warning_for_filtered_memory(item, check))
             continue
+        # F4: user_profile memories that contradict the stored profile are not
+        # injected into the body; they surface as warnings with current value.
+        if _profile_conflict_filter and item.get("type") == "user_profile":
+            try:
+                _pc = _profile_conflict_for_record(item, user_id="default")
+            except Exception:
+                _pc = None
+            if _pc:
+                filtered_ids.append(item["id"])
+                injection_warnings.append({
+                    "type": "profile_conflict",
+                    "severity": "medium",
+                    "memory_id": item["id"],
+                    "title": str(item.get("title", "")).replace("\r", " ").replace("\n", " ")[:80],
+                    "attribute": _pc.get("attribute"),
+                    "profile_value": _pc.get("profile_value"),
+                    "reason": (
+                        f"Memory contradicts current profile value for "
+                        f"'{_pc.get('attribute')}' and was excluded from normal context."
+                    ),
+                })
+                continue
         item_type = item.get("type", "episodic_memory")
         if item_type != current_type:
             lines.append(f"## {item_type}")
@@ -535,6 +628,11 @@ def build_context_pack(
             "min_keyword_lexical_relevance_score": _MIN_KEYWORD_LEXICAL_RELEVANCE_SCORE,
             "task_type": task_type,
             "type_weights": type_weights,
+            "profile_boost_weight": _profile_boost_weight,
+            "profile_query_expansions": _profile_expansions,
+            "profile_conflict_filtered": sum(
+                1 for w in injection_warnings if w.get("type") == "profile_conflict"
+            ),
         },
     }
 import math

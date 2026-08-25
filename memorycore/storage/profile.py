@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import Any, Callable
 
@@ -428,3 +429,184 @@ def extract_profile(
         "errors": errors,
         "elapsed_s": round(time.time() - t0, 2),
     }
+
+
+# ---------------------------------------------------------------------------
+# Profile-driven retrieval aids (batch-3: F1 rerank / F2 query expansion /
+# F4 conflict filter).  All pure-local string ops — zero LLM cost.
+# ---------------------------------------------------------------------------
+
+# Attribute names whose values are strong personalization signals for rerank /
+# query expansion (filtered from noisy preference/schedule attrs when needed).
+_PROFILE_SIGNAL_ATTRS = (
+    "技术栈", "工作领域", "当前项目", "雇主", "常用工具",
+    "兴趣关注", "学习方向", "职业", "模型偏好",
+)
+# Attribute names NOT allowed as query-expansion sources (too generic/noisy).
+_PROFILE_EXPAND_SKIP_ATTRS = ("姓名", "语言", "沟通偏好", "时间偏好", "输出偏好")
+
+
+def _is_cjk_char(ch: str) -> bool:
+    return "\u4e00" <= ch <= "\u9fff"
+
+
+def _tokenize_value(text: str) -> list[str]:
+    """Lightweight tokenizer for profile values: latin tokens + CJK grams.
+
+    CJK spans are kept whole when short (2-6 chars) plus 2-grams, mirroring
+    search._query_terms so overlap detection is symmetric.
+    """
+    if not text:
+        return []
+    lowered = str(text).lower()
+    tokens: list[str] = []
+    for m in re.findall(r"[a-z0-9_][a-z0-9_.+/-]*", lowered):
+        if len(m) >= 2 and not m.startswith("http"):
+            tokens.append(m)
+    for span in re.findall(r"[\u4e00-\u9fff]+", lowered):
+        if 2 <= len(span) <= 6:
+            tokens.append(span)
+        for width in (3, 2):
+            for idx in range(0, max(len(span) - width + 1, 0)):
+                gram = span[idx:idx + width]
+                if any(c in "的一是在了不有和与及或把给让被到过着对从用以将又也都还就很太可会能要想得已正才只这那个么什为而且但如所跟比被" for c in gram):
+                    continue
+                tokens.append(gram)
+    # dedupe, keep order
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in tokens:
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
+def profile_feature_words(
+    user_id: str = "default",
+    cfg: dict[str, Any] | None = None,
+    min_conf: float = 0.6,
+) -> list[str]:
+    """Extract signal feature words from stored profile attributes (for rerank).
+
+    Only attributes in _PROFILE_SIGNAL_ATTRS with confidence >= min_conf are
+    used; values are tokenized (latin + CJK grams). Returns deduped, capped
+    word list (max 200) so a noisy profile cannot dominate scoring.
+    """
+    attrs = get_user_profile(user_id)
+    words: list[str] = []
+    seen: set[str] = set()
+    for attr in attrs:
+        name = str(attr.get("attribute") or "").strip()
+        if name not in _PROFILE_SIGNAL_ATTRS:
+            continue
+        if float(attr.get("confidence") or 0.0) < min_conf:
+            continue
+        value = str(attr.get("value") or "").strip()
+        for token in _tokenize_value(value):
+            if token not in seen:
+                seen.add(token)
+                words.append(token)
+        if len(words) >= 200:
+            break
+    return words
+
+
+def profile_overlap_ratio(text: str, profile_words: list[str]) -> float:
+    """Fraction-style overlap signal: how many distinct profile features appear.
+
+    Capped at 1.0 after 3+ matches so a single long record cannot saturate it.
+    """
+    if not profile_words or not text:
+        return 0.0
+    lowered = text.lower()
+    matched = sum(1 for word in profile_words if word.lower() in lowered)
+    if not matched:
+        return 0.0
+    return min(1.0, matched / 3.0)
+
+
+def profile_query_expansion(
+    task: str,
+    user_id: str = "default",
+    cfg: dict[str, Any] | None = None,
+    max_terms: int = 3,
+    min_overlap: int = 1,
+) -> list[str]:
+    """Derive <= max_terms expansion phrases from profile attrs overlapping task.
+
+    An attribute contributes its full value when its name is mentioned in the
+    task, or when >= min_overlap of its value tokens also appear in the task.
+    Returns [] when no overlap (no drift-prone expansion).
+    """
+    if not task:
+        return []
+    attrs = get_user_profile(user_id)
+    task_lower = str(task).lower()
+    expansions: list[str] = []
+    seen: set[str] = set()
+    for attr in attrs:
+        name = str(attr.get("attribute") or "").strip()
+        if name in _PROFILE_EXPAND_SKIP_ATTRS:
+            continue
+        if float(attr.get("confidence") or 0.0) < 0.5:
+            continue
+        value = str(attr.get("value") or "").strip()
+        if not value or len(value) > 60:
+            continue
+        if value in seen:
+            continue
+        name_in_task = name.lower() in task_lower
+        if name_in_task:
+            expansions.append(value)
+            seen.add(value)
+            continue
+        tokens = _tokenize_value(value)
+        overlap = sum(1 for token in tokens if len(token) >= 2 and token.lower() in task_lower)
+        if overlap >= min_overlap:
+            expansions.append(value)
+            seen.add(value)
+        if len(expansions) >= max_terms:
+            break
+    return expansions
+
+
+def profile_conflict_for_record(
+    record: dict[str, Any],
+    profile: list[dict[str, Any]] | None = None,
+    user_id: str = "default",
+    *,
+    min_conf: float = 0.8,
+    only_immutable: bool = False,
+) -> dict[str, Any] | None:
+    """Detect user_profile memories that contradict stored profile attributes.
+
+    Heuristic: the attribute NAME appears in the memory text, but NONE of the
+    stored value's tokens appear anywhere in the memory — i.e. the memory talks
+    about that attribute yet disagrees with / predates the current value.
+
+    Default checks only high-confidence values; only_immutable=True makes it
+    stricter (immutable attrs only) for low-false-positive callers.
+    Returns {"attribute", "profile_value"} or None.
+    """
+    if not record or record.get("type") != "user_profile":
+        return None
+    profile = profile if profile is not None else get_user_profile(user_id)
+    text = f"{record.get('title', '')}\n{record.get('content', '')}".lower()
+    for attr in profile:
+        name = str(attr.get("attribute") or "").strip()
+        pvalue = str(attr.get("value") or "").strip()
+        if not name or not pvalue or len(pvalue) > 200:
+            continue
+        if only_immutable and not bool(attr.get("immutable")):
+            continue
+        if not only_immutable and float(attr.get("confidence") or 0.0) < min_conf:
+            continue
+        if name.lower() not in text:
+            continue
+        tokens = [t for t in _tokenize_value(pvalue) if len(t) >= 2]
+        if not tokens:
+            continue
+        if all(token not in text for token in tokens):
+            return {"attribute": name, "profile_value": pvalue}
+    return None
