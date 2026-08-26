@@ -5927,3 +5927,25 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 - 新增 `tests/test_frontend_metrics.py` 5 项（CST→ISO、next-trigger、ISO/空/n-a passthrough）。
 - 全量测试：**568 passed / 7 skipped**（+5）。
 - 端到端：`/api/v1/curator/status` 返回值全部 ISO：rule last_run_at=`2026-08-26T15:16:17+08:00`（真实今天 15:16）、next_run_at=`2026-08-27T03:09:48+08:00`；前端 `new Date('2026-08-26T15:16:17+08:00')` 显示 8 月 26 日 15:16 ✓。
+
+---
+
+## [迭代 31] 2026-08-26 — clean 激进模式（aggressive）：归档无用数据纳入硬删候选
+
+### 背景
+- 用户指出：有 5960 条 archived 数据，但"清理（硬删）"候选一直为 0；并明确要求**不要保守策略，尽可能删除无用数据**。
+- 复盘设计文档 `manual-data-maintenance.md`：clean 白名单原本只收 candidate 超 TTL / 测试 agent / 空碎片，**archived 被排除**（当时保守决定）；且黑名单查询 `status != 'archived'` 连 23 条测试污染 archived 都挡掉了。
+
+### 变更（后端 + 测试）
+- `memorycore/storage/maintenance.py`：
+  - `_clean_config()`：新增 `maintenance.clean.mode`（**默认 `aggressive`**，可配置回 `conservative`）；
+  - `_clean_candidate_rows(cutoff, blacklist, min_chars, mode)`：aggressive 模式新增 **archived 无用池**——`status='archived' AND 从未访问 AND injected_count=0 AND 无反馈`；
+  - 黑名单查询从 `status != 'archived'` 改为 `status NOT IN (active/stale/contradicted/superseded)`——测试 agent 的 archived 污染也进候选；
+  - **修复保护判定 bug**：`effectiveness_score` 默认值就是 0.5，不能作为"使用过"信号（原逻辑会把全库误判为已使用）；改为直接信号——`last_accessed_at` 有值 / `injected_count>0` / `feedback_score` 非空 才保护；
+  - plan 返回新增 `protected_count`（被保护的候选池记录数），前端/审计可见。
+- `tests/test_maintenance_d2d3.py`：新增 `TestCleanAggressive` 5 项（archived 垃圾进候选 / 访问过保护 / 注入过保护 / 高重要池内保护 / 保守模式不碰归档）。
+
+### 验证
+- 全量测试：**573 passed / 7 skipped**（+5）。
+- 真实库 dry-run（经 API）：`clean_count=4321`（archived_unused 4306 + test 垃圾 15）、`protected=495`、scanned 4816。
+- 删除链路保护不变：执行仍强制整库备份 + 幂等 plan_token + UI 二次确认（clean 勾选）。

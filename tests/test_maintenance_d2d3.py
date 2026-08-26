@@ -186,3 +186,67 @@ class TestClean:
         assert first["status"] == "succeeded"
         assert second["status"] == "succeeded"
         assert second["replayed"] is True
+
+class TestCleanAggressive:
+    """aggressive mode (default): long-unused archived junk becomes a candidate."""
+
+    def test_archived_unused_junk_is_candidate(self):
+        rec = _add("归档垃圾：从未使用")
+        _force_status_created(rec["id"], "archived", "2020-01-01T00:00:00+00:00")
+        plan = plan_data_maintenance_clean(limit=50)
+        assert plan["clean_count"] >= 1
+        assert rec["id"] in plan["clean_ids"]
+        reasons = [c["reason"] for c in plan.get("groups", []) if c.get("reason") == "archived_unused"]
+        assert reasons, "archived_unused group must exist"
+
+    def test_archived_used_is_protected(self):
+        rec = _add("归档但访问过，不许删")
+        _force_status_created(rec["id"], "archived", "2020-01-01T00:00:00+00:00")
+        from memorycore.storage.db import managed_conn
+
+        with managed_conn() as conn:
+            conn.execute(
+                "UPDATE memories SET last_accessed_at=? WHERE id=?",
+                ("2026-08-01T10:00:00+08:00", rec["id"]),
+            )
+        plan = plan_data_maintenance_clean(limit=50)
+        assert rec["id"] not in plan["clean_ids"]
+
+    def test_high_importance_archived_protected_within_pool(self):
+        # High-importance records DO enter the aggressive pool (SQL has no
+        # importance filter) and are dropped by the plan-layer protection.
+        rec = _add("归档但高价值，不许删")
+        _force_status_created(rec["id"], "archived", "2020-01-01T00:00:00+00:00")
+        from memorycore.storage.db import managed_conn
+
+        with managed_conn() as conn:
+            conn.execute(
+                "UPDATE memories SET importance=? WHERE id=?",
+                (0.998, rec["id"]),
+            )
+        plan = plan_data_maintenance_clean(limit=50)
+        assert rec["id"] not in plan["clean_ids"]
+        assert plan.get("protected_count", 0) >= 1
+
+    def test_archived_injected_is_protected(self):
+        rec = _add("归档但注入过，不许删")
+        _force_status_created(rec["id"], "archived", "2020-01-01T00:00:00+00:00")
+        from memorycore.storage.db import managed_conn
+
+        with managed_conn() as conn:
+            conn.execute(
+                "UPDATE memories SET injected_count=3 WHERE id=?",
+                (rec["id"],),
+            )
+        plan = plan_data_maintenance_clean(limit=50)
+        assert rec["id"] not in plan["clean_ids"]
+
+    def test_conservative_mode_keeps_archived_out(self):
+        from memorycore.storage.maintenance import _clean_candidate_rows
+        from datetime import datetime, timezone, timedelta
+
+        rec = _add("保守模式不碰归档")
+        _force_status_created(rec["id"], "archived", "2020-01-01T00:00:00+00:00")
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        rows = _clean_candidate_rows(cutoff, ("memorycore-smoke-test",), 5, mode="conservative")
+        assert rec["id"] not in {r["id"] for r in rows}

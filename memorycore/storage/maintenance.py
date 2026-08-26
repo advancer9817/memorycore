@@ -730,19 +730,36 @@ CLEAN_SOURCE_AGENT_BLACKLIST = (
 def _clean_config() -> dict[str, Any]:
     from memorycore.models import load_config
 
-    return (load_config().get("maintenance", {}) or {}).get("clean", {}) or {}
+    base = (load_config().get("maintenance", {}) or {}).get("clean", {}) or {}
+    # User prefers aggressive cleanup: archived junk (never accessed, never
+    # injected, no feedback, importance < 0.9) is a candidate — NOT just
+    # candidate-status records. conservative keeps the original whitelist.
+    mode = base.get("mode", "aggressive")
+    return {**base, "mode": mode}
 
 
-def _clean_candidate_rows(cutoff: str, blacklist: tuple[str, ...], min_chars: int) -> list[dict[str, Any]]:
-    """Shared read for the clean plan and replay validation."""
-    placeholders = ",".join("?" for _ in blacklist)
+def _clean_candidate_rows(
+    cutoff: str,
+    blacklist: tuple[str, ...],
+    min_chars: int,
+    mode: str = "aggressive",
+) -> list[dict[str, Any]]:
+    """Shared read for the clean plan and replay validation.
+
+    conservative: candidate-TTL / test-agent / fragment whitelist only.
+    aggressive (default): adds long-unused ARCHIVED junk (never accessed,
+    never injected, no feedback) — high-importance and genuinely-used rows
+    are still protected in the plan layer.
+    """
+    placeholders = ", ".join("?" for _ in blacklist)
     with read_conn() as conn:
         rows = [
             dict(r)
             for r in conn.execute(
                 f"""
                 SELECT id, title, content, status, source_agent, created_at,
-                       last_accessed_at, effectiveness_score, importance
+                       last_accessed_at, injected_count, feedback_score,
+                       effectiveness_score, importance
                 FROM memories
                 WHERE status='candidate' AND datetime(created_at) < datetime(?)
                 """,
@@ -754,9 +771,11 @@ def _clean_candidate_rows(cutoff: str, blacklist: tuple[str, ...], min_chars: in
             for r in conn.execute(
                 f"""
                 SELECT id, title, content, status, source_agent, created_at,
-                       last_accessed_at, effectiveness_score, importance
+                       last_accessed_at, injected_count, feedback_score,
+                       effectiveness_score, importance
                 FROM memories
-                WHERE source_agent IN ({placeholders}) AND status != 'archived'
+                WHERE source_agent IN ({placeholders})
+                  AND status NOT IN ('active', 'stale', 'contradicted', 'superseded')
                 """,
                 tuple(blacklist),
             ).fetchall()
@@ -766,7 +785,8 @@ def _clean_candidate_rows(cutoff: str, blacklist: tuple[str, ...], min_chars: in
             for r in conn.execute(
                 f"""
                 SELECT id, title, content, status, source_agent, created_at,
-                       last_accessed_at, effectiveness_score, importance
+                       last_accessed_at, injected_count, feedback_score,
+                       effectiveness_score, importance
                 FROM memories
                 WHERE status='candidate'
                   AND (content IS NULL OR LENGTH(trim(content)) < ?)
@@ -774,12 +794,29 @@ def _clean_candidate_rows(cutoff: str, blacklist: tuple[str, ...], min_chars: in
                 (min_chars,),
             ).fetchall()
         ]
+        if mode == "aggressive":
+            rows += [
+                dict(r)
+                for r in conn.execute(
+                    """
+                    SELECT id, title, content, status, source_agent, created_at,
+                           last_accessed_at, injected_count, feedback_score,
+                           effectiveness_score, importance
+                    FROM memories
+                    WHERE status='archived'
+                      AND (last_accessed_at IS NULL OR last_accessed_at = '')
+                      AND injected_count = 0
+                      AND (feedback_score IS NULL OR feedback_score = 0)
+                    """
+                ).fetchall()
+            ]
     return rows
 
 
 def plan_data_maintenance_clean(limit: int = CLEAN_DEFAULT_LIMIT) -> dict[str, Any]:
     """Read-only hard-delete plan (whitelist only; protected records skipped)."""
     cfg = _clean_config()
+    mode = cfg.get("mode", "aggressive")
     ttl_days = int(cfg.get("candidate_ttl_days", CLEAN_DEFAULT_TTL_DAYS))
     blacklist = tuple(cfg.get("source_agents", CLEAN_SOURCE_AGENT_BLACKLIST))
     min_chars = int(cfg.get("min_content_chars", CLEAN_DEFAULT_MIN_CONTENT_CHARS))
@@ -788,14 +825,23 @@ def plan_data_maintenance_clean(limit: int = CLEAN_DEFAULT_LIMIT) -> dict[str, A
 
     candidates: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for r in _clean_candidate_rows(cutoff, blacklist, min_chars):
+    protected: set[str] = set()
+    for r in _clean_candidate_rows(cutoff, blacklist, min_chars, mode):
         rid = r["id"]
         if rid in seen:
             continue
         seen.add(rid)
-        if r.get("last_accessed_at") and float(r.get("effectiveness_score") or 0.0) > 0:
-            continue  # genuinely used — never auto-clean
+        # Genuinely used — never auto-clean. effectiveness_score defaults to
+        # 0.5 so it cannot be trusted as a usage signal; rely on direct marks.
+        if (
+            r.get("last_accessed_at")
+            or int(r.get("injected_count") or 0) > 0
+            or (r.get("feedback_score") not in (None, 0, "0"))
+        ):
+            protected.add(rid)
+            continue
         if float(r.get("importance") or 0.0) >= 0.9:
+            protected.add(rid)
             continue  # high-importance — never auto-clean
         reasons: list[str] = []
         if r.get("status") == "candidate" and r.get("created_at"):
@@ -806,6 +852,8 @@ def plan_data_maintenance_clean(limit: int = CLEAN_DEFAULT_LIMIT) -> dict[str, A
             reasons.append(f"source_agent:{r['source_agent']}")
         if r.get("status") == "candidate" and len((r.get("content") or "").strip()) < min_chars:
             reasons.append("fragment")
+        if r.get("status") == "archived" and mode == "aggressive":
+            reasons.append("archived_unused")
         if not reasons:
             continue
         candidates.append({"id": rid, "title": r.get("title") or "", "reason": ",".join(reasons)})
@@ -827,8 +875,9 @@ def plan_data_maintenance_clean(limit: int = CLEAN_DEFAULT_LIMIT) -> dict[str, A
         "plan_token": plan_token,
         "clean_count": len(candidates),
         "clean_ids": [c["id"] for c in candidates],
+        "protected_count": len(protected),
         "groups": list(groups.values()),
-        "summary": {"clean": len(candidates), "scanned": len(seen)},
+        "summary": {"clean": len(candidates), "scanned": len(seen), "protected": len(protected)},
     }
 
 
