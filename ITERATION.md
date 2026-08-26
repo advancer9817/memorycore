@@ -5862,3 +5862,18 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 ### 验证
 - tsc 零错误；build + systemd 部署；:18318 HTTP 200；首页 HTML 导航仅含 /memories /graph /profile /settings（+/），无 /apps /governance。
 - 全量后端测试仍 563 passed（本轮未动后端）。
+
+---
+
+## [迭代 27] 2026-08-26 — E1 Phase 3①：Dashboard 内联重构（健康横幅 + 治理面板 + 应用区块）
+
+### 变更（前端，决策 1A/2A/3A/4A 落地）
+- `components/dashboard/HealthBanner.tsx`（新）—— 顶部健康横幅：读 `/api/v1/health-score`（后端评分），渲染 quality 大数字（>80 绿 / ≥60 黄 / 红）+ risk/linked/reuse/cleanup 指标行 + LLM 治理状态徽章 + 治理待办徽章。
+- `components/dashboard/GovernancePanel.tsx`（新）—— 内联治理状态卡：`/api/v1/governance/counts` + `/api/v1/governance/metrics`，显示 applied/rejected/pending + policy 版本 + 拒绝率 + 肯定式空状态（all clear）；底部链接保留独立治理详情页。
+- `components/dashboard/AppsPanel.tsx`（新）—— 内联应用区块：`/api/v1/apps/` 卡片网格（记忆数/访问数/状态点/最近活动），点击进 `/apps/[appId]`；空则隐藏。
+- `app/page.tsx`：仪表盘顺序 = HealthBanner → MemoryOperations（维护）→ GovernancePanel → AppsPanel → MemoryIntelligenceCenter → Context Lab → 高级面板（折叠）。
+- i18n en/zh：governance 段新增 `pending/openDetails/rejectionRate`；清理 cockpit 段误加 keys。
+
+### 验证
+- tsc 零错误；build + systemd 部署；:18318 HTTP 200；health-score/dashboard 接口 200。
+- 预览面板打开 Dashboard 确认新布局可见。
