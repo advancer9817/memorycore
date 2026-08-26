@@ -24,7 +24,7 @@ import logging
 import os
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -742,23 +742,62 @@ class VectorStore:
 # ---------------------------------------------------------------------------
 
 _store: VectorStore | None = None
+_store_fingerprint: str = ""
 _store_lock = threading.Lock()
 
 
+def _vector_store_fingerprint(vs_cfg: VectorStoreConfig) -> str:
+    """Stable fingerprint of store-affecting config; the singleton rebuilds when it changes.
+
+    Lives INSIDE get_vector_store's control flow: callers pass the latest
+    load_config() result on every call, so a config.yaml edit (Qdrant URL/path,
+    collection, dim, embedding provider/model/keys) takes effect on the next call
+    without a process restart — mtime-aware load_config already hot-reloads the
+    rest of the config; this closes the last persistent-cache gap.
+    """
+    try:
+        return json.dumps(
+            {
+                "path": vs_cfg.path,
+                "url": vs_cfg.url,
+                "collection": vs_cfg.collection,
+                "dim": vs_cfg.dim,
+                "embed": asdict(vs_cfg.embed),
+            },
+            sort_keys=True,
+            default=str,
+        )
+    except Exception:
+        return ""
+
+
 def get_vector_store(config: dict[str, Any] | None = None) -> VectorStore:
-    global _store
-    if _store is not None:
+    global _store, _store_fingerprint
+    vs_cfg = vector_store_config_from_dict(config or {})
+    fingerprint = _vector_store_fingerprint(vs_cfg)
+    if _store is not None and _store_fingerprint == fingerprint:
         return _store
     with _store_lock:
-        if _store is None:
-            vs_cfg = vector_store_config_from_dict(config or {})
-            _store = VectorStore(vs_cfg)
+        if _store is not None and _store_fingerprint == fingerprint:
+            return _store
+        if _store is not None:
+            try:
+                _store.close()
+            except Exception:
+                pass
+            _store = None
+        _store = VectorStore(vs_cfg)
+        _store_fingerprint = fingerprint
     return _store
 
 
 def reset_vector_store() -> None:
-    global _store
+    global _store, _store_fingerprint
     with _store_lock:
         if _store is not None:
-            _store.close()
-        _store = None
+            try:
+                _store.close()
+            except Exception:
+                pass
+            _store = None
+        _store_fingerprint = ""

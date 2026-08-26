@@ -63,10 +63,10 @@ _maintenance_jobs: dict[str, dict[str, Any]] = {}
 _maintenance_jobs_lock = threading.Lock()
 
 
-def _run_data_maintenance_job_thread(job_id: str, plan_token: str) -> None:
+def _run_data_maintenance_job_thread(job_id: str, plan_token: str, action: str = "archive") -> None:
     from memorycore.storage.maintenance import run_data_maintenance_job
     try:
-        result = run_data_maintenance_job(job_id, plan_token)
+        result = run_data_maintenance_job(job_id, plan_token, action=action)
     except Exception as exc:  # run_* already records failures; keep a final fallback
         result = {
             "job_id": job_id,
@@ -328,16 +328,24 @@ def _dispatch_v1_compat(
     if parts == ["profile", "extract"] and method == "POST":
         from memorycore.storage.profile import extract_profile, profile_detail
         apply = bool(body.get("apply", False))
-        result = extract_profile(apply=apply)
+        only_new = bool(body.get("only_new", False))
+        result = extract_profile(apply=apply, only_new=only_new)
         if result.get("errors"):
             return result
         return {**result, "profile": profile_detail(include_sources=True)}
     if parts == ["profile", "extract"] and method == "GET":
         from memorycore.storage.profile import extract_profile
         # Dry-run preview without writing to the store.
-        result = extract_profile(apply=False)
+        result = extract_profile(apply=False, only_new=(query.get("only_new") or ["false"])[0] == "true")
         return result
     if parts == ["maintenance", "plan"] and method == "GET":
+        action = (query.get("action") or ["archive"])[0]
+        if action == "merge":
+            from memorycore.storage.maintenance import plan_data_maintenance_merge
+            return plan_data_maintenance_merge(limit=_int_q(query, "limit", 500))
+        if action == "clean":
+            from memorycore.storage.maintenance import plan_data_maintenance_clean
+            return plan_data_maintenance_clean(limit=_int_q(query, "limit", 500))
         from memorycore.storage.maintenance import plan_data_maintenance
         return plan_data_maintenance(limit=_int_q(query, "limit", 500))
     if parts == ["maintenance", "latest"] and method == "GET":
@@ -347,14 +355,17 @@ def _dispatch_v1_compat(
         plan_token = str(body.get("plan_token") or "").strip()
         if not plan_token:
             raise ValueError("plan_token is required (GET /api/v1/maintenance/plan first)")
+        action = str(body.get("action") or "archive").strip() or "archive"
+        if action not in ("archive", "merge", "clean"):
+            raise ValueError(f"unsupported maintenance action: {action}")
         from memorycore.storage.maintenance import (
             create_maintenance_job,
             run_data_maintenance_job,
         )
-        job = create_maintenance_job(plan_token)
+        job = create_maintenance_job(plan_token, kind=action)
         thread = threading.Thread(
             target=_run_data_maintenance_job_thread,
-            args=(job["job_id"], plan_token),
+            args=(job["job_id"], plan_token, action),
             daemon=True,
         )
         thread.start()

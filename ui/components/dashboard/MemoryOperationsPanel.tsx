@@ -8,6 +8,7 @@ import {
   type CuratorRunState,
   type CuratorStatus,
   type LlmRunState,
+  type MaintenanceAction,
   type MaintenanceJob,
   type MaintenanceRunState,
   getErrorMessage,
@@ -24,10 +25,16 @@ export const MemoryOperationsPanel = () => {
   const [llmRunState, setLlmRunState] = useState<LlmRunState>({ state: "idle" });
   const [llmRunning, setLlmRunning] = useState(false);
   const llmPollRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [maintenanceRunState, setMaintenanceRunState] = useState<MaintenanceRunState>({ state: "idle", plan: null });
+  const [maintenanceRunState, setMaintenanceRunState] = useState<MaintenanceRunState>({ state: "idle", plan: null, action: "archive" });
   const [maintenanceBusy, setMaintenanceBusy] = useState(false);
   const maintenancePollRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const maintenancePollErrorsRef = React.useRef(0);
+
+  const selectMaintenanceAction = (action: MaintenanceAction) => {
+    if (maintenanceBusy) return;
+    if (maintenanceRunState.action === action) return;
+    setMaintenanceRunState({ state: "idle", plan: null, action });
+  };
 
   const fetchStatus = React.useCallback(async () => {
     const response = await fetch(`${getApiBaseUrl()}/api/curator/status`);
@@ -155,17 +162,17 @@ export const MemoryOperationsPanel = () => {
     }
   };
 
-  const fetchMaintenancePlan = async () => {
+  const fetchMaintenancePlan = async (action: MaintenanceAction = maintenanceRunState.action ?? "archive") => {
     if (maintenanceBusy) return;
     setMaintenanceBusy(true);
-    setMaintenanceRunState({ state: "planning", plan: null });
+    setMaintenanceRunState({ state: "planning", plan: null, action });
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/v1/maintenance/plan`);
+      const response = await fetch(`${getApiBaseUrl()}/api/v1/maintenance/plan?action=${encodeURIComponent(action)}`);
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.error?.message || `Maintenance plan failed with ${response.status}`);
-      setMaintenanceRunState({ state: "planReady", plan: payload });
+      setMaintenanceRunState({ state: "planReady", plan: payload, action });
     } catch (error: unknown) {
-      setMaintenanceRunState({ state: "failed", plan: null, error: getErrorMessage(error, "Maintenance plan failed") });
+      setMaintenanceRunState({ state: "failed", plan: null, action, error: getErrorMessage(error, "Maintenance plan failed") });
     } finally {
       setMaintenanceBusy(false);
     }
@@ -198,15 +205,21 @@ export const MemoryOperationsPanel = () => {
 
   const executeMaintenance = async () => {
     const plan = maintenanceRunState.plan;
+    const action = maintenanceRunState.action ?? "archive";
     if (!plan || maintenanceBusy) return;
+    if (action === "clean") {
+      const count = plan.clean_count ?? 0;
+      if (count === 0) return;
+      if (!window.confirm(messages.dashboard.maintenanceCleanConfirm(count))) return;
+    }
     const startedAt = Date.now();
     setMaintenanceBusy(true);
-    setMaintenanceRunState({ state: "running", plan, startedAt });
+    setMaintenanceRunState({ state: "running", plan, action, startedAt });
     try {
       const response = await fetch(`${getApiBaseUrl()}/api/v1/maintenance/execute`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ plan_token: plan.plan_token }),
+        body: JSON.stringify({ plan_token: plan.plan_token, action }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.error?.message || `Maintenance execute failed with ${response.status}`);
@@ -239,7 +252,7 @@ export const MemoryOperationsPanel = () => {
     return () => { if (maintenancePollRef.current) clearTimeout(maintenancePollRef.current); };
   }, [pollMaintenanceJob]);
 
-  return <MemoryOperationsView messages={messages} locale={locale} status={status} applying={applying} llmRunning={llmRunning} runState={runState} runActionsShowAll={runActionsShowAll} llmRunState={llmRunState} maintenanceRunState={maintenanceRunState} maintenanceBusy={maintenanceBusy} onApplyCurator={() => void applyCurator()} onRunLlmCurator={() => void runLlmCurator()} onShowAllActions={() => setRunActionsShowAll(true)} onGenerateMaintenancePlan={() => void fetchMaintenancePlan()} onExecuteMaintenance={() => void executeMaintenance()} />;
+  return <MemoryOperationsView messages={messages} locale={locale} status={status} applying={applying} llmRunning={llmRunning} runState={runState} runActionsShowAll={runActionsShowAll} llmRunState={llmRunState} maintenanceRunState={maintenanceRunState} maintenanceBusy={maintenanceBusy} onApplyCurator={() => void applyCurator()} onRunLlmCurator={() => void runLlmCurator()} onShowAllActions={() => setRunActionsShowAll(true)} onGenerateMaintenancePlan={() => void fetchMaintenancePlan()} onExecuteMaintenance={() => void executeMaintenance()} onSelectMaintenanceAction={(action) => selectMaintenanceAction(action)} />;
 };
 
 export default MemoryOperationsPanel;

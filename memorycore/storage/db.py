@@ -553,6 +553,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "memories", "valid_until", "TEXT")
     _ensure_column(conn, "memories", "superseded_by", "TEXT")
     _ensure_column(conn, "memories", "fact_lineage_root", "TEXT")
+    _ensure_column(conn, "user_profile_attrs", "decayed_at", "TEXT")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_superseded_by ON memories(superseded_by)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_lineage_root ON memories(fact_lineage_root)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_status_lineage ON memories(status, fact_lineage_root)")

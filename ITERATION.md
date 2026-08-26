@@ -5725,3 +5725,91 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 - F1 boost 系数保守（0.15 × 封顶 1.0 = 最多 +0.15 分），conflict 惩罚 0.6 保底，均有 config 开关；未改动召回集合（F2 扩展独立检索、F4 只过滤不扩集）→ 不影响 79.7% hit rate 基线，但需持续观察 context_quality_events 回归。
 - F4 冲突检测为启发式（属性名出现 + 值 token 全缺席），可能误判「追加性」记忆（提及属性但侧重不同方面）；默认仅查高置信属性（≥0.8），`only_immutable=True` 可进一步收紧；误过滤会体现在 warnings 中可人工复核。
 - 本批不涉及 LLM/百炼 → 不受 C1 额度阻塞影响；F3（画像自动更新闭环）仍依赖 C1 LLM 健康，本次未做。
+
+---
+
+## [迭代 22] 2026-08-26 — config 全链路热加载 + extraction LLM 403 修复
+
+### 背景
+- 会话上下文提取失效：日志连续 `extraction: LLM call failed ... 403 Forbidden`（新旧进程都失败）。
+- 根因直测：config.yaml 默认 `model: qwen3.7-plus`（远程默认）→ 403 `Free quota exhausted`（百炼免费额度耗尽）；`qwen3.7-flash` 同样 403；**`qwen3.7-flash-2026-07-15` → HTTP 200 可用**。
+- 恢复：config.yaml `extraction.model` 改用可用模型 + 重启服务后 403 清零。
+
+### 变更（热加载能力补齐）
+- `memorycore/vector_store.py`：`get_vector_store()` 单例从「首次建立后永久复用」改为**配置指纹感知重建**：
+  - 新增 `_store_fingerprint` + `_vector_store_fingerprint(vs_cfg)`（序列化 path/url/collection/dim/embed 全字段）；
+  - 每次调用传入最新 `load_config()` 结果，指纹变化时加锁 close 旧实例并重建（Qdrant 连接/embedding 配置热生效）；
+  - `reset_vector_store()` 同步清指纹。
+- 热加载链路全景确认（无需改动，已达标）：
+  - `models.py load_config()` 已是 mtime 感知缓存（文件 mtime 变化下次调用自动重读）；
+  - extraction/LLM curator/profile/context_pack/rule curator/governance/maint 全部调用方均是每次 `load_config()`；
+  - extraction/embedding 的 httpx client 已有 (base_url, timeout) 指纹重建，api_key/model 每次请求现构——配置改动不依赖重启。
+
+### 验证
+- 全量测试：**547 passed / 7 skipped**（新增 `test_get_vector_store_rebuilds_when_config_changes`：同配置复用单例；embedding dim 变化 → 重建；恢复原配置 → 再重建）。
+- 端到端热加载（服务运行中，不重启）：
+  - `config.yaml extraction.max_tokens: 8000 → 8001` → `GET /api/v1/config` 立即返回 8001；
+  - 恢复 8000 → 接口立即返回 8000（双向验证）。
+- 模型直连实测（同 key/base_url）：`qwen3.7-flash-2026-07-15`=200；`qwen3.7-plus`/`qwen3.7-flash`=403 `Free quota exhausted`。
+
+### 风险 / 说明
+- Qdrant URL/path/collection/embedding 配置变化会触发 VectorStore 重建（重连/重开 collection），仅在配置变化时发生，首次重建有短暂开销。
+- `config.yaml` 含工作区手动修改（model=qwen3.7-flash-2026-07-15 等）未提交。
+
+---
+
+## [迭代 23] 2026-08-26 — 手动维护 D2 合并 + D3 清理（M1-M3 闭环完成）
+
+### 背景
+- 统一迭代计划 D 组仅完成 D1（archive）。本轮补齐 D2 merge + D3 clean，达成验收口径「手动维护功能 D1-D3 可用（预览→确认→执行→结果+备份路径）」。
+- 真实库现状：bridge 前 merge/clean 候选均为 0（1352 条 active/candidate 无 title 归一化重复；无超 TTL candidate / 测试 agent / 碎片）→ 数据治理已健康，功能经单测覆盖验证。
+
+### 变更（后端）
+- `memorycore/storage/maintenance.py` 新增 M2/M3 模块（延续 M1 的 plan→token→execute 幂等模式）：
+  - **M2 merge**：`plan_data_maintenance_merge` / `execute_data_maintenance_merge`——按 `normalize_title_key` 确定性分组，keeper 启发式（last_accessed > importance > confidence > 新）选 winner；loser 经 `supersede_memory_record` 转 superseded + `memory_links` supersedes 血缘，绝不删除/绝不提升 active；执行前预置组内统一 `fact_lineage_root`（修复逐条 supersede 时 winner root 被改写导致「lineage merge requires human review」失败的真实缺陷）。
+  - **M3 clean**：`plan_data_maintenance_clean` / `execute_data_maintenance_clean`——白名单硬删（candidate 超 TTL 默认 30 天 / source_agent 黑名单测试数据 / 空碎片），保护：last_accessed 且 effectiveness>0、importance≥0.9 永不入候选；配置段 `maintenance.clean.{candidate_ttl_days, source_agents, min_content_chars}` 可覆盖默认；执行强制整库备份（memory_backup）→ 逐条删 vector_cache 哈希 → DELETE 行（FTS 走 trigger）→ Qdrant point best-effort → 审计。
+  - **plan_token 增加 action 前缀**（archive|/merge|/clean|）：修复空集 token 相同导致跨 action 幂等串扰。
+  - `run_data_maintenance_job` 支持 `action` 参数分发。
+- `memorycore/frontend_v1.py`：maintenance plan 支持 `?action=archive|merge|clean`；execute 支持 body `action`；线程透传 action。
+
+### 变更（前端）
+- Dashboard MemoryOperations：维护区新增 action 切换（归档 / 合并重复 / 清理），plan 预览按 action 显示 count + groups；**clean 执行前强制二次确认**（window.confirm，硬删告警）；结果区按 action 显示计数。
+- i18n en.ts/zh.ts 同步新增 keys（动作标签、execute 文案、clean 确认、无候选通用文案）。
+
+### 验证
+- 新增 `tests/test_maintenance_d2d3.py` 9 项：merge 计划检测/执行血缘与保持 winner/幂等重放/无重复时不误报；clean 过期候选检测/硬删后 SQLite+FTS 双消失/保护已使用与高 importance/幂等重放。
+- 全量测试：**556 passed / 7 skipped**（迭代 22 的 547 + 9 新增，零回归）。
+- API 端到端：`GET /maintenance/plan?action=merge|clean|archive` 正常返回；三 action token 互不相同（空集不再串扰）。
+- UI：`pnpm tsc --noEmit` 零错误；build + standalone 部署成功；:18318 HTTP 200。
+
+### 风险 / 说明
+- M3 clean 依赖整库备份前置 + UI 二次确认双保险；Qdrant 删除 best-effort（DB 为准，向量残留无害）。
+- 真实库 merge/clean 候选为 0，功能主要靠单测保证；如需实战可先手动灌入测试数据验证 UI 全链路。
+- config.yaml 仍含工作区手动修改（model=qwen3.7-flash-2026-07-15 等）未提交。
+
+---
+
+## [迭代 24] 2026-08-26 — F3 画像自动更新闭环（新鲜度检测 + 增量刷新 + soft 衰减）
+
+### 背景
+- F1/F2/F4（画像召回融合）完成后，画像仍只作为固定块注入；F3 补齐：① 新鲜度检测（画像滞后告警）② 增量刷新（only_new）③ soft 属性 confidence 衰减（immutable 不动）。依赖 LLM 健康，本轮已满足（qwen3.7-flash-2026-07-15 可用）。
+
+### 变更（后端）
+- `memorycore/storage/profile.py` 新增 F3 模块：
+  - `_known_profile_source_ids(user_id)` — 已覆盖 source_ids 集合；
+  - `profile_freshness_warning(user_id, cfg)` — 最新 active user_profile 记忆 created_at 与最新 attrs updated_at 相差超过 `user_profile.max_staleness_days`（默认 7 天）时返回「画像可能过时」提示行；
+  - `decay_profile_attributes(user_id, cfg)` — soft 衰减：non-immutable 属性满一个窗口（`user_profile.decay_days` 默认 30 天）后 `conf = max(0.2, conf × 0.95^(elapsed/window))`，`decayed_at` 水位推进保证幂等；immutable 永不动；
+  - `_profile_memory_rows(cap, exclude_ids)` + `extract_profile(only_new=True)` — 增量刷新：只扫描未被 attrs source_ids 覆盖的新画像记忆。
+- `memorycore/storage/db.py`：`user_profile_attrs` 迁移新增 `decayed_at TEXT` 列（兼容已有库）。
+- `memorycore/storage/context_pack.py`：画像快照注入链路接入闭环——注入前调用 `decay_profile_attributes`（惰性衰减），注入后附 `profile_freshness_warning`（过时标记随上下文可见）。
+- `memorycore/frontend_v1.py`：`GET/POST /api/v1/profile/extract` 支持 `only_new`（POST body / GET query），供 Profile Tab 增量刷新。
+
+### 验证
+- 新增 `tests/test_profile_f3.py` 6 项：freshness 告警/沉默、only_new 只扫未引用记忆、衰减只动 non-immutable 且幂等、fresh 窗口不衰减、满窗口衰减且水位幂等。
+- 全量测试：**562 passed / 7 skipped**（迭代 23 的 556 + 6 新增，零回归）。
+- 端到端：`decay_profile_attributes` 真实库 0 衰减（attrs 昨天刚更新，未满窗口）；freshness 无告警（画像与 attrs 同步）；API `?only_new=true` → scanned 0（97 条画像记忆全部已被 attrs 覆盖）；全量 dry-run 正常提取（姓名=杜鹏洋 / 职业=技术支持与运维工程师 / 雇主=广域）。顺带修复 GET handler 的 `bool(...)[0]` 下标 bug。
+
+### 风险 / 说明
+- 衰减为惰性（注入路径触发）+ 幂等（decayed_at 水位），无独立定时器、无热路径 LLM 成本；仅新鲜度超阈值时注入块附告警。
+- C3 已随 governance_decisions 全部 applied 收敛；剩余计划项仅 E1（前端 4 页重构，独立排期）+ F5（可选）。
+- config.yaml 仍含工作区手动修改（model=qwen3.7-flash-2026-07-15 等）未提交。

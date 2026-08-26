@@ -61,6 +61,8 @@ export type MaintenanceGroup = {
   samples?: Array<{ id: string; title?: string }>;
 };
 
+export type MaintenanceAction = "archive" | "merge" | "clean";
+
 export type MaintenancePlan = {
   dry_run: boolean;
   generated_at: string;
@@ -70,6 +72,20 @@ export type MaintenancePlan = {
   archive_ids: string[];
   groups: MaintenanceGroup[];
   summary: Record<string, number>;
+  // merge (D2) fields
+  merge_count?: number;
+  loser_count?: number;
+  merge_groups?: Array<{
+    key: string;
+    winner_id: string;
+    winner_title?: string;
+    count: number;
+    loser_ids: string[];
+    loser_titles?: string[];
+  }>;
+  // clean (D3) fields
+  clean_count?: number;
+  clean_ids?: string[];
 };
 
 export type MaintenanceJob = {
@@ -88,6 +104,7 @@ export type MaintenanceJob = {
 export type MaintenanceRunState = {
   state: "idle" | "planning" | "planReady" | "running" | "succeeded" | "failed";
   plan?: MaintenancePlan | null;
+  action?: MaintenanceAction;
   jobId?: string;
   startedAt?: number;
   elapsedMs?: number;

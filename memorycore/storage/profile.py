@@ -368,17 +368,38 @@ def _upsert_profile_attrs(
     return updated
 
 
+def _profile_memory_rows(cap: int, exclude_ids: set[str] | None = None) -> list[dict[str, Any]]:
+    """Active user_profile memories, newest first, optionally excluding known ids."""
+    if exclude_ids:
+        placeholders = ",".join("?" for _ in exclude_ids)
+        return _managed_query(
+            f"SELECT id, title, content, created_at FROM memories "
+            f"WHERE type='user_profile' AND status='active' AND id NOT IN ({placeholders}) "
+            f"ORDER BY updated_at DESC LIMIT ?",
+            (*sorted(exclude_ids), cap),
+        )
+    return _managed_query(
+        "SELECT id, title, content, created_at FROM memories "
+        "WHERE type='user_profile' AND status='active' "
+        "ORDER BY updated_at DESC LIMIT ?",
+        (cap,),
+    )
+
+
 def extract_profile(
     *,
     user_id: str = "default",
     apply: bool = False,
     limit: int | None = None,
+    only_new: bool = False,
     cfg: dict[str, Any] | None = None,
     _summarize_fn: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Aggregate active user_profile memories into structured profile attributes.
 
     Dry-run by default; pass apply=True to write to user_profile_attrs.
+    Pass only_new=True for an incremental refresh: only memories not yet
+    referenced by any stored attribute are scanned (F3 incremental loop).
     """
     cfg = cfg or load_config()
     up = cfg.get("user_profile") or {}
@@ -388,15 +409,13 @@ def extract_profile(
                 "errors": ["user_profile.schema is empty in config.yaml"], "skipped": True}
     cap = max(1, min(int(limit or up.get("extract_limit", _DEFAULT_LIMIT)), 2000))
 
-    rows = _managed_query(
-        "SELECT id, title, content, created_at FROM memories "
-        "WHERE type = 'user_profile' AND status = 'active' "
-        "ORDER BY updated_at DESC LIMIT ?",
-        (cap,),
-    )
+    known_ids: set[str] = set()
+    if only_new:
+        known_ids = _known_profile_source_ids(user_id)
+    rows = _profile_memory_rows(cap, exclude_ids=known_ids or None)
     if not rows:
         return {"dry_run": not apply, "scanned": 0, "attributes": [], "updated": 0,
-                "errors": [], "skipped": True}
+                "errors": [], "skipped": True, "only_new": only_new}
 
     t0 = time.time()
     errors: list[str] = []
@@ -612,3 +631,136 @@ def profile_conflict_for_record(
         if all(token not in text for token in tokens):
             return {"attribute": name, "profile_value": pvalue}
     return None
+
+
+# ---------------------------------------------------------------------------
+# F3 — profile auto-update loop
+# (freshness detection / incremental refresh / soft confidence decay)
+# ---------------------------------------------------------------------------
+
+_DEFAULT_STALENESS_DAYS = 7.0
+_DEFAULT_DECAY_DAYS = 30.0
+_DEFAULT_DECAY_FACTOR = 0.95
+_MIN_ATTRIBUTE_CONFIDENCE = 0.2
+
+
+def _known_profile_source_ids(user_id: str) -> set[str]:
+    """All memory ids already referenced by stored attributes (freshness base)."""
+    rows = _managed_query(
+        "SELECT source_ids_json FROM user_profile_attrs WHERE user_id=?",
+        (user_id,),
+    )
+    known: set[str] = set()
+    for row in rows:
+        ids = json.loads(row.get("source_ids_json") or "[]")
+        known.update(str(item) for item in ids)
+    return known
+
+
+def _parse_iso_dt(value: str):
+    from datetime import datetime, timezone
+
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+def _iso_days_between(newer: str, older: str) -> float:
+    """Days `newer` is ahead of `older` (float, clamped at 0.0)."""
+    dt_new = _parse_iso_dt(newer)
+    dt_old = _parse_iso_dt(older)
+    if dt_new is None or dt_old is None:
+        return 0.0
+    return max(0.0, (dt_new - dt_old).total_seconds() / 86400.0)
+
+
+def profile_freshness_warning(
+    user_id: str = "default",
+    cfg: dict[str, Any] | None = None,
+    max_staleness_days: float | None = None,
+) -> str:
+    """Freshness signal for the injected snapshot block (F3-①).
+
+    When the newest active user_profile memory is newer than the newest stored
+    attribute by more than `user_profile.max_staleness_days` (default 7), the
+    snapshot may be stale → return a short advisory line ('' when fresh).
+    """
+    cfg = cfg or load_config()
+    up = cfg.get("user_profile") or {}
+    if not up.get("enabled", False):
+        return ""
+    threshold = float(
+        max_staleness_days
+        if max_staleness_days is not None
+        else up.get("max_staleness_days", _DEFAULT_STALENESS_DAYS)
+    )
+    newest_mem = _managed_query(
+        "SELECT MAX(created_at) AS m FROM memories WHERE type='user_profile' AND status='active'"
+    )
+    newest_attr = _managed_query(
+        "SELECT MAX(updated_at) AS m FROM user_profile_attrs WHERE user_id=?",
+        (user_id,),
+    )
+    mem_ts = str(newest_mem[0]["m"] or "") if newest_mem else ""
+    attr_ts = str(newest_attr[0]["m"] or "") if newest_attr else ""
+    if not mem_ts or not attr_ts:
+        return ""
+    lag_days = _iso_days_between(mem_ts, attr_ts)
+    if lag_days < threshold:
+        return ""
+    return f"> 画像可能过时：最新画像记忆已滞后 {lag_days:.0f} 天，建议执行画像刷新"
+
+
+def decay_profile_attributes(
+    user_id: str = "default",
+    cfg: dict[str, Any] | None = None,
+    *,
+    min_decay_days: float | None = None,
+) -> dict[str, Any]:
+    """Soft confidence decay for non-immutable attributes (F3-③).
+
+    conf = max(0.2, conf * 0.95 ** (elapsed_decay_days / 30)), where elapsed
+    counts from `decayed_at` (or `updated_at` on first decay). Immutable
+    attributes are never touched. Idempotent: after a pass the `decayed_at`
+    watermark advances, so repeated calls within the same window do not double
+    decay.
+    """
+    cfg = cfg or load_config()
+    window = float(
+        min_decay_days
+        if min_decay_days is not None
+        else (cfg.get("user_profile") or {}).get("decay_days", _DEFAULT_DECAY_DAYS)
+    )
+    rows = _managed_query(
+        "SELECT attribute, confidence, immutable, updated_at, decayed_at "
+        "FROM user_profile_attrs WHERE user_id=? AND immutable=0",
+        (user_id,),
+    )
+    now_ts = local_now().isoformat()
+    now_dt = _parse_iso_dt(now_ts)
+    changed = 0
+    with _managed_conn() as conn:
+        for row in rows:
+            base_ts = str(row.get("decayed_at") or row.get("updated_at") or "")
+            base_dt = _parse_iso_dt(base_ts)
+            if base_dt is None or now_dt is None:
+                continue
+            elapsed_days = (now_dt - base_dt).total_seconds() / 86400.0
+            if elapsed_days < window:
+                continue
+            conf = float(row.get("confidence") or 0.0)
+            new_conf = max(
+                _MIN_ATTRIBUTE_CONFIDENCE,
+                conf * (_DEFAULT_DECAY_FACTOR ** (elapsed_days / window)),
+            )
+            conn.execute(
+                "UPDATE user_profile_attrs SET confidence=?, decayed_at=? "
+                "WHERE user_id=? AND attribute=?",
+                (round(new_conf, 4), now_ts, user_id, row["attribute"]),
+            )
+            changed += 1
+    return {"decayed": changed, "window_days": window}

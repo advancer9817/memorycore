@@ -348,7 +348,7 @@ def plan_data_maintenance(limit: int = DEFAULT_MAINTENANCE_LIMIT) -> dict[str, A
     report = curator_report(dry_run=True, limit=cap)
     planned = [p for p in report.get("action_plan", []) if p.get("action") == "archive"]
     archive_ids = [p["id"] for p in planned]
-    token_source = "|".join(sorted(archive_ids)) if archive_ids else "__empty__"
+    token_source = "archive|" + ("|".join(sorted(archive_ids)) if archive_ids else "__empty__")
     plan_token = hashlib.sha256(token_source.encode("utf-8")).hexdigest()[:24]
     groups: dict[str, dict[str, Any]] = {}
     for p in planned:
@@ -510,10 +510,19 @@ def run_data_maintenance_job(
     job_id: str,
     plan_token: str,
     limit: int = DEFAULT_MAINTENANCE_LIMIT,
+    action: str = "archive",
 ) -> dict[str, Any]:
-    """Boundary for the background thread: run execute and record the job row."""
+    """Boundary for the background thread: run execute and record the job row.
+
+    `action` selects the maintenance kind: archive (M1), merge (M2), clean (M3).
+    """
     try:
-        result = execute_data_maintenance(plan_token, limit=limit)
+        if action == "merge":
+            result = execute_data_maintenance_merge(plan_token, limit=limit)
+        elif action == "clean":
+            result = execute_data_maintenance_clean(plan_token, limit=limit)
+        else:
+            result = execute_data_maintenance(plan_token, limit=limit)
         summary = result.get("summary", {})
         backup_path = result.get("backup_path")
         update_maintenance_job(job_id, status="succeeded", summary=summary, backup_path=backup_path)
@@ -536,3 +545,389 @@ def run_data_maintenance_job(
         message = f"{type(exc).__name__}: {exc}"
         update_maintenance_job(job_id, status="failed", error=message)
         return {"job_id": job_id, "plan_token": plan_token, "status": "failed", "error": message}
+
+
+# --------------------------------------------------------------------------
+# D2 / M2 — deterministic title merge
+# --------------------------------------------------------------------------
+# plan → (plan_token) → execute: backup → supersede losers (winner keeps its
+# status; losers become superseded with lineage via supersede_memory_record) →
+# audit. Idempotent per plan_token; shares the maintenance flock with the
+# timer curator and M1 (archive). Merge never deletes and never promotes to
+# active, so it cannot disturb the retrieval baseline.
+
+MERGE_DEFAULT_LIMIT = 200
+
+
+def _merge_winner_key(row: dict[str, Any]) -> tuple[int, str]:
+    """Keeper heuristic: last_accessed > importance > confidence > newer."""
+    score = 0
+    score = (score << 3) | (1 if row.get("last_accessed_at") else 0)
+    score = (score << 3) | max(0, min(7, int(round(float(row.get("importance") or 0.0) * 4))))
+    score = (score << 3) | max(0, min(7, int(round(float(row.get("confidence") or 0.0) * 4))))
+    return (score, str(row.get("created_at") or ""))
+
+
+def plan_data_maintenance_merge(limit: int = MERGE_DEFAULT_LIMIT) -> dict[str, Any]:
+    """Read-only merge plan: duplicate groups by normalize_title_key.
+
+    Each group keeps its best record (winner); losers would be superseded on
+    execute — never deleted, never re-activated.
+    """
+    from memorycore.models import normalize_title_key
+
+    cap = max(1, min(int(limit), 5000))
+    with read_conn() as conn:
+        rows = [
+            dict(r)
+            for r in conn.execute(
+                """
+                SELECT id, title, content, status, importance, confidence,
+                       created_at, last_accessed_at, source_agent
+                FROM memories
+                WHERE status IN ('active','candidate')
+                ORDER BY created_at ASC
+                """
+            ).fetchall()
+        ]
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:
+        key = normalize_title_key(r.get("title") or "")
+        if len(key) < 2:
+            continue
+        groups.setdefault(key, []).append(r)
+    merge_groups: list[dict[str, Any]] = []
+    for key, items in groups.items():
+        if len(items) < 2:
+            continue
+        winner = max(items, key=_merge_winner_key)
+        losers = [it for it in items if it["id"] != winner["id"]]
+        merge_groups.append(
+            {
+                "key": key,
+                "winner_id": winner["id"],
+                "winner_title": winner.get("title") or "",
+                "count": len(items),
+                "loser_ids": [it["id"] for it in losers],
+                "loser_titles": [it.get("title") or "" for it in losers],
+            }
+        )
+    merge_groups.sort(key=lambda g: (-g["count"], g["key"]))
+    merge_groups = merge_groups[:cap]
+    all_ids = sorted(
+        {i for g in merge_groups for i in g["loser_ids"]} | {g["winner_id"] for g in merge_groups}
+    )
+    token_source = "merge|" + ("|".join(all_ids) if all_ids else "__empty__")
+    plan_token = hashlib.sha256(token_source.encode("utf-8")).hexdigest()[:24]
+    loser_count = sum(len(g["loser_ids"]) for g in merge_groups)
+    return {
+        "dry_run": True,
+        "generated_at": now(),
+        "scanned": len(rows),
+        "plan_token": plan_token,
+        "merge_count": len(merge_groups),
+        "merge_groups": merge_groups,
+        "loser_count": loser_count,
+        "summary": {"merge": len(merge_groups), "losers": loser_count, "scanned": len(rows)},
+    }
+
+
+def execute_data_maintenance_merge(plan_token: str, limit: int = MERGE_DEFAULT_LIMIT) -> dict[str, Any]:
+    """Execute a previously planned merge (idempotent per plan_token)."""
+    from memorycore.storage.crud import supersede_memory_record
+    from memorycore.storage.transfer import memory_backup
+
+    existing = get_maintenance_job_by_token(plan_token)
+    if existing and existing.get("status") == "succeeded":
+        return {
+            "job_id": existing["id"],
+            "status": "succeeded",
+            "replayed": True,
+            "summary": existing.get("summary", {}),
+            "backup_path": existing.get("backup_path"),
+        }
+
+    plan = plan_data_maintenance_merge(limit=limit)
+    if plan["plan_token"] != plan_token:
+        raise ValueError(
+            "plan_token is stale: the merge candidate set changed since the plan was "
+            "generated; run plan again and retry"
+        )
+    groups = plan["merge_groups"]
+
+    with maintenance_lock(nonblocking=True):
+        if not groups:
+            log_audit_event("maintenance_merge", detail={"plan_token": plan_token, "merged": 0, "noop": True})
+            summary = {"merge": 0, "already_clean": True}
+            return {"status": "succeeded", "merged": 0, "summary": summary, "backup_path": None}
+        backup = memory_backup()
+        merged = 0
+        processed: list[dict[str, str]] = []
+        for g in groups:
+            winner_id = g["winner_id"]
+            group_ids = [winner_id] + g["loser_ids"]
+            # Unify the lineage root BEFORE superseding: supersede_memory_record
+            # rebinds the new record's fact_lineage_root to the old record's
+            # root on every call, so without pre-unification the second loser
+            # would fail the "lineage merge requires human review" guard.
+            placeholders = ",".join("?" for _ in group_ids)
+            with managed_conn() as conn:
+                conn.execute(
+                    f"UPDATE memories SET fact_lineage_root=? WHERE id IN ({placeholders})",
+                    (winner_id, *group_ids),
+                )
+            for loser_id in g["loser_ids"]:
+                supersede_memory_record(
+                    old_id=loser_id,
+                    new_id=winner_id,
+                    note="maintenance merge: deterministic title normalization",
+                    source_agent="maintenance",
+                )
+                merged += 1
+                processed.append({"loser": loser_id, "winner": winner_id})
+        log_audit_event(
+            "maintenance_merge",
+            detail={
+                "plan_token": plan_token,
+                "merged": merged,
+                "groups": len(groups),
+                "backup": backup.get("path"),
+                "processed": processed[:200],
+            },
+        )
+    summary = {
+        "merge": len(groups),
+        "losers": merged,
+        "backup_path": backup.get("path"),
+        "backup_bytes": backup.get("bytes", 0),
+    }
+    return {"status": "succeeded", "merged": merged, "summary": summary, "backup_path": backup.get("path")}
+
+
+# --------------------------------------------------------------------------
+# D3 / M3 — whitelist clean (hard delete; backup + explicit confirmation)
+# --------------------------------------------------------------------------
+# plan → (plan_token) → execute: backup (mandatory) → hard-delete each
+# candidate (SQLite row + FTS via trigger + Qdrant point + vector_cache
+# entries) → audit. Only whitelisted patterns are ever considered:
+#   1) candidate records older than a TTL;
+#   2) test-agent data (source_agent blacklist, configurable);
+#   3) near-empty fragment candidates.
+# Protected: records with a positive effectiveness/access and importance ≥ 0.9.
+
+CLEAN_DEFAULT_LIMIT = 500
+CLEAN_DEFAULT_TTL_DAYS = 30
+CLEAN_DEFAULT_MIN_CONTENT_CHARS = 5
+CLEAN_SOURCE_AGENT_BLACKLIST = (
+    "memorycore-smoke-test",
+    "smoke-test",
+    "integration-test",
+    "manual-test",
+    "test",
+)
+
+
+def _clean_config() -> dict[str, Any]:
+    from memorycore.models import load_config
+
+    return (load_config().get("maintenance", {}) or {}).get("clean", {}) or {}
+
+
+def _clean_candidate_rows(cutoff: str, blacklist: tuple[str, ...], min_chars: int) -> list[dict[str, Any]]:
+    """Shared read for the clean plan and replay validation."""
+    placeholders = ",".join("?" for _ in blacklist)
+    with read_conn() as conn:
+        rows = [
+            dict(r)
+            for r in conn.execute(
+                f"""
+                SELECT id, title, content, status, source_agent, created_at,
+                       last_accessed_at, effectiveness_score, importance
+                FROM memories
+                WHERE status='candidate' AND datetime(created_at) < datetime(?)
+                """,
+                (cutoff,),
+            ).fetchall()
+        ]
+        rows += [
+            dict(r)
+            for r in conn.execute(
+                f"""
+                SELECT id, title, content, status, source_agent, created_at,
+                       last_accessed_at, effectiveness_score, importance
+                FROM memories
+                WHERE source_agent IN ({placeholders}) AND status != 'archived'
+                """,
+                tuple(blacklist),
+            ).fetchall()
+        ]
+        rows += [
+            dict(r)
+            for r in conn.execute(
+                f"""
+                SELECT id, title, content, status, source_agent, created_at,
+                       last_accessed_at, effectiveness_score, importance
+                FROM memories
+                WHERE status='candidate'
+                  AND (content IS NULL OR LENGTH(trim(content)) < ?)
+                """,
+                (min_chars,),
+            ).fetchall()
+        ]
+    return rows
+
+
+def plan_data_maintenance_clean(limit: int = CLEAN_DEFAULT_LIMIT) -> dict[str, Any]:
+    """Read-only hard-delete plan (whitelist only; protected records skipped)."""
+    cfg = _clean_config()
+    ttl_days = int(cfg.get("candidate_ttl_days", CLEAN_DEFAULT_TTL_DAYS))
+    blacklist = tuple(cfg.get("source_agents", CLEAN_SOURCE_AGENT_BLACKLIST))
+    min_chars = int(cfg.get("min_content_chars", CLEAN_DEFAULT_MIN_CONTENT_CHARS))
+    cap = max(1, min(int(limit), 5000))
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=ttl_days)).isoformat(timespec="seconds")
+
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for r in _clean_candidate_rows(cutoff, blacklist, min_chars):
+        rid = r["id"]
+        if rid in seen:
+            continue
+        seen.add(rid)
+        if r.get("last_accessed_at") and float(r.get("effectiveness_score") or 0.0) > 0:
+            continue  # genuinely used — never auto-clean
+        if float(r.get("importance") or 0.0) >= 0.9:
+            continue  # high-importance — never auto-clean
+        reasons: list[str] = []
+        if r.get("status") == "candidate" and r.get("created_at"):
+            created = str(r["created_at"])
+            if _iso_compare(created, cutoff) < 0:
+                reasons.append("candidate_ttl")
+        if r.get("source_agent") in blacklist:
+            reasons.append(f"source_agent:{r['source_agent']}")
+        if r.get("status") == "candidate" and len((r.get("content") or "").strip()) < min_chars:
+            reasons.append("fragment")
+        if not reasons:
+            continue
+        candidates.append({"id": rid, "title": r.get("title") or "", "reason": ",".join(reasons)})
+
+    candidates = candidates[:cap]
+    token_source = "clean|" + ("|".join(sorted(c["id"] for c in candidates)) if candidates else "__empty__")
+    plan_token = hashlib.sha256(token_source.encode("utf-8")).hexdigest()[:24]
+    groups: dict[str, dict[str, Any]] = {}
+    for c in candidates:
+        reason = c["reason"].split(",")[0]
+        group = groups.setdefault(reason, {"reason": reason, "count": 0, "samples": []})
+        group["count"] += 1
+        if len(group["samples"]) < 5:
+            group["samples"].append({"id": c["id"], "title": c["title"]})
+    return {
+        "dry_run": True,
+        "generated_at": now(),
+        "scanned": len(seen),
+        "plan_token": plan_token,
+        "clean_count": len(candidates),
+        "clean_ids": [c["id"] for c in candidates],
+        "groups": list(groups.values()),
+        "summary": {"clean": len(candidates), "scanned": len(seen)},
+    }
+
+
+def _iso_compare(a: str, b: str) -> int:
+    """Compare two local/UTC ISO timestamps lexicographically after a light
+    normalization of the offset suffix; returns -1/0/1."""
+    def _norm(value: str) -> str:
+        return value.replace("Z", "+00:00").replace(" ", "T")
+    return (_norm(a) > _norm(b)) - (_norm(a) < _norm(b))
+
+
+def execute_data_maintenance_clean(
+    plan_token: str,
+    limit: int = CLEAN_DEFAULT_LIMIT,
+) -> dict[str, Any]:
+    """Execute a previously planned hard delete (idempotent per plan_token).
+
+    Mandatory full backup first; then per-record: Qdrant point delete →
+    vector_cache sweep → SQLite row delete (FTS follows via trigger).
+    """
+    import hashlib as _hashlib
+
+    from memorycore.models import load_config
+    from memorycore.storage.transfer import memory_backup
+    from memorycore.vector_store import get_vector_store
+
+    existing = get_maintenance_job_by_token(plan_token)
+    if existing and existing.get("status") == "succeeded":
+        return {
+            "job_id": existing["id"],
+            "status": "succeeded",
+            "replayed": True,
+            "summary": existing.get("summary", {}),
+            "backup_path": existing.get("backup_path"),
+        }
+
+    plan = plan_data_maintenance_clean(limit=limit)
+    if plan["plan_token"] != plan_token:
+        raise ValueError(
+            "plan_token is stale: the clean candidate set changed since the plan was "
+            "generated; run plan again and retry"
+        )
+    clean_ids = plan["clean_ids"]
+
+    with maintenance_lock(nonblocking=True):
+        if not clean_ids:
+            log_audit_event("maintenance_clean", detail={"plan_token": plan_token, "deleted": 0, "noop": True})
+            summary = {"clean": 0, "already_clean": True}
+            return {"status": "succeeded", "deleted": 0, "summary": summary, "backup_path": None}
+        backup = memory_backup()
+        vs = get_vector_store(load_config())
+        deleted: list[str] = []
+        fragments: list[str] = []
+        with managed_conn() as conn:
+            for cid in clean_ids:
+                row = conn.execute(
+                    "SELECT title, content FROM memories WHERE id=?", (cid,)
+                ).fetchone()
+                if row is None:
+                    fragments.append(cid)
+                    continue
+                # vector_cache sweep for the exact text hashes (same algorithm
+                # as vector_store._embed_text_hash) — non-fatal.
+                text_sources = [str(row["title"] or ""), str(row["content"] or "")]
+                for text in text_sources:
+                    if text:
+                        text_hash = _hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+                        try:
+                            conn.execute("DELETE FROM vector_cache WHERE text_hash=?", (text_hash,))
+                        except Exception:
+                            pass
+                deleted.append(cid)
+            if deleted:
+                placeholders = ",".join("?" for _ in deleted)
+                conn.execute(
+                    f"DELETE FROM memories WHERE id IN ({placeholders})",
+                    tuple(deleted),
+                )
+        # Qdrant points after the SQLite commit (best-effort; a missing point
+        # is harmless — the DB row is already gone/archived).
+        try:
+            for cid in deleted:
+                vs.delete(cid)
+        except Exception as exc:
+            logger = logging.getLogger(__name__)
+            logger.warning("maintenance_clean: qdrant sync failed for some ids: %s", exc)
+        log_audit_event(
+            "maintenance_clean",
+            detail={
+                "plan_token": plan_token,
+                "deleted": len(deleted),
+                "already_missing": len(fragments),
+                "backup": backup.get("path"),
+                "ids": deleted,
+            },
+        )
+    summary = {
+        "clean": len(deleted),
+        "backup_path": backup.get("path"),
+        "backup_bytes": backup.get("bytes", 0),
+    }
+    return {"status": "succeeded", "deleted": len(deleted), "summary": summary, "backup_path": backup.get("path")}

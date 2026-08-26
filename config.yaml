@@ -6,11 +6,11 @@ context_pack:
   include_stale_warnings: true
   max_records_per_group: 6
   profile_boost_weight: 0.15
+  profile_conflict_filter_enabled: true
   profile_conflict_penalty: 0.6
   profile_query_expand_enabled: true
-  profile_query_expand_min_overlap: 1
   profile_query_expand_max_terms: 3
-  profile_conflict_filter_enabled: true
+  profile_query_expand_min_overlap: 1
 embedding:
   api_key: ''
   api_url: ''
@@ -25,7 +25,7 @@ extraction:
   api_key: sk-ws-H.EEPIHLH.pUKR.MEQCIBSQydOcDAJTHrFvpKrjPbEDxbnDw441_X_-pvgNp6FwAiAFDwSYL-YBw4Zx3svDd8IPUZGmlJQ7LvWlvZdVAZ2OdQ
   base_url: https://ws-mvh9ls93gkzn2s2p.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
   max_tokens: 8000
-  model: qwen3.7-plus
+  model: qwen3.7-flash-2026-07-15
   temperature: 1
   timeout: 600
 extraction_strategy:
@@ -124,32 +124,32 @@ user_profile:
   max_snapshot_chars: 800
   min_confidence: 0.6
   schema:
-  - name: 姓名
-    description: 用户的姓名
-  - name: 职业
-    description: 用户的职业/岗位
-  - name: 雇主
-    description: 用户所在公司或雇主名称
-  - name: 工作领域
-    description: 用户日常工作涉及的领域、平台、系统
-  - name: 技术栈
-    description: 用户的技术背景、技能与开发环境
+  - description: 用户的姓名
+    name: 姓名
+  - description: 用户的职业/岗位
+    name: 职业
+  - description: 用户所在公司或雇主名称
+    name: 雇主
+  - description: 用户日常工作涉及的领域、平台、系统
+    name: 工作领域
+  - description: 用户的技术背景、技能与开发环境
     immutable: true
-  - name: 沟通偏好
-    description: 用户偏好的回答语言、风格、格式、交互方式
-  - name: 模型偏好
-    description: 用户偏好的模型/供应商/路由
-  - name: 学习方向
-    description: 用户当前的学习重点与转型目标
-  - name: 语言
-    description: 用户主要使用的语言（沟通、文档、代码注释）
-  - name: 常用工具
-    description: 用户常用的开发/办公/流程工具链
-  - name: 当前项目
-    description: 用户正在推进的项目/产品/任务焦点
-  - name: 兴趣关注
-    description: 用户关注的技术方向、行业趋势与话题
-  - name: 时间偏好
-    description: 工作时区、作息节奏、会议/响应时间偏好
-  - name: 输出偏好
-    description: 用户偏好的产出物格式（报告/图表/代码/演示等）
+    name: 技术栈
+  - description: 用户偏好的回答语言、风格、格式、交互方式
+    name: 沟通偏好
+  - description: 用户偏好的模型/供应商/路由
+    name: 模型偏好
+  - description: 用户当前的学习重点与转型目标
+    name: 学习方向
+  - description: 用户主要使用的语言（沟通、文档、代码注释）
+    name: 语言
+  - description: 用户常用的开发/办公/流程工具链
+    name: 常用工具
+  - description: 用户正在推进的项目/产品/任务焦点
+    name: 当前项目
+  - description: 用户关注的技术方向、行业趋势与话题
+    name: 兴趣关注
+  - description: 工作时区、作息节奏、会议/响应时间偏好
+    name: 时间偏好
+  - description: 用户偏好的产出物格式（报告/图表/代码/演示等）
+    name: 输出偏好

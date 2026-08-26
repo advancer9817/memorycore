@@ -12,6 +12,7 @@ import {
   type CuratorRunState,
   type CuratorStatus,
   type LlmRunState,
+  type MaintenanceAction,
   type MaintenanceRunState,
   ellipsize,
   formatTime,
@@ -33,6 +34,7 @@ type MemoryOperationsViewProps = {
   onShowAllActions: () => void;
   onGenerateMaintenancePlan: () => void;
   onExecuteMaintenance: () => void;
+  onSelectMaintenanceAction: (action: MaintenanceAction) => void;
 };
 
 export function MemoryOperationsView({
@@ -51,6 +53,7 @@ export function MemoryOperationsView({
   onShowAllActions,
   onGenerateMaintenancePlan,
   onExecuteMaintenance,
+  onSelectMaintenanceAction,
 }: MemoryOperationsViewProps) {
   const byStatus = status?.stats.by_status || {};
   const nextRun = status?.timer.NextElapseUSecRealtime;
@@ -161,15 +164,30 @@ export function MemoryOperationsView({
           </div>
         )}
 
-        {/* D1 — one-click manual maintenance (archive only, preview → confirm → execute) */}
+        {/* D1-D3 — one-click manual maintenance (archive / merge / clean, preview → confirm → execute) */}
         <div className="border-t border-zinc-800 pt-2 mt-2">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="text-zinc-500 text-sm">{t.dashboard.maintenanceRun}</span>
+            {(["archive", "merge", "clean"] as MaintenanceAction[]).map((target) => (
+              <button
+                key={target}
+                type="button"
+                onClick={() => onSelectMaintenanceAction(target)}
+                disabled={maintenanceBusy}
+                className={`rounded px-2 py-1 text-xs transition-colors ${
+                  (maintenanceRunState.action ?? "archive") === target
+                    ? "bg-zinc-700 text-white"
+                    : "bg-transparent text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                {target === "archive" ? t.dashboard.maintenanceActionArchive : target === "merge" ? t.dashboard.maintenanceActionMerge : t.dashboard.maintenanceActionClean}
+              </button>
+            ))}
             <Button onClick={onGenerateMaintenancePlan} disabled={maintenanceBusy} variant="outline" size="sm" className="h-7 text-xs border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors">
               <Wrench className="h-3 w-3 mr-1" />{maintenanceRunState.state === "planning" ? t.dashboard.maintenancePlanning : t.dashboard.maintenancePlan}
             </Button>
-            <Button onClick={onExecuteMaintenance} disabled={maintenanceBusy || maintenanceRunState.state !== "planReady" || (maintenanceRunState.plan?.archive_count ?? 0) === 0} variant="outline" size="sm" className="h-7 text-xs border-amber-700/40 bg-amber-900/20 text-amber-300 hover:bg-amber-900/40 transition-colors">
-              <Archive className="h-3 w-3 mr-1" />{maintenanceRunState.state === "running" ? t.dashboard.maintenanceExecuting : t.dashboard.maintenanceExecute(maintenanceRunState.plan?.archive_count ?? 0)}
+            <Button onClick={onExecuteMaintenance} disabled={maintenanceBusy || maintenanceRunState.state !== "planReady" || maintenancePlanCount(maintenanceRunState) === 0} variant="outline" size="sm" className="h-7 text-xs border-amber-700/40 bg-amber-900/20 text-amber-300 hover:bg-amber-900/40 transition-colors">
+              <Archive className="h-3 w-3 mr-1" />{maintenanceRunState.state === "running" ? t.dashboard.maintenanceExecuting : maintenanceExecuteLabel(t, maintenanceRunState)}
             </Button>
             {maintenanceRunState.state === "running" && <span className="text-xs text-sky-300 animate-pulse">{t.dashboard.maintenanceExecuting}...</span>}
           </div>
@@ -178,7 +196,7 @@ export function MemoryOperationsView({
             <div className="mt-2 rounded bg-zinc-800/60 px-2 py-1.5 text-xs space-y-1">
               <div className="flex items-center gap-2 text-zinc-300">
                 <Badge variant="outline" className="border-sky-700 bg-sky-500/10 text-sky-300 text-xs shrink-0">{t.dashboard.maintenancePreview}</Badge>
-                <span>{t.dashboard.maintenanceGroups}: {maintenanceRunState.plan.groups.map((group) => `${group.reason} ${group.count}`).join(" · ")}</span>
+                <span>{t.dashboard.maintenanceGroups}: {maintenanceRunState.plan.groups.map((group) => `${group.reason} ${group.count}`).join(" · ") || "—"}</span>
               </div>
               {maintenanceRunState.plan.groups.slice(0, 3).map((group) => {
                 const titles = (group.samples ?? []).map((sample) => sample.title).filter((title): title is string => Boolean(title)).slice(0, 3);
@@ -189,14 +207,16 @@ export function MemoryOperationsView({
                   </div>
                 );
               })}
-              {maintenanceRunState.plan.archive_count === 0 && <div className="text-emerald-300">{t.dashboard.maintenanceNoCandidates}</div>}
+              {maintenancePlanCount(maintenanceRunState) === 0 && (
+                <div className="text-emerald-300">{(maintenanceRunState.action ?? "archive") === "archive" ? t.dashboard.maintenanceNoCandidates : t.dashboard.maintenanceNoCandidatesAny}</div>
+              )}
             </div>
           )}
 
           {maintenanceRunState.state === "succeeded" && maintenanceRunState.result && (
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
               <Badge variant="outline" className="border-emerald-700 bg-emerald-500/10 text-emerald-300 text-xs">✓ {t.dashboard.maintenanceRun}</Badge>
-              <span className="text-zinc-400">{t.dashboard.archive} <span className="text-zinc-200">{maintenanceRunState.result.summary?.archive ?? 0}</span></span>
+              <span className="text-zinc-400">{maintenanceSummaryLabel(t, maintenanceRunState.action ?? "archive")} <span className="text-zinc-200">{maintenanceSummaryCount(maintenanceRunState)}</span></span>
               {maintenanceRunState.elapsedMs !== undefined && <span className="text-zinc-500">{((maintenanceRunState.elapsedMs) / 1000).toFixed(1)}s</span>}
               {maintenanceRunState.result.replayed && <span className="text-zinc-500">{t.dashboard.maintenanceReplayed}</span>}
               {maintenanceRunState.result.backup_path && <div className="min-w-0 flex-1 truncate text-zinc-500">{t.dashboard.maintenanceBackup}: <span className="text-zinc-300 truncate">{maintenanceRunState.result.backup_path}</span></div>}
@@ -209,6 +229,37 @@ export function MemoryOperationsView({
       </div>
     </div>
   );
+}
+
+function maintenancePlanCount(state: MaintenanceRunState): number {
+  const plan = state.plan;
+  if (!plan) return 0;
+  const action = state.action ?? "archive";
+  if (action === "merge") return plan.merge_count ?? 0;
+  if (action === "clean") return plan.clean_count ?? 0;
+  return plan.archive_count ?? 0;
+}
+
+function maintenanceExecuteLabel(t: Messages, state: MaintenanceRunState): string {
+  const action = state.action ?? "archive";
+  const count = maintenancePlanCount(state);
+  if (action === "merge") return t.dashboard.maintenanceExecuteMerge(count);
+  if (action === "clean") return t.dashboard.maintenanceExecuteClean(count);
+  return t.dashboard.maintenanceExecute(count);
+}
+
+function maintenanceSummaryLabel(t: Messages, action: MaintenanceAction): string {
+  if (action === "merge") return t.dashboard.maintenanceActionMerge;
+  if (action === "clean") return t.dashboard.maintenanceActionClean;
+  return t.dashboard.maintenanceActionArchive;
+}
+
+function maintenanceSummaryCount(state: MaintenanceRunState): number {
+  const summary = state.result?.summary ?? {};
+  const action = state.action ?? "archive";
+  if (action === "merge") return summary.merge ?? 0;
+  if (action === "clean") return summary.clean ?? 0;
+  return summary.archive ?? 0;
 }
 
 function LlmElapsedTimer({ startedAt }: { startedAt: number }) {

@@ -350,3 +350,26 @@ class TestSingleton:
         reset_vector_store()
         s2 = get_vector_store({})
         assert s1 is not s2
+
+    def test_get_vector_store_rebuilds_when_config_changes(self, tmp_path):
+        """Config hot-reload: same config → same instance; changed store-affecting
+        config (embedding provider/dim, qdrant path) → singleton rebuilds."""
+        reset_vector_store()
+        try:
+            base = {
+                "qdrant": {"path": str(tmp_path)},
+                "embedding": {"provider": "hashing", "dim": 32},
+            }
+            s1 = get_vector_store(base)
+            s2 = get_vector_store(base)
+            assert s1 is s2  # unchanged config reuses the singleton
+
+            changed = {"qdrant": {"path": str(tmp_path)},
+                       "embedding": {"provider": "hashing", "dim": 64}}
+            s3 = get_vector_store(changed)
+            assert s3 is not s1  # embedding dim changed → rebuilt
+
+            s4 = get_vector_store(base)
+            assert s4 is not s3  # restored original config → rebuilt again
+        finally:
+            reset_vector_store()
