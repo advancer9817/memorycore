@@ -5907,3 +5907,23 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 - tsc 零错误；build 后确认 `merge_groups` 代码进入 app/page chunk；部署 :18318 200。
 - 真实库 merge plan 返回 `merge_groups: []`（0 候选）→ 修复后显示"无重复候选"（不再崩溃）。
 - 既有 D2/D3 单测 9 项仍通过（后端未动）。
+
+---
+
+## [迭代 30] 2026-08-26 — 修复 curator 时间显示偏移（systemd CST → ISO +08:00）
+
+### 根因
+- 后端 `_curator_status_payload` 直接透传 `systemctl show` 的墙钟字符串（`Wed 2026-08-26 15:16:17 CST`）。
+- 前端 `new Date("...CST")` 时 V8 把 "CST" 解析为美国中部时间 (UTC-6) → 所有时间 +14h 偏移：真实 8/26 15:16 显示成 **8/27 05:16**（未来时间）；下次运行 03:09 显示成 17:09。
+- 附带 bug：`"T" in value` 判断 ISO 时被 "CS**T**" 的 T 误命中 → 转换 helper 曾静默失效。
+
+### 修复
+- `memorycore/frontend_metrics.py`：
+  - 新增 `_parse_systemd_ts(value)`：剥离 weekday + 末尾时区缩写，固定 +08:00（Asia/Shanghai）输出 ISO；JSON 精确判断是否已 ISO（正则 `\d{4}-\d{2}-\d{2}T`），不再用裸 `"T" in value`。
+  - `_curator_status_payload`：last_run_at / service 的 *Timestamp / timer 的 LastTriggerUSec、NextElapseUSecRealtime 全部经 `_parse_systemd_ts` 归一化后返回。
+- `ui/components/dashboard/memory-operations-types.ts`：`formatTime` 防御——遇 `CST` 后缀先替换为 `+08:00` 再 `new Date(...)`（双保险，兼容未来其他来源的 CST 字符串）。
+
+### 验证
+- 新增 `tests/test_frontend_metrics.py` 5 项（CST→ISO、next-trigger、ISO/空/n-a passthrough）。
+- 全量测试：**568 passed / 7 skipped**（+5）。
+- 端到端：`/api/v1/curator/status` 返回值全部 ISO：rule last_run_at=`2026-08-26T15:16:17+08:00`（真实今天 15:16）、next_run_at=`2026-08-27T03:09:48+08:00`；前端 `new Date('2026-08-26T15:16:17+08:00')` 显示 8 月 26 日 15:16 ✓。

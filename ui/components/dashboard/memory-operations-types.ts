@@ -127,7 +127,10 @@ export function ellipsize(value: string | undefined, maxChars: number): string |
 
 export function formatTime(value?: string, locale: "en" | "zh" = "en") {
   if (!value || value === "n/a") return "n/a";
-  const date = new Date(value);
+  // systemd wall-clock strings end with "CST"; V8 reads that as US Central
+  // (-06:00) and shifts timestamps +14h. Pin to the host Asia/Shanghai offset.
+  const normalized = value.trim().replace(/\bCST\b/, "+08:00");
+  const date = new Date(normalized);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString(locale === "zh" ? "zh-CN" : "en-US", {
     month: "short",

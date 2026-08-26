@@ -80,6 +80,38 @@ def _latest_audit_event(event_type: str) -> dict[str, Any]:
     return {**row, "detail": detail}
 
 
+def _parse_systemd_ts(value: str) -> str:
+    """Convert systemd wall-clock 'Wed 2026-08-26 15:16:17 CST' to ISO +08:00.
+
+    `systemctl show` prints times in the host timezone (Asia/Shanghai). If the
+    raw string reaches JS `new Date('...CST')`, V8 interprets CST as US Central
+    (UTC-6), shifting every timestamp +14h. An explicit offset removes the
+    ambiguity; already-ISO values pass through unchanged.
+    """
+    if not value:
+        return value
+    # Already ISO (has the ISO T separator)? Pass through. NOTE: a naive
+    # `"T" in value` check would ALSO match the "T" in "CST", so match the
+    # date prefix instead.
+    import re as _re
+    if _re.match(r"\d{4}-\d{2}-\d{2}T", value):
+        return value
+    try:
+        from datetime import datetime, timedelta, timezone
+        parts = value.split()
+        # Drop weekday token ("Wed") when present.
+        if len(parts) >= 2 and parts[0].isalpha() and parts[1][:4].isdigit():
+            parts = parts[1:]
+        # Drop trailing zone-name token ("CST") — strptime %Z only knows
+        # recognized tznames so we strip it and pin Asia/Shanghai instead.
+        if len(parts) >= 3 and parts[-1].isalpha():
+            parts = parts[:-1]
+        dt = datetime.strptime(" ".join(parts), "%Y-%m-%d %H:%M:%S")
+        return dt.replace(tzinfo=timezone(timedelta(hours=8))).isoformat()
+    except Exception:
+        return value
+
+
 def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
     import time as _time
     global _curator_status_cache, _curator_status_cache_ts
@@ -118,6 +150,12 @@ def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
                 last_run_at = row[0].get("created_at", "")
         except Exception:
             pass
+
+    # Normalize systemd wall-clock strings to explicit-offset ISO so the
+    # frontend `new Date(...)` never misreads "CST" as US Central (-06:00).
+    last_run_at = _parse_systemd_ts(last_run_at)
+    service = {k: (_parse_systemd_ts(v) if k.endswith("Timestamp") else v) for k, v in service.items()}
+    timer = {k: (_parse_systemd_ts(v) if k in ("LastTriggerUSec", "NextElapseUSecRealtime") else v) for k, v in timer.items()}
 
     # Compute next run when timer is inactive (hourly schedule)
     next_run_at = timer.get("NextElapseUSecRealtime") or ""
