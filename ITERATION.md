@@ -5877,3 +5877,16 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 ### 验证
 - tsc 零错误；build + systemd 部署；:18318 HTTP 200；health-score/dashboard 接口 200。
 - 预览面板打开 Dashboard 确认新布局可见。
+
+---
+
+## [迭代 28] 2026-08-26 — E1 Phase 3②：子页返回箭头（PageShell backHref）
+
+### 变更（前端）
+- `components/shared/PageShell.tsx`：新增通用 `backHref`/`backLabel` props——有返回地址时在标题上方渲染返回链接（ArrowLeft 图标 + 可选文案）；头部渲染条件扩展为 `(title || actions || backHref)`。
+- `app/governance/page.tsx`：`backHref="/"` + `backLabel={nav.dashboard}`（治理详情页返回看板）。
+- `app/apps/[appId]/page.tsx`：同样加返回看板（loading 骨架 + 主渲染两处）。
+
+### 验证
+- tsc 零错误；build 后确认 `backHref` 代码进入新 chunk（1428/8289）；systemd 部署 :18318 200。
+- 说明：Electron 预览面板对哈希不变的旧 chunk 有 HTTP 缓存，如需立即看到返回箭头请硬刷新（Ctrl+Shift+R 或清除站点缓存）；治理页 SSR 为 client 渲染空壳属 Next.js streaming 正常行为。

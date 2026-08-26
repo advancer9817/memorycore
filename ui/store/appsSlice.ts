@@ -16,9 +16,8 @@ export interface AppMemory {
   app_name: string;
 }
 
-export interface AccessedMemory {
-  memory: AppMemory;
-  access_count: number;
+export interface AccessedMemory extends AppMemory {
+  access_count?: number;
 }
 
 export interface AppDetails {

@@ -55,7 +55,7 @@ export default function AppDetailsPage() {
   if (selectedApp.error) return <NotFound message={selectedApp.error} title={messages.apps.errorLoadingApp} />;
 
   if (!selectedApp.details) return (
-    <PageShell>
+    <PageShell backHref="/" backLabel={messages.nav.dashboard}>
       <div className="flex justify-between">
         <div className="flex-1 max-w-4xl animate-fade-slide-down">
           <div className="mb-6">
@@ -69,7 +69,7 @@ export default function AppDetailsPage() {
   );
 
   return (
-    <PageShell>
+    <PageShell backHref="/" backLabel={messages.nav.dashboard}>
       <div className="flex justify-between gap-6">
         <div className="flex-1 max-w-4xl animate-fade-slide-down">
           <Tabs defaultValue="created" className="mb-6" onValueChange={setActiveTab}>
@@ -98,8 +98,8 @@ export default function AppDetailsPage() {
               {selectedApp.memories.accessed.loading
                 ? <div className="space-y-4">{[...Array(3)].map((_, i) => <MemoryCardSkeleton key={i} />)}</div>
                 : selectedApp.memories.accessed.items.map((a) => (
-                  <div key={a.memory.id} className="relative">
-                    <MemoryCard id={a.memory.id} content={a.memory.content} created_at={a.memory.created_at} metadata={a.memory.metadata_} categories={a.memory.categories} access_count={a.access_count} app_name={a.memory.app_name} state={a.memory.state} onDelete={handleDelete} />
+                  <div key={a.id} className="relative">
+                    <MemoryCard id={a.id} content={a.content} created_at={a.created_at} metadata={a.metadata_} categories={a.categories} access_count={a.access_count} app_name={a.app_name} state={a.state} onDelete={handleDelete} />
                   </div>
                 ))}
             </TabsContent>

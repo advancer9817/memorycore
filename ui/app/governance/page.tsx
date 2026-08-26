@@ -281,6 +281,8 @@ function GovernancePageInner() {
       title={messages.governance.title}
       subtitle={messages.governance.description}
       actions={toolbar}
+      backHref="/"
+      backLabel={messages.nav.dashboard}
     >
       {cockpit.error && (
         <Alert className="mb-6 border-red-800 bg-red-950/30 text-red-200">
