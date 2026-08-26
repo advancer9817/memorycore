@@ -5963,3 +5963,25 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 ### 验证
 - tsc 零错误；build 后确认 `noMaintenanceJobs` 进入 `app/settings/page-5dadd31f723fe600.js`；部署 :18318/settings 200。
 - `/api/v1/maintenance/latest` 当前返回 `{status:"none"}`（尚无执行记录）→ 页面显示"暂无维护记录"，与后端一致。
+
+---
+
+## [迭代 33] 2026-08-26 — 记忆主体上下文缺失治理（规划中，未实施）
+
+### 背景
+- 用户指出：提取出的单条记忆缺乏「主体」锚点（如「迭代 31」「迭代 27」全文不提 mcore），单条脱离 UI 无法判断归属项目。
+- 实测基线（8399 条）：标题含「迭代」189 条，其中 title+content 均无 mcore/memorycore 的 **110 条（58%）无头**；`project_path` 为空 7976（95%）；`scope=global` 8304（99%）。
+- 根因：检索端（context_pack/entity_search/search/rollup）已透传 project_path/scope，但**写入侧缺口**——`dedup.ingest()` 不传 project_path、`memory_ingest()` 不暴露、hook 不发送、提取 prompt 无主体上下文。
+
+### 方案（详见 `docs/plans/2026-08-26-memory-subject-context.md`）
+- **P1 提取期注入主体**（P0）：`extraction.py` 注入 Active Context（project_name/path/scope），`ExtractedFact` 加 `subject`/`entities`，强化「自包含」规则要求 title 带项目名前缀，输出 schema 加 subject/entities。
+- **P2 ingest 落库 metadata**（P0）：`dedup.ingest()`/`server.memory_ingest()` 加 `project_path`/`scope` 参数并落库，tags 加 `project:*`；`scripts/hooks/mcore-ingest.py` 加 `_detect_project()` 探测（claude slug / git root / 环境变量）。
+- **P3 实体索引兜底**（P0）：`entities.py` 加 `resolve_project_entity()`，`sync_memory_entities` 对带 project_path 的记录强制注入项目实体行 → `entity_search("mcore")` 确定性命中。
+- **P4 检索端主体扩展**（P1）：查询期项目名低权重扩展 + 调用方自动探测 project_path（当前 Hermes 传 `(none)`）。
+- **P5 存量回填**（P2，可选）：`scripts/backfill_subject.py` 高置信标主体 / 低置信进 review，dry-run + 备份 + 幂等。
+
+### 配置
+- `config.yaml` 新增 `subject_context` 段（enabled / default_scope / projects 白名单 name+paths+aliases+scope）。
+
+### 验证（待实施后填写）
+- 新提取 mcore 迭代记忆 title/content 含 mcore（抽检 ≥90%）；新记录 project_path/scope/project:* 正确；`entity_search("mcore")` 命中全部 mcore 记录；全量 pytest 通过。
