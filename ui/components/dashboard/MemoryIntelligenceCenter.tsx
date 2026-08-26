@@ -52,7 +52,7 @@ export function MemoryIntelligenceCenter() {
       try {
         const apiBaseUrl = getApiBaseUrl();
         const [curatorResponse, statsResponse, memoriesResponse, governanceCountsResponse] = await Promise.all([
-          fetch(`${apiBaseUrl}/api/curator/status`, { signal: controller.signal }),
+          fetch(`${apiBaseUrl}/api/v1/curator/status`, { signal: controller.signal }),
           fetch(`${apiBaseUrl}/api/v1/stats?user_id=${encodeURIComponent(userId)}`, { signal: controller.signal }),
           fetch(`${apiBaseUrl}/api/v1/memories/filter`, {
             method: "POST",
@@ -67,7 +67,7 @@ export function MemoryIntelligenceCenter() {
               show_archived: true,
             }),
           }),
-          fetch(`${apiBaseUrl}/api/governance/counts`, { signal: controller.signal }),
+          fetch(`${apiBaseUrl}/api/v1/governance/counts`, { signal: controller.signal }),
         ]);
 
         if (!curatorResponse.ok || !statsResponse.ok || !memoriesResponse.ok) {
@@ -121,13 +121,13 @@ export function MemoryIntelligenceCenter() {
     setLlmRunning(true);
     try {
       const apiBaseUrl = getApiBaseUrl();
-      await fetch(`${apiBaseUrl}/api/curator/llm`, {
+      await fetch(`${apiBaseUrl}/api/v1/curator/llm`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ dry_run: false }),
       });
       const poll = async (): Promise<void> => {
-        const res = await fetch(`${apiBaseUrl}/api/curator/llm/latest`);
+        const res = await fetch(`${apiBaseUrl}/api/v1/curator/llm/latest`);
         if (!res.ok) return;
         const data = (await res.json()) as { status?: string };
         if (data.status === "running") {

@@ -37,8 +37,8 @@ async function refreshForPath(pathname: string): Promise<void> {
   } else if (pathname.startsWith("/settings")) {
     fetches.push(fetch(`${base}/api/v1/config`));
   } else if (pathname.startsWith("/governance")) {
-    fetches.push(fetch(`${base}/api/governance/metrics`));
-    fetches.push(fetch(`${base}/api/governance/decisions?review_status=actionable&limit=500`));
+    fetches.push(fetch(`${base}/api/v1/governance/metrics`));
+    fetches.push(fetch(`${base}/api/v1/governance/decisions?review_status=actionable&limit=500`));
   } else if (pathname.startsWith("/profile")) {
     fetches.push(fetch(`${base}/api/v1/profile`));
   }
@@ -58,7 +58,7 @@ export function Navbar() {
   useEffect(() => {
     const fetchActionableCount = async () => {
       try {
-        const res = await fetch(`${getApiBaseUrl()}/api/governance/counts`);
+        const res = await fetch(`${getApiBaseUrl()}/api/v1/governance/counts`);
         if (!res.ok) return;
         const payload = await res.json();
         const data = payload.data ?? payload;

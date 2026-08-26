@@ -468,3 +468,35 @@ def test_frontend_config_write_ignores_masked_keys(monkeypatch, tmp_path):
     import yaml
     raw = yaml.safe_load(cfg.read_text(encoding="utf-8"))
     assert raw["extraction"]["api_key"] == "sk-testsecret1234567890"
+
+
+def test_frontend_v1_dashboard_health_and_legacy_fallback():
+    """E1 Phase 1: /api/v1/dashboard aggregation + /api/v1/health-score +
+    v1 fallback for curator/governance/graph (frontend now uses /v1 only)."""
+    with _client() as client:
+        dashboard = client.get("/api/v1/dashboard")
+        health = client.get("/api/v1/health-score")
+        curator_v1 = client.get("/api/v1/curator/status?limit=5")
+        governance_v1 = client.get("/api/v1/governance/counts")
+        graph_v1 = client.get("/api/v1/graph?limit=1")
+
+    assert dashboard.status_code == 200
+    payload = dashboard.json()
+    assert "stats" in payload and "curator" in payload
+    assert "governance" in payload and "apps" in payload
+    assert "maintenance" in payload
+    assert payload["total_memories"] >= 0
+
+    assert health.status_code == 200
+    health_payload = health.json()
+    assert "quality" in health_payload and "risk" in health_payload
+    assert "llmGovernance" in health_payload
+    assert "metrics" in health_payload
+    assert 0 <= float(health_payload["quality"]) <= 100
+    assert 0 <= float(health_payload["risk"]) <= 100
+
+    # v1 fallback routes (legacy handlers behind /api/v1/*) must answer.
+    assert curator_v1.status_code == 200
+    assert "stats" in curator_v1.json()  # v1 surface returns the bare payload (no `data` wrapper)
+    assert governance_v1.status_code == 200
+    assert graph_v1.status_code == 200

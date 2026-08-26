@@ -5813,3 +5813,33 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 - 衰减为惰性（注入路径触发）+ 幂等（decayed_at 水位），无独立定时器、无热路径 LLM 成本；仅新鲜度超阈值时注入块附告警。
 - C3 已随 governance_decisions 全部 applied 收敛；剩余计划项仅 E1（前端 4 页重构，独立排期）+ F5（可选）。
 - config.yaml 仍含工作区手动修改（model=qwen3.7-flash-2026-07-15 等）未提交。
+
+---
+
+## [迭代 25] 2026-08-26 — E1 Phase 1：前端 API 收敛 + Dashboard 聚合 + 健康评分后端化
+
+### 背景
+- E1 前端收敛方案已落盘 `docs/plans/2026-08-26-frontend-4page-redesign.md`，用户拍板 1A+2A+3A+4A（Governance/Apps 内联、评分迁后端、Context Lab 卡片化）。本轮实施 **Phase 1 基建**。
+
+### 变更（后端）
+- `memorycore/frontend_helpers.py`：
+  - `dashboard_v1_payload(limit)` — 聚合 stats + apps + curator status + governance metrics + maintenance latest + profile attrs 数，前端 Dashboard 单请求；逐项 best-effort 降级；
+  - `health_score_v1_payload()` — 健康评分后端化（复刻前端 MemoryIntelligenceCenter 2026-08-24 B1-B5 口径：active 池复用率 / memory_links 真实覆盖 / pending-cleanup 占比 / LLM 治理中性分 / weightedScore 归一化）。
+- `memorycore/frontend_v1.py`：新增 `GET /api/v1/dashboard`、`GET /api/v1/health-score`。
+- v1 fallback 确认：`/api/v1/curator/*`、`/api/v1/governance/*`、`/api/v1/graph` 已由 `_V1_LEGACY_FALLBACK` 平滑支持（返回裸 payload，无 `data` 包装）。
+
+### 变更（前端）
+- legacy → v1 换址（13 处，0 残留 legacy 调用）：
+  - `useGraphPage.ts` → `/api/v1/graph`；`Navbar.tsx` → `/api/v1/governance/{metrics,decisions,counts}`；
+  - `MemoryOperationsPanel.tsx` → `/api/v1/curator/{status,apply,llm,llm/latest}`（status 解析兼容裸 payload）；
+  - `MemoryIntelligenceCenter.tsx` → `/api/v1/curator/*`、`/api/v1/governance/counts`（本就兼容双格式）。
+
+### 验证
+- 新增 `test_frontend_v1_dashboard_health_and_legacy_fallback`：dashboard 聚合字段齐全、health-score 在 0-100、v1 fallback 路由 200。
+- 全量测试：**563 passed / 7 skipped**（+1，零回归）。
+- 端到端：`/api/v1/dashboard` 200（total 8226 / apps 6 / profile_attrs 13）；`/api/v1/health-score` 200（quality 78 / risk 100 / llmGovernance 50）；UI build + 部署后 :18318 200。
+- 前端 `grep -rn "api/curator|api/governance|api/graph"`（排除 v1）= 0。
+
+### 风险 / 说明
+- v1 与 legacy 返回结构差异（裸 vs `{data}`）已在前端兼容处理；legacy 路由保留 deprecated 未删（Phase 3 后清理）。
+- Dashboard 重复请求（panel + intelligence center 各拉 curator status）留待 Phase 3 组件拆分时用 Redux 消重；聚合接口已就绪。

@@ -243,6 +243,12 @@ def _dispatch_v1_compat(
             scope=_str_q(query, "scope", "") or "",
             project_path=_str_q(query, "project_path", "") or "",
         )
+    if parts == ["dashboard"] and method == "GET":
+        from memorycore.frontend_helpers import dashboard_v1_payload
+        return dashboard_v1_payload(limit=_int_q(query, "limit", 200))
+    if parts == ["health-score"] and method == "GET":
+        from memorycore.frontend_helpers import health_score_v1_payload
+        return health_score_v1_payload()
     if parts == ["context-traces"] and method == "GET":
         return get_context_quality_stats(_int_q(query, "limit", 500))
     if len(parts) == 1 and parts[0] == "apps" and method == "GET":

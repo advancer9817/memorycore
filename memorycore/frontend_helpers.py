@@ -463,3 +463,180 @@ def _systemctl_user_show(unit: str, properties: list[str]) -> dict[str, str]:
 
 _curator_status_cache: dict[str, Any] = {}
 _curator_status_cache_ts: float = 0.0
+
+
+def dashboard_v1_payload(limit: int = 200) -> dict[str, Any]:
+    """Aggregated Dashboard payload (single v1 request).
+
+    Combines stats + apps + curator status + governance metrics + maintenance
+    latest + profile attribute count so the frontend Dashboard issues ONE
+    request instead of several parallel fetches. Each section is best-effort:
+    a failing section degrades to its empty value, never failing the request.
+    """
+    from memorycore.storage.crud import get_memory_stats
+    from memorycore.storage.governance import get_governance_metrics
+    from memorycore.storage.maintenance import get_latest_maintenance_job
+
+    stats: dict[str, Any] = {}
+    apps: list[Any] = []
+    curator: dict[str, Any] = {}
+    governance: dict[str, Any] = {}
+    maintenance = None
+    profile_attrs = 0
+    try:
+        stats = get_memory_stats()
+    except Exception:
+        pass
+    try:
+        apps = _apps_list(limit=1000)["apps"]
+    except Exception:
+        pass
+    try:
+        from memorycore.frontend_metrics import _curator_status_payload as _curator_payload
+        curator = _curator_payload(limit=limit)
+    except Exception:
+        pass
+    try:
+        governance = get_governance_metrics()
+    except Exception:
+        pass
+    try:
+        maintenance = get_latest_maintenance_job()
+    except Exception:
+        pass
+    try:
+        from memorycore.storage.db import read_conn
+        with read_conn() as conn:
+            row = conn.execute("SELECT COUNT(*) FROM user_profile_attrs").fetchone()
+            profile_attrs = int(row[0]) if row else 0
+    except Exception:
+        pass
+    return {
+        "total_memories": stats.get("total", 0),
+        "stats": stats,
+        "apps": apps,
+        "curator": curator,
+        "governance": governance,
+        "maintenance": maintenance,
+        "profile_attrs": profile_attrs,
+    }
+
+
+def health_score_v1_payload() -> dict[str, Any]:
+    """Backend health-quality scoring (single source of truth).
+
+    Mirrors `MemoryIntelligenceCenter` weighted scoring as of the 2026-08-24
+    B1-B5 caliber fixes: reuse coverage over the ACTIVE pool, linked coverage
+    from real memory_links, non-archived ratio = pending-cleanup share of the
+    usable pool, neutral LLM governance when never run. Frontend renders this
+    payload instead of computing scores locally.
+    """
+    from memorycore.storage.crud import get_memory_stats
+    from memorycore.frontend_metrics import _curator_status_payload
+    from memorycore.storage.db import read_conn
+
+    stats = get_memory_stats()
+    by_status = stats.get("by_status") or {}
+    active = int(by_status.get("active", 0))
+    stale = int(by_status.get("stale", 0))
+    superseded = int(by_status.get("superseded", 0))
+    contradicted = int(by_status.get("contradicted", 0))
+    active_never = int(stats.get("active_never_accessed_count", 0))
+    unique_linked = int(stats.get("unique_linked_memories", 0))
+    link_total = int(stats.get("link_count", 0))
+    pending_cleanup = stale + superseded + contradicted
+    usable_pool = active + stale + contradicted + superseded
+
+    def _pct(num: float, den: float) -> float:
+        return min(100.0, round(num / den * 100)) if den > 0 else 0.0
+
+    def _clamp(value: float) -> float:
+        return max(0.0, min(100.0, round(value)))
+
+    active_reuse = _pct(active - active_never, active)
+    linked_coverage = _pct(unique_linked, active)
+    pending_share = _pct(pending_cleanup, usable_pool)
+
+    contra_actionable = 0
+    dup_actionable = 0
+    try:
+        with read_conn() as conn:
+            rows = conn.execute(
+                "SELECT decision_type, COUNT(*) as cnt FROM governance_decisions"
+                " WHERE review_status IN ('needs_review','auto_approved') AND recommended_action != 'keep'"
+                " GROUP BY decision_type"
+            ).fetchall()
+        dist = {row["decision_type"]: int(row["cnt"]) for row in rows}
+        contra_actionable = int(dist.get("contradiction", 0))
+        dup_actionable = int(dist.get("semantic_duplicate", 0))
+    except Exception:
+        pass
+    # Backend approximation of the frontend "high-severity attention items".
+    high_risk_count = contra_actionable + dup_actionable
+
+    risk_score = _clamp(
+        100
+        - high_risk_count * 18
+        - min(dup_actionable, 100) * 0.28
+        - min(contra_actionable, 20) * 2
+    )
+
+    llm_score = 50.0
+    llm_status = "unknown"
+    try:
+        curator = _curator_status_payload(limit=50)
+        llm = curator.get("llm_curator") or {}
+        llm_status = str(
+            llm.get("last_result") or (llm.get("latest_job") or {}).get("status") or "unknown"
+        )
+        if llm_status in ("success", "succeeded"):
+            llm_score = 100.0
+        elif llm_status == "running":
+            llm_score = 62.0
+    except Exception:
+        pass
+
+    weights = {
+        "risk": 0.34,
+        "pending": 0.16,
+        "linked": 0.08,
+        "reuse": 0.24,
+        "llm": 0.14,
+    }
+    total_weight = sum(weights.values())
+    quality = _clamp(
+        (
+            _clamp(risk_score) * weights["risk"]
+            + _clamp(100 - pending_share) * weights["pending"]
+            + _clamp(linked_coverage) * weights["linked"]
+            + _clamp(active_reuse) * weights["reuse"]
+            + _clamp(llm_score) * weights["llm"]
+        )
+        / total_weight
+    )
+
+    return {
+        "quality": quality,
+        "risk": risk_score,
+        "llmGovernance": llm_score,
+        "llmStatus": llm_status,
+        "metrics": {
+            "active": active,
+            "stale": stale,
+            "superseded": superseded,
+            "contradicted": contradicted,
+            "active_never_accessed": active_never,
+            "active_reuse_coverage": active_reuse,
+            "linked_coverage": linked_coverage,
+            "link_count": link_total,
+            "unique_linked_memories": unique_linked,
+            "pending_cleanup_share": pending_share,
+            "pending_cleanup": pending_cleanup,
+            "usable_pool": usable_pool,
+        },
+        "signals": {
+            "high_risk_count": high_risk_count,
+            "contradiction_actionable": contra_actionable,
+            "duplicate_actionable": dup_actionable,
+        },
+    }

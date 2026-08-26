@@ -37,10 +37,10 @@ export const MemoryOperationsPanel = () => {
   };
 
   const fetchStatus = React.useCallback(async () => {
-    const response = await fetch(`${getApiBaseUrl()}/api/curator/status`);
+    const response = await fetch(`${getApiBaseUrl()}/api/v1/curator/status`);
     if (!response.ok) throw new Error(`Curator status request failed with ${response.status}`);
     const payload = await response.json();
-    setStatus(payload.data);
+    setStatus((payload as { data?: CuratorStatus }).data ?? (payload as CuratorStatus));
   }, []);
 
   useEffect(() => {
@@ -52,7 +52,7 @@ export const MemoryOperationsPanel = () => {
     setApplying(true);
     setRunState({ state: "running", startedAt: started.toISOString() });
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/curator/apply`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/v1/curator/apply`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ limit: 500 }),
@@ -85,7 +85,7 @@ export const MemoryOperationsPanel = () => {
 
   const pollJob = React.useCallback(async (jobId: string, startedAt: number) => {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/curator/llm/${jobId}`);
+      const response = await fetch(`${getApiBaseUrl()}/api/v1/curator/llm/${jobId}`);
       if (!response.ok) {
         setLlmRunState({ state: "idle" });
         setLlmRunning(false);
@@ -115,7 +115,7 @@ export const MemoryOperationsPanel = () => {
   useEffect(() => {
     const saved = localStorage.getItem(LLM_JOB_KEY);
     if (!saved) {
-      fetch(`${getApiBaseUrl()}/api/curator/llm/latest`).then((response) => response.json()).then((payload) => {
+      fetch(`${getApiBaseUrl()}/api/v1/curator/llm/latest`).then((response) => response.json()).then((payload) => {
         const data = payload.data || payload;
         if (data.status === "running" && data.job_id) {
           const startedAt = Date.now();
@@ -147,7 +147,7 @@ export const MemoryOperationsPanel = () => {
     setLlmRunning(true);
     setLlmRunState({ state: "running", startedAt });
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/curator/llm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ dry_run: true }) });
+      const response = await fetch(`${getApiBaseUrl()}/api/v1/curator/llm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ dry_run: true }) });
       const payload = await response.json();
       if (!response.ok || payload.ok === false) throw new Error(payload?.error?.message || `LLM Curator failed with ${response.status}`);
       const jobId = (payload.data || payload)?.job_id;

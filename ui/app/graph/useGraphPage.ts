@@ -50,7 +50,7 @@ export function useGraphPage() {
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true); setError(null); setGraphReady(false);
-    fetch(`${getApiBaseUrl()}/api/graph?status=all&limit=${limit}`, { signal: controller.signal })
+    fetch(`${getApiBaseUrl()}/api/v1/graph?status=all&limit=${limit}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((p) => {
         const raw = p.data ?? p;
