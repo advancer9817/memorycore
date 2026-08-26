@@ -5843,3 +5843,22 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 ### 风险 / 说明
 - v1 与 legacy 返回结构差异（裸 vs `{data}`）已在前端兼容处理；legacy 路由保留 deprecated 未删（Phase 3 后清理）。
 - Dashboard 重复请求（panel + intelligence center 各拉 curator status）留待 Phase 3 组件拆分时用 Redux 消重；聚合接口已就绪。
+
+---
+
+## [迭代 26] 2026-08-26 — E1 Phase 2/3：组件瘦身确认 + Navbar 5 项导航收敛
+
+### Phase 2（组件拆分/清理）审计结论
+- `MemoryOperationsPanel.tsx` 现 258 行（迭代 20/21 已拆出 `MemoryOperationsView`）——历史 1029 行单体已拆分，**Phase 2 验收达成**。
+- 死组件复查：`IterationMetricsPanel` 已不存在；`form-view-backup.tsx` 被 `form-view.tsx` 引用（非死）；intelligence/ 与 shared/ 全部组件均有引用（0 死代码）。
+- `CurationActivityPanel` 已接真实 curatorStatus/最近记忆（非硬编码 3 条 Timeline）——架构地图 P1 项已修复。
+
+### Phase 3 子项①：Navbar 5 项导航（E1 决策 1A/2A 落地第一步）
+- `components/Navbar.tsx`：导航 7 → 5 项（移除 Apps / Governance；保留 Dashboard/Memories/Graph/Profile/Settings）。
+- 治理待办徽章从 Governance 导航项迁移到 **Dashboard（/）导航项**（amber badge 仍显示 actionable 待办数，指引打开 Dashboard 治理面板）。
+- 清理 unused icons（AppWindow/ShieldCheck）。
+- `/apps`、`/governance` 路由保留（Phase 3 Dashboard 内联后处理空壳/重定向）。
+
+### 验证
+- tsc 零错误；build + systemd 部署；:18318 HTTP 200；首页 HTML 导航仅含 /memories /graph /profile /settings（+/），无 /apps /governance。
+- 全量后端测试仍 563 passed（本轮未动后端）。

@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode, useCallback, useEffect, useState } from "react";
-import { AppWindow, Home, Layers3, Menu, Network, RefreshCcw, Settings, ShieldCheck, UserRound } from "lucide-react";
+import { Home, Layers3, Menu, Network, RefreshCcw, Settings, UserRound } from "lucide-react";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -120,9 +120,7 @@ export function Navbar() {
   const navItems: NavItem[] = [
     { href: "/", label: messages.nav.dashboard, icon: <Home /> },
     { href: "/memories", label: messages.nav.memories, icon: <Layers3 /> },
-    { href: "/apps", label: messages.nav.apps, icon: <AppWindow /> },
     { href: "/graph", label: messages.nav.graph, icon: <Network className="h-4 w-4" /> },
-    { href: "/governance", label: messages.nav.governance, icon: <ShieldCheck className="h-4 w-4" /> },
     { href: "/profile", label: messages.nav.profile, icon: <UserRound className="h-4 w-4" /> },
     { href: "/settings", label: messages.nav.settings, icon: <Settings className="h-4 w-4" /> },
   ];
@@ -143,7 +141,7 @@ export function Navbar() {
       >
         {item.icon}
         {item.label}
-        {item.href === "/governance" && actionableCount > 0 && (
+        {item.href === "/" && actionableCount > 0 && (
           <span className="ml-0.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-amber-950 text-[10px] font-bold leading-none">
             {actionableCount > 99 ? "99+" : actionableCount}
           </span>
