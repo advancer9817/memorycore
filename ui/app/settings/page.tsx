@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label"
 import { SaveIcon, RotateCcw } from "lucide-react"
 import { FormView } from "@/components/form-view"
 import { JsonEditor } from "@/components/json-editor"
+import { BackupSettings } from "@/components/form-view-backup"
+import { MaintenanceHistory } from "@/components/settings/MaintenanceHistory"
 import { useConfig } from "@/hooks/useConfig"
 import { useSelector } from "react-redux"
 import { RootState } from "@/store/store"
@@ -39,7 +41,7 @@ export default function SettingsPage() {
     llm: configState.llm,
     strategy: configState.strategy || {},
   })
-  const [viewMode, setViewMode] = useState<"form" | "json">("form")
+  const [viewMode, setViewMode] = useState<"form" | "data" | "json">("form")
   const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL)
   const { fetchConfig, saveConfig, resetConfig, isLoading, error } = useConfig()
 
@@ -164,14 +166,22 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as "form" | "json")} className="w-full animate-fade-slide-down delay-2">
-        <TabsList className="grid w-full grid-cols-2 mb-6">
+      <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as "form" | "data" | "json")} className="w-full animate-fade-slide-down delay-2">
+        <TabsList className="grid w-full grid-cols-3 mb-6">
           <TabsTrigger value="form">{messages.settings.formView}</TabsTrigger>
+          <TabsTrigger value="data">{messages.settings.dataMaintenance}</TabsTrigger>
           <TabsTrigger value="json">{messages.settings.jsonEditor}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="form">
           <FormView settings={settings} onChange={setSettings} />
+        </TabsContent>
+
+        <TabsContent value="data">
+          <div className="space-y-6">
+            <BackupSettings />
+            <MaintenanceHistory />
+          </div>
         </TabsContent>
 
         <TabsContent value="json">

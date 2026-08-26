@@ -5949,3 +5949,17 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 - 全量测试：**573 passed / 7 skipped**（+5）。
 - 真实库 dry-run（经 API）：`clean_count=4321`（archived_unused 4306 + test 垃圾 15）、`protected=495`、scanned 4816。
 - 删除链路保护不变：执行仍强制整库备份 + 幂等 plan_token + UI 二次确认（clean 勾选）。
+
+---
+
+## [迭代 32] 2026-08-26 — E1 Phase 3-②：Settings Tab 化（表单 / 数据与维护 / JSON）
+
+### 变更（前端）
+- `app/settings/page.tsx`：Tabs 从（表单 / JSON）扩展为 **表单 / 数据与维护 / JSON** 三栏。
+- `components/settings/MaintenanceHistory.tsx`（新）——"数据与维护"Tab 内展示最近一次一键维护任务（读 `/api/v1/maintenance/latest`）：状态徽章 / 动作类型 / 时间 / 摘要计数 / 备份路径 / 错误；无记录时肯定式空状态（引导去向看板执行）。
+- 数据 Tab 复用现有 `BackupSettings`（备份/导入导出设置）。
+- i18n en/zh：settings 段新增 `dataMaintenance / dataMaintenanceDescription / recentMaintenance / recentMaintenanceDescription / noMaintenanceJobs / noMaintenanceJobsDetail / loading`。
+
+### 验证
+- tsc 零错误；build 后确认 `noMaintenanceJobs` 进入 `app/settings/page-5dadd31f723fe600.js`；部署 :18318/settings 200。
+- `/api/v1/maintenance/latest` 当前返回 `{status:"none"}`（尚无执行记录）→ 页面显示"暂无维护记录"，与后端一致。
