@@ -70,7 +70,7 @@ export type MaintenancePlan = {
   plan_token: string;
   archive_count: number;
   archive_ids: string[];
-  groups: MaintenanceGroup[];
+  groups?: MaintenanceGroup[];
   summary: Record<string, number>;
   // merge (D2) fields
   merge_count?: number;

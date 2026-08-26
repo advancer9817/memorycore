@@ -5890,3 +5890,20 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 ### 验证
 - tsc 零错误；build 后确认 `backHref` 代码进入新 chunk（1428/8289）；systemd 部署 :18318 200。
 - 说明：Electron 预览面板对哈希不变的旧 chunk 有 HTTP 缓存，如需立即看到返回箭头请硬刷新（Ctrl+Shift+R 或清除站点缓存）；治理页 SSR 为 client 渲染空壳属 Next.js streaming 正常行为。
+
+---
+
+## [迭代 29] 2026-08-26 — 修复 merge 维护计划前端崩溃（Cannot read properties of undefined (reading 'map')）
+
+### 根因
+- 后端 `/api/v1/maintenance/plan?action=merge` 返回 `merge_groups`（**无 `groups` 字段**，`groups` 仅 archive 计划的字段）。
+- 前端 `MemoryOperationsView.tsx` 预览区无条件渲染 `plan.groups.map(...)` → merge 时 `groups` 为 undefined → 崩溃。
+
+### 修复（前端）
+- `memory-operations-types.ts`：`MaintenancePlan.groups` 改为**可选**（仅 archive 有），类型语义对齐三种 action。
+- `MemoryOperationsView.tsx`：新增 `maintenancePlanPreview(state)` helper——按 action 归一化预览条目（archive→groups / merge→merge_groups[key,count,loser_titles] / clean→clean_count）；计划预览区块全部改走 helper（可选链 + 空候选显示 all-clear）。
+
+### 验证
+- tsc 零错误；build 后确认 `merge_groups` 代码进入 app/page chunk；部署 :18318 200。
+- 真实库 merge plan 返回 `merge_groups: []`（0 候选）→ 修复后显示"无重复候选"（不再崩溃）。
+- 既有 D2/D3 单测 9 项仍通过（后端未动）。

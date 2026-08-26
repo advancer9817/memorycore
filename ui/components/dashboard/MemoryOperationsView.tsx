@@ -194,20 +194,20 @@ export function MemoryOperationsView({
 
           {maintenanceRunState.state === "planReady" && maintenanceRunState.plan && (
             <div className="mt-2 rounded bg-zinc-800/60 px-2 py-1.5 text-xs space-y-1">
-              <div className="flex items-center gap-2 text-zinc-300">
-                <Badge variant="outline" className="border-sky-700 bg-sky-500/10 text-sky-300 text-xs shrink-0">{t.dashboard.maintenancePreview}</Badge>
-                <span>{t.dashboard.maintenanceGroups}: {maintenanceRunState.plan.groups.map((group) => `${group.reason} ${group.count}`).join(" · ") || "—"}</span>
-              </div>
-              {maintenanceRunState.plan.groups.slice(0, 3).map((group) => {
-                const titles = (group.samples ?? []).map((sample) => sample.title).filter((title): title is string => Boolean(title)).slice(0, 3);
-                return (
-                  <div key={group.reason} className="text-zinc-400">
-                    <span className="text-zinc-300">{group.reason}</span> ({group.count})
-                    {titles.length > 0 && <span className="text-zinc-500"> — {titles.join(" / ")}</span>}
+              {maintenancePlanPreview(maintenanceRunState).length > 0 ? (
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-zinc-300">
+                    <Badge variant="outline" className="border-sky-700 bg-sky-500/10 text-sky-300 text-xs shrink-0">{t.dashboard.maintenancePreview}</Badge>
+                    <span>{maintenancePlanPreview(maintenanceRunState).map((item) => `${item.reason} ${item.count}`).join(" · ")}</span>
                   </div>
-                );
-              })}
-              {maintenancePlanCount(maintenanceRunState) === 0 && (
+                  {maintenancePlanPreview(maintenanceRunState).slice(0, 3).map((item) => (
+                    <div key={item.reason} className="text-zinc-400">
+                      <span className="text-zinc-300">{item.reason}</span> ({item.count})
+                      {item.samples && item.samples.length > 0 && <span className="text-zinc-500"> — {item.samples.join(" / ")}</span>}
+                    </div>
+                  ))}
+                </div>
+              ) : (
                 <div className="text-emerald-300">{(maintenanceRunState.action ?? "archive") === "archive" ? t.dashboard.maintenanceNoCandidates : t.dashboard.maintenanceNoCandidatesAny}</div>
               )}
             </div>
@@ -238,6 +238,28 @@ function maintenancePlanCount(state: MaintenanceRunState): number {
   if (action === "merge") return plan.merge_count ?? 0;
   if (action === "clean") return plan.clean_count ?? 0;
   return plan.archive_count ?? 0;
+}
+
+function maintenancePlanPreview(state: MaintenanceRunState): Array<{ reason: string; count: number; samples?: string[] }> {
+  const plan = state.plan;
+  if (!plan) return [];
+  const action = state.action ?? "archive";
+  if (action === "merge") {
+    return (plan.merge_groups ?? []).map((group) => ({
+      reason: group.key,
+      count: group.count,
+      samples: (group.loser_titles ?? []).slice(0, 3),
+    }));
+  }
+  if (action === "clean") {
+    const count = plan.clean_count ?? 0;
+    return count > 0 ? [{ reason: "clean", count }] : [];
+  }
+  return (plan.groups ?? []).map((group) => ({
+    reason: group.reason,
+    count: group.count,
+    samples: (group.samples ?? []).map((sample) => sample.title ?? "…").slice(0, 3),
+  }));
 }
 
 function maintenanceExecuteLabel(t: Messages, state: MaintenanceRunState): string {
