@@ -21,6 +21,7 @@ export const en = {
     reset: "Reset",
     save: "Save",
     saving: "Saving...",
+    migratedToDashboard: "This page has been integrated into the Dashboard — prefer using it there.",
     filter: "Filter",
     filters: "Filters",
     clearFilters: "Clear Filters",

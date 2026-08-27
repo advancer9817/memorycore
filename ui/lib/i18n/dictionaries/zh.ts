@@ -23,6 +23,7 @@ export const zh = {
     reset: "重置",
     save: "保存",
     saving: "保存中...",
+    migratedToDashboard: "此页面已整合进看板，建议直接在看板中使用。",
     filter: "筛选",
     filters: "筛选条件",
     clearFilters: "清除筛选",

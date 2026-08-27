@@ -28,6 +28,7 @@ import { useGovernanceCockpit } from "@/hooks/useGovernanceCockpit";
 import { useI18n } from "@/hooks/useI18n";
 import { useToast } from "@/hooks/use-toast";
 import { PageShell } from "@/components/shared/PageShell";
+import { MigratedNotice } from "@/components/shared/MigratedNotice";
 import type { GovernanceReviewStatus } from "@/components/dashboard/intelligence/types";
 import { isActionableDecision } from "@/components/dashboard/intelligence/utils";
 import { GovernanceDecisionSheet } from "./components/GovernanceDecisionSheet";
@@ -284,6 +285,7 @@ function GovernancePageInner() {
       backHref="/"
       backLabel={messages.nav.dashboard}
     >
+      <MigratedNotice />
       {cockpit.error && (
         <Alert className="mb-6 border-red-800 bg-red-950/30 text-red-200">
           <AlertDescription>{cockpit.error}</AlertDescription>

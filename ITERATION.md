@@ -5985,3 +5985,28 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ### 验证（待实施后填写）
 - 新提取 mcore 迭代记忆 title/content 含 mcore（抽检 ≥90%）；新记录 project_path/scope/project:* 正确；`entity_search("mcore")` 命中全部 mcore 记录；全量 pytest 通过。
+
+---
+
+## [迭代 33] 2026-08-26 — E1 Phase 3-③：旧路由空壳提示（/apps、/governance 整合提示）
+
+### 变更（前端）
+- `components/shared/MigratedNotice.tsx`（新）——琥珀色提示条："此页面已整合进看板，建议直接在看板中使用" + 返回看板链接。
+- `app/apps/page.tsx`：加入 MigratedNotice + backHref 返回看板（列表页保留，详情页 /apps/[appId] 仍从 Dashboard 应用卡直达）。
+- `app/governance/page.tsx`：加入 MigratedNotice（治理详情仍可从 Dashboard 治理面板"打开详情"进入）。
+- i18n en/zh：`common.migratedToDashboard`。
+
+### 验证
+- tsc 零错误；build 后确认提示条代码进入 `app/apps/page-f98c80d72056c671.js` / `app/governance/page-e6fb06cfe3cf4a43.js`；部署三个路由均 200。
+
+---
+
+### E1 完成状态小结（8 路由 → 5 核心导航页 + 2 深层路由）
+- ✅ 导航 7 → 5 项（移除 Apps/Governance；治理徽章迁 Dashboard）
+- ✅ Governance/Apps 内联 Dashboard（面板 + 应用区块）
+- ✅ Context Lab 正式化（Dashboard 卡片）
+- ✅ 健康评分后端化（/api/v1/health-score）+ API 100% v1
+- ✅ Settings 3-Tab（表单 / 数据与维护 / JSON）+ 维护记录
+- ✅ 子页返回箭头（PageShell backHref）
+- ✅ 旧路由 /apps /governance 空壳提示 + 返回引导
+- ⏸ Phase 4 统一设计打磨（CSS token 全量替换）留待可选——现有 zinc 风格已全局一致，收益优先级低

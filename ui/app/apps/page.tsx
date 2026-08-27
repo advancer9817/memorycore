@@ -2,6 +2,7 @@
 
 import { AppFilters } from "./components/AppFilters";
 import { AppGrid } from "./components/AppGrid";
+import { MigratedNotice } from "@/components/shared/MigratedNotice";
 import { useI18n } from "@/hooks/useI18n";
 import { PageShell } from "@/components/shared/PageShell";
 
@@ -12,7 +13,10 @@ export default function AppsPage() {
     <PageShell
       title={messages.apps.title}
       subtitle={messages.apps.description}
+      backHref="/"
+      backLabel={messages.nav.dashboard}
     >
+      <MigratedNotice />
       <div className="pb-4 animate-fade-slide-down delay-1">
         <AppFilters />
       </div>
