@@ -822,14 +822,19 @@ def _clean_candidate_rows(
     return rows
 
 
-def plan_data_maintenance_clean(limit: int = CLEAN_DEFAULT_LIMIT) -> dict[str, Any]:
-    """Read-only hard-delete plan (whitelist only; protected records skipped)."""
+def _clean_candidate_items() -> tuple[list[dict[str, Any]], int, int]:
+    """Shared uncapped clean-candidate scan.
+
+    Returns (candidates, scanned, protected_count) where candidates is the
+    full whitelist-matched, protection-filtered list in scan order. Both the
+    capped plan and the paginated UI listing use this scan, so pagination
+    offsets stay consistent with the plan's candidate order.
+    """
     cfg = _clean_config()
     mode = cfg.get("mode", "aggressive")
     ttl_days = int(cfg.get("candidate_ttl_days", CLEAN_DEFAULT_TTL_DAYS))
     blacklist = tuple(cfg.get("source_agents", CLEAN_SOURCE_AGENT_BLACKLIST))
     min_chars = int(cfg.get("min_content_chars", CLEAN_DEFAULT_MIN_CONTENT_CHARS))
-    cap = _resolve_maintenance_cap(limit)
     cutoff = (datetime.now(timezone.utc) - timedelta(days=ttl_days)).isoformat(timespec="seconds")
 
     candidates: list[dict[str, Any]] = []
@@ -865,8 +870,21 @@ def plan_data_maintenance_clean(limit: int = CLEAN_DEFAULT_LIMIT) -> dict[str, A
             reasons.append("archived_unused")
         if not reasons:
             continue
-        candidates.append({"id": rid, "title": r.get("title") or "", "reason": ",".join(reasons)})
+        candidates.append({
+            "id": rid,
+            "title": r.get("title") or "",
+            "reason": ",".join(reasons),
+            "status": r.get("status") or "",
+            "created_at": r.get("created_at") or "",
+            "source_agent": r.get("source_agent") or "",
+        })
+    return candidates, len(seen), len(protected)
 
+
+def plan_data_maintenance_clean(limit: int = CLEAN_DEFAULT_LIMIT) -> dict[str, Any]:
+    """Read-only hard-delete plan (whitelist only; protected records skipped)."""
+    cap = _resolve_maintenance_cap(limit)
+    candidates, scanned, protected_count = _clean_candidate_items()
     candidates = candidates[:cap]
     token_source = "clean|" + ("|".join(sorted(c["id"] for c in candidates)) if candidates else "__empty__")
     plan_token = hashlib.sha256(token_source.encode("utf-8")).hexdigest()[:24]
@@ -880,13 +898,37 @@ def plan_data_maintenance_clean(limit: int = CLEAN_DEFAULT_LIMIT) -> dict[str, A
     return {
         "dry_run": True,
         "generated_at": now(),
-        "scanned": len(seen),
+        "scanned": scanned,
         "plan_token": plan_token,
         "clean_count": len(candidates),
         "clean_ids": [c["id"] for c in candidates],
-        "protected_count": len(protected),
+        "protected_count": protected_count,
         "groups": list(groups.values()),
-        "summary": {"clean": len(candidates), "scanned": len(seen), "protected": len(protected)},
+        "summary": {"clean": len(candidates), "scanned": scanned, "protected": protected_count},
+    }
+
+
+def list_data_maintenance_clean_candidates(offset: int = 0, limit: int = 100) -> dict[str, Any]:
+    """Paginated read-only clean-candidate listing for the UI preview dialog.
+
+    Uses the same candidate scan as the plan (consistent ordering/offset);
+    page size is capped at 500 rows per request.
+    """
+    candidates, scanned, protected_count = _clean_candidate_items()
+    total = len(candidates)
+    page_size = max(1, min(int(limit), 500))
+    start = max(0, int(offset))
+    items = candidates[start:start + page_size]
+    return {
+        "dry_run": True,
+        "generated_at": now(),
+        "action": "clean",
+        "total": total,
+        "offset": start,
+        "limit": len(items),
+        "scanned": scanned,
+        "protected_count": protected_count,
+        "items": items,
     }
 
 

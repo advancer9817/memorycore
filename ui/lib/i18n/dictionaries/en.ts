@@ -113,6 +113,7 @@ export const en = {
     maintenanceCleanReasonFragments: "Fragments",
     maintenanceCleanReasonArchivedUnused: "Archived & unused",
     maintenanceCleanReasonTestAgent: "Test agent",
+    maintenanceViewAll: (n: number) => `View all (${n})`,
     maintenanceStale: "Plan is stale (data changed since preview), run Generate Plan again.",
     maintenanceBusy: "Curator/maintenance is running — try again shortly.",
     maintenanceRestoreJob: "Restoring maintenance job state...",

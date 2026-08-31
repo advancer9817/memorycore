@@ -2,10 +2,18 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { Activity, Archive, Database, Play, Sparkles, Wrench, type LucideIcon } from "lucide-react";
+import { Activity, Archive, ChevronLeft, ChevronRight, Database, Play, Sparkles, Wrench, type LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -42,6 +50,16 @@ type MemoryOperationsViewProps = {
   cleanConfirmCount: number | null;
   onConfirmClean: () => void;
   onCancelClean: () => void;
+  cleanCandidatesOpen: boolean;
+  cleanCandidatesLoading: boolean;
+  cleanCandidatesItems: Array<{ id: string; title: string; reason: string }>;
+  cleanCandidatesTotal: number;
+  cleanCandidatesOffset: number;
+  cleanPageSize: number;
+  onOpenCleanCandidates: () => void;
+  onCloseCleanCandidates: () => void;
+  onPrevCleanCandidates: () => void;
+  onNextCleanCandidates: () => void;
   onApplyCurator: () => void;
   onRunLlmCurator: () => void;
   onShowAllActions: () => void;
@@ -64,6 +82,16 @@ export function MemoryOperationsView({
   cleanConfirmCount,
   onConfirmClean,
   onCancelClean,
+  cleanCandidatesOpen,
+  cleanCandidatesLoading,
+  cleanCandidatesItems,
+  cleanCandidatesTotal,
+  cleanCandidatesOffset,
+  cleanPageSize,
+  onOpenCleanCandidates,
+  onCloseCleanCandidates,
+  onPrevCleanCandidates,
+  onNextCleanCandidates,
   onApplyCurator,
   onRunLlmCurator,
   onShowAllActions,
@@ -214,7 +242,12 @@ export function MemoryOperationsView({
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2 text-zinc-300">
                     <Badge variant="outline" className="border-sky-700 bg-sky-500/10 text-sky-300 text-xs shrink-0">{t.dashboard.maintenancePreview}</Badge>
-                    <span>{maintenancePlanPreview(maintenanceRunState).map((item) => `${maintenanceReasonLabel(t, item.reason)} ${item.count}`).join(" · ")}</span>
+                    <span className="flex-1">{maintenancePlanPreview(maintenanceRunState).map((item) => `${maintenanceReasonLabel(t, item.reason)} ${item.count}`).join(" · ")}</span>
+                    {(maintenanceRunState.action ?? "archive") === "clean" && maintenancePlanCount(maintenanceRunState) > 0 && (
+                      <Button onClick={onOpenCleanCandidates} variant="outline" size="sm" className="h-6 text-[10px] border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors shrink-0">
+                        {t.dashboard.maintenanceViewAll(maintenancePlanCount(maintenanceRunState))}
+                      </Button>
+                    )}
                   </div>
                   {maintenancePlanPreview(maintenanceRunState).map((item) => (
                     <div key={item.reason} className="rounded bg-zinc-900/70 px-2 py-1.5 space-y-1">
@@ -279,6 +312,58 @@ export function MemoryOperationsView({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* 清理候选完整列表 — 分页 Dialog（全局样式），每条可点直达详情 */}
+      <Dialog open={cleanCandidatesOpen} onOpenChange={(open) => { if (!open) onCloseCleanCandidates(); }}>
+        <DialogContent className="border-zinc-800 bg-zinc-950 text-zinc-100 max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-100 flex items-center gap-2">
+              {t.dashboard.maintenanceActionClean}
+              <Badge variant="outline" className="border-zinc-700 bg-zinc-800 text-zinc-300 text-[10px]">{t.dashboard.maintenancePreview}</Badge>
+              <span className="text-zinc-400 text-xs font-normal">— {t.dashboard.maintenanceViewAll(cleanCandidatesTotal)}</span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto space-y-1 pr-1">
+            {cleanCandidatesLoading && (
+              <div className="text-zinc-500 text-xs py-2 animate-pulse">{t.dashboard.maintenancePlanning}</div>
+            )}
+            {!cleanCandidatesLoading && cleanCandidatesItems.map((item) => (
+              <Link
+                key={item.id}
+                href={`/memory/${item.id}`}
+                title={item.title || item.id}
+                className="group flex items-center gap-2 rounded bg-zinc-900/70 px-2 py-1.5 text-xs hover:bg-zinc-800 transition-colors"
+              >
+                <span className="flex-1 truncate text-zinc-300 group-hover:text-sky-300">{item.title || item.id}</span>
+                <Badge variant="outline" className="border-zinc-700 bg-zinc-800 text-zinc-400 text-[10px] shrink-0">{maintenanceReasonLabel(t, item.reason.split(",")[0])}</Badge>
+              </Link>
+            ))}
+            {!cleanCandidatesLoading && cleanCandidatesItems.length === 0 && (
+              <div className="text-zinc-500 text-xs py-2">{t.dashboard.maintenanceNoCandidatesAny}</div>
+            )}
+          </div>
+          <DialogFooter className="flex items-center justify-between gap-2">
+            <span className="text-zinc-500 text-xs">
+              {cleanCandidatesTotal === 0
+                ? "0 / 0"
+                : `${cleanCandidatesOffset + 1}–${Math.min(cleanCandidatesOffset + cleanCandidatesItems.length, cleanCandidatesTotal)} / ${cleanCandidatesTotal}`}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button onClick={onPrevCleanCandidates} disabled={cleanCandidatesLoading || cleanCandidatesOffset <= 0} variant="outline" size="sm" className="h-7 w-7 p-0 text-xs border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors">
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+              <Button onClick={onNextCleanCandidates} disabled={cleanCandidatesLoading || cleanCandidatesOffset + cleanCandidatesItems.length >= cleanCandidatesTotal} variant="outline" size="sm" className="h-7 w-7 p-0 text-xs border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors">
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+              <DialogClose asChild>
+                <Button onClick={onCloseCleanCandidates} variant="outline" size="sm" className="h-7 text-xs border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors">
+                  {t.common.cancel}
+                </Button>
+              </DialogClose>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

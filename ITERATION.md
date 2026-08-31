@@ -6046,3 +6046,23 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ### 备注
 - 预览列表为分组抽样（每组最多 5 条样本），避免 4321 条全量渲染拖垮面板；完整候选可点样本直达详情页核对，执行硬删前仍有全量备份兜底。
+
+## [迭代 36] 2026-08-31 — 清理候选全量列表：分页 Dialog + 后端分页接口
+
+### 变更（后端）
+- `storage/maintenance.py`：把 clean 候选扫描抽成共享函数 `_clean_candidate_items()`（返回全量候选 + scanned + protected_count，顺序与 plan 一致）；`plan_data_maintenance_clean` 改用共享扫描（行为不变）；新增 `list_data_maintenance_clean_candidates(offset, limit)` 分页函数（页大小上限 500，offse 与 plan 顺序一致）。
+- `frontend_v1.py`：新增路由 `GET /api/v1/maintenance/candidates?action=clean&offset=&limit=`（仅支持 clean），返回 `{total, offset, limit, items:[{id,title,reason,status,created_at,source_agent}], scanned, protected_count}`。
+
+### 变更（前端）
+- `components/dashboard/MemoryOperationsPanel.tsx`：新增候选列表状态 + `fetchCleanCandidates(offset)`（每页 100 条）+ 打开/关闭/上下页回调。
+- `components/dashboard/MemoryOperationsView.tsx`：
+  - 预览摘要行（clean 动作）新增「查看全部（N）」按钮。
+  - 新增分页 Dialog（shadcn Dialog 全局样式，zinc 暗色，max-w-2xl）：滚动列表逐条显示 title + 原因标签（复用 maintenanceReasonLabel），整行可点直达 `/memory/<id>`；底部显示当前区间（1–100 / 4321）+ 上一页/下一页/关闭。
+- i18n en/zh：新增 `dashboard.maintenanceViewAll`。
+
+### 验证
+- 后端 maintenance 测试 25 passed；`pnpm tsc --noEmit` 零错误；生产 build + postbuild 成功；mcore.service / mcore-ui.service 重启 active，UI 200。
+- 接口实测：`candidates?action=clean` total=4321 恒等；offset=0 返回 3 条（reason 含 source_agent 组合）、offset=100 返回 2 条、offset=4300 返回 21 条（末页）；分页区间无重叠。
+
+### 备注
+- 4521 条候选全量浏览不出面板，翻页每页 100 条；每条可点详情核对后再决定是否执行硬删（执行前仍会全量备份）。

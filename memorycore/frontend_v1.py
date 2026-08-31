@@ -355,6 +355,14 @@ def _dispatch_v1_compat(
             return plan_data_maintenance_clean(limit=_int_q(query, "limit", 0))
         from memorycore.storage.maintenance import plan_data_maintenance
         return plan_data_maintenance(limit=_int_q(query, "limit", 0))
+    if parts == ["maintenance", "candidates"] and method == "GET":
+        action = (query.get("action") or ["clean"])[0]
+        if action != "clean":
+            raise ValueError("unsupported maintenance candidate action: only clean is supported")
+        from memorycore.storage.maintenance import list_data_maintenance_clean_candidates
+        offset = max(0, _int_q(query, "offset", 0) or 0)
+        limit = max(1, _int_q(query, "limit", 100) or 100)
+        return list_data_maintenance_clean_candidates(offset=offset, limit=limit)
     if parts == ["maintenance", "latest"] and method == "GET":
         from memorycore.storage.maintenance import get_latest_maintenance_job
         return get_latest_maintenance_job() or {"job_id": None, "status": "none"}

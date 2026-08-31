@@ -29,6 +29,13 @@ export const MemoryOperationsPanel = () => {
   const [maintenanceBusy, setMaintenanceBusy] = useState(false);
   // 硬删确认框的候选条数（null = 未打开确认框）
   const [cleanConfirmCount, setCleanConfirmCount] = useState<number | null>(null);
+  // 清理候选完整列表（分页 Dialog）
+  const CLEAN_PAGE_SIZE = 100;
+  const [cleanCandidatesOpen, setCleanCandidatesOpen] = useState(false);
+  const [cleanCandidatesLoading, setCleanCandidatesLoading] = useState(false);
+  const [cleanCandidatesItems, setCleanCandidatesItems] = useState<Array<{ id: string; title: string; reason: string }>>([]);
+  const [cleanCandidatesTotal, setCleanCandidatesTotal] = useState(0);
+  const [cleanCandidatesOffset, setCleanCandidatesOffset] = useState(0);
   const maintenancePollRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const maintenancePollErrorsRef = React.useRef(0);
 
@@ -180,6 +187,24 @@ export const MemoryOperationsPanel = () => {
     }
   };
 
+  const fetchCleanCandidates = React.useCallback(async (offset: number) => {
+    setCleanCandidatesLoading(true);
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/v1/maintenance/candidates?action=clean&offset=${offset}&limit=${CLEAN_PAGE_SIZE}`);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.error?.message || "Clean candidates request failed");
+      const data = (payload as { data?: { items?: Array<{ id: string; title: string; reason: string }>; total?: number } }).data ?? payload;
+      setCleanCandidatesItems(data?.items ?? []);
+      setCleanCandidatesTotal(data?.total ?? 0);
+      setCleanCandidatesOffset(offset);
+    } catch {
+      setCleanCandidatesItems([]);
+      setCleanCandidatesTotal(0);
+    } finally {
+      setCleanCandidatesLoading(false);
+    }
+  }, []);
+
   const pollMaintenanceJob = React.useCallback(async (jobId: string, startedAt: number) => {
     try {
       const response = await fetch(`${getApiBaseUrl()}/api/v1/maintenance/${jobId}`);
@@ -263,7 +288,7 @@ export const MemoryOperationsPanel = () => {
     return () => { if (maintenancePollRef.current) clearTimeout(maintenancePollRef.current); };
   }, [pollMaintenanceJob]);
 
-  return <MemoryOperationsView messages={messages} locale={locale} status={status} applying={applying} llmRunning={llmRunning} runState={runState} runActionsShowAll={runActionsShowAll} llmRunState={llmRunState} maintenanceRunState={maintenanceRunState} maintenanceBusy={maintenanceBusy} cleanConfirmCount={cleanConfirmCount} onConfirmClean={() => { setCleanConfirmCount(null); void runMaintenanceExecute(); }} onCancelClean={() => setCleanConfirmCount(null)} onApplyCurator={() => void applyCurator()} onRunLlmCurator={() => void runLlmCurator()} onShowAllActions={() => setRunActionsShowAll(true)} onGenerateMaintenancePlan={() => void fetchMaintenancePlan()} onExecuteMaintenance={() => executeMaintenance()} onSelectMaintenanceAction={(action) => selectMaintenanceAction(action)} />;
+  return <MemoryOperationsView messages={messages} locale={locale} status={status} applying={applying} llmRunning={llmRunning} runState={runState} runActionsShowAll={runActionsShowAll} llmRunState={llmRunState} maintenanceRunState={maintenanceRunState} maintenanceBusy={maintenanceBusy} cleanConfirmCount={cleanConfirmCount} onConfirmClean={() => { setCleanConfirmCount(null); void runMaintenanceExecute(); }} onCancelClean={() => setCleanConfirmCount(null)} cleanCandidatesOpen={cleanCandidatesOpen} cleanCandidatesLoading={cleanCandidatesLoading} cleanCandidatesItems={cleanCandidatesItems} cleanCandidatesTotal={cleanCandidatesTotal} cleanCandidatesOffset={cleanCandidatesOffset} cleanPageSize={CLEAN_PAGE_SIZE} onOpenCleanCandidates={() => { setCleanCandidatesOpen(true); void fetchCleanCandidates(0); }} onCloseCleanCandidates={() => setCleanCandidatesOpen(false)} onPrevCleanCandidates={() => void fetchCleanCandidates(Math.max(0, cleanCandidatesOffset - CLEAN_PAGE_SIZE))} onNextCleanCandidates={() => void fetchCleanCandidates(cleanCandidatesOffset + CLEAN_PAGE_SIZE)} onApplyCurator={() => void applyCurator()} onRunLlmCurator={() => void runLlmCurator()} onShowAllActions={() => setRunActionsShowAll(true)} onGenerateMaintenancePlan={() => void fetchMaintenancePlan()} onExecuteMaintenance={() => executeMaintenance()} onSelectMaintenanceAction={(action) => selectMaintenanceAction(action)} />;
 };
 
 export default MemoryOperationsPanel;
