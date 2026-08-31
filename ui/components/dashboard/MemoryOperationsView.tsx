@@ -209,17 +209,33 @@ export function MemoryOperationsView({
           </div>
 
           {maintenanceRunState.state === "planReady" && maintenanceRunState.plan && (
-            <div className="mt-2 rounded bg-zinc-800/60 px-2 py-1.5 text-xs space-y-1">
+            <div className="mt-2 rounded bg-zinc-800/60 px-2 py-1.5 text-xs space-y-2">
               {maintenancePlanPreview(maintenanceRunState).length > 0 ? (
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   <div className="flex items-center gap-2 text-zinc-300">
                     <Badge variant="outline" className="border-sky-700 bg-sky-500/10 text-sky-300 text-xs shrink-0">{t.dashboard.maintenancePreview}</Badge>
-                    <span>{maintenancePlanPreview(maintenanceRunState).map((item) => `${item.reason} ${item.count}`).join(" · ")}</span>
+                    <span>{maintenancePlanPreview(maintenanceRunState).map((item) => `${maintenanceReasonLabel(t, item.reason)} ${item.count}`).join(" · ")}</span>
                   </div>
-                  {maintenancePlanPreview(maintenanceRunState).slice(0, 3).map((item) => (
-                    <div key={item.reason} className="text-zinc-400">
-                      <span className="text-zinc-300">{item.reason}</span> ({item.count})
-                      {item.samples && item.samples.length > 0 && <span className="text-zinc-500"> — {item.samples.join(" / ")}</span>}
+                  {maintenancePlanPreview(maintenanceRunState).map((item) => (
+                    <div key={item.reason} className="rounded bg-zinc-900/70 px-2 py-1.5 space-y-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-zinc-300 font-medium">{maintenanceReasonLabel(t, item.reason)}</span>
+                        <Badge variant="outline" className="border-zinc-700 bg-zinc-800 text-zinc-300 text-[10px] shrink-0">{item.count}</Badge>
+                      </div>
+                      {item.samples.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {item.samples.map((sample) => (
+                            <Link
+                              key={sample.id}
+                              href={`/memory/${sample.id}`}
+                              title={sample.title}
+                              className="max-w-[280px] truncate rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-700/70 hover:text-sky-300 transition-colors"
+                            >
+                              {ellipsize(sample.title || sample.id, 40)}
+                            </Link>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -276,7 +292,7 @@ function maintenancePlanCount(state: MaintenanceRunState): number {
   return plan.archive_count ?? 0;
 }
 
-function maintenancePlanPreview(state: MaintenanceRunState): Array<{ reason: string; count: number; samples?: string[] }> {
+function maintenancePlanPreview(state: MaintenanceRunState): Array<{ reason: string; count: number; samples: Array<{ id: string; title: string }> }> {
   const plan = state.plan;
   if (!plan) return [];
   const action = state.action ?? "archive";
@@ -284,18 +300,50 @@ function maintenancePlanPreview(state: MaintenanceRunState): Array<{ reason: str
     return (plan.merge_groups ?? []).map((group) => ({
       reason: group.key,
       count: group.count,
-      samples: (group.loser_titles ?? []).slice(0, 3),
+      samples: (group.loser_ids ?? []).slice(0, 3).map((id, index) => ({
+        id,
+        title: (group.loser_titles ?? [])[index] ?? id,
+      })),
     }));
   }
   if (action === "clean") {
-    const count = plan.clean_count ?? 0;
-    return count > 0 ? [{ reason: "clean", count }] : [];
+    return (plan.groups ?? [])
+      .map((group) => ({
+        reason: group.reason,
+        count: group.count,
+        samples: (group.samples ?? []).map((sample) => ({
+          id: sample.id,
+          title: sample.title ?? sample.id,
+        })),
+      }))
+      .filter((group) => group.count > 0);
   }
-  return (plan.groups ?? []).map((group) => ({
-    reason: group.reason,
-    count: group.count,
-    samples: (group.samples ?? []).map((sample) => sample.title ?? "…").slice(0, 3),
-  }));
+  return (plan.groups ?? [])
+    .map((group) => ({
+      reason: group.reason,
+      count: group.count,
+      samples: (group.samples ?? []).slice(0, 3).map((sample) => ({
+        id: sample.id,
+        title: sample.title ?? sample.id,
+      })),
+    }))
+    .filter((group) => group.count > 0);
+}
+
+function maintenanceReasonLabel(t: Messages, reason: string): string {
+  if (reason.startsWith("source_agent:")) {
+    return `${t.dashboard.maintenanceCleanReasonTestAgent}: ${reason.slice("source_agent:".length)}`;
+  }
+  switch (reason) {
+    case "candidate_ttl":
+      return t.dashboard.maintenanceCleanReasonCandidates;
+    case "fragment":
+      return t.dashboard.maintenanceCleanReasonFragments;
+    case "archived_unused":
+      return t.dashboard.maintenanceCleanReasonArchivedUnused;
+    default:
+      return reason;
+  }
 }
 
 function maintenanceExecuteLabel(t: Messages, state: MaintenanceRunState): string {

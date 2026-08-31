@@ -6029,3 +6029,20 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ### 备注
 - 本次仅修复上限与确认框 UI，未实际执行 4321 条硬删；执行时后端仍会先全量备份（memory_backup）再删除，保护逻辑（有访问/注射/反馈或 importance≥0.9 的记录）不变。
+
+## [迭代 35] 2026-08-31 — 维护计划预览列表化：分组明细 + 可点击记忆条目
+
+### 变更（前端）
+- `components/dashboard/MemoryOperationsView.tsx`：
+  - 预览从纯摘要（"clean 4321"）升级为**分组明细卡片**：每组显示中文原因标签 + 条数徽章 + 最多 5 个样本。
+  - 样本改为**可点击链接**（`/memory/<id>`，hover 高亮），点击直达记忆详情页核对内容——硬删前可逐条确认。
+  - clean 预览不再折叠为一行：展示 `plan.groups`（archived_unused / candidate_ttl / fragment / source_agent:*）全部分组；merge 预览用 `loser_ids` 对齐 loser_titles 生成可点样本；archive 预览样本同样可点。
+  - 新增 `maintenanceReasonLabel()`：把后端英文分组原因映射为中文（超期候选/过短碎片/归档未用/测试来源），未知原样显示。
+- i18n en/zh：新增 `maintenanceCleanReason{Candidates,Fragments,ArchivedUnused,TestAgent}` 四个标签键（双语同步）。
+
+### 验证
+- `pnpm tsc --noEmit` 零错误；生产 `pnpm build` + postbuild 成功；mcore-ui.service 重启后 :18318 返回 200。
+- 接口实测 `plan?action=clean`：groups = source_agent:memorycore-smoke-test(15 条，样本带真实标题) + archived_unused(4306 条)，样本 id/title 齐全，前端可渲染可点链接。
+
+### 备注
+- 预览列表为分组抽样（每组最多 5 条样本），避免 4321 条全量渲染拖垮面板；完整候选可点样本直达详情页核对，执行硬删前仍有全量备份兜底。
