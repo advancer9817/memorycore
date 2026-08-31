@@ -103,7 +103,7 @@ export const zh = {
     maintenancePreview: "预览",
     maintenanceExecute: (n: number) => `归档 ${n} 条记忆`,
     maintenanceExecuteMerge: (n: number) => `合并 ${n} 组`,
-    maintenanceExecuteClean: (n: number) => `删除 ${n} 条记录`,
+    maintenanceExecuteClean: (n: number) => `删除归档（${n}）`,
     maintenancePlanning: "规划中...",
     maintenanceExecuting: "执行中...",
     maintenanceNoCandidates: "无待归档记忆，记忆池干净。",

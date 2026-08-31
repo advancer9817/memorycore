@@ -101,7 +101,7 @@ export const en = {
     maintenancePreview: "Preview",
     maintenanceExecute: (n: number) => `Archive ${n} memories`,
     maintenanceExecuteMerge: (n: number) => `Merge ${n} groups`,
-    maintenanceExecuteClean: (n: number) => `Delete ${n} records`,
+    maintenanceExecuteClean: (n: number) => `Delete archives (${n})`,
     maintenancePlanning: "Planning...",
     maintenanceExecuting: "Executing...",
     maintenanceNoCandidates: "Nothing to archive — memory pool is clean.",
