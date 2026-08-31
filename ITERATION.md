@@ -6047,7 +6047,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 ### 备注
 - 预览列表为分组抽样（每组最多 5 条样本），避免 4321 条全量渲染拖垮面板；完整候选可点样本直达详情页核对，执行硬删前仍有全量备份兜底。
 
-## [迭代 36] 2026-08-31 — 清理候选全量列表：分页 Dialog + 后端分页接口（按钮名改为「删除归档」）
+## [迭代 36] 2026-08-31 — 清理候选全量列表：分页 Dialog + 后端分页接口
 
 ### 变更（后端）
 - `storage/maintenance.py`：把 clean 候选扫描抽成共享函数 `_clean_candidate_items()`（返回全量候选 + scanned + protected_count，顺序与 plan 一致）；`plan_data_maintenance_clean` 改用共享扫描（行为不变）；新增 `list_data_maintenance_clean_candidates(offset, limit)` 分页函数（页大小上限 500，offse 与 plan 顺序一致）。
