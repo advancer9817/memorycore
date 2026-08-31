@@ -6010,3 +6010,22 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 - ✅ 子页返回箭头（PageShell backHref）
 - ✅ 旧路由 /apps /governance 空壳提示 + 返回引导
 - ⏸ Phase 4 统一设计打磨（CSS token 全量替换）留待可选——现有 zinc 风格已全局一致，收益优先级低
+
+## [迭代 34] 2026-08-31 — 维护清理单次条数去上限 + 硬删确认框全局样式化
+
+### 变更（后端）
+- `storage/maintenance.py`：`DEFAULT_MAINTENANCE_LIMIT` / `CLEAN_DEFAULT_LIMIT` / `MERGE_DEFAULT_LIMIT` 由 500/500/200 改为 `0`（0 = 不设条数上限）；新增 `_resolve_maintenance_cap()`（显式正整数仍可限制；无上限时以 100 万作安全天花板）；三处 `cap = min(limit, 5000)` 全部改走统一解析。
+- `storage/curator.py`：`curator_report` 内部 `cap = min(int(limit), 5000)` 同步放开（limit<=0 即无上限），托管维护计划传 0 不再被 5000 截断。
+- `frontend_v1.py`：`/api/v1/maintenance/plan` 默认 `limit=0`（无上限）；`/api/v1/maintenance/execute` 在 body 接收可选 `limit` 并透传后台线程，保证 execute 复算 plan 的 limit 与 plan 阶段一致（防止 plan_token 失配误报 stale）。
+
+### 变更（前端）
+- `components/dashboard/MemoryOperationsPanel.tsx`：删除 `window.confirm`（浏览器原生提示框）；硬删动作改为受控状态 `cleanConfirmCount` 打开全局样式确认框，确认后再执行；`executeMaintenance` 拆为「弹框（clean）」+「直接执行（archive/merge）」。
+- `components/dashboard/MemoryOperationsView.tsx`：新增受控 AlertDialog（shadcn/Radix，zinc 暗色全局样式），标题"清理（硬删）"红色，确认按钮红色危险样式，文案复用 `maintenanceCleanConfirm` / `maintenanceExecuteClean`。
+
+### 验证
+- 后端 maintenance 测试 25 passed；`pnpm tsc --noEmit` 零错误；生产 `pnpm build` + postbuild 成功。
+- 生产库实测：`plan?action=clean` 默认返回 `clean_count=4321`（原 500；protected=495 保护机制不变）；显式 `limit=100` 仍返回 100；token 重算确定性（execute 复算不失配）。
+- 服务重启（mcore.service + mcore-ui.service）后经 :8318 与 :18318 双链路验证 plan 均返回 4321。
+
+### 备注
+- 本次仅修复上限与确认框 UI，未实际执行 4321 条硬删；执行时后端仍会先全量备份（memory_backup）再删除，保护逻辑（有访问/注射/反馈或 importance≥0.9 的记录）不变。

@@ -63,10 +63,10 @@ _maintenance_jobs: dict[str, dict[str, Any]] = {}
 _maintenance_jobs_lock = threading.Lock()
 
 
-def _run_data_maintenance_job_thread(job_id: str, plan_token: str, action: str = "archive") -> None:
+def _run_data_maintenance_job_thread(job_id: str, plan_token: str, action: str = "archive", limit: int = 0) -> None:
     from memorycore.storage.maintenance import run_data_maintenance_job
     try:
-        result = run_data_maintenance_job(job_id, plan_token, action=action)
+        result = run_data_maintenance_job(job_id, plan_token, limit=limit, action=action)
     except Exception as exc:  # run_* already records failures; keep a final fallback
         result = {
             "job_id": job_id,
@@ -346,14 +346,15 @@ def _dispatch_v1_compat(
         return result
     if parts == ["maintenance", "plan"] and method == "GET":
         action = (query.get("action") or ["archive"])[0]
+        # limit 默认 0 = 无条数上限（单次处理全部候选）；显式正整数仍可限制。
         if action == "merge":
             from memorycore.storage.maintenance import plan_data_maintenance_merge
-            return plan_data_maintenance_merge(limit=_int_q(query, "limit", 500))
+            return plan_data_maintenance_merge(limit=_int_q(query, "limit", 0))
         if action == "clean":
             from memorycore.storage.maintenance import plan_data_maintenance_clean
-            return plan_data_maintenance_clean(limit=_int_q(query, "limit", 500))
+            return plan_data_maintenance_clean(limit=_int_q(query, "limit", 0))
         from memorycore.storage.maintenance import plan_data_maintenance
-        return plan_data_maintenance(limit=_int_q(query, "limit", 500))
+        return plan_data_maintenance(limit=_int_q(query, "limit", 0))
     if parts == ["maintenance", "latest"] and method == "GET":
         from memorycore.storage.maintenance import get_latest_maintenance_job
         return get_latest_maintenance_job() or {"job_id": None, "status": "none"}
@@ -369,9 +370,12 @@ def _dispatch_v1_compat(
             run_data_maintenance_job,
         )
         job = create_maintenance_job(plan_token, kind=action)
+        # limit 与 plan 阶段保持一致（默认 0 = 无上限）；不一致会导致
+        # plan_token 失配（stale），故 execute 显式透传同一 limit。
+        limit = int(body.get("limit") or 0)
         thread = threading.Thread(
             target=_run_data_maintenance_job_thread,
-            args=(job["job_id"], plan_token, action),
+            args=(job["job_id"], plan_token, action, limit),
             daemon=True,
         )
         thread.start()

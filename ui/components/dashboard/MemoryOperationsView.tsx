@@ -6,6 +6,16 @@ import { Activity, Archive, Database, Play, Sparkles, Wrench, type LucideIcon } 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useI18n } from "@/hooks/useI18n";
 import type { Locale, Messages } from "@/lib/i18n/types";
 import {
@@ -29,6 +39,9 @@ type MemoryOperationsViewProps = {
   llmRunState: LlmRunState;
   maintenanceRunState: MaintenanceRunState;
   maintenanceBusy: boolean;
+  cleanConfirmCount: number | null;
+  onConfirmClean: () => void;
+  onCancelClean: () => void;
   onApplyCurator: () => void;
   onRunLlmCurator: () => void;
   onShowAllActions: () => void;
@@ -48,6 +61,9 @@ export function MemoryOperationsView({
   llmRunState,
   maintenanceRunState,
   maintenanceBusy,
+  cleanConfirmCount,
+  onConfirmClean,
+  onCancelClean,
   onApplyCurator,
   onRunLlmCurator,
   onShowAllActions,
@@ -227,6 +243,26 @@ export function MemoryOperationsView({
           )}
         </div>
       </div>
+
+      {/* 硬删确认框 — 与全局样式同步（zinc 暗色 Modal），替代浏览器原生 confirm */}
+      <AlertDialog open={cleanConfirmCount !== null} onOpenChange={(open) => { if (!open) onCancelClean(); }}>
+        <AlertDialogContent className="border-zinc-800 bg-zinc-950 text-zinc-100">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-red-300">{t.dashboard.maintenanceActionClean}</AlertDialogTitle>
+            <AlertDialogDescription className="text-zinc-400">
+              {cleanConfirmCount !== null ? t.dashboard.maintenanceCleanConfirm(cleanConfirmCount) : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={onCancelClean} className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800">
+              {t.common.cancel}
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={onConfirmClean} className="bg-red-600/90 text-white hover:bg-red-600">
+              {t.dashboard.maintenanceExecuteClean(cleanConfirmCount ?? 0)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -296,8 +296,17 @@ def run_maintenance(
 # (run_curator.sh acquires the same lockfile).
 # ──────────────────────────────────────────────────────────────────────────
 
-DEFAULT_MAINTENANCE_LIMIT = 500
+# 0 = 不设条数上限（单次删除/归档/合并可一次处理全部候选）。
+# 显式传正整数仍可限制；_resolve_maintenance_cap 统一解释。
+DEFAULT_MAINTENANCE_LIMIT = 0
 MAINTENANCE_LOCK_NAME = "maintenance.lock"
+_MAINTENANCE_CAP_CEILING = 1_000_000  # 无上限时的安全天花板（对记忆库≈不限）
+
+
+def _resolve_maintenance_cap(limit: int) -> int:
+    """Positive limit is honored; 0/negative means no cap (safety ceiling only)."""
+    value = int(limit)
+    return value if value > 0 else _MAINTENANCE_CAP_CEILING
 
 
 class MaintenanceBusyError(RuntimeError):
@@ -344,7 +353,7 @@ def plan_data_maintenance(limit: int = DEFAULT_MAINTENANCE_LIMIT) -> dict[str, A
     """
     from memorycore.storage.curator import curator_report
 
-    cap = max(1, min(int(limit), 5000))
+    cap = _resolve_maintenance_cap(limit)
     report = curator_report(dry_run=True, limit=cap)
     planned = [p for p in report.get("action_plan", []) if p.get("action") == "archive"]
     archive_ids = [p["id"] for p in planned]
@@ -556,7 +565,7 @@ def run_data_maintenance_job(
 # timer curator and M1 (archive). Merge never deletes and never promotes to
 # active, so it cannot disturb the retrieval baseline.
 
-MERGE_DEFAULT_LIMIT = 200
+MERGE_DEFAULT_LIMIT = 0  # 0 = 无上限（合并候选一次处理）
 
 
 def _merge_winner_key(row: dict[str, Any]) -> tuple[int, str]:
@@ -576,7 +585,7 @@ def plan_data_maintenance_merge(limit: int = MERGE_DEFAULT_LIMIT) -> dict[str, A
     """
     from memorycore.models import normalize_title_key
 
-    cap = max(1, min(int(limit), 5000))
+    cap = _resolve_maintenance_cap(limit)
     with read_conn() as conn:
         rows = [
             dict(r)
@@ -715,7 +724,7 @@ def execute_data_maintenance_merge(plan_token: str, limit: int = MERGE_DEFAULT_L
 #   3) near-empty fragment candidates.
 # Protected: records with a positive effectiveness/access and importance ≥ 0.9.
 
-CLEAN_DEFAULT_LIMIT = 500
+CLEAN_DEFAULT_LIMIT = 0  # 0 = 无上限（删除候选一次处理，备份先行）
 CLEAN_DEFAULT_TTL_DAYS = 30
 CLEAN_DEFAULT_MIN_CONTENT_CHARS = 5
 CLEAN_SOURCE_AGENT_BLACKLIST = (
@@ -820,7 +829,7 @@ def plan_data_maintenance_clean(limit: int = CLEAN_DEFAULT_LIMIT) -> dict[str, A
     ttl_days = int(cfg.get("candidate_ttl_days", CLEAN_DEFAULT_TTL_DAYS))
     blacklist = tuple(cfg.get("source_agents", CLEAN_SOURCE_AGENT_BLACKLIST))
     min_chars = int(cfg.get("min_content_chars", CLEAN_DEFAULT_MIN_CONTENT_CHARS))
-    cap = max(1, min(int(limit), 5000))
+    cap = _resolve_maintenance_cap(limit)
     cutoff = (datetime.now(timezone.utc) - timedelta(days=ttl_days)).isoformat(timespec="seconds")
 
     candidates: list[dict[str, Any]] = []

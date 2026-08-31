@@ -27,6 +27,8 @@ export const MemoryOperationsPanel = () => {
   const llmPollRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [maintenanceRunState, setMaintenanceRunState] = useState<MaintenanceRunState>({ state: "idle", plan: null, action: "archive" });
   const [maintenanceBusy, setMaintenanceBusy] = useState(false);
+  // 硬删确认框的候选条数（null = 未打开确认框）
+  const [cleanConfirmCount, setCleanConfirmCount] = useState<number | null>(null);
   const maintenancePollRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const maintenancePollErrorsRef = React.useRef(0);
 
@@ -203,15 +205,10 @@ export const MemoryOperationsPanel = () => {
     }
   }, []);
 
-  const executeMaintenance = async () => {
+  const runMaintenanceExecute = async () => {
     const plan = maintenanceRunState.plan;
     const action = maintenanceRunState.action ?? "archive";
     if (!plan || maintenanceBusy) return;
-    if (action === "clean") {
-      const count = plan.clean_count ?? 0;
-      if (count === 0) return;
-      if (!window.confirm(messages.dashboard.maintenanceCleanConfirm(count))) return;
-    }
     const startedAt = Date.now();
     setMaintenanceBusy(true);
     setMaintenanceRunState({ state: "running", plan, action, startedAt });
@@ -239,6 +236,20 @@ export const MemoryOperationsPanel = () => {
     }
   };
 
+  // 入口：clean 动作先弹出全局样式确认框，其余动作直接执行。
+  const executeMaintenance = () => {
+    const plan = maintenanceRunState.plan;
+    const action = maintenanceRunState.action ?? "archive";
+    if (!plan || maintenanceBusy) return;
+    if (action === "clean") {
+      const count = plan.clean_count ?? 0;
+      if (count === 0) return;
+      setCleanConfirmCount(count);
+      return;
+    }
+    void runMaintenanceExecute();
+  };
+
   useEffect(() => {
     fetch(`${getApiBaseUrl()}/api/v1/maintenance/latest`).then((response) => response.json()).then((payload) => {
       const data = payload as MaintenanceJob;
@@ -252,7 +263,7 @@ export const MemoryOperationsPanel = () => {
     return () => { if (maintenancePollRef.current) clearTimeout(maintenancePollRef.current); };
   }, [pollMaintenanceJob]);
 
-  return <MemoryOperationsView messages={messages} locale={locale} status={status} applying={applying} llmRunning={llmRunning} runState={runState} runActionsShowAll={runActionsShowAll} llmRunState={llmRunState} maintenanceRunState={maintenanceRunState} maintenanceBusy={maintenanceBusy} onApplyCurator={() => void applyCurator()} onRunLlmCurator={() => void runLlmCurator()} onShowAllActions={() => setRunActionsShowAll(true)} onGenerateMaintenancePlan={() => void fetchMaintenancePlan()} onExecuteMaintenance={() => void executeMaintenance()} onSelectMaintenanceAction={(action) => selectMaintenanceAction(action)} />;
+  return <MemoryOperationsView messages={messages} locale={locale} status={status} applying={applying} llmRunning={llmRunning} runState={runState} runActionsShowAll={runActionsShowAll} llmRunState={llmRunState} maintenanceRunState={maintenanceRunState} maintenanceBusy={maintenanceBusy} cleanConfirmCount={cleanConfirmCount} onConfirmClean={() => { setCleanConfirmCount(null); void runMaintenanceExecute(); }} onCancelClean={() => setCleanConfirmCount(null)} onApplyCurator={() => void applyCurator()} onRunLlmCurator={() => void runLlmCurator()} onShowAllActions={() => setRunActionsShowAll(true)} onGenerateMaintenancePlan={() => void fetchMaintenancePlan()} onExecuteMaintenance={() => executeMaintenance()} onSelectMaintenanceAction={(action) => selectMaintenanceAction(action)} />;
 };
 
 export default MemoryOperationsPanel;

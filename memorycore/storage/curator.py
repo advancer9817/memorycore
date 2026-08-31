@@ -40,7 +40,8 @@ def curator_report(
     deny_actions: Any = None,
 ) -> dict[str, Any]:
     now_dt = local_now()
-    cap = max(1, min(int(limit), 5000))
+    # limit <= 0 → 不设上限（托管维护计划会传 0）；显式正数仍生效。
+    cap = max(1, int(limit) if int(limit) > 0 else 1_000_000)
 
     cfg = load_config().get("rule_curator", {})
     _DECAY_STEP = cfg.get("decay_step", 0.05)
