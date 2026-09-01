@@ -6106,3 +6106,22 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 - tsc 零错误；build+postbuild 成功；mcore-ui 重启 200。
 - 接口对账：health-score 与 curator/status 原料完全一致（by_status: active 1622/archived 1700/contradicted 233/stale 611/superseded 23；pending=867, usable=2489, share=35）。
 - governance/counts=0（63 条 LLM 建议已全部 applied：41 archive_and_merge + 17 archive_duplicate + 5 mark_contradicted + 7 supersession - 4 rejected supersession），队列干净，risk=100 合理。
+
+## [迭代 39] 2026-09-01 — 归档链路扩展：stale/superseded 超期自动进入归档计划
+
+### 问题
+- 看板「待清理 867（stale 611/矛盾 233/被取代 23）」只是指标，一键维护三动作候选范围与它零交集——用户找不到清理入口。
+
+### 变更（后端）
+- `storage/maintenance.py` 新增归档扩展规则：`stale`/`superseded` 状态且 `COALESCE(last_accessed_at, created_at)` 超过 `maintenance.archive_extension.min_days_untouched`（默认 30 天，可配；enabled 默认 true）→ 进入「归档」计划（与 Rule Curator 结果去重合并，同 token/execute/备份链路，可逆）。
+- 30 天门槛依据生产分布：stale 609/611 条已 30-90 天未触碰；superseded 23 条为昨晚合并产物（0-30 天，留一个月血缘观察期）。
+
+### 变更（前端）
+- i18n en/zh：`maintenanceArchiveExtension{Stale,Superseded}`（"过期未用 → 归档" / "被取代 → 归档"）；预览分组标签映射新增两个 case。
+
+### 验证
+- maintenance 25 tests passed；tsc 零错误；build+postbuild；双服务重启 active。
+- 生产实测 `plan?action=archive` → archive_count=611（全部 stale）；执行后这批转入 archived，30 天未用的再经「清理归档」白名单硬删，形成 归档→硬删 两段式闭环；contradicted 233 条刻意不入此规则（矛盾需人工/治理决策处理）。
+
+### 备注
+- 指标「待清理占比」仍含 contradicted；归档执行后 stale/superseded 部分会自然下降。治理状态不会污染检索（stale/contradicted 检索时已过滤）。

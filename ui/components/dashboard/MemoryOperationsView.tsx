@@ -426,6 +426,10 @@ function maintenanceReasonLabel(t: Messages, reason: string): string {
       return t.dashboard.maintenanceCleanReasonFragments;
     case "archived_unused":
       return t.dashboard.maintenanceCleanReasonArchivedUnused;
+    case "archive_extension:stale":
+      return t.dashboard.maintenanceArchiveExtensionStale;
+    case "archive_extension:superseded":
+      return t.dashboard.maintenanceArchiveExtensionSuperseded;
     default:
       return reason;
   }

@@ -115,6 +115,8 @@ export const zh = {
     maintenanceCleanReasonFragments: "过短碎片",
     maintenanceCleanReasonArchivedUnused: "归档未用",
     maintenanceCleanReasonTestAgent: "测试来源",
+    maintenanceArchiveExtensionStale: "过期未用 → 归档",
+    maintenanceArchiveExtensionSuperseded: "被取代 → 归档",
     maintenanceViewAll: (n: number) => `查看全部（${n}）`,
     maintenanceStale: "计划已过期（预览后数据有变化），请重新生成计划。",
     maintenanceBusy: "curator/维护任务运行中，请稍后重试。",

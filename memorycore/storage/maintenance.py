@@ -345,22 +345,85 @@ def maintenance_lock(nonblocking: bool = True):
         handle.close()
 
 
+def _archive_extension_config() -> dict[str, Any]:
+    """Archive-extension rules (stale/superseded → archived) from config.yaml.
+
+    maintenance.archive_extension:
+      enabled: bool (default true)
+      min_days_untouched: int (default 90) — last_accessed_at/created_at age gate
+    """
+    from memorycore.models import load_config
+
+    base = (load_config().get("maintenance", {}) or {}).get("archive_extension", {}) or {}
+    return {
+        "enabled": bool(base.get("enabled", True)),
+        # 30d: stale records untouched for a month are safe to archive
+        # (reversible); superseded merges get the same grace period for
+        # rollback/audit before leaving the "pending cleanup" backlog.
+        "min_days_untouched": max(1, int(base.get("min_days_untouched", 30))),
+    }
+
+
+def _archive_extension_candidates(min_days: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Stale/superseded records untouched for `min_days` → archive candidates.
+
+    These are quality-debt statuses the retrieval layer already filters out;
+    archiving them (reversible, backup-first) shrinks the 'pending cleanup'
+    backlog reported on the dashboard. Returns (candidates, scanned_rows).
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=min_days)).isoformat(timespec="seconds")
+    with read_conn() as conn:
+        rows = [
+            dict(r)
+            for r in conn.execute(
+                """
+                SELECT id, title, status, created_at,
+                       COALESCE(NULLIF(last_accessed_at, ''), created_at) AS last_touch
+                FROM memories
+                WHERE status IN ('stale', 'superseded')
+                """
+            ).fetchall()
+        ]
+    candidates: list[dict[str, Any]] = []
+    for r in rows:
+        if str(r.get("last_touch") or "") >= cutoff:
+            continue  # touched recently — keep for now
+        candidates.append({
+            "id": r["id"],
+            "title": r.get("title") or "",
+            "reason": f"archive_extension:{r.get('status')}",
+        })
+    return candidates, len(rows)
+
+
 def plan_data_maintenance(limit: int = DEFAULT_MAINTENANCE_LIMIT) -> dict[str, Any]:
     """Read-only archive plan for the manual maintenance loop (M1).
 
-    Reuses the rule curator's scan (curator_report, dry-run) and keeps only
-    archive transitions. No writes of any kind happen here.
+    Rule curator scan + archive-extension rules (stale/superseded untouched
+    for maintenance.archive_extension.min_days_untouched, default 90 days).
+    No writes of any kind happen here.
     """
     from memorycore.storage.curator import curator_report
 
     cap = _resolve_maintenance_cap(limit)
+    cfg = _archive_extension_config()
     report = curator_report(dry_run=True, limit=cap)
     planned = [p for p in report.get("action_plan", []) if p.get("action") == "archive"]
-    archive_ids = [p["id"] for p in planned]
+    extension, extension_scanned = (
+        _archive_extension_candidates(cfg["min_days_untouched"]) if cfg["enabled"] else ([], 0)
+    )
+    seen: set[str] = set()
+    merged: list[dict[str, Any]] = []
+    for p in planned + extension:
+        if p["id"] in seen:
+            continue
+        seen.add(p["id"])
+        merged.append(p)
+    archive_ids = [p["id"] for p in merged]
     token_source = "archive|" + ("|".join(sorted(archive_ids)) if archive_ids else "__empty__")
     plan_token = hashlib.sha256(token_source.encode("utf-8")).hexdigest()[:24]
     groups: dict[str, dict[str, Any]] = {}
-    for p in planned:
+    for p in merged:
         reason = str(p.get("reason") or "archive")
         group = groups.setdefault(reason, {"reason": reason, "count": 0, "samples": []})
         group["count"] += 1
@@ -369,7 +432,7 @@ def plan_data_maintenance(limit: int = DEFAULT_MAINTENANCE_LIMIT) -> dict[str, A
     return {
         "dry_run": True,
         "generated_at": now(),
-        "scanned": report.get("scanned", 0),
+        "scanned": report.get("scanned", 0) + extension_scanned,
         "plan_token": plan_token,
         "archive_count": len(archive_ids),
         "archive_ids": archive_ids,
