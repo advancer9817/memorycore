@@ -6066,3 +6066,26 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ### 备注
 - 4521 条候选全量浏览不出面板，翻页每页 100 条；每条可点详情核对后再决定是否执行硬删（执行前仍会全量备份）。
+
+## [迭代 37] 2026-09-01 — LLM 治理 403 修复：接入智谱 GLM 官网订阅端点
+
+### 问题
+- LLM curator 全部 dedup/contradiction 批次报 `403 Forbidden`，目标 `https://open.bigmodel.cn/api/v1/chat/completions`。
+
+### 根因
+- 智谱 GLM 的 OpenAI 兼容端点为 `/api/paas/v4`（普通 API key）/`/api/coding/paas/v4`（官网订阅 Coding Plan），`/api/v1` 路径不存在 → 403。
+- 次生缺陷：`extraction.py`（httpx 与 urllib 两路）URL 拼接只认 `/v1` 段，填 `/api/paas/v4` 会被错误追加 `/v1/` 变成 404。
+
+### 变更
+- `config.yaml`：`extraction.base_url` → `https://open.bigmodel.cn/api/coding/paas/v4`（用户 GLM 订阅 key 已实测 200）。
+- `extraction.py`：URL 版本段识别改为正则 `/v\d+$|/v\d+/`（任意版本段直接拼 `/chat/completions`；无版本段才补 `/v1`），兼容 DeepSeek `/v1`、CPA 代理、GLM `/api/paas/v4`、GLM Coding `/api/coding/paas/v4`。
+- skill `mcore-operations/scripts/verify-extraction-api.py`：探测脚本同样的硬拼 `/v1` 问题同步修复。
+
+### 验证
+- 直连 A/B：`/api/paas/v4` 与 `/api/coding/paas/v4` 均返回 200（订阅 key 两端点皆可用，选 coding 端点走订阅额度）。
+- `_call_llm` 端到端（load_config 全量）：`POST /api/coding/paas/v4/chat/completions → 200`，回复正常 JSON。
+- pytest extraction+curator 相关 84 passed；verify-extraction-api.py → HTTP 200 reply 'ok'（usage 含 reasoning_tokens 62，注意 max_tokens 预算）。
+- `systemctl --user restart mcore.service` 后触发 LLM 治理 dry-run 全量任务，批次结果见后续记录（vector_scan 扫描较慢属预期）。
+
+### 备注
+- config.yaml 为 git 追踪文件且历史上已含 api_key（既有现状）；本次 diff 仅 base_url 一行，无新增密钥。若要收敛，建议后续把 api_key 迁到环境变量并重置该 key。

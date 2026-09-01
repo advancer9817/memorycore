@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -348,9 +349,12 @@ def _call_llm(system_prompt: str, user_prompt: str, config: ExtractionConfig) ->
         return _call_llm_urllib(system_prompt, user_prompt, config)
 
     base = config.base_url.rstrip("/")
-    # Auto-add /v1 prefix if the base URL doesn't end with /v1 or /v1/...
-    # This handles proxies like CPA that expose /v1/chat/completions
-    if not (base.endswith("/v1") or "/v1/" in base.split("://", 1)[-1]):
+    # Auto-add /v1 prefix ONLY when the base has no version segment yet.
+    # OpenAI-compatible providers vary: /v1 (DeepSeek, CPA), /api/paas/v4 or
+    # /api/coding/paas/v4 (Zhipu GLM). If the path already ends with /v<N>
+    # or contains /v<N>/, append /chat/completions as-is.
+    path = base.split("://", 1)[-1]
+    if not re.search(r"/v\d+$|/v\d+/", path):
         url = base + "/v1/chat/completions"
     else:
         url = base + "/chat/completions"
@@ -384,7 +388,7 @@ def _call_llm_urllib(
     import urllib.request
 
     base = config.base_url.rstrip("/")
-    if not (base.endswith("/v1") or "/v1/" in base.split("://", 1)[-1]):
+    if not re.search(r"/v\d+$|/v\d+/", base.split("://", 1)[-1]):
         url = base + "/v1/chat/completions"
     else:
         url = base + "/chat/completions"

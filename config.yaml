@@ -22,10 +22,10 @@ embedding:
   sentence_transformers_model: sentence-transformers/all-mpnet-base-v2
   timeout: 30
 extraction:
-  api_key: sk-ws-H.EEPIHLH.pUKR.MEQCIBSQydOcDAJTHrFvpKrjPbEDxbnDw441_X_-pvgNp6FwAiAFDwSYL-YBw4Zx3svDd8IPUZGmlJQ7LvWlvZdVAZ2OdQ
-  base_url: https://ws-mvh9ls93gkzn2s2p.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+  api_key: 66686d501d9345c7b2e2bb71eb1d45a0.jhF6Ea1x1Abt69w8
+  base_url: https://open.bigmodel.cn/api/coding/paas/v4
   max_tokens: 8000
-  model: qwen3.8-27b
+  model: glm-5.3-flash
   temperature: 1
   timeout: 600
 extraction_strategy:
