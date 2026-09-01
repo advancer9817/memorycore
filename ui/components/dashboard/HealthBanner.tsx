@@ -85,7 +85,7 @@ export function HealthBanner() {
           <MetricChip icon={<Activity className="h-3.5 w-3.5 text-violet-400" />} label={t.dashboard.riskControl} value={Math.round(health.risk)} />
           <MetricChip icon={<Link2 className="h-3.5 w-3.5 text-sky-400" />} label={t.dashboard.linkedCoverage} value={Math.round(metrics.linked_coverage)} />
           <MetricChip icon={<Recycle className="h-3.5 w-3.5 text-emerald-400" />} label={t.dashboard.reuseCoverage} value={Math.round(metrics.active_reuse_coverage)} />
-          <MetricChip icon={<Sparkles className="h-3.5 w-3.5 text-emerald-400" />} label={t.dashboard.usablePoolHealth} value={Math.round(100 - metrics.pending_cleanup_share)} describe={`${metrics.pending_cleanup}/${metrics.usable_pool} ${t.dashboard.nonArchivedRatioDetail(metrics.pending_cleanup, metrics.usable_pool)}`} />
+          <MetricChip icon={<Sparkles className="h-3.5 w-3.5 text-emerald-400" />} label={t.dashboard.usablePoolHealth} value={Math.round(100 - metrics.pending_cleanup_share)} describe={t.dashboard.nonArchivedRatioDetail(metrics.pending_cleanup, metrics.usable_pool)} />
         </div>
 
         <div className="ml-auto flex items-center gap-2">

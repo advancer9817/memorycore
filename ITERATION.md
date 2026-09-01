@@ -6181,3 +6181,14 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ### 验证
 - tsc 零错误；build 成功；mcore-ui 重启 200。顶部条与智能中心均为「可用池健康 98」（36/1707 待清理仅作 tooltip 细节）。
+
+## [迭代 44] 2026-09-01 — 顶部条 tooltip 文案重复修复
+
+### 问题
+- HealthBanner「可用池健康」chip 的 describe 手动拼了 `${pending}/${usable}` 前缀，而其 i18n 文案 `nonArchivedRatioDetail` 本身已含 "N/M 条可用记忆待清理"，导致 tooltip 显示 "41/1742 41/1742 条可用记忆待清理" 重复。
+
+### 变更
+- `HealthBanner.tsx`：describe 直接使用 `nonArchivedRatioDetail(pending, usable)`，去除手动前缀。
+
+### 验证
+- tsc 零错误；build 成功；mcore-ui 重启 200；tooltip 现显示 "41/1742 条可用记忆待清理" 一次。
