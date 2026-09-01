@@ -6085,7 +6085,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 - 直连 A/B：`/api/paas/v4` 与 `/api/coding/paas/v4` 均返回 200（订阅 key 两端点皆可用，选 coding 端点走订阅额度）。
 - `_call_llm` 端到端（load_config 全量）：`POST /api/coding/paas/v4/chat/completions → 200`，回复正常 JSON。
 - pytest extraction+curator 相关 84 passed；verify-extraction-api.py → HTTP 200 reply 'ok'（usage 含 reasoning_tokens 62，注意 max_tokens 预算）。
-- `systemctl --user restart mcore.service` 后触发 LLM 治理 dry-run 全量任务，批次结果见后续记录（vector_scan 扫描较慢属预期）。
+- `systemctl --user restart mcore.service` 后触发 LLM 治理 dry-run 全量任务：**succeeded**，dedup 6 批 + contradiction 6 批共 12/12 全部完成、0 失败、errors=0；产出语义重复建议 58 条、矛盾建议 5 条、重评 0 条（dry-run 仅出建议不落库）。修复前同一任务 12 批全部 403。
 
 ### 备注
 - config.yaml 为 git 追踪文件且历史上已含 api_key（既有现状）；本次 diff 仅 base_url 一行，无新增密钥。若要收敛，建议后续把 api_key 迁到环境变量并重置该 key。
