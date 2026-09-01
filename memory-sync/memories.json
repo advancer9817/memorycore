@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "exported_at": "2026-09-01T14:27:15+08:00",
+  "exported_at": "2026-09-01T14:53:00+08:00",
   "memories_only": true,
   "full": false,
   "tables": [
@@ -10,10 +10,10 @@
     "memory_entities"
   ],
   "counts": {
-    "memories": 4189,
-    "feedback_events": 8632,
+    "memories": 4191,
+    "feedback_events": 8633,
     "memory_links": 2662,
-    "memory_entities": 5757
+    "memory_entities": 5763
   },
   "data": {
     "memories": [
@@ -114433,7 +114433,7 @@
         "source_agent": "hermes",
         "project_path": "",
         "created_at": "2026-08-26T16:27:25+08:00",
-        "updated_at": "2026-08-31T11:41:50+08:00",
+        "updated_at": "2026-09-01T14:42:49+08:00",
         "last_accessed_at": "2026-08-31T11:41:49+08:00",
         "confidence": 0.65,
         "importance": 0.8,
@@ -121493,6 +121493,64 @@
         "ineffective_count": 0,
         "effectiveness_score": 0.5,
         "last_injected_at": null,
+        "valid_from": null,
+        "valid_until": null,
+        "superseded_by": null,
+        "fact_lineage_root": null
+      },
+      {
+        "id": "b52624ca-3837-4409-8d3e-515b38304cb8",
+        "type": "decision",
+        "scope": "global",
+        "title": "记忆健康面板统一为后端 health-score 单一数据源",
+        "content": "决策：此前图一顶部横条走后端 /api/v1/health-score（86 分/风险 100），图二「记忆智能中心」前端本地另算一份导致数字分歧；现已统一为前端记忆智能中心直接消费后端 health-score，删除本地加权评分，两面板同源同数且与「治理一切正常」状态自洽。",
+        "tags_json": "[\"extracted\", \"agent:hermes\", \"supersedes:a61cf7f3-446d-478b-996a-98265135da4a\"]",
+        "source": "extraction",
+        "source_agent": "hermes",
+        "project_path": "",
+        "created_at": "2026-09-01T14:42:49+08:00",
+        "updated_at": "2026-09-01T14:42:49+08:00",
+        "last_accessed_at": null,
+        "confidence": 0.65,
+        "importance": 0.7,
+        "status": "active",
+        "decay_policy": "review",
+        "feedback_score": 0.0,
+        "related_ids_json": "[\"a61cf7f3-446d-478b-996a-98265135da4a\"]",
+        "metadata_json": "{\"user_id\": \"default\", \"supersedes\": \"a61cf7f3-446d-478b-996a-98265135da4a\", \"similarity\": 0.8122}",
+        "injected_count": 0,
+        "ineffective_count": 0,
+        "effectiveness_score": 0.5,
+        "last_injected_at": null,
+        "valid_from": null,
+        "valid_until": null,
+        "superseded_by": null,
+        "fact_lineage_root": null
+      },
+      {
+        "id": "f8bcd5c8-cb77-43e9-ae20-97ab7f3c9463",
+        "type": "project_memory",
+        "scope": "global",
+        "title": "记忆库统计快照：可用池 2489、待清理 867、归档 1700",
+        "content": "2026-09-01 记忆库统计：可用池 2489 条，archived 1700 条（归档不计入待清理）。待清理 867 条占 35%：contradicted 233、stale 611、superseded 23。后端 health-score 为 86 分/风险 100。看板「待清理占比 65」是 100−35 的非待清理视角，非另一套数据。",
+        "tags_json": "[\"extracted\", \"agent:hermes\"]",
+        "source": "extraction",
+        "source_agent": "hermes",
+        "project_path": "",
+        "created_at": "2026-09-01T14:42:50+08:00",
+        "updated_at": "2026-09-01T14:53:00+08:00",
+        "last_accessed_at": "2026-09-01T14:53:00+08:00",
+        "confidence": 0.65,
+        "importance": 0.5,
+        "status": "active",
+        "decay_policy": "review",
+        "feedback_score": 0.5,
+        "related_ids_json": "[\"22ea7cef-2d3d-4098-9220-5fe4783b4518\", \"1b5db04e-f39c-4286-9fd0-027966f9ca04\", \"59b6e60c-40dc-4b65-98ad-704c7df67bdf\", \"13a73b3b-c54d-47e9-a717-926d05ac762a\", \"b52624ca-3837-4409-8d3e-515b38304cb8\"]",
+        "metadata_json": "{\"user_id\": \"default\", \"similarity_to_nearest\": 0.737}",
+        "injected_count": 2,
+        "ineffective_count": 0,
+        "effectiveness_score": 0.525,
+        "last_injected_at": "2026-09-01T14:53:00+08:00",
         "valid_from": null,
         "valid_until": null,
         "superseded_by": null,
@@ -190555,6 +190613,14 @@
         "note": "auto:injected",
         "source_agent": "system",
         "created_at": "2026-09-01T14:27:12+08:00"
+      },
+      {
+        "id": "7cf8c547-8cdf-454e-bdbb-1aa4d2e52d9e",
+        "memory_id": "f8bcd5c8-cb77-43e9-ae20-97ab7f3c9463",
+        "score": 0.5,
+        "note": "auto:injected",
+        "source_agent": "system",
+        "created_at": "2026-09-01T14:53:00+08:00"
       }
     ],
     "memory_links": [
@@ -270121,46 +270187,6 @@
         "created_at": "2026-08-26T19:45:25+08:00"
       },
       {
-        "id": "66ca2305-6b4e-456b-b25e-732f2329d5f5",
-        "memory_id": "a61cf7f3-446d-478b-996a-98265135da4a",
-        "entity": "/api/v1/health-score",
-        "normalized_entity": "api v1 health score",
-        "aliases_json": "[\"api v1 health score\"]",
-        "entity_type": "path",
-        "weight": 1.0,
-        "created_at": "2026-08-26T19:45:27+08:00"
-      },
-      {
-        "id": "b1ea44ca-fd95-4482-82eb-c57222bf4b5f",
-        "memory_id": "a61cf7f3-446d-478b-996a-98265135da4a",
-        "entity": "extracted",
-        "normalized_entity": "extracted",
-        "aliases_json": "[\"extracted\"]",
-        "entity_type": "concept",
-        "weight": 0.75,
-        "created_at": "2026-08-26T19:45:27+08:00"
-      },
-      {
-        "id": "f683d4ea-c884-40ac-a235-6dd2e93ebc9c",
-        "memory_id": "a61cf7f3-446d-478b-996a-98265135da4a",
-        "entity": "agent:hermes",
-        "normalized_entity": "agent hermes",
-        "aliases_json": "[\"agent hermes\"]",
-        "entity_type": "concept",
-        "weight": 0.75,
-        "created_at": "2026-08-26T19:45:27+08:00"
-      },
-      {
-        "id": "5932858c-87b2-4257-b42e-512ab2583026",
-        "memory_id": "a61cf7f3-446d-478b-996a-98265135da4a",
-        "entity": "supersedes:6dfd68e2-1bfb-4573-b601-b079dbe35031",
-        "normalized_entity": "supersedes 6dfd68e2 1bfb 4573 b601 b079dbe35031",
-        "aliases_json": "[\"supersedes 6dfd68e2 1bfb 4573 b601 b079dbe35031\"]",
-        "entity_type": "concept",
-        "weight": 0.75,
-        "created_at": "2026-08-26T19:45:27+08:00"
-      },
-      {
         "id": "48c957f5-4604-4bec-bdcc-ba10bcb000ae",
         "memory_id": "25bff845-3a76-4880-9732-3c381fd83996",
         "entity": "/maintenance/plan",
@@ -274749,6 +274775,106 @@
         "entity_type": "concept",
         "weight": 0.75,
         "created_at": "2026-09-01T14:27:15+08:00"
+      },
+      {
+        "id": "a4c7ef8e-4d0b-4012-a6cd-b3d5864e1212",
+        "memory_id": "a61cf7f3-446d-478b-996a-98265135da4a",
+        "entity": "/api/v1/health-score",
+        "normalized_entity": "api v1 health score",
+        "aliases_json": "[\"api v1 health score\"]",
+        "entity_type": "path",
+        "weight": 1.0,
+        "created_at": "2026-09-01T14:42:49+08:00"
+      },
+      {
+        "id": "a3dd83df-7c6b-4c7f-b9fe-153909c893e0",
+        "memory_id": "a61cf7f3-446d-478b-996a-98265135da4a",
+        "entity": "extracted",
+        "normalized_entity": "extracted",
+        "aliases_json": "[\"extracted\"]",
+        "entity_type": "concept",
+        "weight": 0.75,
+        "created_at": "2026-09-01T14:42:49+08:00"
+      },
+      {
+        "id": "197cb50c-5718-4487-a121-5b086abcdda0",
+        "memory_id": "a61cf7f3-446d-478b-996a-98265135da4a",
+        "entity": "agent:hermes",
+        "normalized_entity": "agent hermes",
+        "aliases_json": "[\"agent hermes\"]",
+        "entity_type": "concept",
+        "weight": 0.75,
+        "created_at": "2026-09-01T14:42:49+08:00"
+      },
+      {
+        "id": "a7448c58-ecd0-4f85-b13c-efd29cd906ed",
+        "memory_id": "a61cf7f3-446d-478b-996a-98265135da4a",
+        "entity": "supersedes:6dfd68e2-1bfb-4573-b601-b079dbe35031",
+        "normalized_entity": "supersedes 6dfd68e2 1bfb 4573 b601 b079dbe35031",
+        "aliases_json": "[\"supersedes 6dfd68e2 1bfb 4573 b601 b079dbe35031\"]",
+        "entity_type": "concept",
+        "weight": 0.75,
+        "created_at": "2026-09-01T14:42:49+08:00"
+      },
+      {
+        "id": "0fe62817-7f15-42f2-8c27-96d65d302c41",
+        "memory_id": "b52624ca-3837-4409-8d3e-515b38304cb8",
+        "entity": "/api/v1/health-score",
+        "normalized_entity": "api v1 health score",
+        "aliases_json": "[\"api v1 health score\"]",
+        "entity_type": "path",
+        "weight": 1.0,
+        "created_at": "2026-09-01T14:42:49+08:00"
+      },
+      {
+        "id": "815cb581-fa8b-444d-a59d-8fee72f5d56a",
+        "memory_id": "b52624ca-3837-4409-8d3e-515b38304cb8",
+        "entity": "extracted",
+        "normalized_entity": "extracted",
+        "aliases_json": "[\"extracted\"]",
+        "entity_type": "concept",
+        "weight": 0.75,
+        "created_at": "2026-09-01T14:42:49+08:00"
+      },
+      {
+        "id": "efbfb982-51ae-43c1-9216-fcd09b66a601",
+        "memory_id": "b52624ca-3837-4409-8d3e-515b38304cb8",
+        "entity": "agent:hermes",
+        "normalized_entity": "agent hermes",
+        "aliases_json": "[\"agent hermes\"]",
+        "entity_type": "concept",
+        "weight": 0.75,
+        "created_at": "2026-09-01T14:42:49+08:00"
+      },
+      {
+        "id": "faf1773c-f79b-4b46-bf7d-f713493a4d77",
+        "memory_id": "b52624ca-3837-4409-8d3e-515b38304cb8",
+        "entity": "supersedes:a61cf7f3-446d-478b-996a-98265135da4a",
+        "normalized_entity": "supersedes a61cf7f3 446d 478b 996a 98265135da4a",
+        "aliases_json": "[\"supersedes a61cf7f3 446d 478b 996a 98265135da4a\"]",
+        "entity_type": "concept",
+        "weight": 0.75,
+        "created_at": "2026-09-01T14:42:49+08:00"
+      },
+      {
+        "id": "b2471265-99f3-416f-bd60-e7c0ecfdc6e2",
+        "memory_id": "f8bcd5c8-cb77-43e9-ae20-97ab7f3c9463",
+        "entity": "extracted",
+        "normalized_entity": "extracted",
+        "aliases_json": "[\"extracted\"]",
+        "entity_type": "concept",
+        "weight": 0.75,
+        "created_at": "2026-09-01T14:42:50+08:00"
+      },
+      {
+        "id": "13a1837b-416b-43c9-a483-b8ae1d06ddc1",
+        "memory_id": "f8bcd5c8-cb77-43e9-ae20-97ab7f3c9463",
+        "entity": "agent:hermes",
+        "normalized_entity": "agent hermes",
+        "aliases_json": "[\"agent hermes\"]",
+        "entity_type": "concept",
+        "weight": 0.75,
+        "created_at": "2026-09-01T14:42:50+08:00"
       }
     ]
   }
