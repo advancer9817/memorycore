@@ -282,6 +282,9 @@ export function MemoryOperationsView({
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
               <Badge variant="outline" className="border-emerald-700 bg-emerald-500/10 text-emerald-300 text-xs">✓ {t.dashboard.maintenanceRun}</Badge>
               <span className="text-zinc-400">{maintenanceSummaryLabel(t, maintenanceRunState.action ?? "archive")} <span className="text-zinc-200">{maintenanceSummaryCount(maintenanceRunState)}</span></span>
+              {maintenanceRunState.result.summary?.reactivate != null && maintenanceRunState.result.summary.reactivate > 0 && (
+                <span className="text-zinc-400">· <span className="text-sky-300">{t.dashboard.maintenanceContradictionWinner} {maintenanceRunState.result.summary.reactivate}</span></span>
+              )}
               {maintenanceRunState.elapsedMs !== undefined && <span className="text-zinc-500">{((maintenanceRunState.elapsedMs) / 1000).toFixed(1)}s</span>}
               {maintenanceRunState.result.replayed && <span className="text-zinc-500">{t.dashboard.maintenanceReplayed}</span>}
               {maintenanceRunState.result.backup_path && <div className="min-w-0 flex-1 truncate text-zinc-500">{t.dashboard.maintenanceBackup}: <span className="text-zinc-300 truncate">{maintenanceRunState.result.backup_path}</span></div>}
@@ -430,6 +433,12 @@ function maintenanceReasonLabel(t: Messages, reason: string): string {
       return t.dashboard.maintenanceArchiveExtensionStale;
     case "archive_extension:superseded":
       return t.dashboard.maintenanceArchiveExtensionSuperseded;
+    case "archive_extension:contradiction_loser":
+      return t.dashboard.maintenanceArchiveExtensionContradictionLoser;
+    case "archive_extension:contradiction_orphan":
+      return t.dashboard.maintenanceArchiveExtensionContradictionOrphan;
+    case "contradiction_winner":
+      return t.dashboard.maintenanceContradictionWinner;
     default:
       return reason;
   }

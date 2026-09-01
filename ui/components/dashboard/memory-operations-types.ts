@@ -86,6 +86,8 @@ export type MaintenancePlan = {
   // clean (D3) fields
   clean_count?: number;
   clean_ids?: string[];
+  // contradiction adjudication (archive plan)
+  reactivate_ids?: string[];
 };
 
 export type MaintenanceJob = {

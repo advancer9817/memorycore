@@ -250,3 +250,73 @@ class TestCleanAggressive:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
         rows = _clean_candidate_rows(cutoff, ("memorycore-smoke-test",), 5, mode="conservative")
         assert rec["id"] not in {r["id"] for r in rows}
+
+
+class TestArchiveContradictionAdjudication:
+    """iter 39: contradiction loser/orphan -> archive, winner -> active."""
+
+    def _add_decision(self, newer_id: str, older_id: str) -> None:
+        import json
+        from memorycore.storage.db import managed_conn
+        with managed_conn() as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS governance_decisions ("
+                " id TEXT PRIMARY KEY, decision_type TEXT, source_ids_json TEXT,"
+                " recommended_action TEXT, review_status TEXT, finding_json TEXT,"
+                " created_at TEXT, updated_at TEXT)"
+            )
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(governance_decisions)").fetchall()]
+            base = {"id": "test-contra-" + older_id[:8], "decision_type": "contradiction",
+                    "source_ids_json": json.dumps([older_id, newer_id]),
+                    "recommended_action": "mark_contradicted", "review_status": "applied",
+                    "finding_json": json.dumps({"newer_id": newer_id, "older_id": older_id}),
+                    "created_at": "2026-09-01T00:00:00+00:00",
+                    "updated_at": "2026-09-01T00:00:00+00:00"}
+            keys, vals = [], []
+            for k, v in base.items():
+                if k in cols:
+                    keys.append(k); vals.append(v)
+            conn.execute(
+                f"INSERT OR REPLACE INTO governance_decisions ({', '.join(keys)}) VALUES ({', '.join('?' for _ in keys)})",
+                vals,
+            )
+
+    def test_plan_maps_three_roles(self):
+        from memorycore.storage.maintenance import plan_data_maintenance
+        loser = _add("矛盾败方")
+        winner = _add("矛盾胜方")
+        orphan = _add("悬案矛盾")
+        _force_status_created(loser["id"], "contradicted", "2020-01-01T00:00:00+00:00")
+        _force_status_created(winner["id"], "contradicted", "2020-01-01T00:00:00+00:00")
+        _force_status_created(orphan["id"], "contradicted", "2020-01-01T00:00:00+00:00")
+        self._add_decision(winner["id"], loser["id"])
+
+        plan = plan_data_maintenance(limit=50)
+        assert loser["id"] in plan["archive_ids"], "decision loser must archive"
+        assert orphan["id"] in plan["archive_ids"], "untouched orphan must archive"
+        assert winner["id"] in plan["reactivate_ids"], "decision winner must reactivate"
+        reasons = [g["reason"] for g in plan["groups"]]
+        assert "archive_extension:contradiction_loser" in reasons
+        assert "contradiction_winner" in reasons
+
+    def test_execute_applies_mixed_status(self):
+        from memorycore.storage.maintenance import execute_data_maintenance, plan_data_maintenance
+        from memorycore.storage.db import read_conn
+
+        loser = _add("执行-败方")
+        winner = _add("执行-胜方")
+        _force_status_created(loser["id"], "contradicted", "2020-01-01T00:00:00+00:00")
+        _force_status_created(winner["id"], "contradicted", "2020-01-01T00:00:00+00:00")
+        self._add_decision(winner["id"], loser["id"])
+
+        plan = plan_data_maintenance(limit=50)
+        result = execute_data_maintenance(plan["plan_token"], limit=50)
+        assert result["status"] == "succeeded"
+        assert result["summary"]["archive"] >= 1
+        assert result["summary"]["reactivate"] >= 1
+
+        with read_conn() as conn:
+            lrow = conn.execute("SELECT status FROM memories WHERE id=?", (loser["id"],)).fetchone()
+            wrow = conn.execute("SELECT status FROM memories WHERE id=?", (winner["id"],)).fetchone()
+        assert lrow["status"] == "archived"
+        assert wrow["status"] == "active"

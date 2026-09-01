@@ -396,11 +396,95 @@ def _archive_extension_candidates(min_days: int) -> tuple[list[dict[str, Any]], 
     return candidates, len(rows)
 
 
+def _contradiction_pair_map() -> tuple[set[str], set[str]]:
+    """Older/newer id sets from applied contradiction decisions.
+
+    The LLM contradiction detector records newer_id/older_id in finding_json.
+    Decision-backed pairs are adjudicated: the loser archives immediately, the
+    winner returns to active. Returns (older_ids, newer_ids).
+    """
+    older_ids: set[str] = set()
+    newer_ids: set[str] = set()
+    try:
+        with read_conn() as conn:
+            rows = conn.execute(
+                "SELECT finding_json FROM governance_decisions"
+                " WHERE decision_type='contradiction' AND review_status='applied'"
+            ).fetchall()
+        for (finding_json,) in rows:
+            try:
+                f = json.loads(finding_json or "{}")
+            except Exception:
+                continue
+            nid = f.get("newer_id")
+            oid = f.get("older_id")
+            if nid:
+                newer_ids.add(nid)
+            if oid:
+                older_ids.add(oid)
+    except Exception:
+        pass
+    return older_ids, newer_ids
+
+
+def _contradiction_candidates(
+    older_ids: set[str], newer_ids: set[str], min_days: int
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+    """Contradicted records → archive/reactivate per user-approved strategy.
+
+    - Decision-backed loser (contradicted & older_id of an applied decision)
+      → archive immediately (the newer side already won the pair).
+    - Orphan contradicted (no decision references it) → archive once untouched
+      for `min_days` (same gate as stale/superseded).
+    - Mis-flagged winner (contradicted & newer_id & never an older_id)
+      → reactivate to active (new supersedes old).
+
+    Returns (archive_candidates, reactivate_candidates, scanned).
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=min_days)).isoformat(timespec="seconds")
+    with read_conn() as conn:
+        rows = [
+            dict(r)
+            for r in conn.execute(
+                """
+                SELECT id, title, status, created_at,
+                       COALESCE(NULLIF(last_accessed_at, ''), created_at) AS last_touch
+                FROM memories
+                WHERE status='contradicted'
+                """
+            ).fetchall()
+        ]
+    archive: list[dict[str, Any]] = []
+    reactivate: list[dict[str, Any]] = []
+    for r in rows:
+        rid = r["id"]
+        if rid in older_ids:
+            archive.append({
+                "id": rid,
+                "title": r.get("title") or "",
+                "reason": "archive_extension:contradiction_loser",
+            })
+        elif rid in newer_ids:
+            reactivate.append({
+                "id": rid,
+                "title": r.get("title") or "",
+                "reason": "contradiction_winner",
+            })
+        elif str(r.get("last_touch") or "") < cutoff:
+            archive.append({
+                "id": rid,
+                "title": r.get("title") or "",
+                "reason": "archive_extension:contradiction_orphan",
+            })
+    return archive, reactivate, len(rows)
+
+
 def plan_data_maintenance(limit: int = DEFAULT_MAINTENANCE_LIMIT) -> dict[str, Any]:
     """Read-only archive plan for the manual maintenance loop (M1).
 
     Rule curator scan + archive-extension rules (stale/superseded untouched
-    for maintenance.archive_extension.min_days_untouched, default 90 days).
+    for maintenance.archive_extension.min_days_untouched, default 30 days)
+    + contradiction adjudication (losers/orphans → archive, winners → active).
     No writes of any kind happen here.
     """
     from memorycore.storage.curator import curator_report
@@ -412,18 +496,30 @@ def plan_data_maintenance(limit: int = DEFAULT_MAINTENANCE_LIMIT) -> dict[str, A
     extension, extension_scanned = (
         _archive_extension_candidates(cfg["min_days_untouched"]) if cfg["enabled"] else ([], 0)
     )
+    older_ids, newer_ids = (
+        _contradiction_pair_map() if cfg["enabled"] else (set(), set())
+    )
+    contra_archive, contra_reactivate, contra_scanned = (
+        _contradiction_candidates(older_ids, newer_ids, cfg["min_days_untouched"]) if cfg["enabled"] else ([], [], 0)
+    )
+    # 裁决胜方优先级最高：宁可改归档建议为激活，也不能把胜方归档掉。
+    winner_ids = {c["id"] for c in contra_reactivate}
+    contra_archive_map = {p["id"]: p for p in contra_archive}
     seen: set[str] = set()
     merged: list[dict[str, Any]] = []
-    for p in planned + extension:
-        if p["id"] in seen:
+    for p in planned + extension + contra_archive:
+        if p["id"] in seen or p["id"] in winner_ids:
             continue
         seen.add(p["id"])
-        merged.append(p)
+        # 同一记录 curator 与扩展规则都命中时，用扩展规则的原因名（更可读）。
+        merged.append(contra_archive_map.get(p["id"], p))
     archive_ids = [p["id"] for p in merged]
-    token_source = "archive|" + ("|".join(sorted(archive_ids)) if archive_ids else "__empty__")
+    reactivate_ids = [c["id"] for c in contra_reactivate if c["id"] not in seen]
+    token_source = "archive|" + ("|".join(sorted(archive_ids)) if archive_ids else "__empty__") \
+        + "|active|" + ("|".join(sorted(reactivate_ids)) if reactivate_ids else "__empty__")
     plan_token = hashlib.sha256(token_source.encode("utf-8")).hexdigest()[:24]
     groups: dict[str, dict[str, Any]] = {}
-    for p in merged:
+    for p in merged + contra_reactivate:
         reason = str(p.get("reason") or "archive")
         group = groups.setdefault(reason, {"reason": reason, "count": 0, "samples": []})
         group["count"] += 1
@@ -432,10 +528,12 @@ def plan_data_maintenance(limit: int = DEFAULT_MAINTENANCE_LIMIT) -> dict[str, A
     return {
         "dry_run": True,
         "generated_at": now(),
-        "scanned": report.get("scanned", 0) + extension_scanned,
+        "scanned": report.get("scanned", 0) + extension_scanned + contra_scanned,
         "plan_token": plan_token,
         "archive_count": len(archive_ids),
         "archive_ids": archive_ids,
+        "reactivate_count": len(reactivate_ids),
+        "reactivate_ids": reactivate_ids,
         "groups": list(groups.values()),
         "summary": report.get("summary", {}),
     }
@@ -540,9 +638,10 @@ def execute_data_maintenance(
             "generated (e.g. a curator run mutated statuses); run plan again and retry"
         )
     archive_ids = plan["archive_ids"]
+    reactivate_ids = plan.get("reactivate_ids") or []
 
     with maintenance_lock(nonblocking=True):
-        if not archive_ids:
+        if not archive_ids and not reactivate_ids:
             log_audit_event(
                 "maintenance_archive",
                 detail={"plan_token": plan_token, "archived": 0, "noop": True},
@@ -552,6 +651,7 @@ def execute_data_maintenance(
 
         backup = memory_backup()
         updates = [(memory_id, "archived") for memory_id in archive_ids]
+        updates += [(memory_id, "active") for memory_id in reactivate_ids]
         # Single caller-owned transaction: status writes + cascade Qdrant sync.
         with managed_conn() as conn:
             update_status_batch(conn, updates)
@@ -559,13 +659,15 @@ def execute_data_maintenance(
             "maintenance_archive",
             detail={
                 "plan_token": plan_token,
-                "archived": len(updates),
+                "archived": len(archive_ids),
+                "reactivated": len(reactivate_ids),
                 "backup": backup.get("path"),
                 "kinds": [{"reason": g["reason"], "count": g["count"]} for g in plan["groups"]],
             },
         )
     summary = {
-        "archive": len(updates),
+        "archive": len(archive_ids),
+        "reactivate": len(reactivate_ids),
         "backup_path": backup.get("path"),
         "backup_bytes": backup.get("bytes", 0),
         "groups": [{"reason": g["reason"], "count": g["count"]} for g in plan["groups"]],

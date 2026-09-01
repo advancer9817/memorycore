@@ -6125,3 +6125,22 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ### 备注
 - 指标「待清理占比」仍含 contradicted；归档执行后 stale/superseded 部分会自然下降。治理状态不会污染检索（stale/contradicted 检索时已过滤）。
+
+## [迭代 40] 2026-09-01 — 矛盾裁决并入归档链路：败方/悬案→归档，胜方→激活（用户选定策略）
+
+### 策略（用户拍板）
+- 矛盾对：新的取代旧的。失败方（older_id）**直接落入归档**；胜方（newer_id）若被误标曲为 contradicted 则恢复 active；无裁决决策的悬案矛盾按闲置 30 天规则归档。
+
+### 变更（后端）
+- `storage/maintenance.py`：
+  - `_contradiction_pair_map()`：从 applied 的 contradiction 决策 finding_json（newer_id/older_id）构建裁决对。
+  - `_contradiction_candidates()`：contradicted 记录三分——older_id → `archive_extension:contradiction_loser`（立即归档）；无决策引用且闲置 ≥30 天 → `archive_extension:contradiction_orphan`；newer_id 且非 chain 败方 → reactivate（`contradiction_winner`）。
+  - `plan_data_maintenance`：并入扩展规则，token 覆盖 archive_ids + reactivate_ids；胜方优先级最高（不会被 curator 归档建议遮掉）；同一记录 curator/扩展同时命中时用扩展原因名。
+  - `execute_data_maintenance`：混合批次（archived + active）单事务应用，summary 增加 `reactivate`，audit 记录 archived/reactivated。
+
+### 变更（前端）
+- i18n：`maintenanceArchiveExtensionContradiction{Loser,Orphan}` + `maintenanceContradictionWinner` 三标签双语；View 成功行显示「矛盾胜方 → 激活 N」。
+
+### 验证
+- 新增测试 `TestArchiveContradictionAdjudication`（三角色 plan 映射 + 混合 execute），maintenance 27 passed；tsc 零错误；build 成功；双服务重启。
+- 生产实测（2026-09-01）：矛盾 233 → 计划 226（悬案 176 + 败方 50）→ 执行成功（备份 67MB）→ **剩 7 条新增矛盾**；待清理 867 → **36**（7 矛盾 + 29 新合并取代），健康分 87 → 89、待清理占比 35% → 2%。
