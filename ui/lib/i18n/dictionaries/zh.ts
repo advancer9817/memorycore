@@ -201,6 +201,7 @@ export const zh = {
     linkedCoverageDetail: (linkCount: number, uniqueLinked: number) => `${linkCount} 条链接 · 覆盖 ${uniqueLinked} 条记忆`,
     nonArchivedRatio: "待清理占比",
     nonArchivedRatioDetail: (pending: number, usable: number) => `${pending}/${usable} 条可用记忆待清理`,
+    usablePoolHealth: "可用池健康",
     llmGovernance: "LLM 治理",
     llmNeverRun: "从未运行（中性）",
     nodes: "节点",

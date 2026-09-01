@@ -6168,3 +6168,16 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ### 验证
 - tsc 零错误；build 成功；mcore-ui 重启 200；刷新后 2%（36/1707 待清理）显示绿色、健康分 89 绿徽章「healthy」。
+
+## [迭代 43] 2026-09-01 — 「待清理占比」改为正向「可用池健康」（98% 不红脸）
+
+### 问题
+- 2% 的待清理占比数值小，即便配色已绿，用户仍觉得"2%"不友好/像有问题；希望显示取反的大数字。
+
+### 变更
+- 新增 i18n `usablePoolHealth`（可用池健康 / Usable pool health）。
+- HealthBanner + MemoryIntelligenceCenter 的该指标改为 `100 - pending_cleanup_share`（正向 98%），绿色（越大越好），离屏附注保留 `pending/usable 待清理` 细节。
+- 移除 HealthSignal.inverted 的使用（不再需要反向配色，改为正向值）；inverted 能力保留在类型中供未来反指标复用。
+
+### 验证
+- tsc 零错误；build 成功；mcore-ui 重启 200。顶部条与智能中心均为「可用池健康 98」（36/1707 待清理仅作 tooltip 细节）。

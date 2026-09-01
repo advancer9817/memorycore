@@ -190,10 +190,9 @@ export function MemoryIntelligenceCenter() {
           detail: t.linkedCoverageDetail(health.metrics.link_count, health.metrics.unique_linked_memories),
         },
         {
-          label: t.nonArchivedRatio,
-          value: Math.round(health.metrics.pending_cleanup_share),
+          label: t.usablePoolHealth,
+          value: Math.round(100 - health.metrics.pending_cleanup_share),
           detail: t.nonArchivedRatioDetail(health.metrics.pending_cleanup, health.metrics.usable_pool),
-          inverted: true,
         },
         {
           label: t.llmGovernance,

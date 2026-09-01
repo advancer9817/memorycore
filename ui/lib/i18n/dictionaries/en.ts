@@ -199,6 +199,7 @@ export const en = {
     linkedCoverageDetail: (linkCount: number, uniqueLinked: number) => `${linkCount} links · cover ${uniqueLinked} memories`,
     nonArchivedRatio: "Cleanup backlog",
     nonArchivedRatioDetail: (pending: number, usable: number) => `${pending}/${usable} usable memories pending cleanup`,
+    usablePoolHealth: "Usable pool health",
     llmGovernance: "LLM governance",
     llmNeverRun: "Never run (neutral)",
     nodes: "Nodes",
