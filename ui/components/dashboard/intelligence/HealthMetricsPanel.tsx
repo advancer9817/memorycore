@@ -25,17 +25,20 @@ function barColor(value: number): string {
 }
 
 function SignalCard({ signal }: { signal: HealthSignal }) {
+  // lower-is-better signals (cleanup backlog) must be praised when LOW:
+  // invert the value before feeding the shared high-is-good color scale.
+  const colorValue = signal.inverted ? 100 - signal.value : signal.value;
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2.5">
       <div className="flex items-center justify-between text-xs">
         <span className="text-zinc-400">{signal.label}</span>
-        <span className={`font-mono font-medium ${scoreColor(signal.value)}`}>
+        <span className={`font-mono font-medium ${scoreColor(colorValue)}`}>
           {Math.round(signal.value)}%
         </span>
       </div>
       <div className="mt-2 h-1 overflow-hidden rounded-full bg-zinc-800">
         <div
-          className={`h-full rounded-full transition-all ${barColor(signal.value)}`}
+          className={`h-full rounded-full transition-all ${barColor(colorValue)}`}
           style={{ width: `${Math.min(100, Math.max(2, signal.value))}%` }}
         />
       </div>

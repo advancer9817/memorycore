@@ -102,6 +102,8 @@ export interface HealthSignal {
   label: string;
   value: number;
   detail: string;
+  /** lower-is-better signal (e.g. cleanup backlog): color scale inverted */
+  inverted?: boolean;
 }
 
 export interface RecommendationItem {

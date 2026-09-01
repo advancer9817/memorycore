@@ -193,6 +193,7 @@ export function MemoryIntelligenceCenter() {
           label: t.nonArchivedRatio,
           value: Math.round(health.metrics.pending_cleanup_share),
           detail: t.nonArchivedRatioDetail(health.metrics.pending_cleanup, health.metrics.usable_pool),
+          inverted: true,
         },
         {
           label: t.llmGovernance,

@@ -6155,3 +6155,16 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ### 验证
 - tsc 零错误；build 成功；mcore-ui 重启 200；现在顶部条显示「待清理占比 2」，智能中心同为 2（36/1718）。
+
+## [迭代 42] 2026-09-01 — 智能中心「待清理占比」反向配色修复（2% 不再红色警示）
+
+### 问题
+- 「待清理占比」是越低越好的指标，但 HealthMetricsPanel 所有信号卡共用"越高越好"的配色尺度：2% 被当 2 分 → 红条红字，用户误以为出问题。
+
+### 变更
+- `helpers.ts`：HealthSignal 增加 `inverted?: boolean`（越低越好标记）。
+- `HealthMetricsPanel.SignalCard`：inverted 信号按 `100 - value` 取配色（低=绿、高=红），数值/进度条宽度仍显示真实值。
+- `MemoryIntelligenceCenter`：待清理占比信号标记 `inverted: true`。
+
+### 验证
+- tsc 零错误；build 成功；mcore-ui 重启 200；刷新后 2%（36/1707 待清理）显示绿色、健康分 89 绿徽章「healthy」。
