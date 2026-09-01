@@ -6144,3 +6144,14 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 ### 验证
 - 新增测试 `TestArchiveContradictionAdjudication`（三角色 plan 映射 + 混合 execute），maintenance 27 passed；tsc 零错误；build 成功；双服务重启。
 - 生产实测（2026-09-01）：矛盾 233 → 计划 226（悬案 176 + 败方 50）→ 执行成功（备份 67MB）→ **剩 7 条新增矛盾**；待清理 867 → **36**（7 矛盾 + 29 新合并取代），健康分 87 → 89、待清理占比 35% → 2%。
+
+## [迭代 41] 2026-09-01 — 顶部健康条「待清理占比」显示修正（98→真实 2）
+
+### 问题
+- HealthBanner 的「待清理占比」chip 沿用了旧语义：显示 `100 - pending_cleanup_share`（即"非待清理/干净占比"），标签却叫"待清理占比"，与智能中心显示的真实占比（2）互为补数，让用户困惑（98 vs 2）。
+
+### 变更
+- `HealthBanner.tsx`：chip value 改为直接显示 `metrics.pending_cleanup_share`（真实待清理占比），与 MemoryIntelligenceCenter 同源同口径。score 权重仍用后端 `(100-share)` 计算，无需改动。
+
+### 验证
+- tsc 零错误；build 成功；mcore-ui 重启 200；现在顶部条显示「待清理占比 2」，智能中心同为 2（36/1718）。
