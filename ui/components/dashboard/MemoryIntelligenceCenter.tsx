@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSelector } from "react-redux";
 import { AlertTriangle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,16 +19,34 @@ import {
   MemoriesPayload,
   StatsPayload,
   asNumber,
-  buildAttentionItems,
-  clampScore,
-  inversePercentage,
-  percentage,
-  weightedScore,
 } from "./intelligence/helpers";
 import { MemoryIntelligenceSkeleton, SectionHeader } from "./intelligence/Primitives";
 import { HealthMetricsPanel } from "./intelligence/HealthMetricsPanel";
 import { CurationActivityPanel } from "./intelligence/CurationActivityPanel";
 import { SourceBreakdownPanel } from "./intelligence/SourceBreakdownPanel";
+
+type HealthScorePayload = {
+  quality: number;
+  risk: number;
+  llmGovernance: number;
+  llmStatus: string;
+  metrics: {
+    active: number;
+    active_never_accessed: number;
+    active_reuse_coverage: number;
+    linked_coverage: number;
+    link_count: number;
+    unique_linked_memories: number;
+    pending_cleanup_share: number;
+    pending_cleanup: number;
+    usable_pool: number;
+  };
+  signals: {
+    high_risk_count: number;
+    contradiction_actionable: number;
+    duplicate_actionable: number;
+  };
+};
 
 export function MemoryIntelligenceCenter() {
   const userId = useSelector((state: RootState) => state.profile.userId);
@@ -36,6 +54,7 @@ export function MemoryIntelligenceCenter() {
   const { messages } = useI18n();
   const t = messages.dashboard;
   const [state, setState] = useState<IntelligenceState>(INITIAL_STATE);
+  const [health, setHealth] = useState<HealthScorePayload | null>(null);
   const [llmRunning, setLlmRunning] = useState(false);
   const [localRefreshKey, setLocalRefreshKey] = useState(0);
 
@@ -51,7 +70,7 @@ export function MemoryIntelligenceCenter() {
       setState((current) => ({ ...current, isLoading: true, error: null }));
       try {
         const apiBaseUrl = getApiBaseUrl();
-        const [curatorResponse, statsResponse, memoriesResponse, governanceCountsResponse] = await Promise.all([
+        const [curatorResponse, statsResponse, memoriesResponse, governanceCountsResponse, healthScoreResponse] = await Promise.all([
           fetch(`${apiBaseUrl}/api/v1/curator/status`, { signal: controller.signal }),
           fetch(`${apiBaseUrl}/api/v1/stats?user_id=${encodeURIComponent(userId)}`, { signal: controller.signal }),
           fetch(`${apiBaseUrl}/api/v1/memories/filter`, {
@@ -68,6 +87,7 @@ export function MemoryIntelligenceCenter() {
             }),
           }),
           fetch(`${apiBaseUrl}/api/v1/governance/counts`, { signal: controller.signal }),
+          fetch(`${apiBaseUrl}/api/v1/health-score`, { signal: controller.signal }),
         ]);
 
         if (!curatorResponse.ok || !statsResponse.ok || !memoriesResponse.ok) {
@@ -79,6 +99,13 @@ export function MemoryIntelligenceCenter() {
         const memoriesPayload = (await memoriesResponse.json()) as MemoriesPayload;
         const governanceCounts = governanceCountsResponse.ok
           ? ((await governanceCountsResponse.json()) as { data?: GovernanceCounts }).data ?? null
+          : null;
+        // 健康分走后端单一事实源；失败时不阻塞整个面板（保留上次数值）。
+        const healthPayload = healthScoreResponse.ok
+          ? ((await healthScoreResponse.json()) as ApiEnvelope<HealthScorePayload> | HealthScorePayload)
+          : null;
+        const healthScore = healthPayload
+          ? (healthPayload as ApiEnvelope<HealthScorePayload>).data ?? (healthPayload as HealthScorePayload)
           : null;
 
         const curatorData = (curatorPayload as ApiEnvelope<CuratorStatusPayload>).data ?? (curatorPayload as CuratorStatusPayload);
@@ -92,6 +119,7 @@ export function MemoryIntelligenceCenter() {
           isLoading: false,
           error: null,
         });
+        if (healthScore) setHealth(healthScore);
       } catch (error: unknown) {
         if (controller.signal.aborted && !didTimeout) return;
         setState({
@@ -142,77 +170,41 @@ export function MemoryIntelligenceCenter() {
     }
   }, [llmRunning]);
 
+  // 健康分与信号卡片统一消费后端 /api/v1/health-score（与顶部 HealthBanner 同源，口径永远一致）。
+  const qualityScore = Math.round(health?.quality ?? 0);
+  const healthSignals = health
+    ? [
+        {
+          label: t.riskControl,
+          value: Math.round(health.risk),
+          detail: t.riskControlDetail(health.signals.contradiction_actionable, health.signals.duplicate_actionable),
+        },
+        {
+          label: t.reuseCoverage,
+          value: Math.round(health.metrics.active_reuse_coverage),
+          detail: t.reuseCoverageDetail(health.metrics.active_never_accessed, health.metrics.active),
+        },
+        {
+          label: t.linkedCoverage,
+          value: Math.round(health.metrics.linked_coverage),
+          detail: t.linkedCoverageDetail(health.metrics.link_count, health.metrics.unique_linked_memories),
+        },
+        {
+          label: t.nonArchivedRatio,
+          value: Math.round(health.metrics.pending_cleanup_share),
+          detail: t.nonArchivedRatioDetail(health.metrics.pending_cleanup, health.metrics.usable_pool),
+        },
+        {
+          label: t.llmGovernance,
+          value: Math.round(health.llmGovernance),
+          detail: health.llmStatus,
+        },
+      ]
+    : [];
   const curatorStatus = state.curatorStatus;
   const statusStats = curatorStatus?.stats ?? {};
-  const byStatus = statusStats.by_status ?? {};
   const byType = statusStats.by_type ?? {};
   const totalMemories = asNumber(statusStats.total) || asNumber(state.stats?.total_memories) || state.recentMemories.length;
-  const active = asNumber(byStatus.active);
-  const linkCount = asNumber(statusStats.link_count);
-  const uniqueLinkedMemories = asNumber(statusStats.unique_linked_memories);
-  const activeNeverAccessed = asNumber(statusStats.active_never_accessed_count);
-  const contradicted = asNumber(byStatus.contradicted);
-  const stale = asNumber(byStatus.stale);
-  const superseded = asNumber(byStatus.superseded);
-  const pendingCleanup =
-    stale + superseded + contradicted;
-  const usablePool =
-    active + stale + contradicted + superseded;
-  // B2: reuse coverage over the active pool only (archived dead data excluded)
-  const activeReuseCoverage = active > 0 ? percentage(active - activeNeverAccessed, active) : 0;
-  // B3: linked coverage uses real memory_links unique-coverage ratio, decoupled from reuse
-  const linkedCoverageRatio = active > 0 ? percentage(uniqueLinkedMemories, active) : 0;
-  // B4: non-archived ratio becomes "pending cleanup share of usable pool"
-  const nonArchivedRatio = usablePool > 0 ? percentage(pendingCleanup, usablePool) : 0;
-  const connectedCoverage = linkedCoverageRatio;
-  const attentionItems = useMemo(
-    () => buildAttentionItems(curatorStatus, t, llmRunning ? null : handleRunLlm, state.governanceCounts),
-    [curatorStatus, t, llmRunning, handleRunLlm, state.governanceCounts]
-  );
-  const highRiskCount = attentionItems.filter((item) => item.severity === "high").length;
-  const curatorSummary = curatorStatus?.curator?.summary ?? {};
-  const llmSummary = curatorStatus?.llm_curator?.summary ?? {};
-  const contradictionCount = state.governanceCounts != null
-    ? state.governanceCounts.contradiction
-    : contradicted + asNumber(llmSummary.contradictions) + asNumber(curatorSummary.contradictions);
-  const duplicateCount = state.governanceCounts != null
-    ? state.governanceCounts.semantic_duplicate
-    : asNumber(curatorSummary.duplicates) + asNumber(llmSummary.semantic_duplicates);
-  const staleActionCount = stale + asNumber(curatorSummary.archive) + asNumber(curatorSummary.stale);
-  void staleActionCount;
-  const llmStatus = curatorStatus?.llm_curator?.last_result ?? curatorStatus?.llm_curator?.latest_job?.status ?? "unknown";
-  const llmNeverRun = llmStatus === "unknown" || llmStatus === "idle";
-  const riskScore = clampScore(100 - highRiskCount * 18 - Math.min(duplicateCount, 100) * 0.28 - Math.min(contradictionCount, 20) * 2);
-  // B1: LLM governance score — neutral when never run (no hard-coded 45 penalty);
-  // when run, recent success is 100 and running is a transient 62.
-  const llmGovernanceScore = llmNeverRun
-    ? 50
-    : llmStatus === "success"
-      ? 100
-      : llmStatus === "running"
-        ? 62
-        : 50;
-  const qualityScore = weightedScore([
-    { value: riskScore, weight: 0.34 },
-    { value: inversePercentage(pendingCleanup, usablePool), weight: 0.16 },
-    { value: connectedCoverage, weight: 0.08 },
-    { value: activeReuseCoverage, weight: 0.24 },
-    { value: llmGovernanceScore, weight: 0.14 },
-  ]);
-  const healthSignals = [
-    // B5: when LLM detection is unavailable, flag that risk numbers may be stale
-    {
-      label: t.riskControl,
-      value: riskScore,
-      detail: llmNeverRun || llmStatus !== "success"
-        ? `${t.riskControlDetail(contradictionCount, duplicateCount)} · ${t.llmDataMayBeStale}`
-        : t.riskControlDetail(contradictionCount, duplicateCount),
-    },
-    { label: t.reuseCoverage, value: activeReuseCoverage, detail: t.reuseCoverageDetail(activeNeverAccessed, active) },
-    { label: t.linkedCoverage, value: linkedCoverageRatio, detail: t.linkedCoverageDetail(linkCount, uniqueLinkedMemories) },
-    { label: t.nonArchivedRatio, value: nonArchivedRatio, detail: t.nonArchivedRatioDetail(pendingCleanup, usablePool) },
-    { label: t.llmGovernance, value: llmGovernanceScore, detail: llmNeverRun ? t.llmNeverRun : llmStatus },
-  ];
   const recentCount = state.recentMemories.filter((memory) => Date.now() - new Date(memory.created_at).getTime() <= 7 * DAY_MS).length;
   const oldCount = state.recentMemories.filter((memory) => Date.now() - new Date(memory.created_at).getTime() > 30 * DAY_MS).length;
   const typeEntries = Object.entries(byType)

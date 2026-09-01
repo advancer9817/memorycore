@@ -6089,3 +6089,20 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ### 备注
 - config.yaml 为 git 追踪文件且历史上已含 api_key（既有现状）；本次 diff 仅 base_url 一行，无新增密钥。若要收敛，建议后续把 api_key 迁到环境变量并重置该 key。
+
+## [迭代 38] 2026-09-01 — 健康分口径统一：智能中心改用后端 health-score 单一事实源
+
+### 问题
+- 同一看板两个健康分：顶部 HealthBanner（后端 /api/v1/health-score）显示 86 分/风险 100/待清理 35，而「记忆智能中心」面板前端本地重算显示 65 分/风险 42%/待清理 35% —— 分数与口径均不一致。
+
+### 根因
+- MemoryIntelligenceCenter 在前端本地重复实现加权评分（pitfall #8），其风险分混入了 LLM 已 auto-apply 的发现（58 dedup + 5 contradiction，dry-run→apply 链路不产生 needs_review），与后端"仅统计待处理队列"的口径分叉。
+
+### 变更
+- `MemoryIntelligenceCenter.tsx`：删除本地加权评分实现，health-score 并入面板统一 fetch（失败不阻塞、保留上次数值）；质量分/风险/复用/链接/待清理/LLM 六项信号全部消费后端 payload，与 HealthBanner 永远同源。
+- 后端 `health_score_v1_payload` 未改语义（实探 quality=86 / risk=100 / pending 867/2489=35 / llm=success 与运维统计一致）。
+
+### 验证
+- tsc 零错误；build+postbuild 成功；mcore-ui 重启 200。
+- 接口对账：health-score 与 curator/status 原料完全一致（by_status: active 1622/archived 1700/contradicted 233/stale 611/superseded 23；pending=867, usable=2489, share=35）。
+- governance/counts=0（63 条 LLM 建议已全部 applied：41 archive_and_merge + 17 archive_duplicate + 5 mark_contradicted + 7 supersession - 4 rejected supersession），队列干净，risk=100 合理。
