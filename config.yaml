@@ -121,6 +121,7 @@ temporal:
 subject_context:
   enabled: true
   default_scope: global
+  auto_discover: true
   projects:
     - name: mcore
       paths: ["~/project/memorycore"]

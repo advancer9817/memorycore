@@ -63,6 +63,45 @@ class TestResolveProject:
     def test_empty_cfg_returns_none(self):
         assert resolve_project(project_path="/home/advancer/project/memorycore", cfg={}) is None
 
+    def test_auto_discover_git_repo(self, tmp_path, monkeypatch):
+        # 用一个临时 git 仓库目录模拟 ~/project/* auto-discover
+        import subprocess
+        from memorycore.subject_context import discover_projects
+        repo = tmp_path / "my-proj"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        monkeypatch.setenv("MCORE_PROJECTS_ROOT", str(tmp_path))
+        cfg = {"subject_context": {"enabled": True, "auto_discover": True, "projects": []}}
+        p = resolve_project(project_path=str(repo), cfg=cfg)
+        assert p and p["name"] == "my-proj" and p["scope"] == "project"
+        # 名称匹配也可
+        p2 = resolve_project(project_name="my-proj", cfg=cfg)
+        assert p2 and p2["name"] == "my-proj"
+
+    def test_auto_discover_off_by_default(self, tmp_path, monkeypatch):
+        import subprocess
+        repo = tmp_path / "my-proj"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        monkeypatch.setenv("MCORE_PROJECTS_ROOT", str(tmp_path))
+        cfg = {"subject_context": {"enabled": True, "auto_discover": False, "projects": []}}
+        assert resolve_project(project_path=str(repo), cfg=cfg) is None
+
+    def test_explicit_project_wins_over_discovery(self, tmp_path, monkeypatch):
+        import subprocess
+        repo = tmp_path / "mcore"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        monkeypatch.setenv("MCORE_PROJECTS_ROOT", str(tmp_path))
+        cfg = {
+            "subject_context": {
+                "enabled": True, "auto_discover": True,
+                "projects": [{"name": "mcore", "paths": [str(repo)], "aliases": ["memorycore"], "scope": "project"}],
+            }
+        }
+        p = resolve_project(project_path=str(repo), cfg=cfg)
+        assert p["name"] == "mcore" and p["aliases"] == ["memorycore"]  # 显式项优先
+
     def test_active_context_block(self):
         block = active_context_block("mcore", "/home/advancer/project/memorycore", "project")
         assert "project_name: mcore" in block and "Active Context" in block

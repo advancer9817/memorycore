@@ -314,6 +314,9 @@ class MaintenanceBusyError(RuntimeError):
 
 
 def maintenance_lock_path() -> Path:
+    override = os.environ.get("LOCAL_MEMORY_MAINTENANCE_LOCK")
+    if override:
+        return Path(override)
     return DEFAULT_ROOT / "logs" / MAINTENANCE_LOCK_NAME
 
 

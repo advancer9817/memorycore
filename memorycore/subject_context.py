@@ -37,6 +37,36 @@ def subject_config(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     return sc
 
 
+def discover_projects(sc: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+    """Auto-discover git repos under ~/project/* as subject projects.
+
+    Lets any repo directory (mcore, ai-learning, qai-report, …) resolve
+    without hand-writing a whitelist entry. Explicit ``projects`` entries from
+    config always win over discovery when names collide.
+    """
+    if sc is None:
+        sc = subject_config()
+    if not sc or not sc.get("auto_discover", False):
+        return {}
+    from pathlib import Path
+    import subprocess
+    base = Path(os.environ.get("MCORE_PROJECTS_ROOT", str(Path.home() / "project")))
+    discovered: dict[str, dict[str, Any]] = {}
+    if not base.is_dir():
+        return discovered
+    for child in sorted(base.iterdir()):
+        if not (child / ".git").exists() and not (child / ".git").is_dir():
+            continue
+        name = child.name
+        discovered[name.lower()] = {
+            "name": name,
+            "aliases": [name.lower()],
+            "scope": "project",
+            "path": str(child),
+        }
+    return discovered
+
+
 def resolve_project(
     project_path: str = "",
     project_name: str = "",
@@ -57,35 +87,52 @@ def resolve_project(
     projects = sc.get("projects") or []
     if not isinstance(projects, list):
         return None
+    # Auto-discovered repos (~/project/*) act as additional projects; explicit
+    # config entries below override them by name.
+    discovered = discover_projects(sc)
 
     path = (project_path or "").strip().rstrip("/")
     name = (project_name or "").strip().lower()
 
-    for entry in projects:
-        if not isinstance(entry, dict):
-            continue
-        proj_name = str(entry.get("name") or "").strip()
-        if not proj_name:
-            continue
-        aliases = [str(a).strip().lower() for a in (entry.get("aliases") or []) if str(a).strip()]
-        names = {proj_name.lower(), *aliases}
-        if name and name in names:
-            return {
-                "name": proj_name,
-                "aliases": aliases,
-                "scope": str(entry.get("scope") or "project"),
-                "path": (entry.get("paths") or [""])[0] if entry.get("paths") else "",
-            }
-        for p in entry.get("paths") or []:
-            # Portable configs may use ~/ or $VAR — expand at resolve time.
-            p = os.path.expandvars(os.path.expanduser(str(p).strip())).rstrip("/")
-            if path and p and (path == p or path.startswith(p + "/")):
+    def _entry(projects: list[dict[str, Any]]) -> dict[str, Any] | None:
+        for entry in projects:
+            if not isinstance(entry, dict):
+                continue
+            proj_name = str(entry.get("name") or "").strip()
+            if not proj_name:
+                continue
+            aliases = [str(a).strip().lower() for a in (entry.get("aliases") or []) if str(a).strip()]
+            names = {proj_name.lower(), *aliases}
+            if name and name in names:
                 return {
                     "name": proj_name,
                     "aliases": aliases,
                     "scope": str(entry.get("scope") or "project"),
-                    "path": p,
+                    "path": (entry.get("paths") or [""])[0] if entry.get("paths") else "",
                 }
+            for p in entry.get("paths") or []:
+                # Portable configs may use ~/ or $VAR — expand at resolve time.
+                p = os.path.expandvars(os.path.expanduser(str(p).strip())).rstrip("/")
+                if path and p and (path == p or path.startswith(p + "/")):
+                    return {
+                        "name": proj_name,
+                        "aliases": aliases,
+                        "scope": str(entry.get("scope") or "project"),
+                        "path": p,
+                    }
+        return None
+
+    explicit = _entry(projects)
+    if explicit:
+        return explicit
+    if discovered:
+        # Discovered projects match by exact path or directory-name alias.
+        for entry in discovered.values():
+            p = str(entry["path"]).rstrip("/")
+            if path and p and (path == p or path.startswith(p + "/")):
+                return dict(entry, path=p)
+            if name and name in {str(entry["name"]).lower(), *entry["aliases"]}:
+                return dict(entry)
     return None
 
 
@@ -105,11 +152,13 @@ def active_context_block(project_name: str, project_path: str, scope: str) -> st
 
 SUBJECT_PROMPT_INSTRUCTION = """
 
-# Subject Context 规则（当前对话属于一个已知项目）
+# Subject Context 规则（当前对话可能属于一个项目）
 
-- 每条 fact 的 title 必须以「<project_name> 」为前缀（如 "mcore 迭代31 …"），
-  或在 content 中明确包含项目名，使事实脱离对话后仍能看出归属。
-- 输出 JSON 中每条 fact 可附选字段："subject"（规范项目名，通常即 project_name）
-  与 "entities"（该事实涉及的实体名数组，可选）。
-- 与该项目无关的独立事实不要强行加前缀。
+- 输出 JSON 中每条 fact 必须附 "subject"（该事实归属的规范项目名）与 "entities"
+  （实体名数组，可选）。subject 是主体判定的权威字段。
+- 若事实属于 Active Context 中的 project_name，则 title 必须以
+  「<project_name> 」为前缀（如 "mcore 迭代31 …"），使事实脱离对话后仍能看出归属。
+- 若事实属于其他项目（对话常跨项目引用），不要强加本对话 project_name 前缀，
+  而应在 subject 中写该事实真正归属的项目名。
+- 所有 fact 的 subject 字段都必须是具体项目名或空字符串，禁止泛化占位。
 """

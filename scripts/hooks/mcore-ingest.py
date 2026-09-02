@@ -63,13 +63,42 @@ def _mcore_url() -> str:
 def _detect_project(agent: str = "") -> dict:
     """Best-effort subject detection: which project does this conversation belong to.
 
-    Order: MCORE_PROJECT_PATH env -> claude transcript slug -> git toplevel of
-    the hook's cwd. Returns {"project_path": str} (empty dict when nothing
-    found). Resolution to a canonical project name happens server-side in
-    dedup.ingest via the subject_context.projects whitelist, so this stays
-    generic and never guesses.
+    Order: MCORE_PROJECT_PATH env -> Hermes state.db session git_repo_root
+    (uses the hook payload's session_id; falls back to the most recently
+    active session) -> claude transcript slug -> git toplevel of the hook cwd.
+    Returns {"project_path": str} (empty dict when nothing found). Resolution
+    to a canonical project name happens server-side in dedup.ingest via the
+    subject_context projects whitelist, so this stays generic and never
+    guesses.
     """
     path = os.environ.get("MCORE_PROJECT_PATH", "").strip()
+    if not path and agent == "hermes":
+        # Hermes Desktop sessions record cwd / git_repo_root per session in
+        # ~/.hermes/state.db — the real working dir of the conversation, which
+        # the hook process cwd cannot see (it inherits the app's startup cwd).
+        try:
+            import sqlite3
+            db = Path(os.environ.get("HERMES_STATE_DB", str(Path.home() / ".hermes" / "state.db")))
+            if db.exists():
+                session_id = _payload_session_id(_hook_payload())
+                conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
+                conn.row_factory = sqlite3.Row
+                try:
+                    if session_id:
+                        row = conn.execute(
+                            "SELECT git_repo_root, cwd FROM sessions WHERE id = ?", (session_id,)
+                        ).fetchone()
+                    else:
+                        row = conn.execute(
+                            "SELECT git_repo_root, cwd FROM sessions "
+                            "WHERE ended_at IS NULL ORDER BY last_activity_at DESC LIMIT 1"
+                        ).fetchone()
+                    if row:
+                        path = str(row["git_repo_root"] or "").strip() or str(row["cwd"] or "").strip()
+                finally:
+                    conn.close()
+        except Exception:
+            path = ""
     if not path and agent == "claude":
         # claude transcript lives at ~/.claude/projects/<slug>/<session>.jsonl
         # where <slug> is the cwd with "/" and "." replaced by "-".

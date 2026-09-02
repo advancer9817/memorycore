@@ -6246,3 +6246,30 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ### 备注
 - `subject_context.enabled=false` 可整体关闭该功能；回填备份保留于仓库根目录（备份已加入 .gitignore，不入库）
+
+## [迭代 212] 2026-09-02 — Hermes 读写两路 project_path 自动探测 + subject auto-discover 修复
+
+> 修复「上轮修复之后的新记忆依旧没有主体」：代码逻辑（211）生效了，但 Hermes 实际读写路径没喂 project_path。
+
+### 问题
+- 截图证据：新记忆标签仅 `extracted`，无 `project:*`；查库 `project_path='' scope='global'`
+- 根因链：Hermes desktop/CLI 走 `~/.hermes/plugins/mcore-memory/__init__.py` 直连 MCP（pre_llm_call 读 / post_llm_call 写），on_session_end 才兜底调 `~/.hermes/agent-hooks/mcore-ingest.py` —— **仓库 scripts/hooks 改动从未同步到这两处副本**；且旧 `_detect_project` 只靠 hook 进程 cwd（≈桌面启动目录）跑 git toplevel，拿不到会话真实项目
+
+### 变更
+- `~/.hermes/plugins/mcore-memory/__init__.py`：新增 `_session_project_path(session_id)` 读 `state.db sessions.git_repo_root/cwd`；`_query_memory`→memory_context、`_ingest_async`→memory_ingest 均透传 `project_path`
+- `scripts/hooks/mcore-ingest.py`：`_detect_project()` hermes 分支优先读 state.db（凭 hook payload session_id，回退最近活跃会话）
+- `memorycore/subject_context.py`（服务端）：新增 `discover_projects()` —— `subject_context.auto_discover` 开启时 `~/project/*` 下 git 仓库自动注册为项目（显式 projects 白名单优先）
+- `memorycore/models.py`：`subject_context.auto_discover` 默认 False；`config.yaml` 开启 true
+- prompt 规则调整：`subject` 为权威主体判定字段；事实属于其他项目时不强加本对话 project_name 前缀
+- 同步副本：`~/.hermes/agent-hooks/{mcore-ingest.py,mcore-context.sh}`、`hermes-local-agent-configs/plugins/hermes/mcore-memory/`、`scripts/`
+- 技能：mcore-operations pitfalls 30/31 登记「插件+agent-hooks 三处同步」与「新记忆无主体排查」
+
+### 验证
+- 单测：22 passed（新增 auto_discover 3 例）；全量 594 passed / 7 skipped
+- 服务端：auto_discover 发现 12 个项目；resolve(ai-learning/mcore) 均成功，显式白名单优先
+- 端到端（MCP memory_ingest 带 project_path=/home/advancer/project/ai-learning）：新记录 `project_path=ai-learning`、`scope=project`、tags `['project:mcore']`、`subject='mcore'`（LLM 按内容判定主体）
+- mcore.service 重启 health 200
+
+### 备注
+- 存量旧记录（千帆等）仍 `pp=''` 属预期：P5 回填只处理 mcore 强信号；auto_discover 可随后续会话逐步补齐
+- 读路径注入块 `project_path` 由 Hermes 插件下一次 pre_llm_call 起生效（插件改动需 Hermes 重载/重启）

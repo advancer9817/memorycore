@@ -20,6 +20,8 @@ def isolated_memory_db(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("LOCAL_MEMORY_DB", str(db))
     monkeypatch.setenv("LOCAL_MEMORY_CONFIG", str(config))
+    # 隔离维护锁：测试不得与生产 curator（mcore-curator.timer 持 flock）抢锁。
+    monkeypatch.setenv("LOCAL_MEMORY_MAINTENANCE_LOCK", str(tmp_path / "maint.lock"))
     lm._INITIALIZED_DB_PATHS.clear()
 
     from memorycore.models import invalidate_config_cache

@@ -512,7 +512,7 @@ Step 4（扩展能力）— 独立，可与 Step 1-3 并行
 - [x] **阶段 1（P0）提取期注入主体**：`extraction.py` 注入 Active Context（project_name/path/scope），`ExtractedFact` 增加 `subject`/`entities` 字段，强化 title 自包含规则（带项目名前缀），输出 schema 同步
 - [x] **阶段 2（P0）ingest 落库 metadata**：`dedup.ingest()` / `memory_ingest()` 增加 `project_path`/`scope` 参数并落库，tags 加 `project:*`；`scripts/hooks/mcore-ingest.py` 增加 `_detect_project()` 自动探测（git root / 环境变量 / claude slug）
 - [x] **阶段 3（P0）实体索引兜底**：`entities.py` 增加 `resolve_project_entity()`，带 project_path 的记录强制注入项目实体行，保证 `entity_search("<项目名>")` 确定性命中
-- [ ] **阶段 4（P1）检索端主体扩展**：查询期项目名低权重扩展 + 调用方自动探测 project_path（当前 Hermes 传 `(none)`）
+- [x] **阶段 4（P1）检索端主体扩展（迭代 212 完成）**：Hermes 插件/agent-hooks 双路自动探测 project_path（state.db git_repo_root）+ auto-discover 项目注册；查询期低权重扩展可后补（检索过滤已生效）
 - [x] **阶段 5（P2 可选）存量回填**：`scripts/backfill_subject.py` 高置信自动标主体 / 低置信进 review，dry-run + 备份 + 幂等
 - [x] 新配置段 `subject_context`（enabled / default_scope / projects 白名单 name+paths+aliases+scope）与 config.yaml schema 校验
 

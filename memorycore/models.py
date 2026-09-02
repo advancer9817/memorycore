@@ -98,6 +98,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "subject_context": {
         "enabled": False,  # opt-in: populate projects whitelist, then enable
         "default_scope": "global",
+        "auto_discover": False,  # ~/project/* git repos as subject projects
         "projects": [],
     },
     "rule_curator": {
