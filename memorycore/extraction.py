@@ -135,11 +135,15 @@ def _build_user_prompt(
     messages: list[dict[str, str]],
     existing_memories: list[dict[str, Any]],
     custom_instructions: str = "",
+    active_context: str = "",
 ) -> str:
     today = local_now().date().isoformat()
     parts: list[str] = []
 
     parts.append(f"## Observation Date\n{today}")
+
+    if active_context:
+        parts.append(active_context)
 
     if existing_memories:
         mem_list = [
@@ -224,6 +228,8 @@ class ExtractedFact:
     raw_id: str = ""          # sequential id from LLM response ("0", "1", ...)
     importance: float = 0.5   # LLM-assigned importance 0.0–1.0
     memory_type: str = ""     # LLM-assigned type (decision, bug_fix, etc.)
+    subject: str = ""         # LLM-assigned canonical project name (optional)
+    entities: list[str] = field(default_factory=list)  # LLM-assigned entities (optional)
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +243,9 @@ def extract_facts(
     *,
     min_importance: float = 0.3,
     chinese_detection_ratio: float = 0.15,
+    project_path: str = "",
+    project_name: str = "",
+    scope: str = "global",
 ) -> tuple[list[ExtractedFact], float]:
     """Extract facts from a conversation using an LLM.
 
@@ -280,10 +289,21 @@ def extract_facts(
                 "- 标题和内容均使用中文，保持具体细节（版本号、人名、工具名等）不翻译。\n"
                 "- 输出格式不变，仍为 JSON。\n"
             )
+
+    # Subject context (P1): tell the LLM which project this conversation belongs
+    # to so titles are self-contained ("mcore 迭代31 …" instead of "迭代31 …").
+    active_context = ""
+    if project_name:
+        from memorycore.subject_context import SUBJECT_PROMPT_INSTRUCTION, active_context_block
+        active_context = active_context_block(project_name, project_path, scope)
+        if active_context:
+            system_prompt += SUBJECT_PROMPT_INSTRUCTION
+
     user_prompt = _build_user_prompt(
         messages,
         existing_memories or [],
         config.custom_instructions,
+        active_context=active_context,
     )
 
     t0 = time.time()
@@ -469,6 +489,9 @@ def _parse_response(raw: str, *, min_importance: float = 0.3) -> list[ExtractedF
                 raw_id=str(item.get("id", "")),
                 importance=imp,
                 memory_type=str(item.get("type", "")),
+                subject=str(item.get("subject") or "").strip(),
+                entities=[str(x) for x in item.get("entities", []) if str(x).strip()]
+                if isinstance(item.get("entities"), list) else [],
             ))
 
     return facts

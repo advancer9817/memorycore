@@ -95,6 +95,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "dedup_temporal_guard": True,
         "governance_age_risk_days": 7,
     },
+    "subject_context": {
+        "enabled": False,  # opt-in: populate projects whitelist, then enable
+        "default_scope": "global",
+        "projects": [],
+    },
     "rule_curator": {
         "decay_step": 0.05,
         "decay_interval_days": 30,
@@ -446,6 +451,27 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
                 if name in seen_names:
                     _warn(f"user_profile.schema: duplicate attribute name {name!r} (阿里云建议属性名语义唯一)")
                 seen_names.add(name)
+
+    # subject_context
+    sc = cfg.get("subject_context", {})
+    if not isinstance(sc.get("enabled", False), bool):
+        _warn(f"subject_context.enabled must be a bool (got {sc.get('enabled')!r})")
+    projects = sc.get("projects", [])
+    if not isinstance(projects, list):
+        _warn("subject_context.projects must be a list")
+    else:
+        seen_names: set[str] = set()
+        for entry in projects:
+            if not isinstance(entry, dict) or not str(entry.get("name", "")).strip():
+                _warn(f"subject_context.projects entries must be dicts with a non-empty 'name' (got {entry!r})")
+                continue
+            name = str(entry["name"]).strip()
+            if name in seen_names:
+                _warn(f"subject_context.projects: duplicate project name {name!r}")
+            seen_names.add(name)
+            paths = entry.get("paths", [])
+            if paths and not isinstance(paths, list):
+                _warn(f"subject_context.projects[{name}].paths must be a list")
 
     return warnings
 

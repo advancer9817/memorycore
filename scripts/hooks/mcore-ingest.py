@@ -60,6 +60,47 @@ def _mcore_url() -> str:
     return f"http://{host}:{port}/mcp"
 
 
+def _detect_project(agent: str = "") -> dict:
+    """Best-effort subject detection: which project does this conversation belong to.
+
+    Order: MCORE_PROJECT_PATH env -> claude transcript slug -> git toplevel of
+    the hook's cwd. Returns {"project_path": str} (empty dict when nothing
+    found). Resolution to a canonical project name happens server-side in
+    dedup.ingest via the subject_context.projects whitelist, so this stays
+    generic and never guesses.
+    """
+    path = os.environ.get("MCORE_PROJECT_PATH", "").strip()
+    if not path and agent == "claude":
+        # claude transcript lives at ~/.claude/projects/<slug>/<session>.jsonl
+        # where <slug> is the cwd with "/" and "." replaced by "-".
+        try:
+            explicit = os.environ.get("CLAUDE_SESSION_FILE", "")
+            source = Path(explicit) if explicit else None
+            if source is None or not source.is_file():
+                root = Path.home() / ".claude" / "projects"
+                candidates = [p for p in root.glob("*/*.jsonl") if p.is_file()]
+                if MARK.exists():
+                    candidates = [p for p in candidates if p.stat().st_mtime >= MARK.stat().st_mtime]
+                if candidates:
+                    source = max(candidates, key=lambda p: p.stat().st_mtime)
+            if source is not None:
+                path = source.parent.name.replace("-", "/")
+        except Exception:
+            path = ""
+    if not path:
+        try:
+            cwd = os.environ.get("MCORE_CWD") or os.getcwd()
+            proc = subprocess.run(
+                ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if proc.returncode == 0:
+                path = proc.stdout.strip()
+        except Exception:
+            path = ""
+    return {"project_path": path} if path else {}
+
+
 def _curl_post(payload: dict, session_id: str = "", timeout: float = 10.0) -> tuple[dict, str]:
     cmd = [
         "curl",
@@ -511,7 +552,7 @@ def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:
                 "method": "tools/call",
                 "params": {
                     "name": "memory_ingest",
-                    "arguments": {"messages": messages, "agent_id": agent_id},
+                    "arguments": {"messages": messages, "agent_id": agent_id, **_detect_project(agent)},
                 },
             },
             session_id=session_id,

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 
+from memorycore.models import local_now
 from memorycore.storage.crud import add_memory_record
 from memorycore.storage.profile import (
     decay_profile_attributes,
@@ -70,7 +71,11 @@ class TestFreshness:
         assert "画像可能过时" in warning
 
     def test_silent_when_attrs_current(self):
-        _insert_attr("default", "技术栈", "Java", 0.9, 1, "2026-08-25T00:00:00+08:00")
+        # 动态生成"接近当前时钟"的时间戳（滞后 1 天，阈值 7 天内），
+        # 避免硬编码日期随真实时间流逝变成永假的时间炸弹测试。
+        from datetime import timedelta
+        recent = (local_now() - timedelta(days=1)).isoformat(timespec="seconds")
+        _insert_attr("default", "技术栈", "Java", 0.9, 1, recent)
         _add_profile_memory("技术栈", "现在用 Java")
         warning = profile_freshness_warning(cfg=PROFILE_CFG, max_staleness_days=7)
         assert warning == ""

@@ -38,3 +38,5 @@ ui/tsconfig.tsbuildinfo
 
 # runtime logs
 logs/
+# subject-context backfill backups (65MB+ per run)
+memory-backup-before-subject-*.sqlite3

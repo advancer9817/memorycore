@@ -144,6 +144,8 @@ Extract facts from a conversation and write deduplicated candidates to SQLite.
 | `messages` | `list[dict[str, str]]` | **required** |
 | `user_id` | `str` | `'default'` |
 | `agent_id` | `str` | `'agent'` |
+| `project_path` | `str` | `''` |
+| `scope` | `str` | `''` |
 | `timeout_s` | `int` | `120` |
 
 ### `memory_vector_search`

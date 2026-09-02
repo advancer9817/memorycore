@@ -118,6 +118,14 @@ temporal:
   governance_age_risk_days: 7
   llm_temporal_prompts: true
   recency_half_life_days: 90
+subject_context:
+  enabled: true
+  default_scope: global
+  projects:
+    - name: mcore
+      paths: ["~/project/memorycore"]
+      aliases: ["memorycore", "MemoryCore"]
+      scope: project
 user_profile:
   enabled: true
   extract_limit: 200

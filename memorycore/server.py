@@ -257,16 +257,22 @@ def memory_ingest(
     messages: list[dict[str, str]],
     user_id: str = "default",
     agent_id: str = "agent",
+    project_path: str = "",
+    scope: str = "",
     timeout_s: int = 120,
 ) -> dict[str, Any]:
     """Extract facts from a conversation and write deduplicated candidates to SQLite.
 
-    Full pipeline: DeepSeek LLM extraction -> Qdrant dedup -> SQLite candidate.
+    Full pipeline: LLM extraction -> Qdrant dedup -> SQLite candidate.
 
     Args:
         messages: Conversation as [{"role": "user"|"assistant", "content": "..."}]
         user_id: User scope for vector search filters
         agent_id: Which agent produced the conversation
+        project_path: Project directory the conversation belongs to. When it
+            resolves via subject_context.projects, records get project_path,
+            project scope and a project:<name> tag.
+        scope: Explicit scope override ("global" / "project"); empty = auto.
         timeout_s: Hard timeout in seconds (default 120)
 
     Returns:
@@ -284,6 +290,8 @@ def memory_ingest(
                 messages,
                 user_id=user_id,
                 agent_id=agent_id,
+                project_path=project_path,
+                scope=scope,
                 cfg=load_config(),
                 _add_memory_fn=add_memory_record,
                 _update_memory_fn=update_memory_content,

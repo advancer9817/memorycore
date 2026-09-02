@@ -6222,3 +6222,27 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ### 验证
 - `TODO.md` 未勾选项共 15（原 R7 观测 1 项 + 新增 14 项），区段结构与分级完整；评测集当天 7/7 pass 无回退
+
+## [迭代 211] 2026-09-02 — 记忆主体上下文治理：P1/P2/P3 最小闭环 + P5 存量回填
+
+### 变更
+- `memorycore/subject_context.py`（新增）：`subject_context.projects` 白名单解析（精确/前缀路径匹配 + 名称/别名匹配，支持 `~`/`$VAR` 展开），`active_context_block()` 生成提取期 Active Context 注入块；无信号绝不猜测
+- `memorycore/extraction.py`（P1）：`extract_facts()` 新增 `project_path`/`project_name`/`scope` 参数；`_build_user_prompt()` 注入 Active Context 段；`ADDITIVE_EXTRACTION_PROMPT` 追加 Subject Context 规则（title 前缀要求 + 可选 `subject`/`entities` 输出字段）；`_parse_response()` 解析新字段；`ExtractedFact` 新增 `subject`/`entities`
+- `memorycore/dedup.py`（P2）：`ingest()` 新增 `project_path`/`scope` 参数并解析白名单；resolved scope 优先于 extraction_strategy.default_scope；add/update 分支写入 `project_path` + `project:<name>` 标签 + `metadata.subject`；LLM 标题缺前缀时服务端补 `mcore ` 前缀兜底
+- `memorycore/server.py`：`memory_ingest()` 暴露 `project_path`/`scope` 参数（`docs/tools.md` 已再生成）
+- `memorycore/storage/entities.py`（P3）：新增 `resolve_project_entity()`；`sync_memory_entities()` 对可解析项目但文本无项目实体的记录强制注入项目实体行（weight=1.0），保证 `entity_search("<项目>")` 确定性命中
+- `scripts/hooks/mcore-ingest.py`：新增 `_detect_project()`（MCORE_PROJECT_PATH 环境变量 → claude transcript slug → git toplevel），`memory_ingest` 调用自动携带 `project_path`
+- `memorycore/models.py`：`DEFAULT_CONFIG` 新增 `subject_context` 段（默认关闭，opt-in）；`validate_config()` 补 projects 结构校验
+- `config.yaml`：启用 `subject_context`（mcore: `~/project/memorycore` 可移植路径 + aliases + scope=project）
+- `scripts/backfill_subject.py`（新增，P5）：存量回填 dry-run 默认、`--apply` 前强制备份；高置信信号（mcore/memorycore 显式提及或 ≥2 强信号）写 path+tag+scope，弱信号仅标 `subject_needs_review`
+
+### 数据操作（生产库，已备份）
+- 备份 `memory-backup-before-subject-20260902-143257.sqlite3` 后回填：高置信 613 条（project:mcore + project_path + scope=project）、弱信号 55 条标 needs_review；613 条实体索引已全量重建
+
+### 验证
+- 新增 `tests/test_subject_context.py` 19 项（解析/注入/落库/实体兜底/前缀去重）全过；全量 pytest 594 passed / 7 skipped（修复 test_profile_f3 硬编码日期时间炸弹：改动态时间戳；重新生成 tools.md；config 可移植性回归）
+- 端到端：`_detect_project()` 实测返回项目路径；`entity_search("mcore")` 命中回填记录（含正文无 mcore 的记录）；`memory_ingest` schema 含新参数；mcore.service 重启后 health 200
+- P4（检索端主体扩展 + Hermes 调用方自动探测）留待后续，见 TODO
+
+### 备注
+- `subject_context.enabled=false` 可整体关闭该功能；回填备份保留于仓库根目录（备份已加入 .gitignore，不入库）

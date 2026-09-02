@@ -264,6 +264,8 @@ def ingest(
     *,
     user_id: str = "default",
     agent_id: str = "agent",
+    project_path: str = "",
+    scope: str = "",
     cfg: dict[str, Any] | None = None,
     # Allow injecting dependencies for testing
     _extraction_config=None,
@@ -281,6 +283,10 @@ def ingest(
         Conversation turns to extract from.
     user_id / agent_id:
         Scope for vector search filters and SQLite metadata.
+    project_path / scope:
+        Subject context of the conversation (P2). When ``project_path`` resolves
+        to a configured project (``subject_context.projects``), the record is
+        written with project_path + resolved scope + a ``project:<name>`` tag.
     cfg:
         Parsed config.yaml dict.  Used to build ExtractionConfig and
         VectorStoreConfig if not injected.
@@ -291,6 +297,17 @@ def ingest(
     t_start = time.time()
 
     cfg = cfg or {}
+
+    # --- Subject context resolution (P2) ---
+    from memorycore.subject_context import resolve_project
+    project = resolve_project(project_path=project_path, cfg=cfg)
+    project_name = project["name"] if project else ""
+    resolved_path = project["path"] if project else ""
+    if project:
+        mem_scope = project.get("scope") or "project"
+    else:
+        es_pre = cfg.get("extraction_strategy", {})
+        mem_scope = scope or es_pre.get("default_scope", "global")
 
     # --- Load extraction strategy config ---
     es = cfg.get("extraction_strategy", {})
@@ -304,7 +321,8 @@ def ingest(
     mem_type = es.get("default_memory_type", "episodic_memory")
     mem_status = es.get("default_status", "candidate")
     mem_decay = es.get("default_decay_policy", "review")
-    mem_scope = es.get("default_scope", "global")
+    if not project:  # resolved project scope wins (P2); otherwise config default
+        mem_scope = es.get("default_scope", "global")
     title_max = es.get("title_max_length", 80)
     default_conf = es.get("default_confidence", 0.65)
     default_imp = es.get("default_importance", 0.5)
@@ -357,6 +375,9 @@ def ingest(
         config=ext_cfg,
         min_importance=min_importance,
         chinese_detection_ratio=chinese_ratio,
+        project_path=resolved_path,
+        project_name=project_name,
+        scope=mem_scope,
     )
     result.extraction_elapsed_s = ext_elapsed
 
@@ -376,6 +397,17 @@ def ingest(
 
             fact_type = fact.memory_type if fact.memory_type else mem_type
             fact_title = str(getattr(fact, "title", "") or fact.text[:title_max]).strip()[:title_max]
+            # Subject anchors (P2): structured project tag + metadata, and a
+            # title prefix fallback when the LLM did not make the title
+            # self-contained.
+            subject = (getattr(fact, "subject", "") or "").strip() or project_name
+            fact_tags = ["extracted", f"agent:{agent_id}"]
+            if subject:
+                fact_tags.append(f"project:{subject}")
+            subject_meta = {"subject": subject} if subject else {}
+            if (project_name and subject == project_name
+                    and not fact_title.lower().startswith(project_name.lower())):
+                fact_title = f"{project_name} {fact_title}"[:title_max]
             title_match = _find_title_match_fn(fact_title, fact_type)
             if title_match:
                 existing_id = str(title_match["id"])
@@ -475,7 +507,8 @@ def ingest(
                     title=fact_title,
                     content=fact.text,
                     scope=mem_scope,
-                    tags=["extracted", f"agent:{agent_id}", "supersedes:" + decision.existing_id],
+                    project_path=resolved_path,
+                    tags=fact_tags + ["supersedes:" + decision.existing_id],
                     source="extraction",
                     source_agent=agent_id,
                     confidence=default_conf,
@@ -484,7 +517,7 @@ def ingest(
                     decay_policy=mem_decay,
                     related_ids=([decision.existing_id] + decision.linked_ids)[:max_related],
                     metadata={"user_id": user_id, "supersedes": decision.existing_id,
-                              "similarity": round(decision.similarity, 4)},
+                              "similarity": round(decision.similarity, 4), **subject_meta},
                 )
                 if vs.available:
                     vs.upsert(new_id, fact.text, {
@@ -505,7 +538,8 @@ def ingest(
                     title=fact_title,
                     content=fact.text,
                     scope=mem_scope,
-                    tags=["extracted", f"agent:{agent_id}"],
+                    project_path=resolved_path,
+                    tags=fact_tags,
                     source="extraction",
                     source_agent=agent_id,
                     confidence=default_conf,
@@ -514,7 +548,7 @@ def ingest(
                     decay_policy=mem_decay,
                     related_ids=decision.linked_ids[:max_related],
                     metadata={"user_id": user_id,
-                              "similarity_to_nearest": round(decision.similarity, 4)},
+                              "similarity_to_nearest": round(decision.similarity, 4), **subject_meta},
                 )
                 if vs.available:
                     vs.upsert(new_id, fact.text, {

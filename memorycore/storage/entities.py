@@ -97,6 +97,28 @@ def extract_entities(text: str, tags: list[str] | None = None) -> list[dict[str,
     return sorted(by_norm.values(), key=lambda item: item["weight"], reverse=True)
 
 
+def resolve_project_entity(project_path: str = "", project_name: str = "", cfg: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Resolve project_path / project_name to a canonical project entity row.
+
+    Returns {"entity", "normalized_entity", "aliases", "entity_type", "weight"}
+    or None when no configured project matches.
+    """
+    from memorycore.subject_context import resolve_project
+
+    project = resolve_project(project_path=project_path, project_name=project_name, cfg=cfg)
+    if not project:
+        return None
+    name = project["name"]
+    normalized = canonical_entity(name)
+    return {
+        "entity": name,
+        "normalized_entity": normalized,
+        "aliases": _CANONICAL_ALIASES.get(normalized, sorted({normalize_entity(a) for a in ([name] + project.get("aliases", [])) if normalize_entity(a)})),
+        "entity_type": "concept",
+        "weight": 1.0,
+    }
+
+
 def sync_memory_entities(record: dict[str, Any], conn: Any | None = None) -> list[dict[str, Any]]:
     """Replace entity rows for one memory. Non-active records keep no entity rows."""
     memory_id = record["id"]
@@ -112,6 +134,18 @@ def sync_memory_entities(record: dict[str, Any], conn: Any | None = None) -> lis
     if metadata.get("parent_id"):
         text += f"\n{metadata.get('parent_id')}"
     entities = extract_entities(text, record.get("tags") or [])
+    # Subject fallback (P3): guarantee a project entity row even when the text
+    # itself never mentions the project, so entity_search("<project>") hits
+    # deterministically for every record carrying a resolvable project_path.
+    project_entity = resolve_project_entity(
+        project_path=record.get("project_path") or "",
+        project_name=str(metadata.get("subject") or ""),
+    )
+    if project_entity is not None and not any(
+        e["normalized_entity"] == project_entity["normalized_entity"] for e in entities
+    ):
+        entities.append(project_entity)
+        entities.sort(key=lambda item: item["weight"], reverse=True)
     ts = now()
     def _write(target_conn: Any) -> None:
         target_conn.execute("DELETE FROM memory_entities WHERE memory_id=?", (memory_id,))

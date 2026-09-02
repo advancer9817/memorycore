@@ -1,7 +1,7 @@
 # 记忆主体上下文缺失 — 详细设计与迭代方案
 
 > 日期：2026-08-26
-> 状态：**规划中（未实施）** — 对应 `ITERATION.md` 迭代 33
+> 状态：**已实施（2026-09-02，[迭代 211]）** — P1/P2/P3 最小闭环 + P5 存量回填已落地；P4 检索端扩展留待后续。原编号迭代 33 → 重排后迭代 196。
 > 关联：`docs/plans/2026-08-24-unified-iteration-plan.md`（统合版）、`memorycore/storage/context_pack.py`（检索端）、`memorycore/extraction.py`（提取端）
 > 作者：Hermes Agent（default router）
 
