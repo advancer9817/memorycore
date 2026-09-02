@@ -1,10 +1,50 @@
-# ITERATION.md — local-memory-mcp 迭代日志
+# ITERATION.md — MemoryCore 迭代日志
+
+> **编号规则（2026-09-02 全量重排后永久固定）**：
+> - 全部条目已按时间升序连续编号 [迭代 1] ~ [迭代 208]，编号即条目唯一 ID。
+> - **严禁重排、复用或修改任何历史编号**；新条目一律取「最大编号 + 1」追加到文件底部。
+> - 废弃条目保留编号原位标注「已废弃」，不得删除或重新编号。
+> - 旧编号 ↔ 新编号对照见 `docs/iteration-number-map-2026-09-02.md`；历史文档与记忆中引用的旧编号以该映射为准。
 
 > 按时间升序排列，新条目追加到文件底部。
 
 ---
 
-## [迭代 6] 2026-05-15 — 端到端验证 + Qdrant server 模式 + 5 个 bug 修复
+## 日志格式规范
+
+每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：
+
+```markdown
+## [迭代 N] YYYY-MM-DD — 标题
+
+### 变更
+- `<文件路径>`: 变更描述
+
+### 修复
+- `<文件路径>`: 问题描述 → 修复方式
+
+### 验证
+- 测试: N/N pass
+- 端到端: 关键链路验证结果
+
+### 已知问题
+- 问题描述（若有）
+
+### 回滚
+`git revert HEAD`
+```
+
+> **规则**:
+> - 新条目追加到文件底部（"下一阶段规划"之前），最新迭代在最下面。
+> - 变更与修复分开列出；如果某次提交仅有修复无新功能，"变更"段可省略。
+> - 测试结果必须写实际数字（如 362/362 pass），不允许占位符。
+> - 已知问题如已在上个迭代修复，从列表中移除并改记入"修复"段。
+> - 不要在迭代条目中包含 git diff stat、file change list、remote URL 等 repo sync 元数据。
+> - 编号为唯一 ID 且永久固定：新条目取「最大编号 + 1」追加底部，严禁重排/复用历史编号（旧编号对照见 docs/iteration-number-map-2026-09-02.md）。
+
+---
+
+## [迭代 1] 2026-05-15 — 端到端验证 + Qdrant server 模式 + 5 个 bug 修复
 
 ### 变更
 
@@ -34,7 +74,7 @@
 
 ---
 
-## [迭代 7] 2026-05-18 — 模块重构 + MCP 循环导入彻底修复
+## [迭代 2] 2026-05-18 — 模块重构 + MCP 循环导入彻底修复
 
 ### 变更
 
@@ -56,7 +96,7 @@
 
 ---
 
-## [迭代 8] 2026-05-19 — Curator 自动化 + memory_stats + Context Pack 质量报告
+## [迭代 3] 2026-05-19 — Curator 自动化 + memory_stats + Context Pack 质量报告
 
 ### 变更
 
@@ -77,28 +117,7 @@
 
 ---
 
-## [迭代 8.1] 2026-05-20 — Overmind 借鉴：effectiveness 追踪、主动预警、curator 衰减
-
-### 变更
-
-- `storage.py`: `init_db()` 新增四列 — `injected_count`、`ineffective_count`、`effectiveness_score`、`last_injected_at`
-- `storage.py`: `add_feedback()` 新增 effectiveness 追踪 — score > 0 递增 `injected_count` 并更新 `effectiveness_score`；score < 0 递增 `ineffective_count`
-- `storage.py`: `search_memory_records()` ORDER BY 加入 `effectiveness_score DESC`
-- `storage.py`: 新增 `get_active_warnings()` — 查询 contradicts/supersedes 关系，结合 feedback_score 判断 severity
-- `storage.py`: `build_context_pack()` 返回值新增 `warnings` 字段；修复无条件 fallback（问候语不触发全量查询）
-- `storage.py`: `curator_report()` 新增 `decay_candidates` 和 `evolution_candidates`
-
-### 修复
-
-- `storage.py`: `_ensure_column()` 向后兼容旧库迁移 effectiveness 四列
-
-### 验证
-
-- 测试: 106/106 pass（含 legacy DB migration 回归）
-
----
-
-## [迭代 9] 2026-05-19~20 — Agent Memory Hook Contract + openmemory 清理
+## [迭代 4] 2026-05-19~20 — Agent Memory Hook Contract + openmemory 清理
 
 ### 变更
 
@@ -120,7 +139,28 @@
 
 ---
 
-## [迭代 10] 2026-05-20 — effectiveness 闭环 + memory_warnings/memory_update MCP tools
+## [迭代 5] 2026-05-20 — Overmind 借鉴：effectiveness 追踪、主动预警、curator 衰减
+
+### 变更
+
+- `storage.py`: `init_db()` 新增四列 — `injected_count`、`ineffective_count`、`effectiveness_score`、`last_injected_at`
+- `storage.py`: `add_feedback()` 新增 effectiveness 追踪 — score > 0 递增 `injected_count` 并更新 `effectiveness_score`；score < 0 递增 `ineffective_count`
+- `storage.py`: `search_memory_records()` ORDER BY 加入 `effectiveness_score DESC`
+- `storage.py`: 新增 `get_active_warnings()` — 查询 contradicts/supersedes 关系，结合 feedback_score 判断 severity
+- `storage.py`: `build_context_pack()` 返回值新增 `warnings` 字段；修复无条件 fallback（问候语不触发全量查询）
+- `storage.py`: `curator_report()` 新增 `decay_candidates` 和 `evolution_candidates`
+
+### 修复
+
+- `storage.py`: `_ensure_column()` 向后兼容旧库迁移 effectiveness 四列
+
+### 验证
+
+- 测试: 106/106 pass（含 legacy DB migration 回归）
+
+---
+
+## [迭代 6] 2026-05-20 — effectiveness 闭环 + memory_warnings/memory_update MCP tools
 
 ### 变更
 
@@ -136,7 +176,7 @@
 
 ---
 
-## [迭代 11] 2026-05-21 — P0 文档现实对齐与工具清单门禁
+## [迭代 7] 2026-05-21 — P0 文档现实对齐与工具清单门禁
 
 ### 变更
 
@@ -152,7 +192,7 @@
 
 ---
 
-## [迭代 12] 2026-05-21 — P0 Context Pack 注入防护
+## [迭代 8] 2026-05-21 — P0 Context Pack 注入防护
 
 ### 变更
 
@@ -167,7 +207,7 @@
 
 ---
 
-## [迭代 13] 2026-05-21 — Claude 风格本地记忆 Dashboard
+## [迭代 9] 2026-05-21 — Claude 风格本地记忆 Dashboard
 
 ### 变更
 
@@ -184,7 +224,7 @@
 
 ---
 
-## [迭代 14] 2026-05-21 — 部署自动化与 curator 报告扫尾
+## [迭代 10] 2026-05-21 — 部署自动化与 curator 报告扫尾
 
 ### 变更
 
@@ -199,7 +239,7 @@
 
 ---
 
-## [迭代 15] 2026-05-22 — P0 稳定化：写入端隐私脱敏 + 审计日志 + 降级合约
+## [迭代 11] 2026-05-22 — P0 稳定化：写入端隐私脱敏 + 审计日志 + 降级合约
 
 ### 变更
 
@@ -215,7 +255,7 @@
 
 ---
 
-## [迭代 16] 2026-05-22 — Agent Mailbox MVP：agent_messages + agent_presence + 4 个 MCP 工具
+## [迭代 12] 2026-05-22 — Agent Mailbox MVP：agent_messages + agent_presence + 4 个 MCP 工具
 
 ### 变更
 
@@ -233,7 +273,7 @@
 
 ---
 
-## [迭代 17] 2026-05-22 — Context Pack v2 + Mailbox TTL/广播 + Graph 增强
+## [迭代 13] 2026-05-22 — Context Pack v2 + Mailbox TTL/广播 + Graph 增强
 
 ### 变更
 
@@ -247,7 +287,7 @@
 
 ---
 
-## [迭代 18] 2026-05-22 — Qdrant 自动同步 + config.yaml schema 验证
+## [迭代 14] 2026-05-22 — Qdrant 自动同步 + config.yaml schema 验证
 
 ### 变更
 
@@ -261,7 +301,7 @@
 
 ---
 
-## [迭代 19] 2026-05-25 — 熵检测 + curator_apply 审计 + qdrant-client 升级
+## [迭代 15] 2026-05-25 — 熵检测 + curator_apply 审计 + qdrant-client 升级
 
 ### 变更
 
@@ -275,7 +315,7 @@
 
 ---
 
-## [迭代 20] 2026-05-26 — Agent 权限模型 + 拒绝审计
+## [迭代 16] 2026-05-26 — Agent 权限模型 + 拒绝审计
 
 ### 变更
 
@@ -292,7 +332,7 @@
 
 ---
 
-## [迭代 21] 2026-05-26 — export/import/backup/restore 稳定化
+## [迭代 17] 2026-05-26 — export/import/backup/restore 稳定化
 
 ### 变更
 
@@ -310,7 +350,7 @@
 
 ---
 
-## [迭代 22] 2026-05-26 — Curator apply plan + rollback metadata
+## [迭代 18] 2026-05-26 — Curator apply plan + rollback metadata
 
 ### 变更
 
@@ -323,7 +363,7 @@
 
 ---
 
-## [迭代 23] 2026-05-26 — Context Pack 质量指标与权重调优
+## [迭代 19] 2026-05-26 — Context Pack 质量指标与权重调优
 
 ### 变更
 
@@ -339,7 +379,7 @@
 
 ---
 
-## [迭代 24] 2026-05-26 — Agent handoff workflow schema
+## [迭代 20] 2026-05-26 — Agent handoff workflow schema
 
 ### 变更
 
@@ -357,7 +397,7 @@
 
 ---
 
-## [迭代 25] 2026-05-26 — Dashboard 运维台增强
+## [迭代 21] 2026-05-26 — Dashboard 运维台增强
 
 ### 变更
 
@@ -373,7 +413,7 @@
 
 ---
 
-## [迭代 26] 2026-05-26 — 同端口前端控制服务
+## [迭代 22] 2026-05-26 — 同端口前端控制服务
 
 ### 变更
 
@@ -392,7 +432,7 @@
 
 ---
 
-## [迭代 27] 2026-05-27 — Temporal Memory Layer + Auto-decay + Memory Stats
+## [迭代 23] 2026-05-27 — Temporal Memory Layer + Auto-decay + Memory Stats
 
 ### 变更
 
@@ -409,7 +449,7 @@
 
 ---
 
-## [迭代 28] 2026-05-27 — 全项目缺陷审计与快速优化
+## [迭代 24] 2026-05-27 — 全项目缺陷审计与快速优化
 
 ### 修复
 
@@ -430,7 +470,7 @@
 
 ---
 
-## [迭代 29] 2026-05-27 — 多设备记忆同步（export/import/sync）
+## [迭代 25] 2026-05-27 — 多设备记忆同步（export/import/sync）
 
 ### 变更
 
@@ -446,7 +486,7 @@
 
 ---
 
-## [迭代 30] 2026-05-27 — 一键启动脚本 start.sh
+## [迭代 26] 2026-05-27 — 一键启动脚本 start.sh
 
 ### 变更
 
@@ -462,7 +502,7 @@ bash start.sh --no-import --daemon && sleep 1 && curl -s http://127.0.0.1:8318/h
 
 ---
 
-## [迭代 31] 2026-05-27 — episodic memory 自动汇总 rollup
+## [迭代 27] 2026-05-27 — episodic memory 自动汇总 rollup
 
 ### 变更
 
@@ -476,7 +516,7 @@ bash start.sh --no-import --daemon && sleep 1 && curl -s http://127.0.0.1:8318/h
 
 ---
 
-## [迭代 32] 2026-05-28 — 三端 hook 部署与写回脚本统一化
+## [迭代 28] 2026-05-28 — 三端 hook 部署与写回脚本统一化
 
 ### 变更
 
@@ -491,7 +531,7 @@ bash start.sh --no-import --daemon && sleep 1 && curl -s http://127.0.0.1:8318/h
 
 ---
 
-## [迭代 33] 2026-05-28 — 记忆状态流转完善（v3 状态机）
+## [迭代 29] 2026-05-28 — 记忆状态流转完善（v3 状态机）
 
 ### 变更
 
@@ -512,7 +552,7 @@ bash start.sh --no-import --daemon && sleep 1 && curl -s http://127.0.0.1:8318/h
 
 ---
 
-## [迭代 34] 2026-05-28 — 文档缺口全修复（8 个遗留问题）
+## [迭代 30] 2026-05-28 — 文档缺口全修复（8 个遗留问题）
 
 ### 变更
 
@@ -537,7 +577,7 @@ bash start.sh --no-import --daemon && sleep 1 && curl -s http://127.0.0.1:8318/h
 
 ---
 
-## [迭代 35] 2026-05-28 — lmmcp 本地时间与 Codex hook 信任修复
+## [迭代 31] 2026-05-28 — lmmcp 本地时间与 Codex hook 信任修复
 
 ### 变更
 
@@ -571,7 +611,7 @@ bash start.sh --no-import --daemon && sleep 1 && curl -s http://127.0.0.1:8318/h
 
 ---
 
-## [迭代 36] 2026-05-29 — 检索质量优化：FTS5 + Qdrant 双路召回
+## [迭代 32] 2026-05-29 — 检索质量优化：FTS5 + Qdrant 双路召回
 
 ### 变更
 
@@ -595,7 +635,7 @@ bash start.sh --no-import --daemon && sleep 1 && curl -s http://127.0.0.1:8318/h
 
 ---
 
-## [迭代 37] 2026-05-29 — 修复向量搜索单例未携带 config 的问题
+## [迭代 33] 2026-05-29 — 修复向量搜索单例未携带 config 的问题
 
 ### 修复
 
@@ -613,7 +653,7 @@ bash start.sh --no-import --daemon && sleep 1 && curl -s http://127.0.0.1:8318/h
 
 ---
 
-## [迭代 38] 2026-05-29 — 修复 Qdrant 向量状态失同步导致命中但注入为 0 的问题
+## [迭代 34] 2026-05-29 — 修复 Qdrant 向量状态失同步导致命中但注入为 0 的问题
 
 ### 修复
 
@@ -636,7 +676,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 39] 2026-05-29 — memory_context 返回体瘦身（records 精简 + fallback 收窄）
+## [迭代 35] 2026-05-29 — memory_context 返回体瘦身（records 精简 + fallback 收窄）
 
 ### 变更
 
@@ -659,7 +699,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 40] 2026-05-29 — TODO 取舍记录与 lmmcp 流程约定
+## [迭代 36] 2026-05-29 — TODO 取舍记录与 lmmcp 流程约定
 
 ### 变更
 
@@ -676,7 +716,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 41] 2026-05-29 — 记忆生命周期与 ingest 噪音治理
+## [迭代 37] 2026-05-29 — 记忆生命周期与 ingest 噪音治理
 
 ### 变更
 
@@ -702,7 +742,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 42] 2026-05-30 — 更新至最新版本 + 重新执行初始化脚本
+## [迭代 38] 2026-05-30 — 更新至最新版本 + 重新执行初始化脚本
 
 ### 变更
 
@@ -722,7 +762,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 43] 2026-05-30 — WSL 安装 Docker + Qdrant 向量存储上线
+## [迭代 39] 2026-05-30 — WSL 安装 Docker + Qdrant 向量存储上线
 
 ### 变更
 
@@ -747,7 +787,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 44] 2026-05-30 — Hermes hook 初始化脚本切换为 SQLite session
+## [迭代 40] 2026-05-30 — Hermes hook 初始化脚本切换为 SQLite session
 
 ### 变更
 
@@ -778,7 +818,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 45] 2026-05-31 — 修复 prompt 检索弱相关记忆注入
+## [迭代 41] 2026-05-31 — 修复 prompt 检索弱相关记忆注入
 
 ### 变更
 
@@ -802,7 +842,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 46] 2026-05-31 — 输出系统流程梳理并补充审计待办
+## [迭代 42] 2026-05-31 — 输出系统流程梳理并补充审计待办
 
 ### 变更
 
@@ -824,7 +864,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 47] 2026-05-31 — 修复 vector-only 上下文召回范围隔离
+## [迭代 43] 2026-05-31 — 修复 vector-only 上下文召回范围隔离
 
 ### 变更
 
@@ -847,7 +887,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 48] 2026-05-31 — start.sh 默认安装完整依赖
+## [迭代 44] 2026-05-31 — start.sh 默认安装完整依赖
 
 ### 变更
 
@@ -871,7 +911,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 49] 2026-05-31 — 修复前端向量搜索阈值参数
+## [迭代 45] 2026-05-31 — 修复前端向量搜索阈值参数
 
 ### 变更
 
@@ -894,7 +934,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 50] 2026-05-31 — 默认启用对话前自动记忆注入
+## [迭代 46] 2026-05-31 — 默认启用对话前自动记忆注入
 
 ### 变更
 
@@ -926,7 +966,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 51] 2026-06-01 — SessionStart 自动注册 agent presence 与 capability
+## [迭代 47] 2026-06-01 — SessionStart 自动注册 agent presence 与 capability
 
 ### 变更
 
@@ -957,7 +997,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 52] 2026-06-01 — Embedding 降级链补齐 sentence-transformers
+## [迭代 48] 2026-06-01 — Embedding 降级链补齐 sentence-transformers
 
 ### 变更
 
@@ -993,7 +1033,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 53] 2026-06-01 — opencode 会话结束写回覆盖
+## [迭代 49] 2026-06-01 — opencode 会话结束写回覆盖
 
 ### 变更
 
@@ -1027,7 +1067,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 54] 2026-06-01 — opencode 对话前自动 memory_context 注入
+## [迭代 50] 2026-06-01 — opencode 对话前自动 memory_context 注入
 
 ### 变更
 
@@ -1059,7 +1099,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 55] 2026-06-01 — Hermes 对话前自动 memory_context 注入与弱相关过滤收紧
+## [迭代 51] 2026-06-01 — Hermes 对话前自动 memory_context 注入与弱相关过滤收紧
 
 ### 变更
 
@@ -1099,7 +1139,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 56] 2026-06-01 — Gemini 自动读前/写后 hooks 与 Docker Compose Qdrant 默认启用
+## [迭代 52] 2026-06-01 — Gemini 自动读前/写后 hooks 与 Docker Compose Qdrant 默认启用
 
 ### 变更
 
@@ -1138,7 +1178,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 57] 2026-06-01 — start.sh venv 漂移自修复与 audit import 忽略策略显式化
+## [迭代 53] 2026-06-01 — start.sh venv 漂移自修复与 audit import 忽略策略显式化
 
 ### 变更
 
@@ -1171,7 +1211,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 58] 2026-06-01 — lmmcp 端到端应用流程扫描第一版
+## [迭代 54] 2026-06-01 — lmmcp 端到端应用流程扫描第一版
 
 ### 变更
 
@@ -1193,7 +1233,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 59] 2026-06-01 — semantic-* CLI 接入真实 Qdrant 向量层
+## [迭代 55] 2026-06-01 — semantic-* CLI 接入真实 Qdrant 向量层
 
 ### 变更
 
@@ -1223,7 +1263,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 60] 2026-06-01 — deploy.sh 默认补齐 Docker/Ollama/Qdrant 运行时依赖
+## [迭代 56] 2026-06-01 — deploy.sh 默认补齐 Docker/Ollama/Qdrant 运行时依赖
 
 ### 变更
 
@@ -1254,7 +1294,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 61] 2026-06-01 — 前端测试恢复验证与 all extra 轻量化
+## [迭代 57] 2026-06-01 — 前端测试恢复验证与 all extra 轻量化
 
 ### 变更
 
@@ -1287,7 +1327,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 62] 2026-06-01 — prompt 记忆检索相关性持续评测集
+## [迭代 58] 2026-06-01 — prompt 记忆检索相关性持续评测集
 
 ### 变更
 
@@ -1313,7 +1353,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 63] 2026-06-01 — rollup 扫描测试隔离外部 LLM
+## [迭代 59] 2026-06-01 — rollup 扫描测试隔离外部 LLM
 
 ### 变更
 
@@ -1338,7 +1378,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 64] 2026-06-01 — 移除 agent 权限管理半成品
+## [迭代 60] 2026-06-01 — 移除 agent 权限管理半成品
 
 ### 变更
 
@@ -1372,7 +1412,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 65] 2026-06-01 — MCP 工具文档自动生成
+## [迭代 61] 2026-06-01 — MCP 工具文档自动生成
 
 ### 变更
 
@@ -1402,7 +1442,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 66] 2026-06-01 — MCP 工具面继续收敛
+## [迭代 62] 2026-06-01 — MCP 工具面继续收敛
 
 ### 变更
 
@@ -1435,7 +1475,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 67] 2026-06-01 — 发布准备验证与剩余外部阻塞记录
+## [迭代 63] 2026-06-01 — 发布准备验证与剩余外部阻塞记录
 
 ### 变更
 
@@ -1469,7 +1509,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 68] 2026-06-01 — Docker Compose E2E 镜像拉取阻塞复验
+## [迭代 64] 2026-06-01 — Docker Compose E2E 镜像拉取阻塞复验
 
 ### 变更
 
@@ -1492,7 +1532,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 69] 2026-06-01 — TODO 外部阻塞复验与原始问题核验
+## [迭代 65] 2026-06-01 — TODO 外部阻塞复验与原始问题核验
 
 ### 变更
 
@@ -1519,7 +1559,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 70] 2026-06-01 — GitHub Actions CI 依赖安装修复
+## [迭代 66] 2026-06-01 — GitHub Actions CI 依赖安装修复
 
 ### 变更
 
@@ -1545,7 +1585,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 71] 2026-06-01 — PyPI Publish Workflow 权限修复
+## [迭代 67] 2026-06-01 — PyPI Publish Workflow 权限修复
 
 ### 变更
 
@@ -1571,7 +1611,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 72] 2026-06-01 — v0.25.0 发布触发与 PyPI Trusted Publisher 阻塞定位
+## [迭代 68] 2026-06-01 — v0.25.0 发布触发与 PyPI Trusted Publisher 阻塞定位
 
 ### 变更
 
@@ -1598,7 +1638,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 73] 2026-06-01 — Gemini AfterAgent 写回补强
+## [迭代 69] 2026-06-01 — Gemini AfterAgent 写回补强
 
 ### 变更
 
@@ -1630,7 +1670,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 74] 2026-06-01 — Gemini CLI JSONL Transcript 真实格式解析修复
+## [迭代 70] 2026-06-01 — Gemini CLI JSONL Transcript 真实格式解析修复
 
 ### 变更
 
@@ -1659,7 +1699,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 75] 2026-06-01 — Gemini 真实 CLI 读前写后 E2E 通过
+## [迭代 71] 2026-06-01 — Gemini 真实 CLI 读前写后 E2E 通过
 
 ### 变更
 
@@ -1684,7 +1724,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 76] 2026-06-01 — 全量回归与剩余发布/容器阻塞复验
+## [迭代 72] 2026-06-01 — 全量回归与剩余发布/容器阻塞复验
 
 ### 变更
 
@@ -1707,7 +1747,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 77] 2026-06-01 — CI 并发 SQLite 写入锁库修复
+## [迭代 73] 2026-06-01 — CI 并发 SQLite 写入锁库修复
 
 ### 变更
 
@@ -1735,7 +1775,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 78] 2026-06-01 — Docker Daemon 代理修复与 Compose 远程绑定配置补齐
+## [迭代 74] 2026-06-01 — Docker Daemon 代理修复与 Compose 远程绑定配置补齐
 
 ### 变更
 
@@ -1770,7 +1810,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 79] 2026-06-01 — Docker Compose Qdrant 环境覆盖与 E2E 闭环
+## [迭代 75] 2026-06-01 — Docker Compose Qdrant 环境覆盖与 E2E 闭环
 
 ### 变更
 
@@ -1804,7 +1844,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 80] 2026-06-01 — PyPI API Token 发布路径接入
+## [迭代 76] 2026-06-01 — PyPI API Token 发布路径接入
 
 ### 变更
 
@@ -1832,7 +1872,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 81] 2026-06-01 — PyPI v0.25.0 首发完成
+## [迭代 77] 2026-06-01 — PyPI v0.25.0 首发完成
 
 ### 变更
 
@@ -1860,7 +1900,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 82] 2026-06-01 — 停用 Codex 可见读前记忆注入
+## [迭代 78] 2026-06-01 — 停用 Codex 可见读前记忆注入
 
 ### 变更
 
@@ -1891,7 +1931,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 83] 2026-06-01 — Mem0/OpenMemory 融合方案落档
+## [迭代 79] 2026-06-01 — Mem0/OpenMemory 融合方案落档
 
 ### 变更
 
@@ -1918,7 +1958,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 84] 2026-06-01 — 移除本地 ML embedding 依赖链
+## [迭代 80] 2026-06-01 — 移除本地 ML embedding 依赖链
 
 ### 变更
 
@@ -1949,7 +1989,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 85] 2026-06-01 — 原子事实、实体召回与 OpenMemory 兼容接口
+## [迭代 81] 2026-06-01 — 原子事实、实体召回与 OpenMemory 兼容接口
 
 ### 变更
 
@@ -1985,7 +2025,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 86] 2026-06-01 — OpenMemory UI fork 与端到端验证
+## [迭代 82] 2026-06-01 — OpenMemory UI fork 与端到端验证
 
 ### 变更
 
@@ -2018,7 +2058,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 87] 2026-06-01 — OpenMemory UI API URL 设置项
+## [迭代 83] 2026-06-01 — OpenMemory UI API URL 设置项
 
 ### 变更
 
@@ -2071,116 +2111,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 94] 2026-06-03 — mcore-ui.service + mcore 命令统一由 install_services.sh 管理
-
-### 变更
-
-**新增：`scripts/mcore-ui.service`**
-- Next.js Web UI 的 systemd 单元模板，占位符：`__ROOT__`、`__NODE__`、`__MCORE_HOST__`、`__UI_PORT__`
-- 依赖 `mcore.service`，默认端口 `18318`
-
-**更新：`scripts/mcore`**
-- 从原来的 daemon 模式（nohup + pid 文件）改为 systemd 委托模式
-- 支持 `start|stop|restart [all|server|ui]` 管理对应 service，无目标参数时默认 `all`
-- `status` 同时显示 `mcore.service` 和 `mcore-ui.service` 状态
-- 其他子命令透传给 Python CLI（`python -m memorycore`）
-- 模板占位符 `__PYTHON__` 由 `install_services.sh` 替换
-
-**更新：`scripts/install_services.sh`**
-- 新增 `--ui-port` 参数（默认 `18318`）
-- 新增 `NODE_BIN` 检测（`command -v node`），可通过 `--node` 覆盖
-- 新增 `install_mcore_cmd()`：将 `scripts/mcore` 模板展开后安装到 `~/.local/bin/mcore`，替换旧的手动维护方式
-- `install_systemd()` 中加入 `mcore-ui.service` 安装步骤：若 node 未找到或 `.next/standalone/server.js` 不存在则跳过并打印提示
-
----
-
-## [迭代 29] 2026-06-23 — LLM Curator 全面重构 (Phase A-F)
-
-### 变更
-
-- `memorycore/storage/curator_llm.py`:
-  - **Phase A (P0) — 修复数据损坏**: `_PROMPT_STYLES` 所有样式的 `keep_id` → `keep ("A"/"B")`，`newer_id` → `newer ("A"/"B")`；填充原空的 `aggressive` 字典（含 4 能力：duplicate/contradiction/importance/split）；conservative/balanced/aggressive importance prompt 追加 feedback 保护规则；`_llm_judge_duplicates`/`_llm_judge_contradictions` 结果解析改为 A/B 标签映射，fallback 改为时间戳优先；所有 4 个 `_llm_judge_*` 函数拆分 JSON 容错（LLM 调用失败 raise，JSON 解析失败 skip+warn）
-  - **Phase B (P0) — 消除性能浪费**: 新增 `_find_candidate_pairs()`（单次向量扫描，score_threshold=sim_threshold×0.8，去重和矛盾按分数区间分流）；删除旧的 `_find_semantic_duplicate_candidates` 和 `_find_contradiction_candidates`；所有 judge 函数添加 `config` 参数替代内部 `load_config()` 调用，返回 `tuple[list, set[str]]` 并 track `evaluated_ids`；`llm_curator_report` 全量冷却：所有经 LLM 评判的记忆均进入 cooldown，非仅有发现的；新增 timing 诊断指标
-  - **Phase C (P1) — Prompt 质量**: 所有 judge 函数通过参数接收 `full_config`；`_llm_judge_contradictions`/`_llm_reassess_importance` 添加 `_language_instruction()` 支持
-  - **Phase D (P1) — 图谱建链**: 新增 `_LINK_DISCOVERY_PROMPTS`、`_find_link_candidates()`、`_llm_discover_links()`、`_append_link_discovery_requests()`；`llm_curator_report` 集成 link discovery 阶段（importance 之后、split 之前）；`apply_llm_curator` 调用 `_append_link_discovery_requests`；return dict 和 summary 追加 `link_discoveries` 字段
-  - **Phase F (P2) — 收尾优化**: `_request_from_result` 替换全表遍历为直接 `SELECT ... WHERE id = ?`；`llm_curator_report` 使用 `max_dedup_pairs`/`max_contradiction_pairs`/`max_split_candidates` 配置上限
-- `memorycore/models.py`: `DEFAULT_CONFIG["llm_curator"]` 新增 `max_dedup_pairs=200`、`max_contradiction_pairs=200`、`max_split_candidates=100`、`max_link_pairs=100`
-- `memorycore/server.py` (Phase E): `_start_auto_curator()` 后台线程移除 `curator_report(dry_run=False)` 调用，消除与 systemd timer 的双重执行冲突
-- `ui/components/dashboard/CuratorTuningPanel.tsx`: `knowledge_graph` 预设参数更新（temperature 0.5→0.6，sim_threshold 0.45→0.55，importance_limit 1500→100，batch_size 8→10，review_cooldown 1200→900，keep_threshold 0.03→0.02，prompt_style balanced→aggressive，reviewed_ids_max_age 64800→43200）
-
-### 修复
-
-- `memorycore/storage/curator.py`: 将 `_DECAY_STEP`/`_DECAY_MIN_CONFIDENCE` 作为模块级常量暴露，修复 `tests/test_temporal.py` 导入失败
-- `tests/test_curator_llm_jobs.py`: `test_large_pool_sampling_limit` 从引用已删除的 `_find_semantic_duplicate_candidates` 改为 `_find_candidate_pairs`
-
-### 验证
-
-- 测试: 472/472 pass（另有 3 skip 为功能未实现占位，2 deselect 为预存在 Qdrant UUID 格式问题与本次无关）
-- UI 构建: Next.js 15.5 build 成功，postbuild standalone 资产就绪
-- 服务重启: mcore.service (8318) + mcore-ui.service (18318) 均已 active (running)
-
-### 已知问题
-- 本次也一并处理了前一个 commit 中的“图谱预设命名不一致”问题。最终决定：由于“知识图谱”作为使用场景命名与其他 5 个按强度排列的预设风格格格不入，已将其完全删除，并将图谱建链职责直接融合进“深度(deep)”预设（deep 预设的参数原本就已覆盖并优于知识图谱预设）。
-
-### 回滚
-`git revert HEAD`
-
----
-
-## [迭代 30] 2026-06-23 — 优化 Dashboard Curator 执行日志 UI
-
-### 变更
-
-- `ui/components/dashboard/Install.tsx`: 优化了 Curator 执行结果（LLM findings 和规则 actions）的呈现方式。将 `finding.title` 和 `finding.reason` 的单行强制截断改为 `line-clamp-2 break-words`（最多显示两行并带有 `...` 缩略），从而避免文本生硬截断且丢失信息。
-- `ui/components/dashboard/Install.tsx`: 解析底层数据中的 `id`、`older_id`、`drop_id` 或 `source_id` 作为 `targetId`，在每个 Finding 行的右侧新增了直达对应记忆的 "详情" (Details) 按钮跳转链接（`/memory/[id]`）。
-- `ui/lib/i18n/dictionaries/`: 在 `common` 下增加 `details` 字典键支持中英双语。
-
-### 修复
-- (无)
-
-### 验证
-- UI 构建: Next.js 15.5 build 成功。
-- 服务重启: mcore.service 与 mcore-ui.service 运行正常。
-
-### 回滚
-`git revert HEAD`
-
----
-
-## 日志格式规范
-
-每次迭代完成后在本文件 **底部** 追加一条记录，格式如下：
-
-```markdown
-## [迭代 N] YYYY-MM-DD — 标题
-
-### 变更
-- `<文件路径>`: 变更描述
-
-### 修复
-- `<文件路径>`: 问题描述 → 修复方式
-
-### 验证
-- 测试: N/N pass
-- 端到端: 关键链路验证结果
-
-### 已知问题
-- 问题描述（若有）
-
-### 回滚
-`git revert HEAD`
-```
-
-> **规则**:
-> - 新条目追加到文件底部（"下一阶段规划"之前），最新迭代在最下面。
-> - 变更与修复分开列出；如果某次提交仅有修复无新功能，"变更"段可省略。
-> - 测试结果必须写实际数字（如 362/362 pass），不允许占位符。
-> - 已知问题如已在上个迭代修复，从列表中移除并改记入"修复"段。
-> - 不要在迭代条目中包含 git diff stat、file change list、remote URL 等 repo sync 元数据。
-
----
-
-## [迭代 88] 2026-06-02 — 品牌重命名：local-memory-mcp → MemoryCore
+## [迭代 84] 2026-06-02 — 品牌重命名：local-memory-mcp → MemoryCore
 
 ### 变更
 
@@ -2221,7 +2152,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 89] 2026-06-02 — README 更新
+## [迭代 85] 2026-06-02 — README 更新
 
 ### 变更
 
@@ -2237,7 +2168,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 90] 2026-06-02 — lmmcp → mcore 全量重命名
+## [迭代 86] 2026-06-02 — lmmcp → mcore 全量重命名
 
 ### 变更
 
@@ -2277,7 +2208,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## [迭代 91] 2026-06-02 — Next.js 前端集成到 :8318 单端口
+## [迭代 87] 2026-06-02 — Next.js 前端集成到 :8318 单端口
 
 ### 变更
 
@@ -2292,7 +2223,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 - `pnpm dev` 开发模式仍然可用（不带 `--ui-port` 时后端 serve 老 HTML）
 - Node.js/pnpm 不可用时优雅降级，继续 serve 老 HTML 控制台
 
-## 2026-06-02 — 服务迁移 + UI 代理修复 + git 记忆同步
+## [迭代 88] 2026-06-02 — 服务迁移 + UI 代理修复 + git 记忆同步
 
 ### 变更内容
 
@@ -2310,7 +2241,30 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 - `scripts/hooks/git-post-merge`：pull/merge 后检测 memories.json 是否变更，有则自动 `import --conflict-policy newer --apply`。
 - `scripts/setup-hooks.sh`：末尾加入 git hooks 安装逻辑，`bash scripts/setup-hooks.sh` 一次完成全部配置。
 
-## [迭代 92] 2026-06-03 — 仓库迁移、脚本全量清理、UI 优化
+## [迭代 89] 2026-06-03 — mcore-ui.service + mcore 命令统一由 install_services.sh 管理
+
+### 变更
+
+**新增：`scripts/mcore-ui.service`**
+- Next.js Web UI 的 systemd 单元模板，占位符：`__ROOT__`、`__NODE__`、`__MCORE_HOST__`、`__UI_PORT__`
+- 依赖 `mcore.service`，默认端口 `18318`
+
+**更新：`scripts/mcore`**
+- 从原来的 daemon 模式（nohup + pid 文件）改为 systemd 委托模式
+- 支持 `start|stop|restart [all|server|ui]` 管理对应 service，无目标参数时默认 `all`
+- `status` 同时显示 `mcore.service` 和 `mcore-ui.service` 状态
+- 其他子命令透传给 Python CLI（`python -m memorycore`）
+- 模板占位符 `__PYTHON__` 由 `install_services.sh` 替换
+
+**更新：`scripts/install_services.sh`**
+- 新增 `--ui-port` 参数（默认 `18318`）
+- 新增 `NODE_BIN` 检测（`command -v node`），可通过 `--node` 覆盖
+- 新增 `install_mcore_cmd()`：将 `scripts/mcore` 模板展开后安装到 `~/.local/bin/mcore`，替换旧的手动维护方式
+- `install_systemd()` 中加入 `mcore-ui.service` 安装步骤：若 node 未找到或 `.next/standalone/server.js` 不存在则跳过并打印提示
+
+---
+
+## [迭代 90] 2026-06-03 — 仓库迁移、脚本全量清理、UI 优化
 
 ### 背景
 仓库从 `local-memory-mcp` 正式改名为 `memorycore`，在新设备完成克隆并首次启动后，对残留旧命名做彻底清理，同时修复 Apps 页 agent 列表和 status 问题，优化 Memory Operations UI。
@@ -2356,7 +2310,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 **UI 端口**
 - 默认 UI 端口从 `3001` 改为 `18318`（`start.sh`、`scripts/install_services.sh`）
 
-## [迭代 93] 2026-06-03 — LLM-enhanced Curator + 多项 UI 与后端修复
+## [迭代 91] 2026-06-03 — LLM-enhanced Curator + 多项 UI 与后端修复
 
 ### 变更
 
@@ -2406,7 +2360,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 - `Planned Actions: 0` 是正常结果（记忆质量尚可），但 UI 没有任何解释，用户易误以为失败
 - 本次新增 LLM curator 作为语义补充层；UI 可后续加 "为什么没有 action" 的说明文本
 
-## [迭代 94] 2026-06-03 — Dashboard 初始化、Origin 修复、端口统一、时间显示修复
+## [迭代 92] 2026-06-03 — Dashboard 初始化、Origin 修复、端口统一、时间显示修复
 
 ### 变更
 
@@ -2427,7 +2381,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 - `ui/playwright.config.ts`：默认端口 `3000` → `18318`
 - `scripts/mcore-ui.service`：ExecStart 改为 `next dev --port __UI_PORT__`
 
-## [迭代 95] 2026-06-03 — App 详情页记忆操作 + Last Activity 修复
+## [迭代 93] 2026-06-03 — App 详情页记忆操作 + Last Activity 修复
 
 ### 变更
 
@@ -2455,7 +2409,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 
 ---
 
-## 迭代 37 — 2026-06-03
+## [迭代 94] 2026-06-03 — Atomization Backfill + UI 风格重构（Claude 设计语言）
 
 ### 完成内容
 
@@ -2480,7 +2434,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 - 新增 `ui/app/graph/ForceGraph.tsx`：`ssr: false` dynamic import，canvas 自定义渲染，点击节点跳转 `/memory/{id}`，支持缩放/拖拽/搜索高亮
 - 验证：`/api/graph` 返回 351 nodes / 292 edges，build 无错误
 
-## [迭代 96] 2026-06-04 — 全链路性能优化 + Graph 交互升级 + LLM Curator 修复
+## [迭代 95] 2026-06-04 — 全链路性能优化 + Graph 交互升级 + LLM Curator 修复
 
 ### 变更
 
@@ -2550,7 +2504,7 @@ Qdrant payload 里的 status 字段在 curator 批量操作时没有随 SQLite �
 - `tests/test_deployment.py`：包名从 `local-memory-mcp` 更新为 `memorycore`
 - `3d-force-graph` npm 依赖补装（上游 ubuntu 提交引入但未 pnpm install）
 
-## [迭代 97] 2026-06-04 — Dashboard 紧凑化 + Graph 三栏布局 + Qdrant 依赖修复
+## [迭代 96] 2026-06-04 — Dashboard 紧凑化 + Graph 三栏布局 + Qdrant 依赖修复
 
 ### 变更
 
@@ -2847,7 +2801,7 @@ Memory Graph 界面存在多处体验问题：顶部过滤标签两行溢出遮�
 
 ---
 
-## [迭代 104] 2026-06-05 — Bug 审计续修（14 项）
+## [迭代 102] 2026-06-05 — Bug 审计续修（14 项）
 
 ### 痛点
 - 迭代 102-103 遗留的中低优先级问题，含性能、逻辑、类型、UX 四个维度
@@ -2885,7 +2839,7 @@ Memory Graph 界面存在多处体验问题：顶部过滤标签两行溢出遮�
 
 ---
 
-## [迭代 105] 2026-06-05 — 性能与稳定性（7 项）
+## [迭代 103] 2026-06-05 — 性能与稳定性（7 项）
 
 ### 痛点
 - 事件循环被同步 I/O 阻塞、Qdrant 高频失败日志、搜索时 3D 图频繁重建
@@ -2912,7 +2866,7 @@ Memory Graph 界面存在多处体验问题：顶部过滤标签两行溢出遮�
 
 ---
 
-## [迭代 106] 2026-06-05 — 并发安全 + 虚拟滚动 + 测试覆盖（7 项）
+## [迭代 104] 2026-06-05 — 并发安全 + 虚拟滚动 + 测试覆盖（7 项）
 
 ### 痛点
 - atomize_record 多事务并发不安全；Graph 列表大数据量卡顿；三个测试覆盖缺口
@@ -2940,7 +2894,7 @@ Memory Graph 界面存在多处体验问题：顶部过滤标签两行溢出遮�
 
 ---
 
-## [迭代 107] 2026-06-06 — MCP 命名空间归一与旧版清理（5 项）
+## [迭代 105] 2026-06-06 — MCP 命名空间归一与旧版清理（5 项）
 
 ### 痛点
 - MCP 客户端中的工具前缀为旧版项目名 `mcp__local_memory__`，命名空间不统一。
@@ -2973,7 +2927,7 @@ Memory Graph 界面存在多处体验问题：顶部过滤标签两行溢出遮�
 
 ---
 
-## [迭代 108] 2026-06-08 — 记忆智能中心、运行稳定性与 i18n 待办沉淀
+## [迭代 106] 2026-06-08 — 记忆智能中心、运行稳定性与 i18n 待办沉淀
 
 ### 痛点
 - Dashboard 缺少一屏式记忆治理态势入口，curator/LLM curator 的运行结果不够直观。
@@ -3021,7 +2975,7 @@ Memory Graph 界面存在多处体验问题：顶部过滤标签两行溢出遮�
 
 ---
 
-## [迭代 109] 2026-06-08 — Curator 定时任务覆盖规则与 LLM 双通道
+## [迭代 107] 2026-06-08 — Curator 定时任务覆盖规则与 LLM 双通道
 
 ### 痛点
 
@@ -3065,7 +3019,7 @@ Dashboard 的 Memory Operations 区域同时提供 `Run Curator` 与 `Run LLM` �
 
 ---
 
-## [迭代 110] 2026-06-08 — Graph 全状态链路与 part_of 筛选修复
+## [迭代 108] 2026-06-08 — Graph 全状态链路与 part_of 筛选修复
 
 ### 痛点
 
@@ -3096,7 +3050,7 @@ Graph 页面默认只加载 active/candidate 节点，导致绝大多数连接 a
 
 ---
 
-## [迭代 111] 2026-06-08 — Graph 全状态加载性能优化
+## [迭代 109] 2026-06-08 — Graph 全状态加载性能优化
 
 ### 痛点
 
@@ -3131,7 +3085,7 @@ Graph 页面切换或默认使用 `status=all` 时会一次加载大量节点和
 
 ---
 
-## [迭代 112] 2026-06-08 — Graph 连接类型筛选高亮增强
+## [迭代 110] 2026-06-08 — Graph 连接类型筛选高亮增强
 
 ### 痛点
 
@@ -3160,7 +3114,7 @@ Graph 左侧连接类型筛选里 `part of` 与 `related to` 使用灰色/暗 sl
 
 ---
 
-## [迭代 113] 2026-06-08 — Dashboard 治理成熟化、LLM split 幂等与 typecheck 修复
+## [迭代 111] 2026-06-08 — Dashboard 治理成熟化、LLM split 幂等与 typecheck 修复
 
 ### 痛点
 
@@ -3219,7 +3173,7 @@ Graph 左侧连接类型筛选里 `part of` 与 `related to` 使用灰色/暗 sl
 ---
 
 
-## [迭代 114] 2026-06-08 — i18n 全局切换、Dashboard 治理报告与 LLM Curator 数据质量闭环
+## [迭代 112] 2026-06-08 — i18n 全局切换、Dashboard 治理报告与 LLM Curator 数据质量闭环
 
 ### 变更
 
@@ -3262,7 +3216,7 @@ Graph 左侧连接类型筛选里 `part of` 与 `related to` 使用灰色/暗 sl
 ---
 
 
-## [迭代 115] 2026-06-09 — Dashboard 运维面板 polish、健康趋势洞察与治理测试收敛
+## [迭代 113] 2026-06-09 — Dashboard 运维面板 polish、健康趋势洞察与治理测试收敛
 
 ### 变更
 
@@ -3299,7 +3253,7 @@ Graph 左侧连接类型筛选里 `part of` 与 `related to` 使用灰色/暗 sl
 
 ---
 
-## [迭代 116] 2026-06-09 — 修复 mcore 服务管理命令失效与前后端统一控制
+## [迭代 114] 2026-06-09 — 修复 mcore 服务管理命令失效与前后端统一控制
 
 ### 痛点
 
@@ -3341,7 +3295,7 @@ Graph 左侧连接类型筛选里 `part of` 与 `related to` 使用灰色/暗 sl
 
 ---
 
-## [迭代 117] 2026-06-09 — Dashboard 审查流程与 Categories 筛选弹窗可用性优化
+## [迭代 115] 2026-06-09 — Dashboard 审查流程与 Categories 筛选弹窗可用性优化
 
 ### 痛点
 
@@ -3382,7 +3336,7 @@ Graph 左侧连接类型筛选里 `part of` 与 `related to` 使用灰色/暗 sl
 
 ---
 
-## [迭代 118] 2026-06-09 — Apps 页面 Refresh 功能修复
+## [迭代 116] 2026-06-09 — Apps 页面 Refresh 功能修复
 
 ### 背景
 
@@ -3424,7 +3378,7 @@ Graph 左侧连接类型筛选里 `part of` 与 `related to` 使用灰色/暗 sl
 
 ---
 
-## [迭代 119] 2026-06-09 — Graph 页面 Refresh 功能修复
+## [迭代 117] 2026-06-09 — Graph 页面 Refresh 功能修复
 
 ### 背景
 
@@ -3458,7 +3412,7 @@ Graph 左侧连接类型筛选里 `part of` 与 `related to` 使用灰色/暗 sl
 
 ---
 
-## [迭代 120] 2026-06-09 — Dashboard 首次打开 loading 卡死修复
+## [迭代 118] 2026-06-09 — Dashboard 首次打开 loading 卡死修复
 
 ### 背景
 
@@ -3507,7 +3461,7 @@ Dashboard 首次打开时，顶部统计卡和 Memory Intelligence Center 可能
 
 ---
 
-## [迭代 121] 2026-06-09 — 部署入口收敛与旧 lmmcp 脚本清理
+## [迭代 119] 2026-06-09 — 部署入口收敛与旧 lmmcp 脚本清理
 
 ### 背景
 
@@ -3543,7 +3497,7 @@ Dashboard 首次打开时，顶部统计卡和 Memory Intelligence Center 可能
 
 ---
 
-## [迭代 122] 2026-06-09 — Temporal Governance Phase 1 收敛
+## [迭代 120] 2026-06-09 — Temporal Governance Phase 1 收敛
 
 ### 背景
 
@@ -3573,7 +3527,7 @@ Dashboard 首次打开时，顶部统计卡和 Memory Intelligence Center 可能
 
 ---
 
-## [迭代 123] 2026-06-09 — Temporal Governance Phase 2 LLM 决策治理
+## [迭代 121] 2026-06-09 — Temporal Governance Phase 2 LLM 决策治理
 
 ### 背景
 
@@ -3601,7 +3555,7 @@ Phase 1 已提供 superseded 状态、lineage、recency 排序和 curator supers
 
 ---
 
-## [迭代 124] 2026-06-09 — Temporal Governance Phase 3 自动 Supersession
+## [迭代 122] 2026-06-09 — Temporal Governance Phase 3 自动 Supersession
 
 ### 背景
 
@@ -3628,7 +3582,7 @@ Phase 2 已完成 governance decisions、deterministic policy gate、apply/rejec
 
 ---
 
-## [迭代 125] 2026-06-09 — Temporal Governance 架构文档落地与提交前校验
+## [迭代 123] 2026-06-09 — Temporal Governance 架构文档落地与提交前校验
 
 ### 背景
 
@@ -3652,7 +3606,7 @@ Phase 2 已完成 governance decisions、deterministic policy gate、apply/rejec
 - 回滚 `ITERATION.md`、`README.md`、`docs/tools.md`、`docs/plans/2026-06-09-temporal-governance-engine.md`；如需完整撤回本次架构升级，还需连同迭代 122–124 中列出的 Phase 1–3 文件一并回滚。
 ---
 
-## [迭代 126] 2026-06-09 — main 合并远端治理分支与测试对齐
+## [迭代 124] 2026-06-09 — main 合并远端治理分支与测试对齐
 
 ### 背景
 
@@ -3678,7 +3632,7 @@ Phase 2 已完成 governance decisions、deterministic policy gate、apply/rejec
 
 ---
 
-## [迭代 127] 2026-06-10 — Auto-Governance v4 Backend Safety Foundation 基础落地
+## [迭代 125] 2026-06-10 — Auto-Governance v4 Backend Safety Foundation 基础落地
 
 ### 背景
 
@@ -3707,7 +3661,7 @@ Phase 2 已完成 governance decisions、deterministic policy gate、apply/rejec
 
 ---
 
-## [迭代 128] 2026-06-10 — Phase 3 reviewer verification 与文档一致性修复
+## [迭代 126] 2026-06-10 — Phase 3 reviewer verification 与文档一致性修复
 
 ### 背景
 
@@ -3732,7 +3686,7 @@ Phase 2 已完成 governance decisions、deterministic policy gate、apply/rejec
 
 ---
 
-## [迭代 129] 2026-06-10 — Phase 4 Auto-Governance Cockpit UI MVP
+## [迭代 127] 2026-06-10 — Phase 4 Auto-Governance Cockpit UI MVP
 
 ### 背景
 
@@ -3763,7 +3717,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 ---
 
-## [迭代 130] 2026-06-11 — 治理页面重设计 + 看板优化
+## [迭代 128] 2026-06-11 — 治理页面重设计 + 看板优化
 
 ### 背景
 
@@ -3803,7 +3757,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 ---
 
-## [迭代 131] 2026-06-11 — 治理操作错误提示修复
+## [迭代 129] 2026-06-11 — 治理操作错误提示修复
 
 ### 背景
 
@@ -3826,7 +3780,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 ---
 
-## [迭代 132] 2026-06-11 — 治理页结果化与优先级排序
+## [迭代 130] 2026-06-11 — 治理页结果化与优先级排序
 
 ### 背景
 
@@ -3856,7 +3810,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 ---
 
-## [迭代 133] 2026-06-11 — 治理页四项修复：Hydration / 快照预览 / 一键应用全部 / 分页跳转
+## [迭代 131] 2026-06-11 — 治理页四项修复：Hydration / 快照预览 / 一键应用全部 / 分页跳转
 
 ### 修复
 
@@ -3877,7 +3831,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 ---
 
-## [迭代 134] 2026-06-11 — 治理页自动弹窗与连续弹窗修复
+## [迭代 132] 2026-06-11 — 治理页自动弹窗与连续弹窗修复
 
 ### 背景
 
@@ -3902,7 +3856,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 ---
 
-## [迭代 135] 2026-06-11 — 批量治理决策接口与 MCP 工具实现
+## [迭代 133] 2026-06-11 — 批量治理决策接口与 MCP 工具实现
 
 ### 背景
 
@@ -3923,7 +3877,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 ---
 
-## [迭代 136] 2026-06-12 — 全面技术框架审查与改进计划
+## [迭代 134] 2026-06-12 — 全面技术框架审查与改进计划
 
 ### 背景
 
@@ -3975,7 +3929,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 ---
 
-## [迭代 136] 2026-06-12 — 全面技术框架审查 + Phase 1 数据完整性修复
+## [迭代 135] 2026-06-12 — 全面技术框架审查 + Phase 1 数据完整性修复
 
 ### 背景
 
@@ -4010,7 +3964,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 ---
 
-## Iteration 2026-06-12-B: ingest 窗口扩展 & dedup 更新时间戳修复
+## [迭代 136] 2026-06-12 — ingest 窗口扩展 & dedup 更新时间戳修复（批次 B）
 
 ### 修复
 
@@ -4067,7 +4021,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 - 回滚 `ui/components/dashboard/intelligence/` 下新增的 helpers.ts、Primitives.tsx、HealthMetricsPanel.tsx、ReviewFlowPanel.tsx、CurationActivityPanel.tsx、SourceBreakdownPanel.tsx、AutoAppliedStrip.tsx、index.ts，以及 MemoryIntelligenceCenter.tsx、`ui/app/page.tsx`、`ui/app/memory/[id]/components/MemoryLineage.tsx`、MemoryDetails.tsx、GovernanceDecisionSheet.tsx、i18n dictionaries 与本条 ITERATION.md 记录。
 
-## 2026-06-16
+## [迭代 138] 2026-06-16 — 治理页面优化
 
 ### 治理页面优化
 
@@ -4075,7 +4029,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 - `ui/hooks/useGovernanceCockpit.ts`：默认 `reviewStatus` 从 `actionable` 改为 `needs_review`
 - `memorycore/storage/governance.py`：修复 `governance apply does not support action 'keep'` 报错，`keep` action 直接标记 applied 跳过 mutation
 
-## 2026-06-17
+## [迭代 139] 2026-06-17 — LLM Curator 调谐面板 + 可配置 Prompt 策略 + Strategy 持久化修复
 
 ### LLM Curator 调谐面板 + 可配置 Prompt 策略 + Strategy 持久化修复
 
@@ -4105,7 +4059,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 ---
 
-## [2026-06-17] i18n 补全 + 治理筛选优化
+## [迭代 140] 2026-06-17 — i18n 补全 + 治理筛选优化
 
 ### 修复
 
@@ -4132,7 +4086,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 ---
 
-## 2026-06-17 LLM Curator 调谐面板增强 + Stop hook 记忆提取质量修复
+## [迭代 141] 2026-06-17 — LLM Curator 调谐面板增强 + Stop hook 记忆提取质量修复
 
 ### 新增
 
@@ -4160,7 +4114,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
   - 根因 2：每条消息截断到 `[:800]` 字符，代码内容被截断丢失上下文
   - 修复 2：截断上限提升至 `[:2000]`，覆盖 6 处截断点
 
-## [迭代 138] 2026-06-22 — 生产模式前端 + 服务管理修复 + 代理路由完善
+## [迭代 142] 2026-06-22 — 生产模式前端 + 服务管理修复 + 代理路由完善
 
 ### 变更
 
@@ -4196,7 +4150,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 ---
 
-## [迭代] 2026-06-22 — mcore restart 自动构建前端
+## [迭代 143] 2026-06-22 — mcore restart 自动构建前端
 
 ### 变更
 
@@ -4213,7 +4167,60 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 此前 `mcore restart` 不会自动构建前端代码。修改 UI 后需要手动 `pnpm build` 再 `mcore restart`，容易遗漏导致运行旧版本。现在 `restart` 命令自动执行构建，简化部署流程。
 
-## 2026-06-23 时间感知架构全链路实施（Phase 1-6）
+## [迭代 144] 2026-06-23 — LLM Curator 全面重构 (Phase A-F)
+
+### 变更
+
+- `memorycore/storage/curator_llm.py`:
+  - **Phase A (P0) — 修复数据损坏**: `_PROMPT_STYLES` 所有样式的 `keep_id` → `keep ("A"/"B")`，`newer_id` → `newer ("A"/"B")`；填充原空的 `aggressive` 字典（含 4 能力：duplicate/contradiction/importance/split）；conservative/balanced/aggressive importance prompt 追加 feedback 保护规则；`_llm_judge_duplicates`/`_llm_judge_contradictions` 结果解析改为 A/B 标签映射，fallback 改为时间戳优先；所有 4 个 `_llm_judge_*` 函数拆分 JSON 容错（LLM 调用失败 raise，JSON 解析失败 skip+warn）
+  - **Phase B (P0) — 消除性能浪费**: 新增 `_find_candidate_pairs()`（单次向量扫描，score_threshold=sim_threshold×0.8，去重和矛盾按分数区间分流）；删除旧的 `_find_semantic_duplicate_candidates` 和 `_find_contradiction_candidates`；所有 judge 函数添加 `config` 参数替代内部 `load_config()` 调用，返回 `tuple[list, set[str]]` 并 track `evaluated_ids`；`llm_curator_report` 全量冷却：所有经 LLM 评判的记忆均进入 cooldown，非仅有发现的；新增 timing 诊断指标
+  - **Phase C (P1) — Prompt 质量**: 所有 judge 函数通过参数接收 `full_config`；`_llm_judge_contradictions`/`_llm_reassess_importance` 添加 `_language_instruction()` 支持
+  - **Phase D (P1) — 图谱建链**: 新增 `_LINK_DISCOVERY_PROMPTS`、`_find_link_candidates()`、`_llm_discover_links()`、`_append_link_discovery_requests()`；`llm_curator_report` 集成 link discovery 阶段（importance 之后、split 之前）；`apply_llm_curator` 调用 `_append_link_discovery_requests`；return dict 和 summary 追加 `link_discoveries` 字段
+  - **Phase F (P2) — 收尾优化**: `_request_from_result` 替换全表遍历为直接 `SELECT ... WHERE id = ?`；`llm_curator_report` 使用 `max_dedup_pairs`/`max_contradiction_pairs`/`max_split_candidates` 配置上限
+- `memorycore/models.py`: `DEFAULT_CONFIG["llm_curator"]` 新增 `max_dedup_pairs=200`、`max_contradiction_pairs=200`、`max_split_candidates=100`、`max_link_pairs=100`
+- `memorycore/server.py` (Phase E): `_start_auto_curator()` 后台线程移除 `curator_report(dry_run=False)` 调用，消除与 systemd timer 的双重执行冲突
+- `ui/components/dashboard/CuratorTuningPanel.tsx`: `knowledge_graph` 预设参数更新（temperature 0.5→0.6，sim_threshold 0.45→0.55，importance_limit 1500→100，batch_size 8→10，review_cooldown 1200→900，keep_threshold 0.03→0.02，prompt_style balanced→aggressive，reviewed_ids_max_age 64800→43200）
+
+### 修复
+
+- `memorycore/storage/curator.py`: 将 `_DECAY_STEP`/`_DECAY_MIN_CONFIDENCE` 作为模块级常量暴露，修复 `tests/test_temporal.py` 导入失败
+- `tests/test_curator_llm_jobs.py`: `test_large_pool_sampling_limit` 从引用已删除的 `_find_semantic_duplicate_candidates` 改为 `_find_candidate_pairs`
+
+### 验证
+
+- 测试: 472/472 pass（另有 3 skip 为功能未实现占位，2 deselect 为预存在 Qdrant UUID 格式问题与本次无关）
+- UI 构建: Next.js 15.5 build 成功，postbuild standalone 资产就绪
+- 服务重启: mcore.service (8318) + mcore-ui.service (18318) 均已 active (running)
+
+### 已知问题
+- 本次也一并处理了前一个 commit 中的“图谱预设命名不一致”问题。最终决定：由于“知识图谱”作为使用场景命名与其他 5 个按强度排列的预设风格格格不入，已将其完全删除，并将图谱建链职责直接融合进“深度(deep)”预设（deep 预设的参数原本就已覆盖并优于知识图谱预设）。
+
+### 回滚
+`git revert HEAD`
+
+---
+
+## [迭代 145] 2026-06-23 — 优化 Dashboard Curator 执行日志 UI
+
+### 变更
+
+- `ui/components/dashboard/Install.tsx`: 优化了 Curator 执行结果（LLM findings 和规则 actions）的呈现方式。将 `finding.title` 和 `finding.reason` 的单行强制截断改为 `line-clamp-2 break-words`（最多显示两行并带有 `...` 缩略），从而避免文本生硬截断且丢失信息。
+- `ui/components/dashboard/Install.tsx`: 解析底层数据中的 `id`、`older_id`、`drop_id` 或 `source_id` 作为 `targetId`，在每个 Finding 行的右侧新增了直达对应记忆的 "详情" (Details) 按钮跳转链接（`/memory/[id]`）。
+- `ui/lib/i18n/dictionaries/`: 在 `common` 下增加 `details` 字典键支持中英双语。
+
+### 修复
+- (无)
+
+### 验证
+- UI 构建: Next.js 15.5 build 成功。
+- 服务重启: mcore.service 与 mcore-ui.service 运行正常。
+
+### 回滚
+`git revert HEAD`
+
+---
+
+## [迭代 146] 2026-06-23 — 时间感知架构全链路实施（Phase 1-6）
 
 ### 改动摘要
 
@@ -4273,7 +4280,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 ---
 
-## [迭代 8] 2026-06-23 — Phase 7: 前端时间增强
+## [迭代 147] 2026-06-23 — Phase 7: 前端时间增强
 
 ### Phase 7: 前端时间增强
 
@@ -4321,7 +4328,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 ---
 
-## 2026-06-23 记忆详情页修复与 Validity Range UI 重设计
+## [迭代 148] 2026-06-23 — 记忆详情页修复与 Validity Range UI 重设计
 
 ### 问题修复
 
@@ -4351,7 +4358,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 ---
 
-## [迭代 9] 2026-06-23 — LLM Curator 全面审计与优化方案设计
+## [迭代 149] 2026-06-23 — LLM Curator 全面审计与优化方案设计
 
 ### 背景
 
@@ -4392,7 +4399,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 | E | P2 | 移除后台线程 rule curator 调用，统一由 systemd timer 执行 |
 | F | P2 | _request_from_result 查询优化；硬编码上限配置化；diagnostics 追加耗时 |
 
-## [迭代 31] 2026-06-24 — 向量相似度召回增强 (Context Pack Hybrid Retrieval V2)
+## [迭代 150] 2026-06-24 — 向量相似度召回增强 (Context Pack Hybrid Retrieval V2)
 
 ### 变更
 
@@ -4450,7 +4457,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
   4. **测试覆盖**：新增 `test_frontend_apps_include_unknown_source_agent_with_stable_routes`，覆盖 `source_agent=memorycore-smoke-test` 在 Apps 列表、detail、memories 路由中的一致性。
   5. **验证**：`.venv/bin/python -m py_compile memorycore/frontend.py` 通过；直接调用 `_dispatch_api_sync()` 验证 `memorycore-smoke-test` 的 `in_apps=True/detail_ok=True/memory_ok=True`；`cd ui && pnpm exec tsc --noEmit` 通过。`timeout 60 .venv/bin/python -m pytest tests/test_frontend.py::test_frontend_apps_include_unknown_source_agent_with_stable_routes -q` 无输出超时，未计为通过。
 
-## [迭代 32] 2026-06-24 — 产品方向文档与 Governance/UI 收敛
+## [迭代 151] 2026-06-24 — 产品方向文档与 Governance/UI 收敛
 
 ### 变更
 
@@ -4471,7 +4478,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 - `.venv/bin/python -m py_compile memorycore/storage/governance.py memorycore/server.py`：通过。
 - `cd ui && pnpm exec tsc --noEmit`：通过。
 
-## [迭代 33] 2026-06-24 — 产品方向文档按原始目标重设计
+## [迭代 152] 2026-06-24 — 产品方向文档按原始目标重设计
 
 ### 变更
 
@@ -4487,7 +4494,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 - 文档-only 变更，未运行测试。
 
-## [迭代 34] 2026-06-24 — 审计修复计划 Phase 4/5 收尾
+## [迭代 153] 2026-06-24 — 审计修复计划 Phase 4/5 收尾
 
 ### 变更
 
@@ -4499,7 +4506,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 
 - 待执行全量 pytest、UI build、TypeScript 与 Playwright 验证。
 
-## [迭代 35] 2026-06-24 — LLM Curator 增量执行与逐步加载
+## [迭代 154] 2026-06-24 — LLM Curator 增量执行与逐步加载
 
 ### 变更
 
@@ -4517,7 +4524,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 - `.venv/bin/python -m pytest -q tests/test_curator_llm_jobs.py tests/test_frontend.py tests/test_governance.py`：42 passed, 3 skipped, 2 warnings。
 - `cd ui && pnpm build`：通过，standalone 静态资源复制成功。
 
-## [迭代 36] 2026-06-25 — Governance 分页条数扩展
+## [迭代 155] 2026-06-25 — Governance 分页条数扩展
 
 ### 变更
 
@@ -4528,7 +4535,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 - `cd ui && pnpm exec tsc --noEmit`：通过。
 - `cd ui && pnpm build`：通过，standalone 静态资源复制成功。
 
-## [迭代 37] 2026-06-27 — LLM Curator 调度冲突修复与超时扩大
+## [迭代 156] 2026-06-27 — LLM Curator 调度冲突修复与超时扩大
 
 ### 痛点
 
@@ -4550,7 +4557,7 @@ Phase 3 后端治理路径完成后，下一阶段需要把治理决策、策略
 - `systemctl --user daemon-reload`：通过。
 - timer 触发的 curator run 从 30-45 分钟降至 1.5 秒（仅规则 curator）。
 
-## [迭代 38] 2026-06-28 — LLM Curator PID 丢失 bug 修复与向量同步/治理增强
+## [迭代 157] 2026-06-28 — LLM Curator PID 丢失 bug 修复与向量同步/治理增强
 
 ### 痛点
 
@@ -4584,7 +4591,7 @@ LLM 分析 job 仍然被中断（"Job was interrupted by service restart"），�
 - `curl http://127.0.0.1:8318/health`: 服务健康
 - `systemctl --user restart mcore.service`: 重启成功
 
-## [迭代 39] 2026-06-29 — 记忆引擎四轮系统重构（记得准、记得牢、读得准、治得好）
+## [迭代 158] 2026-06-29 — 记忆引擎四轮系统重构（记得准、记得牢、读得准、治得好）
 
 ### 背景
 
@@ -4638,7 +4645,7 @@ LLM 分析 job 仍然被中断（"Job was interrupted by service restart"），�
 - extraction 实测：3 条事实正确分类（bug_fix + decision + decision），内容自包含
 - 5 组查询 Top-1 全部命中最相关记忆
 
-## [迭代 40] 2026-06-30 — 框架重设计 Phase 1+2：MCP 精简 + 治理自动化
+## [迭代 159] 2026-06-30 — 框架重设计 Phase 1+2：MCP 精简 + 治理自动化
 
 ### 变更（8 files, +135/-478 lines）
 
@@ -4665,7 +4672,7 @@ LLM 分析 job 仍然被中断（"Job was interrupted by service restart"），�
 ### 验证
 - `.venv/bin/python -m pytest tests/`：488 passed, 3 skipped, 3 pre-existing failures（与本次无关）
 
-## [迭代 42] 2026-06-30 — 召回层分词与排序缺陷修复
+## [迭代 160] 2026-06-30 — 召回层分词与排序缺陷修复
 
 ### 问题诊断
 
@@ -4691,7 +4698,7 @@ LLM 分析 job 仍然被中断（"Job was interrupted by service restart"），�
 
 ---
 
-## [Phase 0] 2026-07-02 — 深度审计基线建立 + 可观测性修复
+## [迭代 161] 2026-07-02 — 深度审计基线建立 + 可观测性修复（Phase 0）
 
 ### 背景
 
@@ -4748,7 +4755,7 @@ Phase 0 目标：建立基线、修复可观测性、为后续优化提供数据
 
 ---
 
-## [Phase 1] 2026-07-02 — 召回失败根因分析与修复
+## [迭代 162] 2026-07-02 — 召回失败根因分析与修复（Phase 1）
 
 ### 背景
 
@@ -4806,7 +4813,7 @@ Phase 0 recall metrics API 揭示核心问题：
 
 ---
 
-## [Phase 2] 2026-07-02 — 治理系统修复
+## [迭代 163] 2026-07-02 — 治理系统修复（Phase 2）
 
 ### 背景
 
@@ -4870,7 +4877,7 @@ Phase 0 recall metrics API 揭示核心问题：
 
 ---
 
-## [Phase 3] 2026-07-07 — LLM Curator 验证与治理零审批
+## [迭代 164] 2026-07-07 — LLM Curator 验证与治理零审批（Phase 3）
 
 ### 背景
 
@@ -4944,7 +4951,7 @@ Phase 2 后 needs_review 积压 512 条，5 天后回涨至 799 条。
 
 ---
 
-## [Phase 3 补充] 2026-07-07 — Governance 流程简化
+## [迭代 165] 2026-07-07 — Governance 流程简化（Phase 3 补充）
 
 ### 背景
 
@@ -4999,7 +5006,7 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 
 ---
 
-## [迭代 15] 2026-07-07 — 框架重设计收尾：Context Lab + hit_rate 微调 + MCP 精简 + 文件拆分
+## [迭代 166] 2026-07-07 — 框架重设计收尾：Context Lab + hit_rate 微调 + MCP 精简 + 文件拆分
 
 ### 背景
 
@@ -5053,7 +5060,7 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 
 ---
 
-## [迭代 26] 2026-07-08 — 后端模块拆分 + 前端 Error Boundary + 文档归档
+## [迭代 167] 2026-07-08 — 后端模块拆分 + 前端 Error Boundary + 文档归档
 
 ### 变更
 
@@ -5087,7 +5094,7 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 
 ---
 
-## 迭代 27 — Dashboard 看板重设计 + 治理僵死决策修复（2026-07-08）
+## [迭代 168] 2026-07-08 — Dashboard 看板重设计 + 治理僵死决策修复
 
 ### 变更
 
@@ -5126,7 +5133,7 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 
 ---
 
-## 迭代 28 — 深度审计阶段 A+B+C：hit_rate 修复 + 测试恢复 + 死代码清理（2026-07-09）
+## [迭代 169] 2026-07-09 — 深度审计阶段 A+B+C：hit_rate 修复 + 测试恢复 + 死代码清理
 
 ### 背景
 
@@ -5182,7 +5189,7 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 
 ---
 
-## 迭代 29 — 深度审计续作计划基线（2026-07-10）
+## [迭代 170] 2026-07-10 — 深度审计续作计划基线
 
 ### 已完成
 
@@ -5296,7 +5303,7 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 
 ---
 
-## [迭代 8] 2026-08-24 — 降本增效：curator 降频 + 全量重嵌入根治（¥20/周 → ≤¥5/周）
+## [迭代 171] 2026-08-24 — 降本增效：curator 降频 + 全量重嵌入根治（¥20/周 → ≤¥5/周）
 
 > 承接 A/B 评测结论（mcore 胜出保留），执行 HANDOFF.md 降本增效 P0+P1。
 > 目标：LLM curator 花费从 ¥20/周（10M token、45 次/周）降至 ≤¥5/周。
@@ -5337,7 +5344,7 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 
 ---
 
-## [迭代 9] 2026-08-24 — 用户画像层（借鉴阿里云长期记忆 User Profile，落地 mcore）
+## [迭代 172] 2026-08-24 — 用户画像层（借鉴阿里云长期记忆 User Profile，落地 mcore）
 
 > 设计：docs/plans/2026-08-24-user-profile-layer.md；决策记忆 7bd604fd。
 
@@ -5369,7 +5376,7 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 
 ---
 
-## [迭代 10] 2026-08-24 — LLM curator require-accessed（治理域收缩 26%）
+## [迭代 173] 2026-08-24 — LLM curator require-accessed（治理域收缩 26%）
 
 > I9.1 of governance-slimming plan（docs/plans/2026-08-24-governance-slimming.md）
 
@@ -5395,7 +5402,7 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 
 ---
 
-## [迭代 11] 2026-08-24 — 清理 sqlite-vec 死表（业务表 27→21）
+## [迭代 174] 2026-08-24 — 清理 sqlite-vec 死表（业务表 27→21）
 
 > I9.2 of governance-slimming plan（docs/plans/2026-08-24-governance-slimming.md）
 
@@ -5418,7 +5425,7 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 
 ---
 
-## [迭代 12] 2026-08-24 — governance-slimming I9.3/I9.4/I10 执行（agent 死代码 + governance 噪音 + MCP/前端收敛）
+## [迭代 175] 2026-08-24 — governance-slimming I9.3/I9.4/I10 执行（agent 死代码 + governance 噪音 + MCP/前端收敛）
 
 > 承接 docs/plans/2026-08-24-governance-slimming.md（I9-I10）
 
@@ -5455,7 +5462,7 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 
 ---
 
-## [迭代 13] 2026-08-24 — LLM 模型 API 切换：DeepSeek 官方 → 百炼专属端点
+## [迭代 176] 2026-08-24 — LLM 模型 API 切换：DeepSeek 官方 → 百炼专属端点
 
 ### 背景
 用户要求 mcore 的 LLM 调用（extraction / LLM curator / profile extraction）从 DeepSeek 官方端点切到百炼（Bailian）连接，默认模型 `deepseek-v4-flash-0731`。注意：不是 Coding Plan 端点、不是 DeepSeek 官方，而是用户已在 Hermes 配置的百炼专属 MaaS 连通点。
@@ -5481,7 +5488,7 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 
 ---
 
-## [迭代 14] 2026-08-24 — 默认模型替换：deepseek-v4-flash-0731 → qwen3.7-plus
+## [迭代 177] 2026-08-24 — 默认模型替换：deepseek-v4-flash-0731 → qwen3.7-plus
 
 ### 变更
 - `config.yaml` extraction.model: `deepseek-v4-flash-0731` → `qwen3.7-plus`（其余不变：百炼专属 base_url + HERMES_CUSTOM_BAILIAN_API_KEY + max_tokens 8000）。
@@ -5496,7 +5503,7 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 
 ---
 
-## [迭代 15] 2026-08-24 — 用户画像增强 + 前端独立 Profile Tab
+## [迭代 178] 2026-08-24 — 用户画像增强 + 前端独立 Profile Tab
 
 ### 背景
 用户要求：画像维度更丰富，并作为 mcore 前端专门展示模块，独立 tab，样式与现有 UI 融合。
@@ -5524,7 +5531,7 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 
 ---
 
-## [迭代 16] 2026-08-24 — 统合迭代规划：面板口径 + 健康度评分 + 手动维护 + 画像召回融合
+## [迭代 179] 2026-08-24 — 统合迭代规划：面板口径 + 健康度评分 + 手动维护 + 画像召回融合
 
 ### 背景
 基于应用页四张截图诊断 + 记忆健康度指标分析 + 用户画像需求，统合全部问题点为 A-F 组可执行迭代项，并完成手动维护功能设计方案。
@@ -5552,7 +5559,7 @@ Phase 3 recalibrate 后发现 2,775 条 auto_approved 决策从未被执行。
 
 ---
 
-## [迭代 17] 2026-08-24 — push 前置 memory-sync 机制改造（git syncpush）
+## [迭代 180] 2026-08-24 — push 前置 memory-sync 机制改造（git syncpush）
 
 ### 背景
 git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实测：外层 push 使用 hook 运行前捕获的 SHA，已知对象集合不可变），产生遗留 commit 需二次推送。
@@ -5573,7 +5580,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ---
 
-## [迭代 18] 2026-08-24 — 记忆库瘦身清理功能（详细实现方案定稿）
+## [迭代 181] 2026-08-24 — 记忆库瘦身清理功能（详细实现方案定稿）
 
 ### 背景
 用户提出"mcore 归档数据能否只留统合记忆、删除无意义碎片"，经实审确认：
@@ -5597,7 +5604,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ---
 
-## [迭代 19] 2026-08-24 — 面板口径修复（A4+B组评分）+ C2 数据收敛
+## [迭代 182] 2026-08-24 — 面板口径修复（A4+B组评分）+ C2 数据收敛
 
 > 承接 2026-08-24-unified-iteration-plan.md（A/B/C 组），实现批次 1。
 
@@ -5644,7 +5651,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 - 剩余 stale 658 条多数为「曾被访问但可复检」的记忆，留给后续 D1（手动维护）按需处理，未盲目归档。
 - 本迭代未实现 D 组（手动维护）与 F 组（画像召回融合），按规划留到批次 2/3。
 
-## [迭代 20] 2026-08-25 — 批次 2:手动维护 D1 + C1 LLM 链路验证 + A1/A2/A3 修补
+## [迭代 183] 2026-08-25 — 批次 2:手动维护 D1 + C1 LLM 链路验证 + A1/A2/A3 修补
 
 ### 背景
 - 批次 1(A4+B 组评分+C2 收敛)完成后,按执行规划推进批次 2(P1 功能闭环)。
@@ -5690,7 +5697,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ---
 
-## [迭代 21] 2026-08-25 — 批次 3:画像召回融合 F1+F2+F4（纯本地，零 LLM）
+## [迭代 184] 2026-08-25 — 批次 3:画像召回融合 F1+F2+F4（纯本地，零 LLM）
 
 ### 背景
 - 统合迭代规划 F 组：画像基础层（user_profile_attrs + profile.py + snapshot 注入 + Profile Tab）已在前迭代落地，但画像只作为固定块注入，与检索排序/查询扩展/冲突过滤完全割裂。
@@ -5728,7 +5735,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ---
 
-## [迭代 22] 2026-08-26 — config 全链路热加载 + extraction LLM 403 修复
+## [迭代 185] 2026-08-26 — config 全链路热加载 + extraction LLM 403 修复
 
 ### 背景
 - 会话上下文提取失效：日志连续 `extraction: LLM call failed ... 403 Forbidden`（新旧进程都失败）。
@@ -5758,7 +5765,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ---
 
-## [迭代 23] 2026-08-26 — 手动维护 D2 合并 + D3 清理（M1-M3 闭环完成）
+## [迭代 186] 2026-08-26 — 手动维护 D2 合并 + D3 清理（M1-M3 闭环完成）
 
 ### 背景
 - 统一迭代计划 D 组仅完成 D1（archive）。本轮补齐 D2 merge + D3 clean，达成验收口径「手动维护功能 D1-D3 可用（预览→确认→执行→结果+备份路径）」。
@@ -5789,7 +5796,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ---
 
-## [迭代 24] 2026-08-26 — F3 画像自动更新闭环（新鲜度检测 + 增量刷新 + soft 衰减）
+## [迭代 187] 2026-08-26 — F3 画像自动更新闭环（新鲜度检测 + 增量刷新 + soft 衰减）
 
 ### 背景
 - F1/F2/F4（画像召回融合）完成后，画像仍只作为固定块注入；F3 补齐：① 新鲜度检测（画像滞后告警）② 增量刷新（only_new）③ soft 属性 confidence 衰减（immutable 不动）。依赖 LLM 健康，本轮已满足（qwen3.7-flash-2026-07-15 可用）。
@@ -5816,7 +5823,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ---
 
-## [迭代 25] 2026-08-26 — E1 Phase 1：前端 API 收敛 + Dashboard 聚合 + 健康评分后端化
+## [迭代 188] 2026-08-26 — E1 Phase 1：前端 API 收敛 + Dashboard 聚合 + 健康评分后端化
 
 ### 背景
 - E1 前端收敛方案已落盘 `docs/plans/2026-08-26-frontend-4page-redesign.md`，用户拍板 1A+2A+3A+4A（Governance/Apps 内联、评分迁后端、Context Lab 卡片化）。本轮实施 **Phase 1 基建**。
@@ -5846,7 +5853,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ---
 
-## [迭代 26] 2026-08-26 — E1 Phase 2/3：组件瘦身确认 + Navbar 5 项导航收敛
+## [迭代 189] 2026-08-26 — E1 Phase 2/3：组件瘦身确认 + Navbar 5 项导航收敛
 
 ### Phase 2（组件拆分/清理）审计结论
 - `MemoryOperationsPanel.tsx` 现 258 行（迭代 20/21 已拆出 `MemoryOperationsView`）——历史 1029 行单体已拆分，**Phase 2 验收达成**。
@@ -5865,7 +5872,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ---
 
-## [迭代 27] 2026-08-26 — E1 Phase 3①：Dashboard 内联重构（健康横幅 + 治理面板 + 应用区块）
+## [迭代 190] 2026-08-26 — E1 Phase 3①：Dashboard 内联重构（健康横幅 + 治理面板 + 应用区块）
 
 ### 变更（前端，决策 1A/2A/3A/4A 落地）
 - `components/dashboard/HealthBanner.tsx`（新）—— 顶部健康横幅：读 `/api/v1/health-score`（后端评分），渲染 quality 大数字（>80 绿 / ≥60 黄 / 红）+ risk/linked/reuse/cleanup 指标行 + LLM 治理状态徽章 + 治理待办徽章。
@@ -5880,7 +5887,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ---
 
-## [迭代 28] 2026-08-26 — E1 Phase 3②：子页返回箭头（PageShell backHref）
+## [迭代 191] 2026-08-26 — E1 Phase 3②：子页返回箭头（PageShell backHref）
 
 ### 变更（前端）
 - `components/shared/PageShell.tsx`：新增通用 `backHref`/`backLabel` props——有返回地址时在标题上方渲染返回链接（ArrowLeft 图标 + 可选文案）；头部渲染条件扩展为 `(title || actions || backHref)`。
@@ -5893,7 +5900,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ---
 
-## [迭代 29] 2026-08-26 — 修复 merge 维护计划前端崩溃（Cannot read properties of undefined (reading 'map')）
+## [迭代 192] 2026-08-26 — 修复 merge 维护计划前端崩溃（Cannot read properties of undefined (reading 'map')）
 
 ### 根因
 - 后端 `/api/v1/maintenance/plan?action=merge` 返回 `merge_groups`（**无 `groups` 字段**，`groups` 仅 archive 计划的字段）。
@@ -5910,7 +5917,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ---
 
-## [迭代 30] 2026-08-26 — 修复 curator 时间显示偏移（systemd CST → ISO +08:00）
+## [迭代 193] 2026-08-26 — 修复 curator 时间显示偏移（systemd CST → ISO +08:00）
 
 ### 根因
 - 后端 `_curator_status_payload` 直接透传 `systemctl show` 的墙钟字符串（`Wed 2026-08-26 15:16:17 CST`）。
@@ -5930,7 +5937,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ---
 
-## [迭代 31] 2026-08-26 — clean 激进模式（aggressive）：归档无用数据纳入硬删候选
+## [迭代 194] 2026-08-26 — clean 激进模式（aggressive）：归档无用数据纳入硬删候选
 
 ### 背景
 - 用户指出：有 5960 条 archived 数据，但"清理（硬删）"候选一直为 0；并明确要求**不要保守策略，尽可能删除无用数据**。
@@ -5952,7 +5959,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ---
 
-## [迭代 32] 2026-08-26 — E1 Phase 3-②：Settings Tab 化（表单 / 数据与维护 / JSON）
+## [迭代 195] 2026-08-26 — E1 Phase 3-②：Settings Tab 化（表单 / 数据与维护 / JSON）
 
 ### 变更（前端）
 - `app/settings/page.tsx`：Tabs 从（表单 / JSON）扩展为 **表单 / 数据与维护 / JSON** 三栏。
@@ -5966,7 +5973,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ---
 
-## [迭代 33] 2026-08-26 — 记忆主体上下文缺失治理（规划中，未实施）
+## [迭代 196] 2026-08-26 — 记忆主体上下文缺失治理（规划中，未实施）
 
 ### 背景
 - 用户指出：提取出的单条记忆缺乏「主体」锚点（如「迭代 31」「迭代 27」全文不提 mcore），单条脱离 UI 无法判断归属项目。
@@ -5988,7 +5995,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ---
 
-## [迭代 33] 2026-08-26 — E1 Phase 3-③：旧路由空壳提示（/apps、/governance 整合提示）
+## [迭代 197] 2026-08-26 — E1 Phase 3-③：旧路由空壳提示（/apps、/governance 整合提示）
 
 ### 变更（前端）
 - `components/shared/MigratedNotice.tsx`（新）——琥珀色提示条："此页面已整合进看板，建议直接在看板中使用" + 返回看板链接。
@@ -6011,7 +6018,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 - ✅ 旧路由 /apps /governance 空壳提示 + 返回引导
 - ⏸ Phase 4 统一设计打磨（CSS token 全量替换）留待可选——现有 zinc 风格已全局一致，收益优先级低
 
-## [迭代 34] 2026-08-31 — 维护清理单次条数去上限 + 硬删确认框全局样式化
+## [迭代 198] 2026-08-31 — 维护清理单次条数去上限 + 硬删确认框全局样式化
 
 ### 变更（后端）
 - `storage/maintenance.py`：`DEFAULT_MAINTENANCE_LIMIT` / `CLEAN_DEFAULT_LIMIT` / `MERGE_DEFAULT_LIMIT` 由 500/500/200 改为 `0`（0 = 不设条数上限）；新增 `_resolve_maintenance_cap()`（显式正整数仍可限制；无上限时以 100 万作安全天花板）；三处 `cap = min(limit, 5000)` 全部改走统一解析。
@@ -6030,7 +6037,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 ### 备注
 - 本次仅修复上限与确认框 UI，未实际执行 4321 条硬删；执行时后端仍会先全量备份（memory_backup）再删除，保护逻辑（有访问/注射/反馈或 importance≥0.9 的记录）不变。
 
-## [迭代 35] 2026-08-31 — 维护计划预览列表化：分组明细 + 可点击记忆条目
+## [迭代 199] 2026-08-31 — 维护计划预览列表化：分组明细 + 可点击记忆条目
 
 ### 变更（前端）
 - `components/dashboard/MemoryOperationsView.tsx`：
@@ -6047,7 +6054,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 ### 备注
 - 预览列表为分组抽样（每组最多 5 条样本），避免 4321 条全量渲染拖垮面板；完整候选可点样本直达详情页核对，执行硬删前仍有全量备份兜底。
 
-## [迭代 36] 2026-08-31 — 清理候选全量列表：分页 Dialog + 后端分页接口
+## [迭代 200] 2026-08-31 — 清理候选全量列表：分页 Dialog + 后端分页接口
 
 ### 变更（后端）
 - `storage/maintenance.py`：把 clean 候选扫描抽成共享函数 `_clean_candidate_items()`（返回全量候选 + scanned + protected_count，顺序与 plan 一致）；`plan_data_maintenance_clean` 改用共享扫描（行为不变）；新增 `list_data_maintenance_clean_candidates(offset, limit)` 分页函数（页大小上限 500，offse 与 plan 顺序一致）。
@@ -6067,7 +6074,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 ### 备注
 - 4521 条候选全量浏览不出面板，翻页每页 100 条；每条可点详情核对后再决定是否执行硬删（执行前仍会全量备份）。
 
-## [迭代 37] 2026-09-01 — LLM 治理 403 修复：接入智谱 GLM 官网订阅端点
+## [迭代 201] 2026-09-01 — LLM 治理 403 修复：接入智谱 GLM 官网订阅端点
 
 ### 问题
 - LLM curator 全部 dedup/contradiction 批次报 `403 Forbidden`，目标 `https://open.bigmodel.cn/api/v1/chat/completions`。
@@ -6090,7 +6097,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 ### 备注
 - config.yaml 为 git 追踪文件且历史上已含 api_key（既有现状）；本次 diff 仅 base_url 一行，无新增密钥。若要收敛，建议后续把 api_key 迁到环境变量并重置该 key。
 
-## [迭代 38] 2026-09-01 — 健康分口径统一：智能中心改用后端 health-score 单一事实源
+## [迭代 202] 2026-09-01 — 健康分口径统一：智能中心改用后端 health-score 单一事实源
 
 ### 问题
 - 同一看板两个健康分：顶部 HealthBanner（后端 /api/v1/health-score）显示 86 分/风险 100/待清理 35，而「记忆智能中心」面板前端本地重算显示 65 分/风险 42%/待清理 35% —— 分数与口径均不一致。
@@ -6107,7 +6114,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 - 接口对账：health-score 与 curator/status 原料完全一致（by_status: active 1622/archived 1700/contradicted 233/stale 611/superseded 23；pending=867, usable=2489, share=35）。
 - governance/counts=0（63 条 LLM 建议已全部 applied：41 archive_and_merge + 17 archive_duplicate + 5 mark_contradicted + 7 supersession - 4 rejected supersession），队列干净，risk=100 合理。
 
-## [迭代 39] 2026-09-01 — 归档链路扩展：stale/superseded 超期自动进入归档计划
+## [迭代 203] 2026-09-01 — 归档链路扩展：stale/superseded 超期自动进入归档计划
 
 ### 问题
 - 看板「待清理 867（stale 611/矛盾 233/被取代 23）」只是指标，一键维护三动作候选范围与它零交集——用户找不到清理入口。
@@ -6126,7 +6133,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 ### 备注
 - 指标「待清理占比」仍含 contradicted；归档执行后 stale/superseded 部分会自然下降。治理状态不会污染检索（stale/contradicted 检索时已过滤）。
 
-## [迭代 40] 2026-09-01 — 矛盾裁决并入归档链路：败方/悬案→归档，胜方→激活（用户选定策略）
+## [迭代 204] 2026-09-01 — 矛盾裁决并入归档链路：败方/悬案→归档，胜方→激活（用户选定策略）
 
 ### 策略（用户拍板）
 - 矛盾对：新的取代旧的。失败方（older_id）**直接落入归档**；胜方（newer_id）若被误标曲为 contradicted 则恢复 active；无裁决决策的悬案矛盾按闲置 30 天规则归档。
@@ -6145,7 +6152,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 - 新增测试 `TestArchiveContradictionAdjudication`（三角色 plan 映射 + 混合 execute），maintenance 27 passed；tsc 零错误；build 成功；双服务重启。
 - 生产实测（2026-09-01）：矛盾 233 → 计划 226（悬案 176 + 败方 50）→ 执行成功（备份 67MB）→ **剩 7 条新增矛盾**；待清理 867 → **36**（7 矛盾 + 29 新合并取代），健康分 87 → 89、待清理占比 35% → 2%。
 
-## [迭代 41] 2026-09-01 — 顶部健康条「待清理占比」显示修正（98→真实 2）
+## [迭代 205] 2026-09-01 — 顶部健康条「待清理占比」显示修正（98→真实 2）
 
 ### 问题
 - HealthBanner 的「待清理占比」chip 沿用了旧语义：显示 `100 - pending_cleanup_share`（即"非待清理/干净占比"），标签却叫"待清理占比"，与智能中心显示的真实占比（2）互为补数，让用户困惑（98 vs 2）。
@@ -6156,7 +6163,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 ### 验证
 - tsc 零错误；build 成功；mcore-ui 重启 200；现在顶部条显示「待清理占比 2」，智能中心同为 2（36/1718）。
 
-## [迭代 42] 2026-09-01 — 智能中心「待清理占比」反向配色修复（2% 不再红色警示）
+## [迭代 206] 2026-09-01 — 智能中心「待清理占比」反向配色修复（2% 不再红色警示）
 
 ### 问题
 - 「待清理占比」是越低越好的指标，但 HealthMetricsPanel 所有信号卡共用"越高越好"的配色尺度：2% 被当 2 分 → 红条红字，用户误以为出问题。
@@ -6169,7 +6176,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 ### 验证
 - tsc 零错误；build 成功；mcore-ui 重启 200；刷新后 2%（36/1707 待清理）显示绿色、健康分 89 绿徽章「healthy」。
 
-## [迭代 43] 2026-09-01 — 「待清理占比」改为正向「可用池健康」（98% 不红脸）
+## [迭代 207] 2026-09-01 — 「待清理占比」改为正向「可用池健康」（98% 不红脸）
 
 ### 问题
 - 2% 的待清理占比数值小，即便配色已绿，用户仍觉得"2%"不友好/像有问题；希望显示取反的大数字。
@@ -6182,7 +6189,7 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 ### 验证
 - tsc 零错误；build 成功；mcore-ui 重启 200。顶部条与智能中心均为「可用池健康 98」（36/1707 待清理仅作 tooltip 细节）。
 
-## [迭代 44] 2026-09-01 — 顶部条 tooltip 文案重复修复
+## [迭代 208] 2026-09-01 — 顶部条 tooltip 文案重复修复
 
 ### 问题
 - HealthBanner「可用池健康」chip 的 describe 手动拼了 `${pending}/${usable}` 前缀，而其 i18n 文案 `nonArchivedRatioDetail` 本身已含 "N/M 条可用记忆待清理"，导致 tooltip 显示 "41/1742 41/1742 条可用记忆待清理" 重复。
@@ -6192,3 +6199,17 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ### 验证
 - tsc 零错误；build 成功；mcore-ui 重启 200；tooltip 现显示 "41/1742 条可用记忆待清理" 一次。
+
+## [迭代 209] 2026-09-02 — 迭代日志全量重排：编号冻结 + 格式统一 + 新旧编号映射
+
+### 变更
+- `ITERATION.md`：208 条迭代按时间升序连续重编号 [迭代 1]~[迭代 208]，消除旧编号 4 个历史时期重复问题（如「迭代 37」×3、「迭代 33」×4）；标题统一为 `## [迭代 N] YYYY-MM-DD — 标题`，18 条历史非标准格式条目（日期头/Phase 头/旧式迭代 N 头）归一，Phase/批次信息保留为标题后缀（如「（Phase 0）」「（批次 B）」）
+- `ITERATION.md`：文件头新增编号规则横幅，「日志格式规范」规则区新增冻结条款——**编号即唯一 ID，新条目取「最大编号 + 1」追加底部，严禁重排/复用/修改历史编号**
+- `docs/iteration-number-map-2026-09-02.md`：新增新旧编号映射表（208 行，旧编号+日期联合定位，★ 标注标题归一条目），历史文档/记忆中的旧编号引用以此为准
+
+### 验证
+- 机器校验：208 条正文与重排前 git HEAD 逐字节一致（围栏感知多重集比对，仅标题/顺序变化）；编号连续 1~208；日期严格升序；标题格式正则全量检查通过
+- 「日志格式规范」区模板与既有规则逐字保留，仅追加编号冻结条款一行
+
+### 备注
+- 本次为一次性整理；今后新条目仅追加 [迭代 210]+，任何情况不得再重排。
