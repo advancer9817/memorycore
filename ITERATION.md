@@ -6213,3 +6213,12 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 
 ### 备注
 - 本次为一次性整理；今后新条目仅追加 [迭代 210]+，任何情况不得再重排。
+
+## [迭代 210] 2026-09-02 — TODO 未完成项全量登记（P0-P3 分级汇总）
+
+### 变更
+- `TODO.md`：新增「未完成迭代项汇总 — 2026-09-02」区段，14 项待办按 P0→P3 分级：P0 记忆主体上下文治理（5 阶段拆分 + subject_context 配置，方案 `docs/plans/2026-08-26-memory-subject-context.md`）、P1 检索质量连续观测（hit_rate>0.90 / cross_retrieval≥0.15 / 79.7% 基线回归）、P2 GLM 治理成本观察（承接原 deepseek 账单核对项，对象已切换）、P3 低优先级 idea（标点规则拆分、E1 Phase 4 打磨）、运维观察（矛盾/待清理回升收敛确认）
+- 盘点范围：ITERATION.md 全部 209 条 + TODO 全量核对；确认 R4 巨型文件拆分已在深度审计续作完成（frontend 568 / search 640 / server 571 / governance 559 行），不再列为待办
+
+### 验证
+- `TODO.md` 未勾选项共 15（原 R7 观测 1 项 + 新增 14 项），区段结构与分级完整；评测集当天 7/7 pass 无回退

@@ -498,3 +498,42 @@ Step 4（扩展能力）— 独立，可与 Step 1-3 并行
 - [x] 验证 governance_split 未召回目标和 active 重复标题均为 0
 - [x] 更新计划状态、TODO 勾选与 `ITERATION.md` 完成记录
 - [x] 最终执行后端全量测试、前端 build/tsc 和数据库完整性检查
+
+---
+
+## 未完成迭代项汇总 — 2026-09-02（按重要程度排序）
+
+> 来源：2026-09-02 全量盘点（ITERATION.md 209 条 + TODO 全量核对）。按 P0→P3 排序，完成一项打勾一项，实现细节记入 ITERATION.md。
+
+### P0 — 记忆主体上下文治理（方案已定稿，待实施）
+
+> 单条记忆缺「主体」锚点：脱离 UI 无法判断归属项目。盘点基线：标题含「迭代」的记忆 58% 无头、95% 无 project_path、99% scope=global。缺口在写入侧（dedup.ingest 不传 project_path、hook 不发送、提取 prompt 无主体上下文）。方案细节：`docs/plans/2026-08-26-memory-subject-context.md`。
+
+- [ ] **阶段 1（P0）提取期注入主体**：`extraction.py` 注入 Active Context（project_name/path/scope），`ExtractedFact` 增加 `subject`/`entities` 字段，强化 title 自包含规则（带项目名前缀），输出 schema 同步
+- [ ] **阶段 2（P0）ingest 落库 metadata**：`dedup.ingest()` / `memory_ingest()` 增加 `project_path`/`scope` 参数并落库，tags 加 `project:*`；`scripts/hooks/mcore-ingest.py` 增加 `_detect_project()` 自动探测（git root / 环境变量 / claude slug）
+- [ ] **阶段 3（P0）实体索引兜底**：`entities.py` 增加 `resolve_project_entity()`，带 project_path 的记录强制注入项目实体行，保证 `entity_search("<项目名>")` 确定性命中
+- [ ] **阶段 4（P1）检索端主体扩展**：查询期项目名低权重扩展 + 调用方自动探测 project_path（当前 Hermes 传 `(none)`）
+- [ ] **阶段 5（P2 可选）存量回填**：`scripts/backfill_subject.py` 高置信自动标主体 / 低置信进 review，dry-run + 备份 + 幂等
+- [ ] 新配置段 `subject_context`（enabled / default_scope / projects 白名单 name+paths+aliases+scope）与 config.yaml schema 校验
+
+### P1 — 检索质量连续观测机制
+
+> 评测集当天实测 7/7 pass 无回退，但缺乏周期观测，「待观察」项无法收敛。
+
+- [ ] 建立周期性检索质量观测：定期跑 `tests/test_context_relevance.py` 评测集并记录 hit_rate / filter_rate / cross_retrieval_rate 趋势（可挂 cron 或每周手动）
+- [ ] hit_rate 冲刺 >0.90（07-07 微调阈值后实测 0.889，需连续观测确认是否达标）
+- [ ] cross_retrieval_rate 达标 ≥0.15（07-10 基线检查时未达标，持续偏低）
+- [ ] context hit rate 基线 79.7% 回归观察（08-24 C2 数据收敛后遗留的观察项）
+
+### P2 — LLM 治理成本观察（对象已切换）
+
+- [ ] GLM 订阅端点用量/成本观察：确认切换后治理调用量与订阅额度匹配（原「deepseek 账单降至 1/5」一周核对项因 09-01 切换 GLM 已过时，并入本项关闭）
+
+### P3 — 低优先级遗留 idea（可评估后放弃）
+
+- [ ] 写入时按标点纯规则拆分长事实（>400 字符按句号/分号拆分，无 LLM）：框架重设计 Phase 4 遗留、从未实施；R3 深度审计续作（提取 title 分离 + 种子反馈 + 双命中融合）已部分覆盖其目标，动工前先评估剩余价值
+- [ ] E1 Phase 4 统一设计打磨：无验收标准、未排期；8→4 页精简已由用户决策排除，仅剩视觉/交互统一打磨
+
+### 运维观察（非迭代欠账）
+
+- [ ] 矛盾/待清理回升收敛确认：09-01 收官后矛盾 7→16、待清理 36→62 属新数据正常增长；确认下次维护计划（或手动一键维护）后回落至低位
