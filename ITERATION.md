@@ -6321,4 +6321,19 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 - 观测实测：`eval_context_quality.py` 实测输出 24h hit_rate 0.8679、7d 0.8420、30d 0.8301，基准稳固，并生成观测快照 `reports/quality_20260903_173547.json`。
 - 服务状态：`mcore.service` 重启健康状态 200 OK，总记忆数 4,157 条，定时器 `mcore-curator.timer` 处于正常等待调度状态。
 
+## [迭代 215] 2026-09-03 — 系统隐患深度探查与架构体检：根因诊断与演进路线报告落地
+
+> 全方位深度探查 mcore 生产库与核心链路，定位 Qdrant 向量单例配置冲刷、单测假绿与事件表膨胀三项核心风险，输出高规格架构体检报告。
+
+### 探查与诊断
+- **P0 致命缺陷诊断**：定位 `get_vector_store()` 在无参调用时 `config or {}` 为空，导致单例指纹突变重构并回退本地文件锁冲突，致使生产库 `cross_retrieval_rate` 长期归零（0.0000），向量检索静默瘫痪。
+- **P1 测试与质量盲区**：`tests/test_curator_llm_jobs.py` 中 3 个核心用例因历史代码重构为 SQLite 存储后未同步修改断言而长期 `pytest.skip`，冷却防重机制处于无测试守护状态。
+- **P1 数据库膨胀隐患**：`audit_events`（8,236 条）与 `context_quality_events`（1,244 条）缺乏生命周期自动滚卷/清理策略。
+- **P2 功能割裂**：后端已具备 `/api/v1/context-lab/test` 评测接口，但前端 `ui/app` 缺少 `/context-lab` 可视化页面。
+
+### 变更
+- `docs/2026-09-03-memorycore-deep-investigation-report.md`（新增）：落地详实的架构体检与深度探查报告，涵盖数据全景、缺陷复现链路、召回与融合逻辑图、阶段性演进排期表。
+- 报告同步转储至 Windows 宿主机桌面 `output/` 目录与 gdrive 迭代备份。
+
+
 
