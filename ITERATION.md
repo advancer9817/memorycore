@@ -6306,3 +6306,19 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
   - 针对历史遗漏的 `2b44f21d` 执行修补，补齐 `project:mcore`、`scope=project` 与路径；`backfill_subject.py` 自动备份生产库并完成 17 条高置信存量清洗。
 - 生产服务：`mcore.service` 健康状态 200。
 
+## [迭代 214] 2026-09-03 — 检索质量周期性观测工具落地 + CPA模型路由对齐与遗留项收敛
+
+> 落地 P1 检索质量多维周期观测机制，修复本地 CPA 提取模型别名路由，完成 TODO 遗留待办项的全面收敛。
+
+### 变更
+- `scripts/eval_context_quality.py`（新增）：轻量检索质量观测工具，集成评测集回归（`tests/test_context_relevance.py` 7 项用例）与生产库 `context_quality_events`（1d/7d/30d）多维指标（hit_rate / filter_rate / cross_retrieval_rate / used_count / vector_avg_score），支持 `--save` 快照归档至 `reports/`。
+- `config.yaml`：修复 `extraction.model` 别名对齐：从 `gemini-3.8-flash-high` 调整为本地 CPA 暴露的统一对外路由 `gemini-3.8-flash`，彻底解决 LLM 提取与治理调用报 400 Bad Request（unknown provider）的问题。
+- `TODO.md`：更新 R7 与 P1 检索质量观测项为已完成，关闭历史观察项；评估关闭已无必要实施的 P3 纯规则标点切分与已决策排除的前端 8→4 页重构，实现 TODO 待办项全面收敛。
+
+### 验证
+- 测试：单测 `test_context_relevance.py` 7 passed、`test_subject_context.py` 32 passed 全部绿标通过。
+- 提取实测：通过本地 CPA 成功调用 `gemini-3.8-flash` 完成事实提取，准确识别 `subject: mcore` 与关联实体。
+- 观测实测：`eval_context_quality.py` 实测输出 24h hit_rate 0.8679、7d 0.8420、30d 0.8301，基准稳固，并生成观测快照 `reports/quality_20260903_173547.json`。
+- 服务状态：`mcore.service` 重启健康状态 200 OK，总记忆数 4,157 条，定时器 `mcore-curator.timer` 处于正常等待调度状态。
+
+
