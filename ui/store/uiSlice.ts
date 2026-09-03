@@ -16,6 +16,7 @@ interface LanguageState {
 interface UIState {
   dialogs: DialogState;
   language: LanguageState;
+  pageRefreshKey: number;
   dashboardRefreshKey: number;
   graphRefreshKey: number;
   governanceRefreshKey: number;
@@ -32,6 +33,7 @@ const initialState: UIState = {
   language: {
     locale: DEFAULT_LOCALE,
   },
+  pageRefreshKey: 0,
   dashboardRefreshKey: 0,
   graphRefreshKey: 0,
   governanceRefreshKey: 0,
@@ -72,6 +74,13 @@ const uiSlice = createSlice({
         locale: action.payload,
       },
     }),
+    triggerPageRefresh: (state) => ({
+      ...state,
+      pageRefreshKey: state.pageRefreshKey + 1,
+      dashboardRefreshKey: state.dashboardRefreshKey + 1,
+      graphRefreshKey: state.graphRefreshKey + 1,
+      governanceRefreshKey: state.governanceRefreshKey + 1,
+    }),
     requestDashboardRefresh: (state) => ({
       ...state,
       dashboardRefreshKey: state.dashboardRefreshKey + 1,
@@ -91,6 +100,7 @@ export const {
   openUpdateMemoryDialog,
   closeUpdateMemoryDialog,
   setLocale,
+  triggerPageRefresh,
   requestDashboardRefresh,
   requestGraphRefresh,
   requestGovernanceRefresh,

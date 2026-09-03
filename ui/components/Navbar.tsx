@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode, useCallback, useEffect, useState } from "react";
+import { useDispatch } from "react-redux";
 import { Home, Layers3, Menu, Network, RefreshCcw, Settings, UserRound } from "lucide-react";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,15 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useI18n } from "@/hooks/useI18n";
 import { useToast } from "@/hooks/use-toast";
 import { getApiBaseUrl } from "@/lib/api-url";
+import {
+  triggerPageRefresh,
+  requestDashboardRefresh,
+  requestGraphRefresh,
+  requestGovernanceRefresh,
+} from "@/store/uiSlice";
+import { requestMemoriesRefresh } from "@/store/memoriesSlice";
+import { requestAppsRefresh } from "@/store/appsSlice";
+import { resetProfileState } from "@/store/profileSlice";
 
 const CreateMemoryDialog = dynamic(
   () => import("@/app/memories/components/CreateMemoryDialog").then((mod) => mod.CreateMemoryDialog),
@@ -23,94 +33,67 @@ interface NavItem {
   icon: ReactNode;
 }
 
-async function refreshForPath(pathname: string): Promise<void> {
-  const { getApiBaseUrl } = await import("@/lib/api-url");
-  const base = getApiBaseUrl();
-  const fetches: Promise<unknown>[] = [];
-
-  if (pathname === "/") {
-    fetches.push(fetch(`${base}/api/v1/stats`));
-  } else if (pathname.startsWith("/memories")) {
-    return;
-  } else if (pathname.startsWith("/apps")) {
-    fetches.push(fetch(`${base}/api/v1/apps/`));
-  } else if (pathname.startsWith("/settings")) {
-    fetches.push(fetch(`${base}/api/v1/config`));
-  } else if (pathname.startsWith("/governance")) {
-    fetches.push(fetch(`${base}/api/v1/governance/metrics`));
-    fetches.push(fetch(`${base}/api/v1/governance/decisions?review_status=actionable&limit=500`));
-  } else if (pathname.startsWith("/profile")) {
-    fetches.push(fetch(`${base}/api/v1/profile`));
-  }
-
-  await Promise.allSettled(fetches);
-}
-
 export function Navbar() {
   const pathname = usePathname();
+  const dispatch = useDispatch();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [actionableCount, setActionableCount] = useState(0);
   const { messages } = useI18n();
   const { toast } = useToast();
 
+  const fetchActionableCount = useCallback(async () => {
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/api/v1/governance/counts`);
+      if (!res.ok) return;
+      const payload = await res.json();
+      const data = payload.data ?? payload;
+      // actionable = total - applied - rejected - rolled_back - auto_approved
+      const total = data?.total ?? 0;
+      const applied = data?.applied ?? 0;
+      const rejected = data?.rejected ?? 0;
+      const rolledBack = data?.rolled_back ?? 0;
+      const autoApproved = data?.auto_approved ?? 0;
+      const actionable = Math.max(0, total - applied - rejected - rolledBack - autoApproved);
+      setActionableCount(actionable);
+    } catch {
+      // 静默失败，badge 不是关键功能
+    }
+  }, []);
+
   // 轮询 governance actionable 计数
   useEffect(() => {
-    const fetchActionableCount = async () => {
-      try {
-        const res = await fetch(`${getApiBaseUrl()}/api/v1/governance/counts`);
-        if (!res.ok) return;
-        const payload = await res.json();
-        const data = payload.data ?? payload;
-        // actionable = total - applied - rejected - rolled_back - auto_approved
-        const total = data?.total ?? 0;
-        const applied = data?.applied ?? 0;
-        const rejected = data?.rejected ?? 0;
-        const rolledBack = data?.rolled_back ?? 0;
-        const autoApproved = data?.auto_approved ?? 0;
-        const actionable = Math.max(0, total - applied - rejected - rolledBack - autoApproved);
-        setActionableCount(actionable);
-      } catch {
-        // 静默失败，badge 不是关键功能
-      }
-    };
-
     fetchActionableCount();
     // 每 60 秒轮询一次
     const interval = setInterval(fetchActionableCount, 60_000);
     return () => clearInterval(interval);
-  }, [pathname]);
+  }, [fetchActionableCount, pathname]);
 
   const handleRefresh = useCallback(async () => {
     if (isRefreshing) return;
     setIsRefreshing(true);
     try {
-      const { store } = await import("@/store/store");
-      if (pathname === "/") {
-        const { requestDashboardRefresh } = await import("@/store/uiSlice");
-        store.dispatch(requestDashboardRefresh());
-      } else if (pathname.startsWith("/memories")) {
-        const { requestMemoriesRefresh } = await import("@/store/memoriesSlice");
-        store.dispatch(requestMemoriesRefresh());
-      } else if (pathname.startsWith("/apps")) {
-        const { requestAppsRefresh } = await import("@/store/appsSlice");
-        store.dispatch(requestAppsRefresh());
-      } else if (pathname.startsWith("/graph")) {
-        const { requestGraphRefresh } = await import("@/store/uiSlice");
-        store.dispatch(requestGraphRefresh());
-      } else if (pathname.startsWith("/governance")) {
-        const { requestGovernanceRefresh } = await import("@/store/uiSlice");
-        store.dispatch(requestGovernanceRefresh());
-      } else {
-        await refreshForPath(pathname);
-        const { resetProfileState } = await import("@/store/profileSlice");
-        store.dispatch(resetProfileState());
-      }
+      // 1. 触发页面级 SPA 局部重挂载（改变 pageRefreshKey 彻底重建当前路由的视图子树）
+      dispatch(triggerPageRefresh());
+
+      // 2. 清除并重置各模块缓存与 refreshKey，击穿 30 秒客户端缓存
+      dispatch(requestMemoriesRefresh());
+      dispatch(requestAppsRefresh());
+      dispatch(resetProfileState());
+
+      // 3. 重新获取 Navbar 自身的待办计数
+      await fetchActionableCount();
+
+      // 4. 适当平滑过渡动效
+      await new Promise((resolve) => setTimeout(resolve, 350));
+
       toast({ description: messages.nav.refreshed });
+    } catch {
+      // 忽略非关键异常
     } finally {
       setIsRefreshing(false);
     }
-  }, [isRefreshing, messages.nav.refreshed, pathname, toast]);
+  }, [dispatch, fetchActionableCount, isRefreshing, messages.nav.refreshed, toast]);
 
   const isActive = (href: string): boolean => {
     if (href === "/") return pathname === href;

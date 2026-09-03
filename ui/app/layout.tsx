@@ -4,6 +4,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { Navbar } from "@/components/Navbar";
 import { Toaster } from "@/components/ui/toaster";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { PageContainer } from "@/components/PageContainer";
 import { Providers } from "./providers";
 
 export const metadata = {
@@ -30,7 +31,9 @@ export default function RootLayout({
             disableTransitionOnChange
           >
             <Navbar />
-            <ScrollArea className="h-[calc(100vh-var(--navbar-h))]">{children}</ScrollArea>
+            <ScrollArea className="h-[calc(100vh-var(--navbar-h))]">
+              <PageContainer>{children}</PageContainer>
+            </ScrollArea>
             <Toaster />
           </ThemeProvider>
         </Providers>

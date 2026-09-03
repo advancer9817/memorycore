@@ -6368,6 +6368,38 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 - 单测与全量回归：全量 pytest **613 passed / 0 failed / 0 skipped**（原 607 passed / 7 skipped），测试盲区完全清零。
 - 服务验证：`mcore.service` 重启成功（Active running），`eval_context_quality.py` 7/7 用例顺利通过。
 
+## [迭代 217] 2026-09-03 — 修复前端头部栏刷新无效：重构为 SPA 局部重载与缓存击穿机制
+
+> 彻底根除前端头部栏刷新按钮点击后页面数据纹丝不动的缺陷，落地 SPA 级别视图子树重挂载与 Redux 内存缓存重置，实现与浏览器刷新等价的即时数据拉取体验。
+
+### 问题与根因
+1. **首页组件未监听刷新**：原 Navbar 点击仅派发 `requestDashboardRefresh`，但首页 7 个面板中仅有 1 个监听了该 key，HealthBanner、MemoryOperationsPanel 等绝大多数面板均使用 `useEffect(..., [])` 一次性挂载，完全不响应刷新。
+2. **非首页路由走入假刷新**：在 `/settings`、`/profile`、`/memory/[id]` 等页面，原逻辑执行裸 `fetch` 但完全未存入 State/Store，导致数据毫无变化；且详情页 `/memory/[id]` 因单复数失配直接跌入无效 fallback。
+3. **客户端 30s 缓存拦截**：`useMemoriesApi`、`useAppsApi`、`useStats` 内部基于 `lastFetchedAt` 维护了 30 秒缓存，即便发起查询也会被拦截并返回旧数据。
+
+### 变更
+- `ui/store/uiSlice.ts`：
+  - 新增 `pageRefreshKey: number` 状态。
+  - 新增 `triggerPageRefresh` action，自增 `pageRefreshKey` 并同步联动 `dashboardRefreshKey`、`graphRefreshKey`、`governanceRefreshKey`。
+- `ui/store/profileSlice.ts`：
+  - 增强 `resetProfileState`，重置 `lastFetchedAt = null`、`totalMemories = 0`、`totalApps = 0`、`apps = []`，彻底清除 `useStats` 的 30 秒客户端缓存。
+- `ui/components/PageContainer.tsx`（新增）：
+  - 客户端包裹组件，监听 `state.ui.pageRefreshKey`，以 `display: contents` 无感包裹页面 children；利用 React `key={pageRefreshKey}` 在刷新时自动对当前页面视图树执行全新 mount 初始化。
+- `ui/app/layout.tsx`：
+  - 在 `ScrollArea` 内引入 `PageContainer` 包裹 `{children}`，使全局所有路由具备即时局部重挂载能力。
+- `ui/components/Navbar.tsx`：
+  - 移除无用的裸 `refreshForPath` 请求。
+  - 改造 `handleRefresh` 为直接调用 `useDispatch` 派发 `triggerPageRefresh`、`requestMemoriesRefresh`、`requestAppsRefresh` 与 `resetProfileState`。
+  - 刷新时同步重新拉取 Navbar 自身的待办计数（`fetchActionableCount`），并提供 350ms 平滑旋转动效与已刷新反馈。
+
+### 验证
+- 编译与打包：`pnpm run build` 顺利通过，Next.js standalone 资源自动同步。
+- 服务验证：`systemctl --user restart mcore-ui.service`，HTTP :18318 返回 200 OK，界面正常加载。
+- 联动测试：SPA 级刷新不仅无需整页白屏重载，且能彻底击穿各面板缓存并触发重新挂载拉取后端最新数据。
+
+### 回滚
+`git revert HEAD`
+
 
 
 

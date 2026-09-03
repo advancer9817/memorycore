@@ -39,6 +39,10 @@ const profileSlice = createSlice({
       state.status = 'idle';
       state.error = null;
       state.userId = process.env.NEXT_PUBLIC_USER_ID || 'user';
+      state.lastFetchedAt = null;
+      state.totalMemories = 0;
+      state.totalApps = 0;
+      state.apps = [];
     },
     setTotalMemories: (state, action: PayloadAction<number>) => {
       state.totalMemories = action.payload;
