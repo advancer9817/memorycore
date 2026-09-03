@@ -301,6 +301,31 @@ class TestIngestSubject:
         assert captured["project_path"] == ""
         assert captured["scope"] == "global"
 
+    def test_ingest_in_non_project_dir_auto_recovers_subject_from_title(self):
+        captured = {}
+
+        def add_memory_fn(**kwargs):
+            captured.update(kwargs)
+            return {"id": kwargs.get("memory_id")}
+
+        # 模拟在 /home/advancer/公共的 产生的记忆：
+        # project_path 为外部路径，LLM 漏了 subject，但标题明确以 mcore 开头
+        fact = ExtractedFact(
+            text="mcore 记忆主体上下文治理完成落地实施",
+            title="mcore 记忆主体上下文治理完成落地实施",
+            importance=0.8,
+            memory_type="project_memory",
+            subject="",  # LLM 漏填
+        )
+        self._run(fact, "/home/advancer/公共的", add_memory_fn, expect_resolve=False)
+
+        # 断言兜底引擎生效：自动补齐 project 标签、升级 scope 并反查补齐路径
+        assert captured["metadata"].get("subject") == "mcore"
+        assert "project:mcore" in captured["tags"]
+        assert captured["scope"] == "project"
+        assert captured["project_path"] == "/home/advancer/project/memorycore"
+
+
 
 # ---------------------------------------------------------------------------
 # entities: project entity fallback
