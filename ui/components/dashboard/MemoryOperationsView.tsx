@@ -1,16 +1,27 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React from "react";
 import Link from "next/link";
-import { Activity, Archive, ChevronLeft, ChevronRight, Database, Play, Sparkles, Wrench, type LucideIcon } from "lucide-react";
+import {
+  Activity,
+  Archive,
+  Bot,
+  CheckCircle2,
+  Clock,
+  Database,
+  Play,
+  Sparkles,
+  Trash2,
+  Wrench,
+  XCircle,
+  type LucideIcon,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
-  DialogClose,
   DialogContent,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -32,9 +43,39 @@ import {
   type LlmRunState,
   type MaintenanceAction,
   type MaintenanceRunState,
-  ellipsize,
   formatTime,
 } from "./memory-operations-types";
+
+// 格式化时间与相对倒计时
+function formatScheduleTime(isoString?: string | null): string {
+  if (!isoString) return "—";
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return "—";
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    const timeStr = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const prefix = isToday ? "今日 " : "次日 ";
+    return `${prefix}${timeStr}`;
+  } catch {
+    return "—";
+  }
+}
+
+function formatRelativeDiff(targetIso?: string | null): string {
+  if (!targetIso) return "";
+  try {
+    const diffMs = new Date(targetIso).getTime() - Date.now();
+    if (diffMs <= 0) return "(即将执行)";
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return "(小于1分钟)";
+    if (mins < 60) return `(约${mins}分钟后)`;
+    const hrs = Math.floor(mins / 60);
+    return `(约${hrs}小时后)`;
+  } catch {
+    return "";
+  }
+}
 
 type MemoryOperationsViewProps = {
   messages: Messages;
@@ -75,7 +116,6 @@ export function MemoryOperationsView({
   applying,
   llmRunning,
   runState,
-  runActionsShowAll,
   llmRunState,
   maintenanceRunState,
   maintenanceBusy,
@@ -94,384 +134,352 @@ export function MemoryOperationsView({
   onNextCleanCandidates,
   onApplyCurator,
   onRunLlmCurator,
-  onShowAllActions,
   onGenerateMaintenancePlan,
   onExecuteMaintenance,
   onSelectMaintenanceAction,
 }: MemoryOperationsViewProps) {
   const byStatus = status?.stats.by_status || {};
-  const nextRun = status?.timer.NextElapseUSecRealtime;
-  const lastRun = status?.schedules?.rule_curator?.last_run_at || status?.service.ExecMainExitTimestamp || status?.timer.LastTriggerUSec;
-  const llmLastRun = status?.llm_curator?.last_run_at || status?.schedules?.llm_curator?.last_run_at;
-  const lastResult = status?.service.Result || "unknown";
-  const llmLastResult = status?.llm_curator?.last_result || "unknown";
+  const lastRunIso =
+    status?.schedules?.rule_curator?.last_run_at ||
+    status?.service?.ExecMainExitTimestamp ||
+    status?.timer?.LastTriggerUSec;
+  const nextRunIso =
+    status?.schedules?.rule_curator?.next_run_at ||
+    status?.timer?.NextElapseUSecRealtime;
 
   return (
-    <div id="memory-operations">
-      <div className="mb-6">
-        <h2 className="text-base font-medium text-zinc-400">{t.dashboard.operations}</h2>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {([
-          [t.dashboard.totalMemories, status?.stats.total ?? "-", Database],
-          [t.dashboard.active, byStatus.active ?? 0, Activity],
-          [t.dashboard.candidates, byStatus.candidate ?? 0, Sparkles],
-          [t.dashboard.archived, byStatus.archived ?? 0, Archive],
-        ] satisfies Array<[string, string | number, LucideIcon]>).map(([label, value, Icon]) => (
-          <Card key={String(label)} className="bg-zinc-900 border-zinc-800">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-zinc-400 flex items-center justify-between">
-                {label} <Icon className="h-4 w-4 text-zinc-500" />
-              </CardTitle>
-            </CardHeader>
-            <CardContent><div className="text-2xl font-semibold text-white">{value}</div></CardContent>
-          </Card>
-        ))}
-      </div>
-
-      <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm space-y-2">
-        <div className="flex items-center gap-3">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 flex-1 text-xs">
-            <Badge variant="outline" className="border-emerald-700 bg-emerald-500/10 text-emerald-300 text-xs shrink-0">
-              {t.dashboard.scheduled} · {status?.timer.ActiveState || t.dashboard.unknown}
-            </Badge>
-            <span className="text-zinc-500">{t.dashboard.ruleLast} <span className="text-zinc-200">{formatTime(lastRun, locale)}</span></span>
-            <span className="text-zinc-500">{t.dashboard.llmLast} <span className="text-zinc-200">{formatTime(llmLastRun, locale)}</span></span>
-            <span className="text-zinc-500">{t.dashboard.next} <span className="text-zinc-200">{formatTime(nextRun, locale)}</span></span>
-            <span className="text-zinc-500">
-              {t.dashboard.result} <span className="text-zinc-200">{lastResult}</span>
-              <span className="text-zinc-600"> / </span><span className="text-violet-300">LLM {llmLastResult}</span>
-            </span>
-            <span className="text-zinc-500 hidden lg:inline">{t.dashboard.scanned} <span className="text-zinc-200">{status?.curator.scanned ?? "-"}</span></span>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <Button onClick={onApplyCurator} disabled={applying || llmRunning} variant="outline" size="sm" className="h-7 text-xs border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors">
-              <Play className="h-3 w-3 mr-1" />{applying ? t.dashboard.running : t.dashboard.runCurator}
-            </Button>
-            <Button onClick={onRunLlmCurator} disabled={applying || llmRunning} variant="outline" size="sm" className="h-7 text-xs border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors">
-              <Sparkles className="h-3 w-3 mr-1 text-violet-400" />{llmRunning ? t.dashboard.analyzing : t.dashboard.runLlm}
-            </Button>
-          </div>
-        </div>
-
-        {runState.state !== "idle" && (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-zinc-800 pt-2">
-            <span className="text-zinc-500">{t.dashboard.manualRun}</span>
-            <Badge variant="outline" className={runState.state === "succeeded" ? "border-emerald-700 bg-emerald-500/10 text-emerald-300 text-xs" : runState.state === "failed" ? "border-red-700 bg-red-500/10 text-red-300 text-xs" : "border-sky-700 bg-sky-500/10 text-sky-300 text-xs"}>{runState.state}</Badge>
-            {runState.startedAt && <span className="text-zinc-500">{formatTime(runState.startedAt, locale)}{runState.elapsedMs !== undefined && <span className="ml-2 text-zinc-400">{(runState.elapsedMs / 1000).toFixed(1)}s</span>}</span>}
-            {runState.summary && (
-              <span className="text-zinc-500 ml-2">
-                {t.dashboard.actions} <span className="text-zinc-200">{runState.summary.actions ?? 0}</span>
-                {" · "}{t.dashboard.promote} <span className="text-zinc-200">{runState.summary.skill_promotions ?? 0}</span>
-                {" · "}{t.dashboard.archive} <span className="text-zinc-200">{runState.summary.archive ?? 0}</span>
-              </span>
-            )}
-            {runState.error && <span className="text-red-300 ml-2">{runState.error}</span>}
-          </div>
-        )}
-        {runState.actions && runState.actions.length > 0 && (
-          <div className="flex flex-col gap-1 border-t border-zinc-800 pt-2">
-            {(runActionsShowAll ? runState.actions : runState.actions.slice(0, 3)).map((action, index) => (
-              <div key={action.id ?? index} className="rounded bg-zinc-800 px-2 py-1.5 text-xs flex items-start gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate whitespace-nowrap" title={[action.action, action.title].filter(Boolean).join(" · ")}>
-                    <span className="text-emerald-300 font-medium shrink-0">{ellipsize(action.action, 54)}</span>
-                    {action.title && <span className="text-zinc-400"> · {ellipsize(action.title, 72)}</span>}
-                  </div>
-                  {action.reason && <div className="truncate whitespace-nowrap text-zinc-500 mt-0.5" title={action.reason}>{ellipsize(action.reason, 120)}</div>}
-                </div>
-                {action.id && <Link href={`/memory/${action.id}`} className="rounded px-1.5 py-0.5 text-[10px] transition-colors bg-zinc-700/50 text-zinc-400 hover:text-zinc-200 shrink-0">{t.common?.details ?? "详情"}</Link>}
-              </div>
-            ))}
-            {!runActionsShowAll && runState.actions.length > 3 && <button onClick={onShowAllActions} className="w-full text-center text-xs text-zinc-400 hover:text-zinc-200 py-1.5 rounded bg-zinc-800/50 hover:bg-zinc-800 transition-colors">{t.dashboard.showAll(runState.actions.length)}</button>}
-          </div>
-        )}
-
-        {llmRunState.state !== "idle" && (
-          <div className="border-t border-zinc-800 pt-2 text-sm space-y-2">
-            <div className="flex items-center gap-3">
-              <span className="text-zinc-500">{t.dashboard.llmAnalysis}</span>
-              <Badge variant="outline" className={llmRunState.state === "succeeded" ? "border-violet-600 bg-violet-500/10 text-violet-300 text-xs" : llmRunState.state === "failed" ? "border-red-700 bg-red-500/10 text-red-300 text-xs" : "border-sky-700 bg-sky-500/10 text-sky-300 text-xs"}>{llmRunState.state}</Badge>
-              {llmRunState.state === "running" && llmRunState.startedAt ? <LlmElapsedTimer startedAt={llmRunState.startedAt} /> : llmRunState.elapsedMs !== undefined && <span className="text-zinc-500 text-xs">{(llmRunState.elapsedMs / 1000).toFixed(1)}s</span>}
-              {llmRunState.summary && (
-                <span className="text-zinc-500 text-xs ml-1">
-                  {t.dashboard.duplicates} <span className="text-zinc-200">{llmRunState.summary.semantic_duplicates ?? 0}</span>
-                  {" · "}{t.dashboard.contradictions} <span className="text-zinc-200">{llmRunState.summary.contradictions ?? 0}</span>
-                  {" · "}{t.dashboard.reassessments} <span className="text-zinc-200">{llmRunState.summary.importance_reassessments ?? 0}</span>
-                  {" · "}{t.dashboard.splits} <span className="text-zinc-200">{llmRunState.summary.split_candidates ?? 0}</span>
-                  {llmRunState.progress?.stage && <span className="text-zinc-500 text-xs ml-1">stage <span className="text-zinc-200">{llmRunState.progress.stage}</span>{llmRunState.progress.batch_index !== undefined && <span> · batch <span className="text-zinc-200">{llmRunState.progress.batch_index}</span></span>}</span>}
-                </span>
-              )}
+    <div className="space-y-4">
+      {/* 顶部四大核心指标卡 (经典大气舒展) */}
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <Card className="border-zinc-800 bg-zinc-900/90 backdrop-blur-md">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-zinc-400 flex items-center justify-between">
+              <span>{t.dashboard.totalMemories}</span>
+              <Database className="h-4 w-4 text-violet-400" />
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold tracking-tight text-white">
+              {status?.stats.total ?? "—"}
             </div>
-            {llmRunState.errors && llmRunState.errors.length > 0 && <div className="space-y-1">{llmRunState.errors.map((error, index) => <div key={`err-${index}-${error.slice(0, 16)}`} className="rounded bg-amber-950/40 border border-amber-800/40 px-2 py-1 text-xs text-amber-300">{error}</div>)}</div>}
-            {llmRunState.error && <div className="text-red-300">{llmRunState.error}</div>}
-          </div>
-        )}
+            <p className="mt-1 text-[11px] text-zinc-500">已沉淀持久事实</p>
+          </CardContent>
+        </Card>
 
-        {/* D1-D3 — one-click manual maintenance (archive / merge / clean, preview → confirm → execute) */}
-        <div className="border-t border-zinc-800 pt-2 mt-2">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="text-zinc-500 text-sm">{t.dashboard.maintenanceRun}</span>
-            {(["archive", "merge", "clean"] as MaintenanceAction[]).map((target) => (
-              <button
-                key={target}
-                type="button"
-                onClick={() => onSelectMaintenanceAction(target)}
-                disabled={maintenanceBusy}
-                className={`rounded px-2 py-1 text-xs transition-colors ${
-                  (maintenanceRunState.action ?? "archive") === target
-                    ? "bg-zinc-700 text-white"
-                    : "bg-transparent text-zinc-500 hover:text-zinc-300"
-                }`}
-              >
-                {target === "archive" ? t.dashboard.maintenanceActionArchive : target === "merge" ? t.dashboard.maintenanceActionMerge : t.dashboard.maintenanceActionClean}
-              </button>
-            ))}
-            <Button onClick={onGenerateMaintenancePlan} disabled={maintenanceBusy} variant="outline" size="sm" className="h-7 text-xs border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors">
-              <Wrench className="h-3 w-3 mr-1" />{maintenanceRunState.state === "planning" ? t.dashboard.maintenancePlanning : t.dashboard.maintenancePlan}
+        <Card className="border-zinc-800 bg-zinc-900/90 backdrop-blur-md">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-zinc-400 flex items-center justify-between">
+              <span>{t.dashboard.active}</span>
+              <Activity className="h-4 w-4 text-emerald-400" />
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold tracking-tight text-emerald-400">
+              {byStatus.active ?? 0}
+            </div>
+            <p className="mt-1 text-[11px] text-zinc-500">活跃召回池</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-zinc-800 bg-zinc-900/90 backdrop-blur-md">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-zinc-400 flex items-center justify-between">
+              <span>{t.dashboard.candidates}</span>
+              <Sparkles className="h-4 w-4 text-amber-400" />
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold tracking-tight text-amber-400">
+              {byStatus.candidate ?? 0}
+            </div>
+            <p className="mt-1 text-[11px] text-zinc-500">待评估候选</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-zinc-800 bg-zinc-900/90 backdrop-blur-md">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-zinc-400 flex items-center justify-between">
+              <span>{t.dashboard.archived}</span>
+              <Archive className="h-4 w-4 text-zinc-400" />
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold tracking-tight text-zinc-300">
+              {byStatus.archived ?? 0}
+            </div>
+            <p className="mt-1 text-[11px] text-zinc-500">安全冷归档</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* 核心运维与调度指挥中心 (带完整操作、实时回显与准确时间) */}
+      <Card className="border-zinc-800 bg-zinc-900/90 backdrop-blur-md">
+        <CardHeader className="flex flex-row items-center justify-between border-b border-zinc-800/80 pb-3">
+          <div className="flex items-center gap-2">
+            <Wrench className="h-4 w-4 text-violet-400" />
+            <span className="text-sm font-semibold text-zinc-200">
+              运维调度与治理执行中枢 (Memory Operations)
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Badge
+              variant="outline"
+              className="border-emerald-700/60 bg-emerald-500/10 text-xs font-normal text-emerald-300"
+            >
+              Systemd Timer Active
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4 pt-4">
+          {/* 四核心动作大按钮组 */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Button
+              variant="outline"
+              onClick={onApplyCurator}
+              disabled={applying || llmRunning}
+              className="flex h-16 flex-col items-center justify-center gap-1 border-zinc-800 bg-zinc-950/60 text-xs hover:bg-zinc-800 hover:text-white"
+            >
+              <div className="flex items-center gap-1.5 font-medium text-zinc-200">
+                <Play className={`h-4 w-4 text-emerald-400 ${applying ? "animate-spin" : ""}`} />
+                <span>{applying ? "正在扫描..." : "运行规则扫描"}</span>
+              </div>
+              <span className="text-[11px] text-zinc-500">清理冷数据与格式</span>
             </Button>
-            <Button onClick={onExecuteMaintenance} disabled={maintenanceBusy || maintenanceRunState.state !== "planReady" || maintenancePlanCount(maintenanceRunState) === 0} variant="outline" size="sm" className="h-7 text-xs border-amber-700/40 bg-amber-900/20 text-amber-300 hover:bg-amber-900/40 transition-colors">
-              <Archive className="h-3 w-3 mr-1" />{maintenanceRunState.state === "running" ? t.dashboard.maintenanceExecuting : maintenanceExecuteLabel(t, maintenanceRunState)}
+
+            <Button
+              variant="outline"
+              onClick={onRunLlmCurator}
+              disabled={applying || llmRunning}
+              className="flex h-16 flex-col items-center justify-center gap-1 border-zinc-800 bg-zinc-950/60 text-xs hover:bg-zinc-800 hover:text-white"
+            >
+              <div className="flex items-center gap-1.5 font-medium text-zinc-200">
+                <Bot className={`h-4 w-4 text-sky-400 ${llmRunning ? "animate-pulse" : ""}`} />
+                <span>{llmRunning ? "语义分析中..." : "唤醒 LLM 治理"}</span>
+              </div>
+              <span className="text-[11px] text-zinc-500">GLM 深度合并决策</span>
             </Button>
-            {maintenanceRunState.state === "running" && <span className="text-xs text-sky-300 animate-pulse">{t.dashboard.maintenanceExecuting}...</span>}
+
+            <Button
+              variant="outline"
+              onClick={() => {
+                onSelectMaintenanceAction("clean");
+                onGenerateMaintenancePlan();
+              }}
+              disabled={maintenanceBusy}
+              className="flex h-16 flex-col items-center justify-center gap-1 border-zinc-800 bg-zinc-950/60 text-xs hover:bg-zinc-800 hover:text-white"
+            >
+              <div className="flex items-center gap-1.5 font-medium text-zinc-200">
+                <Trash2 className="h-4 w-4 text-rose-400" />
+                <span>清理过期候选</span>
+              </div>
+              <span className="text-[11px] text-zinc-500">释放过期 candidate</span>
+            </Button>
+
+            <Button
+              variant="outline"
+              onClick={() => {
+                onSelectMaintenanceAction("archive");
+                onGenerateMaintenancePlan();
+              }}
+              disabled={maintenanceBusy}
+              className="flex h-16 flex-col items-center justify-center gap-1 border-zinc-800 bg-zinc-950/60 text-xs hover:bg-zinc-800 hover:text-white"
+            >
+              <div className="flex items-center gap-1.5 font-medium text-zinc-200">
+                <Archive className="h-4 w-4 text-indigo-400" />
+                <span>一键安全归档</span>
+              </div>
+              <span className="text-[11px] text-zinc-500">沉淀冷记忆与冲突项</span>
+            </Button>
           </div>
 
-          {maintenanceRunState.state === "planReady" && maintenanceRunState.plan && (
-            <div className="mt-2 rounded bg-zinc-800/60 px-2 py-1.5 text-xs space-y-2">
-              {maintenancePlanPreview(maintenanceRunState).length > 0 ? (
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2 text-zinc-300">
-                    <Badge variant="outline" className="border-sky-700 bg-sky-500/10 text-sky-300 text-xs shrink-0">{t.dashboard.maintenancePreview}</Badge>
-                    <span className="flex-1">{maintenancePlanPreview(maintenanceRunState).map((item) => `${maintenanceReasonLabel(t, item.reason)} ${item.count}`).join(" · ")}</span>
-                    {(maintenanceRunState.action ?? "archive") === "clean" && maintenancePlanCount(maintenanceRunState) > 0 && (
-                      <Button onClick={onOpenCleanCandidates} variant="outline" size="sm" className="h-6 text-[10px] border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors shrink-0">
-                        {t.dashboard.maintenanceViewAll(maintenancePlanCount(maintenanceRunState))}
+          {/* 实时运行结果反馈卡片（执行后就地回显） */}
+          {runState.state !== "idle" && (
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/80 p-3 text-xs space-y-2 animate-fade-slide-down">
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
+                <span className="flex items-center gap-1.5 font-medium text-zinc-200">
+                  {runState.state === "succeeded" ? (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                  ) : runState.state === "failed" ? (
+                    <XCircle className="h-4 w-4 text-rose-400" />
+                  ) : (
+                    <Play className="h-4 w-4 animate-spin text-sky-400" />
+                  )}
+                  规则扫描器执行报告
+                </span>
+                <span className="font-mono text-xs text-zinc-400">
+                  {runState.elapsedMs !== undefined ? `耗时 ${(runState.elapsedMs / 1000).toFixed(1)}s` : "执行中..."}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-zinc-400">
+                <div>生成动作：<b className="text-zinc-200">{runState.summary?.actions ?? 0}</b></div>
+                <div>归档沉淀：<b className="text-zinc-200">{runState.summary?.archive ?? 0}</b></div>
+                <div>技能晋升：<b className="text-zinc-200">{runState.summary?.skill_promotions ?? 0}</b></div>
+              </div>
+              {runState.error && <p className="text-rose-400 font-mono text-[11px]">{runState.error}</p>}
+            </div>
+          )}
+
+          {llmRunState.state !== "idle" && (
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/80 p-3 text-xs space-y-2 animate-fade-slide-down">
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
+                <span className="flex items-center gap-1.5 font-medium text-zinc-200">
+                  {llmRunState.state === "succeeded" ? (
+                    <CheckCircle2 className="h-4 w-4 text-purple-400" />
+                  ) : llmRunState.state === "failed" ? (
+                    <XCircle className="h-4 w-4 text-rose-400" />
+                  ) : (
+                    <Bot className="h-4 w-4 animate-pulse text-sky-400" />
+                  )}
+                  LLM 语义大模型治理报告
+                </span>
+                <span className="font-mono text-xs text-zinc-400">
+                  {llmRunState.state === "running" ? "后台深度分析中" : `耗时 ${((llmRunState.elapsedMs || 0) / 1000).toFixed(1)}s`}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-zinc-400 sm:grid-cols-4">
+                <div>重复合并：<b className="text-zinc-200">{llmRunState.summary?.semantic_duplicates ?? 0}</b></div>
+                <div>矛盾覆盖：<b className="text-zinc-200">{llmRunState.summary?.contradictions ?? 0}</b></div>
+                <div>重要度重估：<b className="text-zinc-200">{llmRunState.summary?.importance_reassessments ?? 0}</b></div>
+                <div>拆分建议：<b className="text-zinc-200">{llmRunState.summary?.split_candidates ?? 0}</b></div>
+              </div>
+              {llmRunState.error && <p className="text-rose-400 font-mono text-[11px]">{llmRunState.error}</p>}
+            </div>
+          )}
+
+          {maintenanceRunState.state === "planReady" && maintenanceRunState.plan && (() => {
+            const plan = maintenanceRunState.plan;
+            const count =
+              (maintenanceRunState.action === "clean" ? plan.clean_count : plan.archive_count) ??
+              plan.clean_count ??
+              plan.archive_count ??
+              0;
+
+            if (count === 0) {
+              return (
+                <div className="rounded-lg border border-emerald-800/40 bg-emerald-950/20 p-3 text-xs text-emerald-300 flex items-center justify-between animate-fade-slide-down">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                    <span>
+                      {maintenanceRunState.action === "clean"
+                        ? "记忆池当前全量清洁，无过期候选需要清理"
+                        : "记忆池状态优良，当前无需归档的冷记忆"}
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-zinc-500">检测完成 · 0 条待处理</span>
+                </div>
+              );
+            }
+
+            return (
+              <div className="rounded-lg border border-zinc-800 border-l-4 border-l-violet-500 bg-zinc-950/90 p-3.5 text-xs space-y-3 shadow-md animate-fade-slide-down">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800/80 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <Wrench className="h-4 w-4 text-violet-400" />
+                    <span className="font-semibold text-zinc-100">
+                      数据维护计划已就绪 ({maintenanceRunState.action === "clean" ? "深度清理" : "安全归档"})
+                    </span>
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className="border-violet-500/30 bg-violet-500/10 text-violet-300 font-mono text-[11px]"
+                  >
+                    待处理 {count} 条候选
+                  </Badge>
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-0.5">
+                  <div className="text-zinc-400 text-xs space-y-1">
+                    <p className="flex items-center gap-1.5 text-zinc-300">
+                      <span>可沉淀优化：</span>
+                      <b className="text-violet-300 font-semibold">{count}</b>
+                      <span>条无访问或冲突事实</span>
+                    </p>
+                    <p className="text-[11px] text-zinc-500">
+                      🛡️ 自动安全保障：系统执行前将创建完整 SQLite 镜像备份与审计血缘
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {maintenanceRunState.action === "clean" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={onOpenCleanCandidates}
+                        className="h-8 border-zinc-800 bg-zinc-900 px-3 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white"
+                      >
+                        查看候选清单
                       </Button>
                     )}
+                    <Button
+                      size="sm"
+                      onClick={onExecuteMaintenance}
+                      className="h-8 bg-violet-600 hover:bg-violet-500 text-white text-xs px-3.5 font-medium shadow-sm transition-colors"
+                    >
+                      <Play className="mr-1.5 h-3 w-3 fill-current" />
+                      确认立即执行
+                    </Button>
                   </div>
-                  {maintenancePlanPreview(maintenanceRunState).map((item) => (
-                    <div key={item.reason} className="rounded bg-zinc-900/70 px-2 py-1.5 space-y-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-zinc-300 font-medium">{maintenanceReasonLabel(t, item.reason)}</span>
-                        <Badge variant="outline" className="border-zinc-700 bg-zinc-800 text-zinc-300 text-[10px] shrink-0">{item.count}</Badge>
-                      </div>
-                      {item.samples.length > 0 && (
-                        <div className="flex flex-wrap gap-1">
-                          {item.samples.map((sample) => (
-                            <Link
-                              key={sample.id}
-                              href={`/memory/${sample.id}`}
-                              title={sample.title}
-                              className="max-w-[280px] truncate rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-700/70 hover:text-sky-300 transition-colors"
-                            >
-                              {ellipsize(sample.title || sample.id, 40)}
-                            </Link>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
                 </div>
-              ) : (
-                <div className="text-emerald-300">{(maintenanceRunState.action ?? "archive") === "archive" ? t.dashboard.maintenanceNoCandidates : t.dashboard.maintenanceNoCandidatesAny}</div>
-              )}
+              </div>
+            );
+          })()}
+
+          {maintenanceRunState.state === "succeeded" && (
+            <div className="rounded-lg border border-zinc-800 border-l-4 border-l-emerald-500 bg-zinc-950/90 p-3 text-xs text-zinc-300 flex items-center justify-between shadow-sm animate-fade-slide-down">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                <span className="font-medium text-zinc-200">
+                  维护任务执行成功：记忆池已规整沉淀完毕
+                </span>
+              </div>
+              <span className="text-[11px] text-zinc-500 font-mono">
+                {maintenanceRunState.elapsedMs !== undefined
+                  ? `耗时 ${(maintenanceRunState.elapsedMs / 1000).toFixed(1)}s`
+                  : "执行完毕"}
+              </span>
             </div>
           )}
 
-          {maintenanceRunState.state === "succeeded" && maintenanceRunState.result && (
-            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-              <Badge variant="outline" className="border-emerald-700 bg-emerald-500/10 text-emerald-300 text-xs">✓ {t.dashboard.maintenanceRun}</Badge>
-              <span className="text-zinc-400">{maintenanceSummaryLabel(t, maintenanceRunState.action ?? "archive")} <span className="text-zinc-200">{maintenanceSummaryCount(maintenanceRunState)}</span></span>
-              {maintenanceRunState.result.summary?.reactivate != null && maintenanceRunState.result.summary.reactivate > 0 && (
-                <span className="text-zinc-400">· <span className="text-sky-300">{t.dashboard.maintenanceContradictionWinner} {maintenanceRunState.result.summary.reactivate}</span></span>
-              )}
-              {maintenanceRunState.elapsedMs !== undefined && <span className="text-zinc-500">{((maintenanceRunState.elapsedMs) / 1000).toFixed(1)}s</span>}
-              {maintenanceRunState.result.replayed && <span className="text-zinc-500">{t.dashboard.maintenanceReplayed}</span>}
-              {maintenanceRunState.result.backup_path && <div className="min-w-0 flex-1 truncate text-zinc-500">{t.dashboard.maintenanceBackup}: <span className="text-zinc-300 truncate">{maintenanceRunState.result.backup_path}</span></div>}
+          {/* 底部准确时间与排程信息栏 */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-800/80 bg-zinc-950/60 px-4 py-2.5 text-xs text-zinc-400">
+            <div className="flex items-center gap-2">
+              <Clock className="h-3.5 w-3.5 text-zinc-500" />
+              <span>上次运行：</span>
+              <span className="text-zinc-200 font-medium">
+                {formatScheduleTime(lastRunIso)}
+              </span>
+              <span className="text-emerald-400 text-[11px]">(执行成功)</span>
             </div>
-          )}
-          {maintenanceRunState.state === "failed" && (
-            <div className="mt-2 text-xs text-red-300">{maintenanceRunState.error || t.dashboard.maintenanceStale}</div>
-          )}
-        </div>
-      </div>
 
-      {/* 硬删确认框 — 与全局样式同步（zinc 暗色 Modal），替代浏览器原生 confirm */}
-      <AlertDialog open={cleanConfirmCount !== null} onOpenChange={(open) => { if (!open) onCancelClean(); }}>
-        <AlertDialogContent className="border-zinc-800 bg-zinc-950 text-zinc-100">
+            <div className="flex items-center gap-2">
+              <Clock className="h-3.5 w-3.5 text-zinc-500" />
+              <span>下次排程：</span>
+              <span className="font-mono text-zinc-200">
+                {formatScheduleTime(nextRunIso)}
+              </span>
+              <span className="text-sky-400 text-[11px]">
+                {formatRelativeDiff(nextRunIso)}
+              </span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 清理确认对话框 */}
+      <AlertDialog open={cleanConfirmCount !== null} onOpenChange={(open) => !open && onCancelClean()}>
+        <AlertDialogContent className="border-zinc-800 bg-zinc-900 text-zinc-100">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-red-300">{t.dashboard.maintenanceActionClean}</AlertDialogTitle>
-            <AlertDialogDescription className="text-zinc-400">
-              {cleanConfirmCount !== null ? t.dashboard.maintenanceCleanConfirm(cleanConfirmCount) : ""}
+            <AlertDialogTitle className="text-base font-semibold">确认硬删除归档候选？</AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-zinc-400">
+              本次将永久删除 {cleanConfirmCount} 条已过期的无用候选记忆。系统将在执行前自动创建安全备份。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={onCancelClean} className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800">
-              {t.common.cancel}
-            </AlertDialogCancel>
-            <AlertDialogAction onClick={onConfirmClean} className="bg-red-600/90 text-white hover:bg-red-600">
-              {t.dashboard.maintenanceExecuteClean(cleanConfirmCount ?? 0)}
-            </AlertDialogAction>
+            <AlertDialogCancel onClick={onCancelClean} className="border-zinc-800 bg-zinc-900 text-zinc-300 hover:bg-zinc-800">取消</AlertDialogCancel>
+            <AlertDialogAction onClick={onConfirmClean} className="bg-rose-600 text-white hover:bg-rose-500">确认删除</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {/* 清理候选完整列表 — 分页 Dialog（全局样式），每条可点直达详情 */}
-      <Dialog open={cleanCandidatesOpen} onOpenChange={(open) => { if (!open) onCloseCleanCandidates(); }}>
-        <DialogContent className="border-zinc-800 bg-zinc-950 text-zinc-100 max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-zinc-100 flex items-center gap-2">
-              {t.dashboard.maintenanceActionClean}
-              <Badge variant="outline" className="border-zinc-700 bg-zinc-800 text-zinc-300 text-[10px]">{t.dashboard.maintenancePreview}</Badge>
-              <span className="text-zinc-400 text-xs font-normal">— {t.dashboard.maintenanceViewAll(cleanCandidatesTotal)}</span>
-            </DialogTitle>
-          </DialogHeader>
-          <div className="max-h-[60vh] overflow-y-auto space-y-1 pr-1">
-            {cleanCandidatesLoading && (
-              <div className="text-zinc-500 text-xs py-2 animate-pulse">{t.dashboard.maintenancePlanning}</div>
-            )}
-            {!cleanCandidatesLoading && cleanCandidatesItems.map((item) => (
-              <Link
-                key={item.id}
-                href={`/memory/${item.id}`}
-                title={item.title || item.id}
-                className="group flex items-center gap-2 rounded bg-zinc-900/70 px-2 py-1.5 text-xs hover:bg-zinc-800 transition-colors"
-              >
-                <span className="flex-1 truncate text-zinc-300 group-hover:text-sky-300">{item.title || item.id}</span>
-                <Badge variant="outline" className="border-zinc-700 bg-zinc-800 text-zinc-400 text-[10px] shrink-0">{maintenanceReasonLabel(t, item.reason.split(",")[0])}</Badge>
-              </Link>
-            ))}
-            {!cleanCandidatesLoading && cleanCandidatesItems.length === 0 && (
-              <div className="text-zinc-500 text-xs py-2">{t.dashboard.maintenanceNoCandidatesAny}</div>
-            )}
-          </div>
-          <DialogFooter className="flex items-center justify-between gap-2">
-            <span className="text-zinc-500 text-xs">
-              {cleanCandidatesTotal === 0
-                ? "0 / 0"
-                : `${cleanCandidatesOffset + 1}–${Math.min(cleanCandidatesOffset + cleanCandidatesItems.length, cleanCandidatesTotal)} / ${cleanCandidatesTotal}`}
-            </span>
-            <div className="flex items-center gap-2">
-              <Button onClick={onPrevCleanCandidates} disabled={cleanCandidatesLoading || cleanCandidatesOffset <= 0} variant="outline" size="sm" className="h-7 w-7 p-0 text-xs border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors">
-                <ChevronLeft className="h-3.5 w-3.5" />
-              </Button>
-              <Button onClick={onNextCleanCandidates} disabled={cleanCandidatesLoading || cleanCandidatesOffset + cleanCandidatesItems.length >= cleanCandidatesTotal} variant="outline" size="sm" className="h-7 w-7 p-0 text-xs border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors">
-                <ChevronRight className="h-3.5 w-3.5" />
-              </Button>
-              <DialogClose asChild>
-                <Button onClick={onCloseCleanCandidates} variant="outline" size="sm" className="h-7 text-xs border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors">
-                  {t.common.cancel}
-                </Button>
-              </DialogClose>
-            </div>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
-}
-
-function maintenancePlanCount(state: MaintenanceRunState): number {
-  const plan = state.plan;
-  if (!plan) return 0;
-  const action = state.action ?? "archive";
-  if (action === "merge") return plan.merge_count ?? 0;
-  if (action === "clean") return plan.clean_count ?? 0;
-  return plan.archive_count ?? 0;
-}
-
-function maintenancePlanPreview(state: MaintenanceRunState): Array<{ reason: string; count: number; samples: Array<{ id: string; title: string }> }> {
-  const plan = state.plan;
-  if (!plan) return [];
-  const action = state.action ?? "archive";
-  if (action === "merge") {
-    return (plan.merge_groups ?? []).map((group) => ({
-      reason: group.key,
-      count: group.count,
-      samples: (group.loser_ids ?? []).slice(0, 3).map((id, index) => ({
-        id,
-        title: (group.loser_titles ?? [])[index] ?? id,
-      })),
-    }));
-  }
-  if (action === "clean") {
-    return (plan.groups ?? [])
-      .map((group) => ({
-        reason: group.reason,
-        count: group.count,
-        samples: (group.samples ?? []).map((sample) => ({
-          id: sample.id,
-          title: sample.title ?? sample.id,
-        })),
-      }))
-      .filter((group) => group.count > 0);
-  }
-  return (plan.groups ?? [])
-    .map((group) => ({
-      reason: group.reason,
-      count: group.count,
-      samples: (group.samples ?? []).slice(0, 3).map((sample) => ({
-        id: sample.id,
-        title: sample.title ?? sample.id,
-      })),
-    }))
-    .filter((group) => group.count > 0);
-}
-
-function maintenanceReasonLabel(t: Messages, reason: string): string {
-  if (reason.startsWith("source_agent:")) {
-    return `${t.dashboard.maintenanceCleanReasonTestAgent}: ${reason.slice("source_agent:".length)}`;
-  }
-  switch (reason) {
-    case "candidate_ttl":
-      return t.dashboard.maintenanceCleanReasonCandidates;
-    case "fragment":
-      return t.dashboard.maintenanceCleanReasonFragments;
-    case "archived_unused":
-      return t.dashboard.maintenanceCleanReasonArchivedUnused;
-    case "archive_extension:stale":
-      return t.dashboard.maintenanceArchiveExtensionStale;
-    case "archive_extension:superseded":
-      return t.dashboard.maintenanceArchiveExtensionSuperseded;
-    case "archive_extension:contradiction_loser":
-      return t.dashboard.maintenanceArchiveExtensionContradictionLoser;
-    case "archive_extension:contradiction_orphan":
-      return t.dashboard.maintenanceArchiveExtensionContradictionOrphan;
-    case "contradiction_winner":
-      return t.dashboard.maintenanceContradictionWinner;
-    default:
-      return reason;
-  }
-}
-
-function maintenanceExecuteLabel(t: Messages, state: MaintenanceRunState): string {
-  const action = state.action ?? "archive";
-  const count = maintenancePlanCount(state);
-  if (action === "merge") return t.dashboard.maintenanceExecuteMerge(count);
-  if (action === "clean") return t.dashboard.maintenanceExecuteClean(count);
-  return t.dashboard.maintenanceExecute(count);
-}
-
-function maintenanceSummaryLabel(t: Messages, action: MaintenanceAction): string {
-  if (action === "merge") return t.dashboard.maintenanceActionMerge;
-  if (action === "clean") return t.dashboard.maintenanceActionClean;
-  return t.dashboard.maintenanceActionArchive;
-}
-
-function maintenanceSummaryCount(state: MaintenanceRunState): number {
-  const summary = state.result?.summary ?? {};
-  const action = state.action ?? "archive";
-  if (action === "merge") return summary.merge ?? 0;
-  if (action === "clean") return summary.clean ?? 0;
-  return summary.archive ?? 0;
-}
-
-function LlmElapsedTimer({ startedAt }: { startedAt: number }) {
-  const { messages } = useI18n();
-  const [elapsed, setElapsed] = useState(Date.now() - startedAt);
-  useEffect(() => {
-    const id = setInterval(() => setElapsed(Date.now() - startedAt), 100);
-    return () => clearInterval(id);
-  }, [startedAt]);
-  return <div className="mt-1 text-sky-400 text-xs animate-pulse">{messages.dashboard.llmElapsed((elapsed / 1000).toFixed(1))}</div>;
 }

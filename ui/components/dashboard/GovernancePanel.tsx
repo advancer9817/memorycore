@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, ShieldCheck, XCircle } from "lucide-react";
 import Link from "next/link";
+import { ArrowRight, CheckCircle2, ShieldAlert, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useI18n } from "@/hooks/useI18n";
@@ -23,7 +23,6 @@ type GovernanceMetrics = {
   review_queue_age_hours: number;
   rollback_rate: number;
   policy_version: string;
-  degraded_warning?: boolean;
 };
 
 export function GovernancePanel() {
@@ -34,14 +33,14 @@ export function GovernancePanel() {
   useEffect(() => {
     let active = true;
     Promise.all([
-      fetch(`${getApiBaseUrl()}/api/v1/governance/counts`).then((response) => response.json()),
-      fetch(`${getApiBaseUrl()}/api/v1/governance/metrics`).then((response) => response.json()),
+      fetch(`${getApiBaseUrl()}/api/v1/governance/counts`).then((r) => r.json()),
+      fetch(`${getApiBaseUrl()}/api/v1/governance/metrics`).then((r) => r.json()),
     ])
-      .then(([countsPayload, metricsPayload]) => {
+      .then(([cPayload, mPayload]) => {
         if (!active) return;
-        const data = (countsPayload as { data?: GovernanceCounts }).data ?? (countsPayload as GovernanceCounts);
-        setCounts(data ?? null);
-        setMetrics(metricsPayload as GovernanceMetrics);
+        const cData = (cPayload as { data?: GovernanceCounts }).data ?? (cPayload as GovernanceCounts);
+        setCounts(cData ?? null);
+        setMetrics(mPayload as GovernanceMetrics);
       })
       .catch(() => {
         if (active) {
@@ -55,58 +54,77 @@ export function GovernancePanel() {
   }, []);
 
   const actionable = counts?.total ?? 0;
-  const done = metrics?.applied_count ?? 0;
+  const applied = metrics?.applied_count ?? 0;
+  const rejected = metrics?.rejected_count ?? 0;
 
   return (
-    <Card className="border-zinc-800 bg-zinc-900">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center justify-between text-sm font-medium text-zinc-300">
-          <span className="flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-violet-400" /> {t.nav.governance}
-          </span>
+    <Card className="border-zinc-800 bg-zinc-900/90 shadow-sm backdrop-blur-md">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b border-zinc-800/80 pb-3">
+        <CardTitle className="flex items-center gap-2 text-sm font-semibold text-zinc-200">
+          <ShieldAlert className="h-4 w-4 text-violet-400" />
+          <span>记忆治理裁决中心 (Governance Cockpit)</span>
+        </CardTitle>
+        <div className="flex items-center gap-2">
           {actionable > 0 ? (
             <Badge variant="outline" className="border-amber-700/60 bg-amber-500/10 text-amber-300 text-xs">
-              {actionable} {t.governance.pending}
+              {actionable} 项待决策审阅
             </Badge>
           ) : (
-            <Badge variant="outline" className="border-emerald-700 bg-emerald-500/10 text-emerald-300 text-xs">
-              {t.governance.cockpit.allClear}
+            <Badge variant="outline" className="border-emerald-700/60 bg-emerald-500/10 text-emerald-300 text-xs">
+              全量合规通过
             </Badge>
           )}
-        </CardTitle>
+          <Link
+            href="/governance"
+            className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 transition-colors"
+          >
+            <span>完整治理台</span>
+            <ArrowRight className="h-3 w-3" />
+          </Link>
+        </div>
       </CardHeader>
-      <CardContent className="text-sm">
-        {actionable === 0 && done === 0 ? (
-          <div className="flex items-center gap-2 text-zinc-500 py-2">
-            <CheckCircle2 className="h-4 w-4 text-emerald-500" /> {t.governance.cockpit.allClearDetail}
+      <CardContent className="space-y-4 pt-4">
+        {actionable === 0 ? (
+          <div className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/60 p-4 text-xs">
+            <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" />
+            <div className="space-y-0.5">
+              <div className="font-semibold text-zinc-200">记忆流当前全量清洁</div>
+              <p className="text-zinc-400">
+                暂无冲突或冗余事实。LLM 治理与规则扫描器将持续监控新注入的事实，并在发现取代 (Supersedes) 或矛盾 (Contradicts) 时自动推送到待审流。
+              </p>
+            </div>
           </div>
         ) : (
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-            <Stat label={t.governance.applied} value={done} tone="text-emerald-300" />
-            <Stat label={t.governance.rejected} value={metrics?.rejected_count ?? 0} tone="text-red-300" />
-            <Stat label={t.governance.pending} value={actionable} tone="text-amber-300" />
-            <span className="text-xs text-zinc-500">{t.governance.policyVersionValue(String(metrics?.policy_version ?? "—"))}</span>
+          <div className="rounded-lg border border-amber-800/40 bg-amber-950/20 p-4 text-xs text-amber-200 space-y-1">
+            <div className="font-semibold">检测到 {actionable} 条需要人工确认的高价值治理提案</div>
+            <p className="text-zinc-400">
+              请前往治理页面对冲突或重复事实进行裁决，或通过上方运维中心执行自动化归档。
+            </p>
           </div>
         )}
-        <div className="mt-3 flex items-center justify-between border-t border-zinc-800 pt-2">
-          <span className="text-xs text-zinc-600">
-            <XCircle className="mr-1 inline h-3 w-3 text-zinc-600" />
-            {t.governance.rejectionRate}: {metrics && (metrics.rejected_count + (metrics.applied_count ?? 0)) > 0 ? `${Math.round((metrics.rejected_count / (metrics.rejected_count + (metrics.applied_count ?? 0))) * 100)}%` : "—"}
-          </span>
-          <Link href="/governance" className="text-xs text-violet-400 hover:text-violet-300">
-            {t.governance.openDetails} →
-          </Link>
+
+        {/* 核心治理指标矩阵 */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 text-center">
+            <div className="text-[11px] text-zinc-500">已批准执行</div>
+            <div className="mt-1 text-xl font-bold text-emerald-400">{applied}</div>
+          </div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 text-center">
+            <div className="text-[11px] text-zinc-500">已忽略驳回</div>
+            <div className="mt-1 text-xl font-bold text-rose-400">{rejected}</div>
+          </div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 text-center">
+            <div className="text-[11px] text-zinc-500">待决策积压</div>
+            <div className="mt-1 text-xl font-bold text-amber-400">{actionable}</div>
+          </div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 text-center">
+            <div className="text-[11px] text-zinc-500">策略版本</div>
+            <div className="mt-1 font-mono text-sm font-semibold text-zinc-200">
+              {metrics?.policy_version || "v2.2"}
+            </div>
+          </div>
         </div>
       </CardContent>
     </Card>
-  );
-}
-
-function Stat({ label, value, tone }: { label: string; value: number; tone: string }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-xs text-zinc-500">{label}</span>
-      <span className={`text-base font-semibold ${tone}`}>{value}</span>
-    </div>
   );
 }

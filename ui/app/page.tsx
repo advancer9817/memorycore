@@ -5,7 +5,6 @@ import { ContextLab } from "@/components/dashboard/ContextLab";
 import { CuratorTuningPanel } from "@/components/dashboard/CuratorTuningPanel";
 import { GovernancePanel } from "@/components/dashboard/GovernancePanel";
 import { HealthBanner } from "@/components/dashboard/HealthBanner";
-import { MemoryIntelligenceCenter } from "@/components/dashboard/MemoryIntelligenceCenter";
 import { MemoryOperationsPanel } from "@/components/dashboard/MemoryOperationsPanel";
 import { PageShell } from "@/components/shared/PageShell";
 
@@ -30,14 +29,10 @@ export default function DashboardPage() {
         </div>
 
         <div className="animate-fade-slide-down delay-4">
-          <MemoryIntelligenceCenter />
-        </div>
-
-        <div className="animate-fade-slide-down delay-5">
           <ContextLab />
         </div>
 
-        <div className="animate-fade-slide-down delay-6">
+        <div className="animate-fade-slide-down delay-5">
           <CuratorTuningPanel />
         </div>
       </div>

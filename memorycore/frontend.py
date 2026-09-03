@@ -15,7 +15,7 @@ from urllib.parse import parse_qs
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
-from memorycore.models import MEMORY_TYPES, STATUSES, VALID_RELATION_TYPES, load_config, config_path, row_to_dict
+from memorycore.models import MEMORY_TYPES, STATUSES, VALID_RELATION_TYPES, load_config, config_path, row_to_dict, now
 from memorycore.storage.db import _managed_query
 from memorycore.storage import (
     add_feedback,
