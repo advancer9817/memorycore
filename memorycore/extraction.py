@@ -77,6 +77,8 @@ ADDITIVE_EXTRACTION_PROMPT = """\
       "content": "...",
       "type": "decision",
       "importance": 0.8,
+      "subject": "mcore",
+      "entities": ["mcore"],
       "linked_memory_ids": ["<existing-uuid>"]
     }}
   ]
@@ -290,14 +292,14 @@ def extract_facts(
                 "- 输出格式不变，仍为 JSON。\n"
             )
 
-    # Subject context (P1): tell the LLM which project this conversation belongs
-    # to so titles are self-contained ("mcore 迭代31 …" instead of "迭代31 …").
+    # Subject context (P1): 基础的主体提取规范永久生效
+    from memorycore.subject_context import SUBJECT_PROMPT_INSTRUCTION, active_context_block
+    system_prompt += SUBJECT_PROMPT_INSTRUCTION
+
+    # 仅当具体项目已知时，注入 Active Context 说明
     active_context = ""
     if project_name:
-        from memorycore.subject_context import SUBJECT_PROMPT_INSTRUCTION, active_context_block
         active_context = active_context_block(project_name, project_path, scope)
-        if active_context:
-            system_prompt += SUBJECT_PROMPT_INSTRUCTION
 
     user_prompt = _build_user_prompt(
         messages,

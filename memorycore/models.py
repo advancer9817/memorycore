@@ -99,6 +99,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": False,  # opt-in: populate projects whitelist, then enable
         "default_scope": "global",
         "auto_discover": False,  # ~/project/* git repos as subject projects
+        "discovery_roots": ["~/project"],
         "projects": [],
     },
     "rule_curator": {
@@ -457,6 +458,9 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
     sc = cfg.get("subject_context", {})
     if not isinstance(sc.get("enabled", False), bool):
         _warn(f"subject_context.enabled must be a bool (got {sc.get('enabled')!r})")
+    roots = sc.get("discovery_roots")
+    if roots is not None and not isinstance(roots, list):
+        _warn("subject_context.discovery_roots must be a list")
     projects = sc.get("projects", [])
     if not isinstance(projects, list):
         _warn("subject_context.projects must be a list")

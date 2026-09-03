@@ -165,19 +165,27 @@ def _curator_status_payload(limit: int = 200) -> dict[str, Any]:
         next_hour = (now_dt + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
         next_run_at = next_hour.isoformat()
 
-    # For LLM Curator, we now use the jobs table directly instead of audit logs
+    # For LLM Curator, prioritize the jobs table so started_at/finished_at are always populated
+    latest_job = {}
     with _llm_curator_lock:
         latest_job_id = _latest_llm_job_id[0] if _latest_llm_job_id else None
-        latest_job = dict(_llm_curator_jobs.get(latest_job_id, {})) if latest_job_id else {}
+        memory_job = dict(_llm_curator_jobs.get(latest_job_id, {})) if latest_job_id else {}
 
-    if not latest_job:
-        try:
-            from memorycore.storage.llm_curator_jobs import get_latest_llm_curator_job
-            job = get_latest_llm_curator_job()
-            if job:
-                latest_job = job
-        except Exception:
-            pass
+    try:
+        from memorycore.storage.llm_curator_jobs import get_latest_llm_curator_job, get_llm_curator_job
+        db_job = get_llm_curator_job(latest_job_id) if latest_job_id else None
+        if not db_job:
+            db_job = get_latest_llm_curator_job()
+        if db_job:
+            latest_job = dict(db_job)
+            if latest_job_id is None:
+                latest_job_id = db_job.get("id")
+    except Exception:
+        pass
+
+    # Merge transient in-memory status/progress if present
+    if memory_job:
+        latest_job = {**latest_job, **memory_job}
 
     llm_errors = latest_job.get("errors", []) if isinstance(latest_job.get("errors"), list) else []
 

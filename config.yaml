@@ -22,10 +22,10 @@ embedding:
   sentence_transformers_model: sentence-transformers/all-mpnet-base-v2
   timeout: 30
 extraction:
-  api_key: 66686d501d9345c7b2e2bb71eb1d45a0.jhF6Ea1x1Abt69w8
-  base_url: https://open.bigmodel.cn/api/coding/paas/v4
-  max_tokens: 8000
-  model: glm-5.3-flash
+  api_key: nk
+  base_url: http://127.0.0.1:8317
+  max_tokens: 10000
+  model: gemini-3.8-flash-high
   temperature: 1
   timeout: 600
 extraction_strategy:
@@ -110,6 +110,21 @@ rule_curator:
   stale_days_episodic: 14
   stale_feedback_threshold: -0.5
   stale_importance_threshold: 0.45
+subject_context:
+  auto_discover: true
+  default_scope: global
+  discovery_roots:
+    - ~/project
+    - ~/公共的
+  enabled: true
+  projects:
+  - aliases:
+    - memorycore
+    - MemoryCore
+    name: mcore
+    paths:
+    - ~/project/memorycore
+    scope: project
 temporal:
   auto_supersede_user_corrections: true
   contradiction_detection: heuristic
@@ -118,15 +133,6 @@ temporal:
   governance_age_risk_days: 7
   llm_temporal_prompts: true
   recency_half_life_days: 90
-subject_context:
-  enabled: true
-  default_scope: global
-  auto_discover: true
-  projects:
-    - name: mcore
-      paths: ["~/project/memorycore"]
-      aliases: ["memorycore", "MemoryCore"]
-      scope: project
 user_profile:
   enabled: true
   extract_limit: 200

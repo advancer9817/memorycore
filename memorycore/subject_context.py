@@ -18,11 +18,13 @@ else falls back to ``default_scope`` with no subject — never guess.
 Public API
 ----------
 resolve_project(project_path="", project_name="", cfg=None) -> dict | None
+infer_subject_from_title(title="", cfg=None) -> dict | None
 active_context_block(project_name, project_path, scope) -> str
 """
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 
@@ -38,7 +40,7 @@ def subject_config(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
 
 
 def discover_projects(sc: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
-    """Auto-discover git repos under ~/project/* as subject projects.
+    """Auto-discover git repos under configured discovery_roots as subject projects.
 
     Lets any repo directory (mcore, ai-learning, qai-report, …) resolve
     without hand-writing a whitelist entry. Explicit ``projects`` entries from
@@ -49,21 +51,28 @@ def discover_projects(sc: dict[str, Any] | None = None) -> dict[str, dict[str, A
     if not sc or not sc.get("auto_discover", False):
         return {}
     from pathlib import Path
-    import subprocess
-    base = Path(os.environ.get("MCORE_PROJECTS_ROOT", str(Path.home() / "project")))
+
+    roots = sc.get("discovery_roots") or []
+    if not roots:
+        env_root = os.environ.get("MCORE_PROJECTS_ROOT")
+        roots = [env_root] if env_root else [str(Path.home() / "project")]
+
     discovered: dict[str, dict[str, Any]] = {}
-    if not base.is_dir():
-        return discovered
-    for child in sorted(base.iterdir()):
-        if not (child / ".git").exists() and not (child / ".git").is_dir():
+    for r in roots:
+        base = Path(os.path.expandvars(os.path.expanduser(str(r).strip()))).resolve()
+        if not base.is_dir():
             continue
-        name = child.name
-        discovered[name.lower()] = {
-            "name": name,
-            "aliases": [name.lower()],
-            "scope": "project",
-            "path": str(child),
-        }
+        for child in sorted(base.iterdir()):
+            if not child.is_dir():
+                continue
+            if (child / ".git").exists():
+                name = child.name
+                discovered[name.lower()] = {
+                    "name": name,
+                    "aliases": [name.lower()],
+                    "scope": "project",
+                    "path": str(child),
+                }
     return discovered
 
 
@@ -133,6 +142,36 @@ def resolve_project(
                 return dict(entry, path=p)
             if name and name in {str(entry["name"]).lower(), *entry["aliases"]}:
                 return dict(entry)
+    return None
+
+
+def infer_subject_from_title(
+    title: str,
+    cfg: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """从标题前缀提取项目名/别名并反查为已知项目。"""
+    if not title or not title.strip():
+        return None
+
+    # 过滤开头的特殊括号符号，提取可能的前缀词元
+    cleaned = re.sub(r"^[\[\(\<【〔（]+", "", title.strip())
+    tokens = [t for t in re.split(r"[\s:：_\-—/\]\)\>】〕）]+", cleaned) if t]
+    if not tokens:
+        return None
+
+    # 1. 尝试单个词匹配 (e.g. "mcore", "MemoryCore")
+    first = tokens[0].strip()
+    proj = resolve_project(project_name=first, cfg=cfg)
+    if proj:
+        return proj
+
+    # 2. 尝试前两个词组合 (e.g. "cpa", "manager" -> "cpa-manager")
+    if len(tokens) >= 2:
+        combo = f"{tokens[0]}-{tokens[1]}".strip()
+        proj = resolve_project(project_name=combo, cfg=cfg)
+        if proj:
+            return proj
+
     return None
 
 

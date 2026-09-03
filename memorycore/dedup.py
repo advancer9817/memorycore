@@ -397,17 +397,42 @@ def ingest(
 
             fact_type = fact.memory_type if fact.memory_type else mem_type
             fact_title = str(getattr(fact, "title", "") or fact.text[:title_max]).strip()[:title_max]
-            # Subject anchors (P2): structured project tag + metadata, and a
-            # title prefix fallback when the LLM did not make the title
-            # self-contained.
-            subject = (getattr(fact, "subject", "") or "").strip() or project_name
+
+            from memorycore.subject_context import infer_subject_from_title
+
+            # 四级主体裁决引擎
+            raw_subject = (getattr(fact, "subject", "") or "").strip()
+            resolved_proj = None
+
+            # 1. 优先采用 LLM 提取的 subject 归一化
+            if raw_subject:
+                resolved_proj = resolve_project(project_name=raw_subject, cfg=cfg)
+
+            # 2. 其次采用会话环境探测出的 project (即前面 resolve_project(project_path, ...))
+            if not resolved_proj and project:
+                resolved_proj = project
+
+            # 3. 兜底防线：从标题前缀提取反查
+            if not resolved_proj:
+                resolved_proj = infer_subject_from_title(fact_title, cfg=cfg)
+
+            # 元数据增强与自动提权
             fact_tags = ["extracted", f"agent:{agent_id}"]
-            if subject:
+            fact_scope = mem_scope
+            fact_project_path = resolved_path
+
+            if resolved_proj:
+                subject = resolved_proj["name"]
+                fact_project_path = fact_project_path or resolved_proj.get("path", "")
+                fact_scope = "project"  # 自动提权为 project 级 scope
                 fact_tags.append(f"project:{subject}")
-            subject_meta = {"subject": subject} if subject else {}
-            if (project_name and subject == project_name
-                    and not fact_title.lower().startswith(project_name.lower())):
-                fact_title = f"{project_name} {fact_title}"[:title_max]
+                subject_meta = {"subject": subject}
+                if not fact_title.lower().startswith(subject.lower()):
+                    fact_title = f"{subject} {fact_title}"[:title_max]
+            else:
+                subject = ""
+                subject_meta = {}
+
             title_match = _find_title_match_fn(fact_title, fact_type)
             if title_match:
                 existing_id = str(title_match["id"])
@@ -506,8 +531,8 @@ def ingest(
                     memory_type=fact_type,
                     title=fact_title,
                     content=fact.text,
-                    scope=mem_scope,
-                    project_path=resolved_path,
+                    scope=fact_scope,
+                    project_path=fact_project_path,
                     tags=fact_tags + ["supersedes:" + decision.existing_id],
                     source="extraction",
                     source_agent=agent_id,
@@ -537,8 +562,8 @@ def ingest(
                     memory_type=fact_type,
                     title=fact_title,
                     content=fact.text,
-                    scope=mem_scope,
-                    project_path=resolved_path,
+                    scope=fact_scope,
+                    project_path=fact_project_path,
                     tags=fact_tags,
                     source="extraction",
                     source_agent=agent_id,

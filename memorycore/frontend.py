@@ -117,7 +117,9 @@ def _run_llm_curator_job(job_id: str, cfg: Any, limit: int, sim_threshold: float
         )
         _diag(f"THREAD_DONE: job={job_id} status={report.get('status', 'done')} errors={len(report.get('errors', []))}")
         with _llm_curator_lock:
+            existing = _llm_curator_jobs.get(job_id, {})
             _llm_curator_jobs[job_id] = {
+                **existing,
                 "status": report.get("status", "done"),
                 "summary": report.get("summary", {}),
                 "errors": report.get("errors", []),
@@ -129,7 +131,9 @@ def _run_llm_curator_job(job_id: str, cfg: Any, limit: int, sim_threshold: float
         logger.warning("[llm-curator job %s] failed: %s", job_id, exc)
         update_llm_curator_job(job_id, status="failed", errors=[str(exc)], finished=True)
         with _llm_curator_lock:
+            existing = _llm_curator_jobs.get(job_id, {})
             _llm_curator_jobs[job_id] = {
+                **existing,
                 "status": "error", "error": str(exc),
                 "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
             }
@@ -342,9 +346,14 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
             },
             created_by=body.get("source_agent", "frontend"),
         )
+        ts = now()
         with _llm_curator_lock:
             _cleanup_stale_llm_jobs()
-            _llm_curator_jobs[job_id] = {"status": "running", "job_id": job_id}
+            _llm_curator_jobs[job_id] = {
+                "status": "running",
+                "job_id": job_id,
+                "started_at": ts,
+            }
             _latest_llm_job_id[:] = [job_id]
         global _llm_curator_thread
         t = threading.Thread(

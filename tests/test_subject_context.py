@@ -102,6 +102,32 @@ class TestResolveProject:
         p = resolve_project(project_path=str(repo), cfg=cfg)
         assert p["name"] == "mcore" and p["aliases"] == ["memorycore"]  # 显式项优先
 
+    def test_discover_projects_multi_roots(self, tmp_path):
+        import subprocess
+        from memorycore.subject_context import discover_projects
+
+        root1 = tmp_path / "root1"
+        root2 = tmp_path / "root2"
+        root1.mkdir()
+        root2.mkdir()
+
+        repo1 = root1 / "proj-a"
+        repo1.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo1)], check=True)
+
+        repo2 = root2 / "proj-b"
+        repo2.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo2)], check=True)
+
+        sc = {
+            "enabled": True,
+            "auto_discover": True,
+            "discovery_roots": [str(root1), str(root2)],
+        }
+        discovered = discover_projects(sc)
+        assert "proj-a" in discovered
+        assert "proj-b" in discovered
+
     def test_active_context_block(self):
         block = active_context_block("mcore", "/home/advancer/project/memorycore", "project")
         assert "project_name: mcore" in block and "Active Context" in block
@@ -113,6 +139,27 @@ class TestResolveProject:
 # ---------------------------------------------------------------------------
 
 class TestExtractionSubject:
+    def test_extract_facts_prompt_always_contains_subject_schema(self):
+        from memorycore.extraction import ADDITIVE_EXTRACTION_PROMPT
+        assert '"subject":' in ADDITIVE_EXTRACTION_PROMPT
+        assert '"entities":' in ADDITIVE_EXTRACTION_PROMPT
+
+    def test_extract_facts_system_prompt_has_general_subject_rule_without_project(self):
+        captured = {}
+
+        def fake_call(system_prompt, user_prompt, config):
+            captured["system"] = system_prompt
+            return json.dumps({"memory": []})
+
+        with patch("memorycore.extraction._call_llm", side_effect=fake_call):
+            extract_facts(
+                [{"role": "user", "content": "讨论关于 mcore 的优化"}],
+                config=__import__("memorycore.extraction", fromlist=["ExtractionConfig"]).ExtractionConfig(api_key="k"),
+                project_name="",
+            )
+        assert "Subject Context" in captured["system"]
+        assert "每条 fact 必须附 \"subject\"" in captured["system"]
+
     def test_user_prompt_contains_active_context(self):
         prompt = _build_user_prompt(
             [{"role": "user", "content": "hi"}], [],
@@ -254,6 +301,31 @@ class TestIngestSubject:
         assert captured["project_path"] == ""
         assert captured["scope"] == "global"
 
+    def test_ingest_in_non_project_dir_auto_recovers_subject_from_title(self):
+        captured = {}
+
+        def add_memory_fn(**kwargs):
+            captured.update(kwargs)
+            return {"id": kwargs.get("memory_id")}
+
+        # 模拟在 /home/advancer/公共的 产生的记忆：
+        # project_path 为外部路径，LLM 漏了 subject，但标题明确以 mcore 开头
+        fact = ExtractedFact(
+            text="mcore 记忆主体上下文治理完成落地实施",
+            title="mcore 记忆主体上下文治理完成落地实施",
+            importance=0.8,
+            memory_type="project_memory",
+            subject="",  # LLM 漏填
+        )
+        self._run(fact, "/home/advancer/公共的", add_memory_fn, expect_resolve=False)
+
+        # 断言兜底引擎生效：自动补齐 project 标签、升级 scope 并反查补齐路径
+        assert captured["metadata"].get("subject") == "mcore"
+        assert "project:mcore" in captured["tags"]
+        assert captured["scope"] == "project"
+        assert captured["project_path"] == "/home/advancer/project/memorycore"
+
+
 
 # ---------------------------------------------------------------------------
 # entities: project entity fallback
@@ -315,3 +387,65 @@ class _FakeConn:
 
     def execute(self, *_args, **_kwargs):
         return None
+
+
+# ---------------------------------------------------------------------------
+# Config Validation (Task 1)
+# ---------------------------------------------------------------------------
+
+class TestSubjectConfig:
+    def test_validate_config_discovery_roots_valid(self):
+        from memorycore.models import validate_config
+        cfg = {
+            "subject_context": {
+                "enabled": True,
+                "discovery_roots": ["~/project", "/home/advancer/公共的"],
+                "projects": [],
+            }
+        }
+        warnings = validate_config(cfg)
+        assert not any("discovery_roots" in w for w in warnings)
+
+    def test_validate_config_discovery_roots_invalid(self):
+        from memorycore.models import validate_config
+        cfg = {
+            "subject_context": {
+                "enabled": True,
+                "discovery_roots": "not-a-list",
+                "projects": [],
+            }
+        }
+        warnings = validate_config(cfg)
+        assert any("discovery_roots must be a list" in w for w in warnings)
+
+
+# ---------------------------------------------------------------------------
+# Infer Subject From Title (Task 3)
+# ---------------------------------------------------------------------------
+
+class TestInferSubjectFromTitle:
+    def test_infer_from_exact_name(self):
+        from memorycore.subject_context import infer_subject_from_title
+        p = infer_subject_from_title("mcore 记忆主体治理完成落地", cfg=SUBJECT_CFG)
+        assert p is not None
+        assert p["name"] == "mcore"
+        assert p["scope"] == "project"
+
+    def test_infer_from_alias_name(self):
+        from memorycore.subject_context import infer_subject_from_title
+        p = infer_subject_from_title("MemoryCore 当前进展汇总", cfg=SUBJECT_CFG)
+        assert p is not None
+        assert p["name"] == "mcore"
+
+    def test_infer_with_colons_or_brackets(self):
+        from memorycore.subject_context import infer_subject_from_title
+        p = infer_subject_from_title("[mcore]: 修复断点问题", cfg=SUBJECT_CFG)
+        assert p is not None
+        assert p["name"] == "mcore"
+
+    def test_infer_no_match(self):
+        from memorycore.subject_context import infer_subject_from_title
+        p = infer_subject_from_title("今日天气不错", cfg=SUBJECT_CFG)
+        assert p is None
+
+
