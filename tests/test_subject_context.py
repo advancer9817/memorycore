@@ -372,3 +372,34 @@ class TestSubjectConfig:
         warnings = validate_config(cfg)
         assert any("discovery_roots must be a list" in w for w in warnings)
 
+
+# ---------------------------------------------------------------------------
+# Infer Subject From Title (Task 3)
+# ---------------------------------------------------------------------------
+
+class TestInferSubjectFromTitle:
+    def test_infer_from_exact_name(self):
+        from memorycore.subject_context import infer_subject_from_title
+        p = infer_subject_from_title("mcore 记忆主体治理完成落地", cfg=SUBJECT_CFG)
+        assert p is not None
+        assert p["name"] == "mcore"
+        assert p["scope"] == "project"
+
+    def test_infer_from_alias_name(self):
+        from memorycore.subject_context import infer_subject_from_title
+        p = infer_subject_from_title("MemoryCore 当前进展汇总", cfg=SUBJECT_CFG)
+        assert p is not None
+        assert p["name"] == "mcore"
+
+    def test_infer_with_colons_or_brackets(self):
+        from memorycore.subject_context import infer_subject_from_title
+        p = infer_subject_from_title("[mcore]: 修复断点问题", cfg=SUBJECT_CFG)
+        assert p is not None
+        assert p["name"] == "mcore"
+
+    def test_infer_no_match(self):
+        from memorycore.subject_context import infer_subject_from_title
+        p = infer_subject_from_title("今日天气不错", cfg=SUBJECT_CFG)
+        assert p is None
+
+
