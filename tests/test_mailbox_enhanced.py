@@ -214,29 +214,5 @@ class TestBroadcastMessage:
 # ---------------------------------------------------------------------------
 
 
-class TestAgentSendMCPTool:
-    @pytest.mark.skip(reason="agent_send removed from MCP tools")
-    def test_agent_send_accepts_ttl_seconds(self):
-        pass
-
-    @pytest.mark.skip(reason="agent_send removed from MCP tools")
-    def test_agent_send_ttl_none_by_default(self):
-        pass
-
-
-# ---------------------------------------------------------------------------
-# MCP tool: agent_messages_cleanup (removed from MCP registration)
-# ---------------------------------------------------------------------------
-
-
-class TestAgentMessagesCleanupMCPTool:
-    @pytest.mark.skip(reason="agent_messages_cleanup removed from MCP tools")
-    def test_agent_messages_cleanup_exists_and_callable(self):
-        pass
-
-    @pytest.mark.skip(reason="agent_messages_cleanup removed from MCP tools")
-    def test_agent_messages_cleanup_deletes_expired(self):
-        pass
-
     def test_agent_messages_cleanup_exported_in_init(self):
         assert hasattr(lm, "cleanup_expired_messages")

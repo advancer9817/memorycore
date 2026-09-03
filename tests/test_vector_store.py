@@ -373,3 +373,26 @@ class TestSingleton:
             assert s4 is not s3  # restored original config → rebuilt again
         finally:
             reset_vector_store()
+
+    def test_get_vector_store_none_defaults_to_load_config(self, monkeypatch):
+        """get_vector_store(None) and get_vector_store() must load global config, not empty dict."""
+        reset_vector_store()
+        try:
+            fake_config = {
+                "qdrant": {"url": "http://127.0.0.1:6333", "collection": "agent_memory"},
+                "embedding": {"provider": "hashing", "dim": 64},
+            }
+            monkeypatch.setattr("memorycore.models.load_config", lambda: fake_config)
+
+            s1 = get_vector_store()  # no args
+            assert s1.config.url == "http://127.0.0.1:6333"
+            assert s1.config.collection == "agent_memory"
+
+            s2 = get_vector_store(None)  # explicit None
+            assert s2 is s1
+
+            s3 = get_vector_store(fake_config)  # explicit config match
+            assert s3 is s1
+        finally:
+            reset_vector_store()
+

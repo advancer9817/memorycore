@@ -581,7 +581,7 @@ def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:
                 "method": "tools/call",
                 "params": {
                     "name": "memory_ingest",
-                    "arguments": {"messages": messages, "agent_id": agent_id, **_detect_project(agent)},
+                    "arguments": {"messages": messages, "agent_id": agent_id, **_detect_project(agent_id)},
                 },
             },
             session_id=session_id,
@@ -590,7 +590,9 @@ def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:
         preview = " ".join(body.split())[:500]
         _log(f"ingest_done agent={agent_id} messages={len(messages)} response={preview}")
     except Exception:
-        _log(f"ingest_exception agent={agent_id}")
+        import traceback
+
+        _log(f"ingest_exception agent={agent_id} tb={traceback.format_exc()[-1500:]}")
 
 
 def _messages_for_agent(agent: str) -> list[dict[str, str]]:

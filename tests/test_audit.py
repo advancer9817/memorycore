@@ -110,3 +110,24 @@ class TestAuditIntegration:
         rows = get_audit_log(memory_id=record["id"], event_type="memory_status_change")
         assert len(rows) == 1
         assert json.loads(rows[0]["detail_json"])["status"] == "stale"
+
+    def test_cleanup_stale_audit_events(self, isolated_db):
+        from memorycore.storage.audit import cleanup_stale_audit_events
+        from memorycore.storage.db import managed_conn, read_conn
+        import datetime
+        from memorycore.models import local_now
+
+        ts_stale = (local_now() - datetime.timedelta(days=95)).isoformat(timespec="seconds")
+        ts_fresh = (local_now() - datetime.timedelta(days=10)).isoformat(timespec="seconds")
+
+        with managed_conn() as conn:
+            conn.execute("INSERT INTO audit_events (id, event_type, created_at) VALUES ('audit-old', 'test', ?)", (ts_stale,))
+            conn.execute("INSERT INTO audit_events (id, event_type, created_at) VALUES ('audit-fresh', 'test', ?)", (ts_fresh,))
+
+        cleaned = cleanup_stale_audit_events(retention_days=90)
+        assert cleaned >= 1
+
+        with read_conn() as conn:
+            assert conn.execute("SELECT id FROM audit_events WHERE id='audit-old'").fetchone() is None
+            assert conn.execute("SELECT id FROM audit_events WHERE id='audit-fresh'").fetchone() is not None
+

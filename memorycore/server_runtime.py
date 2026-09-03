@@ -48,15 +48,21 @@ def _start_auto_curator(interval_hours: float = 6.0) -> None:
                 from memorycore.storage.handoff import cleanup_expired_handoffs
                 from memorycore.storage.crud import _drain_vector_sync_queue
                 from memorycore.storage.governance import auto_expire_stale_reviews
+                from memorycore.storage.audit import cleanup_stale_audit_events
+                from memorycore.storage.search import cleanup_stale_quality_events
                 handoff_cleanup = cleanup_expired_handoffs()
                 sync_result = _drain_vector_sync_queue()
                 expire_result = auto_expire_stale_reviews(stale_days=14, dry_run=False)
+                audit_cleaned = cleanup_stale_audit_events(retention_days=90)
+                quality_cleaned = cleanup_stale_quality_events(retention_days=30)
                 logger.info(
-                    "[auto-curator] handoff_cleaned=%s sync_retried=%s/%s expired_reviews=%s",
+                    "[auto-curator] handoff_cleaned=%s sync_retried=%s/%s expired_reviews=%s audit_cleaned=%s quality_cleaned=%s",
                     handoff_cleanup.get("cleaned", 0),
                     sync_result.get("succeeded", 0),
                     sync_result.get("failed", 0),
                     expire_result.get("expired", 0),
+                    audit_cleaned,
+                    quality_cleaned,
                 )
             except Exception as exc:
                 logger.warning("[auto-curator] error: %s", exc)

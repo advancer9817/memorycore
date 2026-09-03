@@ -6335,5 +6335,39 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 - `docs/2026-09-03-memorycore-deep-investigation-report.md`（新增）：落地详实的架构体检与深度探查报告，涵盖数据全景、缺陷复现链路、召回与融合逻辑图、阶段性演进排期表。
 - 报告同步转储至 Windows 宿主机桌面 `output/` 目录与 gdrive 迭代备份。
 
+## [迭代 216] 2026-09-03 — 修复 get_vector_store 单例配置冲刷 + 消除全量单测 Skip 盲区 + 落地事件表生命周期清理
+
+> 彻底根除 Qdrant 向量单例配置冲刷与偶发失效，重构单测消除全部 Skip 盲区，落地数据库审计与质量事件表 TTL 滚卷清理。
+
+### 问题与根因
+1. **Qdrant 单例配置冲刷**：`get_vector_store(config=None)` 时使用 `config or {}`，导致无参调用（如 `context_pack.py`、`search.py`）产生空指纹，强行销毁原 Qdrant Server 连接并回退本地文件锁冲突失败，造成向量检索静默瘫痪。
+2. **测试盲区**：`tests/test_curator_llm_jobs.py` 中 3 项用例因历史遗留的内存变量 `_reviewed_memory_ids` 被跳过；`test_mailbox_enhanced.py` 遗留已废弃 MCP 工具的 skip 用例。
+3. **事件表无界膨胀**：`context_quality_events` 与 `audit_events` 累积过万条，缺乏自动淘汰机制。
+
+### 变更
+- `memorycore/vector_store.py`：
+  - `get_vector_store(config)`：当 `config is None` 时强制加载全局 `load_config()`，守护 Qdrant Server 单例配置指纹稳定。
+- `memorycore/storage/search.py` & `memorycore/storage/context_pack.py`：
+  - 提取 `_scope_project_clauses()` 统合作用域与项目路径隔离条件，消除多处重复 SQL 片段。
+  - 优化纯向量命中过滤门槛（`vector_hits.get(id) < min_vector_only_score`），使高相似度语义向量能正常参与重排序。
+  - `search.py` 新增 `cleanup_stale_quality_events(retention_days=30)`，清理 30 天前的上下文质量事件。
+- `memorycore/storage/audit.py`：
+  - 新增 `cleanup_stale_audit_events(retention_days=90)`，清理 90 天前的历史审计日志。
+- `memorycore/server_runtime.py`：
+  - `_start_auto_curator` 后台循环增加对 `cleanup_stale_audit_events` 与 `cleanup_stale_quality_events` 的调度执行。
+- `tests/test_vector_store.py`：
+  - 新增 `test_get_vector_store_none_defaults_to_load_config`，锁定单例配置兜底逻辑。
+- `tests/test_curator_llm_jobs.py`：
+  - 重构所有用例为对真实 SQLite `curator_review_log` 表与 `_cleanup_reviewed_ids`、`mark_stale_running_jobs_failed` 的真实断言，移除全部 skip。
+- `tests/test_mailbox_enhanced.py`：
+  - 清理已下线 MCP 工具的无意义 skip 用例。
+- `tests/test_audit.py` & `tests/test_context_quality_metrics.py`：
+  - 增加对清理函数有效性的单元测试。
+
+### 验证
+- 单测与全量回归：全量 pytest **613 passed / 0 failed / 0 skipped**（原 607 passed / 7 skipped），测试盲区完全清零。
+- 服务验证：`mcore.service` 重启成功（Active running），`eval_context_quality.py` 7/7 用例顺利通过。
+
+
 
 

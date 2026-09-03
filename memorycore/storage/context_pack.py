@@ -266,12 +266,9 @@ def build_context_pack(
                 "(valid_until IS NULL OR valid_until > ?)",
             ]
             extra_params: list[Any] = [*extra_ids, now()]
-            if scope:
-                extra_clauses.append("(scope = ? OR scope = 'global')")
-                extra_params.append(scope)
-            if project_path:
-                extra_clauses.append("(project_path = ? OR project_path = '')")
-                extra_params.append(project_path)
+            sp_clauses, sp_params = _search._scope_project_clauses(scope=scope, project_path=project_path)
+            extra_clauses.extend(sp_clauses)
+            extra_params.extend(sp_params)
             rows = conn.execute(
                 f"SELECT * FROM memories WHERE {' AND '.join(extra_clauses)}",
                 extra_params,
@@ -391,14 +388,9 @@ def build_context_pack(
         if "keyword" in sources and lexical < _MIN_KEYWORD_LEXICAL_RELEVANCE_SCORE:
             continue
         is_vector_only = sources == ["vector"]
-        min_score = (
-            mode_settings["min_vector_only_score"]
-            if is_vector_only
-            else mode_settings["min_context_score"]
-        )
-        if is_vector_only and vector_hits.get(record["id"], 0.0) < min_score:
+        if is_vector_only and vector_hits.get(record["id"], 0.0) < mode_settings["min_vector_only_score"]:
             continue
-        if score >= min_score:
+        if score >= mode_settings["min_context_score"]:
             scored_records.append((record, score))
     records = [record for record, _ in sorted(
         scored_records,

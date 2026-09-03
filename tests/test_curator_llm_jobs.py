@@ -3,61 +3,99 @@ import time
 import pytest
 
 
-def test_job_registry_ttl_cleanup():
-    """Jobs in succeeded/error state older than 30min should be cleaned up."""
-    import memorycore.storage.curator_llm as clm
+"""Unit tests for LLM Curator job registry and cooldown mechanisms."""
+import datetime
+import os
+import time
+import pytest
+from unittest.mock import patch
 
-    old_jobs = dict(clm._reviewed_memory_ids) if hasattr(clm, '_reviewed_memory_ids') else {}
+from memorycore.models import now, local_now
+from memorycore.storage.db import managed_conn, read_conn
+from memorycore.storage.curator_llm.core import (
+    _cleanup_reviewed_ids,
+    _get_recently_reviewed_ids,
+    _mark_reviewed,
+)
+from memorycore.storage.llm_curator_jobs import (
+    create_llm_curator_job,
+    get_llm_curator_job,
+    mark_stale_running_jobs_failed,
+)
 
-    # Test the cleanup function if it exists
-    if not hasattr(clm, '_cleanup_stale_llm_jobs'):
-        pytest.skip("_cleanup_stale_llm_jobs not implemented yet")
 
-    # Reset state
-    clm._reviewed_memory_ids.clear()
-    clm._reviewed_memory_ids.update(old_jobs)
+def test_job_registry_ttl_cleanup(tmp_path):
+    """mark_stale_running_jobs_failed marks dead-process running jobs as failed."""
+    # Create a job with non-existent dead PID
+    dead_pid = 99999999
+    job_id = "test-job-stale-pid"
+    with managed_conn() as conn:
+        conn.execute("DELETE FROM llm_curator_jobs WHERE id=?", (job_id,))
+    create_llm_curator_job(job_id=job_id, params={"limit": 10})
+    with managed_conn() as conn:
+        conn.execute(
+            "UPDATE llm_curator_jobs SET status='running', progress_json=? WHERE id=?",
+            (f'{{"pid": {dead_pid}}}', job_id),
+        )
+
+    marked = mark_stale_running_jobs_failed()
+    assert marked >= 1
+    job = get_llm_curator_job(job_id)
+    assert job is not None
+    assert job["status"] == "failed"
+    assert "interrupted" in str(job.get("errors", []))
+
+    # Clean up
+    with managed_conn() as conn:
+        conn.execute("DELETE FROM llm_curator_jobs WHERE id=?", (job_id,))
 
 
 def test_review_cooldown_skips_recent_memories():
-    """Memories reviewed within cooldown period should be skipped."""
-    import memorycore.storage.curator_llm as clm
-
-    if not hasattr(clm, '_reviewed_memory_ids'):
-        pytest.skip("_reviewed_memory_ids not implemented yet")
-    if not hasattr(clm, '_REVIEW_COOLDOWN_SECONDS'):
-        pytest.skip("_REVIEW_COOLDOWN_SECONDS not implemented yet")
-
-    # Mark a memory as recently reviewed
+    """Memories reviewed within cooldown period should be in recently reviewed set."""
     test_id = "test-memory-id-12345"
-    clm._reviewed_memory_ids[test_id] = time.time()
+    with managed_conn() as conn:
+        conn.execute("DELETE FROM curator_review_log WHERE memory_id=?", (test_id,))
 
-    # It should be in the cooldown dict
-    assert test_id in clm._reviewed_memory_ids
-    assert time.time() - clm._reviewed_memory_ids[test_id] < clm._REVIEW_COOLDOWN_SECONDS
-
-    # Clean up
-    clm._reviewed_memory_ids.pop(test_id, None)
+    try:
+        _mark_reviewed([test_id], review_type="llm_curator")
+        recently = _get_recently_reviewed_ids(review_type="llm_curator")
+        assert test_id in recently
+    finally:
+        with managed_conn() as conn:
+            conn.execute("DELETE FROM curator_review_log WHERE memory_id=?", (test_id,))
 
 
 def test_review_cooldown_expired_memory_not_skipped():
-    """Memories reviewed beyond cooldown period should be eligible again."""
-    import memorycore.storage.curator_llm as clm
+    """Memories reviewed beyond cooldown period should not be returned by _get_recently_reviewed_ids,
+    and entries beyond reviewed_ids_max_age_seconds should be physically cleaned up by _cleanup_reviewed_ids."""
+    test_id_cooldown = "test-memory-id-cooldown-expired"
+    test_id_stale = "test-memory-id-max-age-expired"
+    ts_now = local_now()
+    past_cooldown = (ts_now - datetime.timedelta(seconds=7201)).isoformat(timespec="seconds")
+    past_max_age = (ts_now - datetime.timedelta(seconds=86401)).isoformat(timespec="seconds")
 
-    if not hasattr(clm, '_reviewed_memory_ids'):
-        pytest.skip("_reviewed_memory_ids not implemented yet")
-    if not hasattr(clm, '_REVIEW_COOLDOWN_SECONDS'):
-        pytest.skip("_REVIEW_COOLDOWN_SECONDS not implemented yet")
+    with managed_conn() as conn:
+        conn.execute("DELETE FROM curator_review_log WHERE memory_id IN (?, ?)", (test_id_cooldown, test_id_stale))
+        conn.execute("INSERT INTO curator_review_log(memory_id, review_type, reviewed_at) VALUES (?, 'llm_curator', ?)", (test_id_cooldown, past_cooldown))
+        conn.execute("INSERT INTO curator_review_log(memory_id, review_type, reviewed_at) VALUES (?, 'llm_curator', ?)", (test_id_stale, past_max_age))
 
-    test_id = "test-memory-id-expired"
-    # Set timestamp far in the past
-    clm._reviewed_memory_ids[test_id] = time.time() - clm._REVIEW_COOLDOWN_SECONDS - 1
+    try:
+        # 1. Beyond cooldown window (7200s): should not be in recently reviewed
+        recently = _get_recently_reviewed_ids(review_type="llm_curator")
+        assert test_id_cooldown not in recently
+        assert test_id_stale not in recently
 
-    # The entry exists but is expired
-    age = time.time() - clm._reviewed_memory_ids[test_id]
-    assert age > clm._REVIEW_COOLDOWN_SECONDS
+        # 2. Beyond max age (86400s): should be deleted by _cleanup_reviewed_ids
+        _cleanup_reviewed_ids()
+        with read_conn() as conn:
+            row_cooldown = conn.execute("SELECT memory_id FROM curator_review_log WHERE memory_id=?", (test_id_cooldown,)).fetchone()
+            row_stale = conn.execute("SELECT memory_id FROM curator_review_log WHERE memory_id=?", (test_id_stale,)).fetchone()
+        assert row_cooldown is not None  # Not past max_age yet, still retained for history
+        assert row_stale is None         # Past max_age, deleted
+    finally:
+        with managed_conn() as conn:
+            conn.execute("DELETE FROM curator_review_log WHERE memory_id IN (?, ?)", (test_id_cooldown, test_id_stale))
 
-    # Clean up
-    clm._reviewed_memory_ids.pop(test_id, None)
 
 
 def test_large_pool_sampling_limit():

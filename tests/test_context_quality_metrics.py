@@ -43,3 +43,25 @@ def test_context_quality_stats_empty_shape():
         "avg_ineffective_rate": 0.0,
         "by_task_type": {},
     }
+
+
+def test_cleanup_stale_quality_events(isolated_memory_db):
+    from memorycore.storage.search import cleanup_stale_quality_events
+    from memorycore.storage.db import managed_conn, read_conn
+    import datetime
+    from memorycore.models import local_now
+
+    ts_stale = (local_now() - datetime.timedelta(days=35)).isoformat(timespec="seconds")
+    ts_fresh = (local_now() - datetime.timedelta(days=5)).isoformat(timespec="seconds")
+
+    with managed_conn() as conn:
+        conn.execute("INSERT INTO context_quality_events (id, task, created_at) VALUES ('q-old', 'test', ?)", (ts_stale,))
+        conn.execute("INSERT INTO context_quality_events (id, task, created_at) VALUES ('q-fresh', 'test', ?)", (ts_fresh,))
+
+    cleaned = cleanup_stale_quality_events(retention_days=30)
+    assert cleaned >= 1
+
+    with read_conn() as conn:
+        assert conn.execute("SELECT id FROM context_quality_events WHERE id='q-old'").fetchone() is None
+        assert conn.execute("SELECT id FROM context_quality_events WHERE id='q-fresh'").fetchone() is not None
+

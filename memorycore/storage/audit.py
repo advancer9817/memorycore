@@ -56,3 +56,14 @@ def get_audit_log(
             params,
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def cleanup_stale_audit_events(retention_days: int = 90) -> int:
+    """Delete audit events older than retention_days. Returns deleted count."""
+    import datetime
+    from memorycore.models import local_now
+    cutoff = (local_now() - datetime.timedelta(days=retention_days)).isoformat(timespec="seconds")
+    with managed_conn() as conn:
+        cursor = conn.execute("DELETE FROM audit_events WHERE created_at < ?", (cutoff,))
+        return cursor.rowcount if cursor is not None else 0
+

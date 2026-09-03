@@ -773,7 +773,10 @@ def _vector_store_fingerprint(vs_cfg: VectorStoreConfig) -> str:
 
 def get_vector_store(config: dict[str, Any] | None = None) -> VectorStore:
     global _store, _store_fingerprint
-    vs_cfg = vector_store_config_from_dict(config or {})
+    if config is None:
+        from memorycore.models import load_config
+        config = load_config()
+    vs_cfg = vector_store_config_from_dict(config)
     fingerprint = _vector_store_fingerprint(vs_cfg)
     if _store is not None and _store_fingerprint == fingerprint:
         return _store

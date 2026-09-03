@@ -298,6 +298,41 @@ def get_context_quality_stats(limit: int = 500) -> dict[str, Any]:
     }
 
 
+def cleanup_stale_quality_events(retention_days: int = 30) -> int:
+    """Delete context_quality_events older than retention_days. Returns deleted count."""
+    import datetime
+    cutoff = (local_now() - datetime.timedelta(days=retention_days)).isoformat(timespec="seconds")
+    with managed_conn() as conn:
+        cursor = conn.execute("DELETE FROM context_quality_events WHERE created_at < ?", (cutoff,))
+        return cursor.rowcount if cursor is not None else 0
+
+
+
+def _scope_project_clauses(scope: str = "", project_path: str = "", table_prefix: str = "") -> tuple[list[str], list[Any]]:
+    """Build SQL clauses and parameters for safe scope and project isolation.
+
+    When project_path is present:
+      - scope is empty or 'global': allows global memories and current project memories.
+      - specific scope: allows global memories and current project memories under that scope.
+    When project_path is empty:
+      - falls back to matching requested scope or global.
+    """
+    prefix = f"{table_prefix}." if table_prefix else ""
+    clauses: list[str] = []
+    params: list[Any] = []
+    if project_path:
+        if not scope or scope == "global":
+            clauses.append(f"({prefix}scope = 'global' OR ({prefix}scope = 'project' AND ({prefix}project_path = ? OR {prefix}project_path = '')))")
+            params.append(project_path)
+        else:
+            clauses.append(f"({prefix}scope = 'global' OR ({prefix}scope = ? AND ({prefix}project_path = ? OR {prefix}project_path = '')))")
+            params.extend([scope, project_path])
+    elif scope:
+        clauses.append(f"({prefix}scope = ? OR {prefix}scope = 'global')")
+        params.append(scope)
+    return clauses, params
+
+
 def _is_greeting(task: str) -> bool:
     return task.strip().lower() in _GREETINGS
 
@@ -305,12 +340,9 @@ def _is_greeting(task: str) -> bool:
 def _fallback_candidate_count(scope: str = "", project_path: str = "", limit: int = 8) -> int:
     clauses = ["status = 'active'", "(valid_until IS NULL OR valid_until > ?)"]
     params: list[Any] = [now()]
-    if scope:
-        clauses.append("(scope = ? OR scope = 'global')")
-        params.append(scope)
-    if project_path:
-        clauses.append("(project_path = ? OR project_path = '')")
-        params.append(project_path)
+    sp_clauses, sp_params = _scope_project_clauses(scope=scope, project_path=project_path)
+    clauses.extend(sp_clauses)
+    params.extend(sp_params)
     params.append(max(1, min(int(limit), 100)))
     with read_conn() as conn:
         rows = conn.execute(
@@ -337,12 +369,9 @@ def _keyword_scan_records(
 
     scope_clauses: list[str] = ["status = 'active'", "(valid_until IS NULL OR valid_until > ?)"]
     scope_params: list[Any] = [now()]
-    if scope:
-        scope_clauses.append("(scope = ? OR scope = 'global')")
-        scope_params.append(scope)
-    if project_path:
-        scope_clauses.append("(project_path = ? OR project_path = '')")
-        scope_params.append(project_path)
+    sp_clauses, sp_params = _scope_project_clauses(scope=scope, project_path=project_path)
+    scope_clauses.extend(sp_clauses)
+    scope_params.extend(sp_params)
     scope_where = " AND ".join(scope_clauses)
 
     # --- Fast path: FTS5 OR query ---
@@ -455,12 +484,9 @@ def search_memory_records(
     if types_list:
         clauses.append("m.type IN (%s)" % ",".join("?" for _ in types_list))
         params.extend(types_list)
-    if scope:
-        clauses.append("(m.scope = ? OR m.scope = 'global')")
-        params.append(scope)
-    if project_path:
-        clauses.append("(m.project_path = ? OR m.project_path = '')")
-        params.append(project_path)
+    sp_clauses, sp_params = _scope_project_clauses(scope=scope, project_path=project_path, table_prefix="m")
+    clauses.extend(sp_clauses)
+    params.extend(sp_params)
     if tags_list:
         clauses.append(
             "EXISTS (SELECT 1 FROM json_each(m.tags_json) WHERE lower(json_each.value) IN (%s))"
@@ -595,13 +621,8 @@ def _vector_search_ids(
             return cached_val
 
     try:
-        from memorycore.vector_store import get_vector_store, _store
-        # If singleton not yet initialized with config, load config now
-        if _store is None:
-            from memorycore.models import load_config
-            vs = get_vector_store(load_config())
-        else:
-            vs = get_vector_store()
+        from memorycore.vector_store import get_vector_store
+        vs = get_vector_store()
 
         results_list = []
         if vs.available:
