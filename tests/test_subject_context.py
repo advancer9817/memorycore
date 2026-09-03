@@ -102,6 +102,32 @@ class TestResolveProject:
         p = resolve_project(project_path=str(repo), cfg=cfg)
         assert p["name"] == "mcore" and p["aliases"] == ["memorycore"]  # 显式项优先
 
+    def test_discover_projects_multi_roots(self, tmp_path):
+        import subprocess
+        from memorycore.subject_context import discover_projects
+
+        root1 = tmp_path / "root1"
+        root2 = tmp_path / "root2"
+        root1.mkdir()
+        root2.mkdir()
+
+        repo1 = root1 / "proj-a"
+        repo1.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo1)], check=True)
+
+        repo2 = root2 / "proj-b"
+        repo2.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo2)], check=True)
+
+        sc = {
+            "enabled": True,
+            "auto_discover": True,
+            "discovery_roots": [str(root1), str(root2)],
+        }
+        discovered = discover_projects(sc)
+        assert "proj-a" in discovered
+        assert "proj-b" in discovered
+
     def test_active_context_block(self):
         block = active_context_block("mcore", "/home/advancer/project/memorycore", "project")
         assert "project_name: mcore" in block and "Active Context" in block

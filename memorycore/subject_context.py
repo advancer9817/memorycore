@@ -38,7 +38,7 @@ def subject_config(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
 
 
 def discover_projects(sc: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
-    """Auto-discover git repos under ~/project/* as subject projects.
+    """Auto-discover git repos under configured discovery_roots as subject projects.
 
     Lets any repo directory (mcore, ai-learning, qai-report, …) resolve
     without hand-writing a whitelist entry. Explicit ``projects`` entries from
@@ -49,21 +49,28 @@ def discover_projects(sc: dict[str, Any] | None = None) -> dict[str, dict[str, A
     if not sc or not sc.get("auto_discover", False):
         return {}
     from pathlib import Path
-    import subprocess
-    base = Path(os.environ.get("MCORE_PROJECTS_ROOT", str(Path.home() / "project")))
+
+    roots = sc.get("discovery_roots") or []
+    if not roots:
+        env_root = os.environ.get("MCORE_PROJECTS_ROOT")
+        roots = [env_root] if env_root else [str(Path.home() / "project")]
+
     discovered: dict[str, dict[str, Any]] = {}
-    if not base.is_dir():
-        return discovered
-    for child in sorted(base.iterdir()):
-        if not (child / ".git").exists() and not (child / ".git").is_dir():
+    for r in roots:
+        base = Path(os.path.expandvars(os.path.expanduser(str(r).strip()))).resolve()
+        if not base.is_dir():
             continue
-        name = child.name
-        discovered[name.lower()] = {
-            "name": name,
-            "aliases": [name.lower()],
-            "scope": "project",
-            "path": str(child),
-        }
+        for child in sorted(base.iterdir()):
+            if not child.is_dir():
+                continue
+            if (child / ".git").exists():
+                name = child.name
+                discovered[name.lower()] = {
+                    "name": name,
+                    "aliases": [name.lower()],
+                    "scope": "project",
+                    "path": str(child),
+                }
     return discovered
 
 
