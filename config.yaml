@@ -115,7 +115,7 @@ subject_context:
   default_scope: global
   discovery_roots:
     - ~/project
-    - /home/advancer/公共的
+    - ~/公共的
   enabled: true
   projects:
   - aliases:
