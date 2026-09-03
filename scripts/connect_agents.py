@@ -152,7 +152,7 @@ def configure_codex(path: Path, endpoint: str, backup_dir: Path, dry_run: bool) 
         text += "\n[mcp_servers]\n"
     if text and not text.endswith("\n"):
         text += "\n"
-    text += f"\n[mcp_servers.{SERVER_NAME}]\ntype = \"http\"\nurl = \"{endpoint}\"\n"
+    text += f'\n[mcp_servers.{SERVER_NAME}]\ntype = "http"\nurl = "{endpoint}"\nheaders = {{ "X-Agent-Id" = "codex" }}\n'
     if old == text:
         return False
     if dry_run:
@@ -167,7 +167,7 @@ def configure_opencode(path: Path, endpoint: str, backup_dir: Path, dry_run: boo
     data = read_json(path)
     data.setdefault("$schema", "https://opencode.ai/config.json")
     servers = data.setdefault("mcp", {})
-    servers[SERVER_NAME] = {"type": "remote", "url": endpoint}
+    servers[SERVER_NAME] = {"type": "remote", "url": endpoint, "headers": {"X-Agent-Id": "opencode"}}
     return write_json(path, data, backup_dir, dry_run)
 
 

@@ -18,8 +18,9 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
+import inspect
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Context
 
 from memorycore.frontend import (
     configure_frontend,
@@ -109,6 +110,54 @@ def _safe_tool(fn):
     return wrapper
 
 
+def _infer_caller_agent(ctx: Any) -> str:
+    """Infer caller agent identifier from FastMCP session clientInfo or request headers.
+
+    Examples:
+        'Claude Code' -> 'claude'
+        'hermes' / 'hermes-mcore-plugin' -> 'hermes'
+        'OpenAI Codex' / 'codex' -> 'codex'
+    """
+    candidate = ""
+    if ctx:
+        try:
+            req_ctx = getattr(ctx, "request_context", None)
+            if req_ctx:
+                http_req = getattr(req_ctx, "request", None)
+                if http_req and hasattr(http_req, "headers"):
+                    candidate = (
+                        http_req.headers.get("x-agent-id")
+                        or http_req.headers.get("x-mcore-agent")
+                        or ""
+                    )
+            if not candidate:
+                session = getattr(req_ctx, "session", None) or getattr(ctx, "session", None)
+                client_params = getattr(session, "client_params", None)
+                client_info = getattr(client_params, "clientInfo", None)
+                candidate = getattr(client_info, "name", "")
+        except Exception:
+            candidate = ""
+
+    if not candidate:
+        candidate = os.environ.get("MCORE_AGENT_ID", "")
+
+    if not candidate:
+        return ""
+
+    cand_lower = candidate.strip().lower()
+    if "claude" in cand_lower:
+        return "claude"
+    if "codex" in cand_lower:
+        return "codex"
+    if "hermes" in cand_lower:
+        return "hermes"
+    if "opencode" in cand_lower:
+        return "opencode"
+    if "gemini" in cand_lower:
+        return "gemini"
+    return cand_lower
+
+
 def _threaded_tool(mcp: Any):
     """Register a sync MCP tool body on a worker thread.
 
@@ -121,12 +170,45 @@ def _threaded_tool(mcp: Any):
     sync function, so in-process callers and tests keep the sync contract.
     Signature introspection follows ``__wrapped__``, so the tool schema is
     unchanged.
+
+    Additionally, the wrapper injects the caller's agent identity from MCP
+    session clientInfo/headers (e.g. Claude Code -> 'claude', Hermes -> 'hermes')
+    whenever 'source_agent', 'agent', or 'agent_id' is left as default 'agent' or empty.
     """
     def decorator(fn):
+        sig = inspect.signature(fn)
+        has_ctx = "ctx" in sig.parameters
+
         @functools.wraps(fn)
-        async def wrapper(*args, **kwargs):
+        async def wrapper(*args, ctx: Context = None, **kwargs):
             import anyio
-            return await anyio.to_thread.run_sync(lambda: fn(*args, **kwargs))
+
+            inferred = _infer_caller_agent(ctx)
+            bound = sig.bind_partial(*args, **kwargs)
+            bound.apply_defaults()
+            call_kwargs = dict(bound.arguments)
+
+            if inferred:
+                for key in ("source_agent", "agent", "agent_id"):
+                    if key in call_kwargs and call_kwargs[key] in ("agent", "", None):
+                        call_kwargs[key] = inferred
+
+            if not has_ctx and "ctx" in call_kwargs:
+                del call_kwargs["ctx"]
+            elif has_ctx:
+                call_kwargs["ctx"] = ctx
+
+            return await anyio.to_thread.run_sync(lambda: fn(**call_kwargs))
+
+        new_params = [p for p in sig.parameters.values() if p.name != "ctx"] + [
+            inspect.Parameter("ctx", inspect.Parameter.KEYWORD_ONLY, default=None, annotation=Context)
+        ]
+        wrapper.__signature__ = sig.replace(parameters=new_params)
+        wrapper.__doc__ = fn.__doc__
+        wrapper.__name__ = fn.__name__
+        wrapper.__annotations__ = {k: v for k, v in fn.__annotations__.items() if k != "ctx"}
+        wrapper.__annotations__["ctx"] = Context
+
         mcp.add_tool(wrapper, name=fn.__name__)
         return fn
     return decorator
@@ -158,7 +240,25 @@ def memory_add(
     valid_until: str | None = None,
     atomize: str | bool = "auto",
 ) -> dict[str, Any]:
-    """Add a structured memory record to local SQLite memory."""
+    """Add a structured memory record to local SQLite memory.
+
+    Args:
+        type: Memory category (e.g. 'decision', 'feedback', 'project_memory', 'environment_fact')
+        title: Concise factual title
+        content: Detailed factual content
+        scope: 'global' or 'project'
+        tags: Optional list of tags
+        source: 'manual', 'extraction', etc. (default 'manual')
+        source_agent: Calling agent identifier ('hermes' when called from Hermes,
+            'claude' when called from Claude, 'codex' when called from Codex).
+            If omitted or 'agent', automatically inferred from MCP client context/headers.
+        project_path: Optional repository/project path
+        confidence: Confidence score 0.0-1.0
+        importance: Importance score 0.0-1.0
+        status: 'active', etc.
+        decay_policy: 'review', 'archive', etc.
+        atomize: 'auto' (split long compound texts) or False
+    """
     return add_memory_record(
         type, title, content, scope, tags, source, source_agent,
         project_path, confidence, importance, status, decay_policy,
