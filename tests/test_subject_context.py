@@ -139,6 +139,27 @@ class TestResolveProject:
 # ---------------------------------------------------------------------------
 
 class TestExtractionSubject:
+    def test_extract_facts_prompt_always_contains_subject_schema(self):
+        from memorycore.extraction import ADDITIVE_EXTRACTION_PROMPT
+        assert '"subject":' in ADDITIVE_EXTRACTION_PROMPT
+        assert '"entities":' in ADDITIVE_EXTRACTION_PROMPT
+
+    def test_extract_facts_system_prompt_has_general_subject_rule_without_project(self):
+        captured = {}
+
+        def fake_call(system_prompt, user_prompt, config):
+            captured["system"] = system_prompt
+            return json.dumps({"memory": []})
+
+        with patch("memorycore.extraction._call_llm", side_effect=fake_call):
+            extract_facts(
+                [{"role": "user", "content": "讨论关于 mcore 的优化"}],
+                config=__import__("memorycore.extraction", fromlist=["ExtractionConfig"]).ExtractionConfig(api_key="k"),
+                project_name="",
+            )
+        assert "Subject Context" in captured["system"]
+        assert "每条 fact 必须附 \"subject\"" in captured["system"]
+
     def test_user_prompt_contains_active_context(self):
         prompt = _build_user_prompt(
             [{"role": "user", "content": "hi"}], [],
