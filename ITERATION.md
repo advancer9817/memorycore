@@ -6273,3 +6273,36 @@ git pre-push hook 内 commit 的 memory-sync 不会被当次 push 携带（实�
 ### 备注
 - 存量旧记录（千帆等）仍 `pp=''` 属预期：P5 回填只处理 mcore 强信号；auto_discover 可随后续会话逐步补齐
 - 读路径注入块 `project_path` 由 Hermes 插件下一次 pre_llm_call 起生效（插件改动需 Hermes 重载/重启）
+
+## [迭代 213] 2026-09-03 — 记忆主体上下文全域防御加固：多根发现 + 常态 Schema + 标题前缀反查兜底
+
+> 彻底根治脱离 `~/project/*`（如在 `/home/advancer/公共的` 或桌面）对话时产生“无主体无标签漏网记忆”的断点，实现四层立体防御。
+
+### 问题
+- 证据：在 `/home/advancer/公共的` 讨论 mcore 产生新记忆 `2b44f21d`，虽标题自发包含 mcore，但 `project_path` 为空、`scope` 为 `global`、无 `project:mcore` 标签。
+- 根因链：
+  1. 路径不在 `~/project/*` 下，服务端 `resolve_project()` 返回空；
+  2. `extraction.py` 的 `SUBJECT_PROMPT_INSTRUCTION` 被锁在 `if project_name:` 内部，LLM 提取时无主体指令与字段 schema；
+  3. `dedup.py` 缺乏对已提取 `fact_title` 的前缀反查兜底。
+
+### 变更
+- `memorycore/models.py`：`DEFAULT_CONFIG["subject_context"]` 增加 `discovery_roots: ["~/project"]`，`validate_config` 增加 list 结构校验。
+- `config.yaml`：`subject_context` 显式配置 `discovery_roots`，纳管 `~/project` 与 `/home/advancer/公共的`。
+- `memorycore/subject_context.py`：
+  - `discover_projects()`：支持多根目录扫描，自动展开 `~` 与环境变量，纳管各 root 下的 git 仓库。
+  - `infer_subject_from_title()`（新增）：智能提取标题前缀（剥离括号/标点，支持单个词元与双词连字符），反查已知项目名称与别名。
+- `memorycore/extraction.py`：
+  - `ADDITIVE_EXTRACTION_PROMPT`：基础 JSON Schema 永久声明 `"subject"` 与 `"entities"` 字段。
+  - `extract_facts()`：`SUBJECT_PROMPT_INSTRUCTION` 无条件常驻系统提示词，解耦环境路径注入。
+- `memorycore/dedup.py`：
+  - 构建四级裁决引擎：`fact.subject` 归一化 → 会话环境 `project` → `infer_subject_from_title(fact_title)` 标题反查 → 全局兜底。
+  - 自动提权与增强：兜底命中后，自动将 `mem_scope` 升级为 `project`，补齐 `project_path` 与 `project:<name>` 标签，并注入 `metadata.subject`。
+
+### 验证
+- 单测与回归：
+  - 新增 `TestSubjectConfig`（多根配置校验）、`TestInferSubjectFromTitle`（前缀反查 4 项边界）与 `test_ingest_in_non_project_dir_auto_recovers_subject_from_title`（非项目路径自动自愈）。
+  - `tests/test_subject_context.py` 32 passed；全量 pytest 607 passed / 7 skipped（0 failed）。
+- 数据自愈：
+  - 针对历史遗漏的 `2b44f21d` 执行修补，补齐 `project:mcore`、`scope=project` 与路径；`backfill_subject.py` 自动备份生产库并完成 17 条高置信存量清洗。
+- 生产服务：`mcore.service` 健康状态 200。
+
