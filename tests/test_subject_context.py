@@ -315,3 +315,34 @@ class _FakeConn:
 
     def execute(self, *_args, **_kwargs):
         return None
+
+
+# ---------------------------------------------------------------------------
+# Config Validation (Task 1)
+# ---------------------------------------------------------------------------
+
+class TestSubjectConfig:
+    def test_validate_config_discovery_roots_valid(self):
+        from memorycore.models import validate_config
+        cfg = {
+            "subject_context": {
+                "enabled": True,
+                "discovery_roots": ["~/project", "/home/advancer/公共的"],
+                "projects": [],
+            }
+        }
+        warnings = validate_config(cfg)
+        assert not any("discovery_roots" in w for w in warnings)
+
+    def test_validate_config_discovery_roots_invalid(self):
+        from memorycore.models import validate_config
+        cfg = {
+            "subject_context": {
+                "enabled": True,
+                "discovery_roots": "not-a-list",
+                "projects": [],
+            }
+        }
+        warnings = validate_config(cfg)
+        assert any("discovery_roots must be a list" in w for w in warnings)
+
