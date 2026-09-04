@@ -333,7 +333,9 @@ def build_context_pack(
         )
         candidate_discount = 0.85 if r.get("status") == "candidate" else 1.0
         feedback = max(-1.0, min(1.0, float(r.get("feedback_score") or 0)))
-        usage_rate = min(1.0, float(r.get("injected_count") or 0) / 10.0)
+        import math
+        # De-bias: smooth log-scale usage bonus bounded to max 0.02 to avoid Matthew effect
+        usage_rate = min(0.02, math.log1p(float(r.get("injected_count") or 0)) * 0.005)
 
         # F1: profile-driven rerank (pure-local).  Records whose text overlaps
         # stored profile signal words get a bounded additive boost; a
@@ -355,16 +357,16 @@ def build_context_pack(
 
         return max(
             0.0,
-            (vector_score * 0.30
-            + lexical * 0.26
+            (vector_score * 0.35
+            + lexical * 0.28
             + entity_boosts.get(r["id"], 0.0)
             + source_bonus
             + high_lexical_bonus
             + parent_penalty
             + float(r.get("importance") or 0) * 0.05
-            + usage_rate * 0.08
-            + float(r.get("effectiveness_score") or 0) * 0.04
-            + feedback * 0.03
+            + usage_rate
+            + float(r.get("effectiveness_score") or 0) * 0.02
+            + feedback * 0.02
             + _recency_score(r) * recency_weight
             + profile_boost)
             * candidate_discount
@@ -531,7 +533,8 @@ def build_context_pack(
         ts = now()
         ids_snapshot = list(used_ids)
         _write_injected(ids_snapshot, ts)
-        _auto_feedback_for_used(ids_snapshot)
+        # De-bias: stopped auto-feedback on injection to prevent Matthew effect.
+        # Genuine feedback must come from explicit agent/user evaluations.
     active_count = sum(1 for r in records if r["status"] == "active")
     warnings = (get_active_warnings(used_ids) if used_ids else []) + injection_warnings
     hit_rate = round(len(used_ids) / max(len(records), 1), 3)

@@ -208,3 +208,33 @@
 ### 回滚
 `git revert HEAD`
 
+## [迭代 224] 2026-09-04 — 消除召回马太效应：停用 auto:injected 虚假好评、重构语义强相关重排公式与清理 12,230 条自嗨反馈
+
+> 彻底斩断系统在上下文注入时无脑自打好评的假闭环；清理 12,230 条虚假反馈事件，平滑校准被刷至满分 1.0 的老油条记忆；重构 `_rank_score` 重排打分模型，将语义向量与词法相关性权重提升至 63%，对数平滑资历分至上限 0.02，彻底消除历史老记忆对新记忆与专业长尾记忆的挤占垄断。
+
+### 问题与根因
+1. **虚假好评自嗨闭环**：`build_context_pack` 末尾无条件调用 `_auto_feedback_for_used` 给所有注入记忆打 0.5 分好评，累计生产 12,230 条虚假 feedback，将 142 条老常客记忆的 `effectiveness_score` 刷到满分 1.0。
+2. **打分模型资历偏置严重**：原公式中 `usage_rate * 0.08 + effectiveness_score * 0.04 + feedback * 0.03` 赋予老记忆高达 0.15 的固定保底资历分，即便与当前任务无关也能霸占前排，导致 28.9% 的新录入专业记忆面临“冷启动天堑”，沦为零使用僵尸记忆。
+
+### 变更
+- `memorycore/storage/context_pack.py`：
+  - 在 `build_context_pack` 中彻底移除 `_auto_feedback_for_used` 调用，注入仅记录 `injected_count` / `last_injected_at`，绝不再冒充真实反馈。
+  - 重构 `_rank_score` 算法：
+    - `vector_score` 权重由 0.30 提升至 **0.35**；
+    - `lexical` 词法相关性权重由 0.26 提升至 **0.28**（文本与语义相关性合计占 **63%** 绝对主导）；
+    - `usage_rate` 资历分改用对数平滑 `min(0.02, math.log1p(injected_count) * 0.005)`，上限从 0.08 大幅收敛至 **0.02**；
+    - `effectiveness_score` 权重调为 0.02，`feedback` 权重调为 0.02。
+- 真实数据库清理与校准：
+  - 删除 `feedback_events` 中全部 12,230 条 `note = 'auto:injected'` 事件，仅保留 206 条真实种子与评估事件；
+  - 批量平滑校准主表被虚高刷到 1.0 的老记忆，满分老油条记忆清零，活跃池均分平稳回落至 0.567。
+
+### 验证
+- 实测对比：
+  - 复测 CPA EOF 修复与技术偏好查询，Top-5 召回记忆由原先被注入 200~300 次的老常客，变为 injected 为 3 次、6 次、11 次、20 次的强相关高精记忆，语义命中度大幅改善。
+- 单测与全量回归：全量 pytest **619 passed / 0 failed / 0 skipped**（全绿通过）。
+- 服务验证：`mcore.service` 平滑重启正常。
+
+### 回滚
+`git revert HEAD`
+
+
