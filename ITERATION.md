@@ -172,3 +172,39 @@
 ### 回滚
 `git revert HEAD`
 
+## [迭代 223] 2026-09-04 — 写入方架构重构与应用管理落地：收敛归一四大主体、预置初始化登记约束与全功能管理卡片
+
+> 彻底理顺 Agent 与客户端模块概念混淆问题；将散碎的内部子系统（frontend、memory-rollup、llm-curator）强制收敛归一至统一的 `mcore`，与外部 AI 客户端（`hermes`, `claude`, `codex`）形成清晰明确的写入方名录；在 `connect_agents.py` 固化新接入方预置登记与约束机制；实装应用元数据持久化、PUT 管理接口与前端管理表单（别名编辑、定位描述、访问启停与直达记忆管理）。
+
+### 问题与根因
+1. **概念混乱与假应用泛滥**：原系统直接对 `memories.source_agent` 字段进行粗暴 GROUP BY，将内部控制台 (`frontend`)、定时聚合 (`memory-rollup`)、治理裁决 (`llm-curator`) 拆分为多个独立“应用”，与真实的外部 AI 客户端混为一谈，造成认知困扰。
+2. **缺乏约束与自注册**：任何新接入方若随意传入 `source_agent`，数据库即刻凭空新增散碎来源，缺乏初始化脚本的显式命名约束与预置档案。
+3. **只读假卡片，缺乏基本管理功能**：原 `/apps/[appId]` 的 PUT 接口未做任何落盘直接原样返回，前端卡片无法编辑显示名称、备注描述，无法真正控制应用启停。
+
+### 变更
+- `memorycore/frontend_helpers.py`：
+  - 更新 `_AGENT_DISPLAY_NAME`：将 `frontend`、`memory-rollup`、`llm_curator`、`llm-curator`、`curator` 统一收敛归一为 **`mcore`**。
+  - 新增 `_DEFAULT_APP_METADATA` 预置四大核心主体的友好显示名称、定位描述与分类角色（`agent` / `system`）。
+  - 重构 `_apps_list` 与 `_app_details`：从 `agent_presence.metadata_json` 提取持久化的自定义属性。
+  - 新增 `_update_app_details(app_id, body)`：实现真正的应用配置修改落盘持久化。
+- `memorycore/frontend_v1.py`：
+  - `PUT /api/v1/apps/{app_id}` 接口全面接入 `_update_app_details(parts[1], body)`。
+- `scripts/connect_agents.py`：
+  - 新增 `OFFICIAL_APP_REGISTRY` 与 `register_app_presence` 函数，在执行接入初始化时自动在 SQLite 中预置注册各应用的标准档案，日后新接入方受此严格约束。
+- 前端交互升级 (`ui/`)：
+  - `AppsPanel.tsx`：清晰展示 4 大应用，标注角色徽章（`系统内置` / `Agent 客户端`），展示中文别名与功能定位。
+  - `AppDetailCard.tsx`：提供基本管理功能表单（修改显示别名、用途描述、启停访问开关），并附带“查看此写入方的全部记忆”直达链接。
+  - `useAppsApi.ts` & `appsSlice.ts`：扩充 `display_name`, `description`, `category` 并在 PUT 中发送规范 JSON payload。
+- 测试适配：
+  - `tests/test_frontend.py`：对齐 `mcore` 归一化断言，并新增应用元数据更新与管理功能的端到端测试。
+
+### 验证
+- 初始化验证：运行 `python scripts/connect_agents.py` 成功输出 `Registered app profiles in mcore: claude, codex, gemini, hermes, mcore, opencode`。
+- API 与持久化实测：`PUT /api/v1/apps/claude` 成功更新 `display_name` 与 `description` 并持久化到 `agent_presence`。
+- 编译与打包：前端 `pnpm tsc --noEmit` 0 错误通过，`pnpm build` 构建成功。
+- 单测与全量回归：全量 pytest **619 passed / 0 failed / 0 skipped** 全绿。
+- 服务验证：`mcore.service` 与 `mcore-ui.service` 重启成功。
+
+### 回滚
+`git revert HEAD`
+

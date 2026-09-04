@@ -119,7 +119,7 @@ def test_frontend_v1_memory_compat_routes():
     assert entities.status_code == 200
     assert any(hit["memory_id"] == memory_id for hit in entities.json())
     assert stats.json()["total_memories"] >= 1
-    app = next(row for row in apps.json()["apps"] if row["id"] == "memorycore-ui")
+    app = next(row for row in apps.json()["apps"] if row["id"] == "mcore")
     assert app["total_memories_created"] >= 1
     assert "last_activity_at" in app
     assert "status" in app
@@ -183,12 +183,25 @@ def test_frontend_apps_alias_groups_and_curator_display_name():
     assert rows["hermes"]["total_memories_created"] >= 2  # both aliases grouped
     assert "hermes-default" not in rows
     assert "hermes-default-router" not in rows
-    assert "llm-curator" in rows
-    assert rows["llm-curator"]["total_memories_created"] >= 1
+    assert "mcore" in rows
+    assert rows["mcore"]["total_memories_created"] >= 1
     assert "gemini" in rows  # identity display, still present
     # App detail resolves alias sources back to raw rows.
     detail = apps_detail("hermes")
     assert detail["total_memories_created"] >= 2
+
+    # Verify update app management functionality (PUT /api/v1/apps/{app_id})
+    with _client() as client:
+        update_resp = client.put("/api/v1/apps/hermes", json={
+            "display_name": "Hermes Pro Agent",
+            "description": "Custom Hermes Description",
+            "is_active": True,
+        })
+        assert update_resp.status_code == 200
+        up_data = update_resp.json()
+        assert up_data["display_name"] == "Hermes Pro Agent"
+        assert up_data["description"] == "Custom Hermes Description"
+        assert up_data["is_active"] is True
 
 
 def apps_detail(app_id: str) -> dict:

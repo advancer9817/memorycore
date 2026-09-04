@@ -59,7 +59,7 @@ interface UseAppsApiReturn {
   fetchAppDetails: (appId: string) => Promise<void>;
   fetchAppMemories: (appId: string, page?: number, pageSize?: number) => Promise<void>;
   fetchAppAccessedMemories: (appId: string, page?: number, pageSize?: number) => Promise<void>;
-  updateAppDetails: (appId: string, details: { is_active: boolean }) => Promise<void>;
+  updateAppDetails: (appId: string, details: { is_active?: boolean; display_name?: string; description?: string }) => Promise<any>;
   deleteApp: (appId: string) => Promise<{ archived_count: number }>;
   isLoading: boolean;
   error: string | null;
@@ -193,11 +193,16 @@ export const useAppsApi = (): UseAppsApiReturn => {
     }
   }, [dispatch]);
 
-  const updateAppDetails = async (appId: string, details: { is_active: boolean }) => {
+  const updateAppDetails = async (
+    appId: string,
+    details: { is_active?: boolean; display_name?: string; description?: string }
+  ) => {
     setIsLoading(true);
     try {
       const response = await axios.put(
-        `${getApiBaseUrl()}/api/v1/apps/${appId}?is_active=${details.is_active}`
+        `${getApiBaseUrl()}/api/v1/apps/${appId}`,
+        details,
+        { headers: { "Content-Type": "application/json" } }
       );
       setIsLoading(false);
       return response.data;

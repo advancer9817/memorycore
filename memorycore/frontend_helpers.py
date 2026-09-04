@@ -268,12 +268,36 @@ _AGENT_DISPLAY_NAME: dict[str, str] = {
     "default-router": "hermes",
     # gpt-5.5 family.
     "gpt-5.5-router": "gpt-5.5",
-    # Cosmetic rename for the system curator agent (raw name is machine-ish).
-    "llm_curator": "llm-curator",
-    # Self-explanatory raw names shown verbatim: claude, hermes, codex, gemini,
-    # gpt-5.5, frontend, memory-rollup, memorycore-ui, opencode,
-    # memorycore-smoke-test, … (memorycore-smoke-test MUST stay unmapped:
-    # tests assert its app id equals the raw source_agent).
+    # All mcore internal subsystems collapse onto 'mcore'
+    "frontend": "mcore",
+    "memory-rollup": "mcore",
+    "llm_curator": "mcore",
+    "llm-curator": "mcore",
+    "curator": "mcore",
+    "memorycore-ui": "mcore",
+}
+
+_DEFAULT_APP_METADATA: dict[str, dict[str, str]] = {
+    "claude": {
+        "display_name": "Claude Code",
+        "description": "Anthropic Claude Code 命令行交互智能体",
+        "category": "agent",
+    },
+    "hermes": {
+        "display_name": "Hermes Agent",
+        "description": "Hermes 个人全能 Agent 与长期记忆中心",
+        "category": "agent",
+    },
+    "codex": {
+        "display_name": "Codex CLI",
+        "description": "代码编写与执行辅助 Agent",
+        "category": "agent",
+    },
+    "mcore": {
+        "display_name": "MemoryCore",
+        "description": "mcore 核心记忆中枢自省、治理与控制台",
+        "category": "system",
+    },
 }
 
 
@@ -322,6 +346,9 @@ def _apps_list(
             apps_by_id[app] = {
                 "id": app,
                 "name": app,
+                "display_name": _DEFAULT_APP_METADATA.get(app, {}).get("display_name", app.capitalize()),
+                "description": _DEFAULT_APP_METADATA.get(app, {}).get("description", ""),
+                "category": _DEFAULT_APP_METADATA.get(app, {}).get("category", "agent"),
                 "total_memories_created": int(row["cnt"]),
                 "total_memories_accessed": accessed_by_agent.get(agent_raw, 0),
                 "is_active": False,
@@ -331,6 +358,7 @@ def _apps_list(
             }
         else:
             existing["total_memories_created"] += int(row["cnt"])
+            existing["total_memories_accessed"] += accessed_by_agent.get(agent_raw, 0)
             last = str(row["last_at"] or "")
             if last > str(existing.get("last_activity_at") or ""):
                 existing["last_activity_at"] = last
@@ -339,12 +367,25 @@ def _apps_list(
     now = datetime.now(timezone.utc)
     for app, item in apps_by_id.items():
         presence = presence_by_id.get(app)
-        if presence and presence.get("status"):
-            item["status"] = presence["status"]
-            item["last_seen_at"] = presence.get("last_seen_at") or ""
-            item["is_active"] = item["status"] in {"online", "idle", "busy"}
-            if str(item["last_seen_at"]) > str(item.get("last_activity_at") or ""):
-                item["last_activity_at"] = item["last_seen_at"]
+        if presence:
+            import json
+            try:
+                meta = json.loads(presence.get("metadata_json") or "{}")
+                if meta.get("display_name"):
+                    item["display_name"] = meta["display_name"]
+                if meta.get("description"):
+                    item["description"] = meta["description"]
+                if "is_active" in meta:
+                    item["is_active"] = bool(meta["is_active"])
+            except Exception:
+                pass
+            if presence.get("status"):
+                item["status"] = presence["status"]
+                item["last_seen_at"] = presence.get("last_seen_at") or ""
+                if "is_active" not in item:
+                    item["is_active"] = item["status"] in {"online", "idle", "busy"}
+                if str(item["last_seen_at"]) > str(item.get("last_activity_at") or ""):
+                    item["last_activity_at"] = item["last_seen_at"]
         else:
             # Derive status from last memory activity when no live presence record
             last_ts = item.get("last_activity_at") or ""
@@ -368,6 +409,7 @@ def _apps_list(
 
     sort_map = {
         "name": lambda item: str(item["name"]).lower(),
+        "display_name": lambda item: str(item["display_name"]).lower(),
         "memories": lambda item: int(item["total_memories_created"]),
         "memories_accessed": lambda item: int(item["total_memories_accessed"]),
         "last_activity": lambda item: str(item.get("last_activity_at") or ""),
@@ -382,6 +424,7 @@ def _apps_list(
 
 
 def _app_details(app_id: str) -> dict[str, Any]:
+    import json
     from memorycore.storage.db import read_conn as _rc
     source_agents = _source_agents_for_app_id(app_id)
     placeholders = ", ".join("?" for _ in source_agents)
@@ -395,15 +438,73 @@ def _app_details(app_id: str) -> dict[str, Any]:
             f"FROM memories WHERE source_agent IN ({placeholders}) AND last_accessed_at IS NOT NULL",
             tuple(source_agents),
         ).fetchone()
+        p_row = conn.execute("SELECT * FROM agent_presence WHERE agent_id=?", (app_id,)).fetchone()
+
     total = int(row["cnt"]) if row else 0
     accessed_count = int(accessed["cnt"]) if accessed else 0
+
+    meta = {}
+    status = "idle"
+    is_active = True
+    if p_row:
+        status = p_row["status"]
+        try:
+            meta = json.loads(p_row["metadata_json"] or "{}")
+            if "is_active" in meta:
+                is_active = bool(meta["is_active"])
+        except Exception:
+            pass
+
+    default_meta = _DEFAULT_APP_METADATA.get(app_id, {})
     return {
-        "is_active": True,
+        "id": app_id,
+        "name": app_id,
+        "display_name": meta.get("display_name") or default_meta.get("display_name", app_id.capitalize()),
+        "description": meta.get("description") or default_meta.get("description", ""),
+        "category": default_meta.get("category", "agent"),
+        "is_active": is_active,
+        "status": status,
         "total_memories_created": total,
         "total_memories_accessed": accessed_count,
         "first_accessed": str(accessed["first_ts"] or "") or None,
         "last_accessed": str(accessed["last_ts"] or "") or None,
     }
+
+
+def _update_app_details(app_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    import json
+    from memorycore.storage.db import read_conn as _rc, managed_conn as _mc
+    from memorycore.models import now as _now
+
+    with _rc() as conn:
+        row = conn.execute("SELECT * FROM agent_presence WHERE agent_id=?", (app_id,)).fetchone()
+
+    meta = {}
+    status = "idle"
+    if row:
+        status = row["status"]
+        try:
+            meta = json.loads(row["metadata_json"] or "{}")
+        except Exception:
+            meta = {}
+
+    if "display_name" in body:
+        meta["display_name"] = str(body["display_name"]).strip()
+    if "description" in body:
+        meta["description"] = str(body["description"]).strip()
+    if "is_active" in body:
+        meta["is_active"] = bool(body["is_active"])
+        status = "idle" if body["is_active"] else "paused"
+
+    ts = _now()
+    with _mc() as conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO agent_presence (agent_id, status, last_seen_at, metadata_json)
+               VALUES (?, ?, ?, ?)""",
+            (app_id, status, ts, json.dumps(meta, ensure_ascii=False)),
+        )
+
+    return _app_details(app_id)
 
 
 def _delete_app_memories(app_id: str) -> dict[str, Any]:

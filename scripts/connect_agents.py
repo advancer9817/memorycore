@@ -36,6 +36,69 @@ BACKUP_ROOT = HOME / ".agent-memory" / "memorycore" / "backups" / "connect-agent
 HOOKS_DIR = Path(__file__).resolve().parent / "hooks"
 
 
+OFFICIAL_APP_REGISTRY: dict[str, dict[str, str]] = {
+    "claude": {
+        "display_name": "Claude Code",
+        "description": "Anthropic Claude Code 命令行交互智能体",
+        "category": "agent",
+    },
+    "hermes": {
+        "display_name": "Hermes Agent",
+        "description": "Hermes 个人全能 Agent 与长期记忆中心",
+        "category": "agent",
+    },
+    "codex": {
+        "display_name": "Codex CLI",
+        "description": "代码编写与执行辅助 Agent",
+        "category": "agent",
+    },
+    "gemini": {
+        "display_name": "Gemini CLI",
+        "description": "Google Gemini 命令行助手",
+        "category": "agent",
+    },
+    "opencode": {
+        "display_name": "OpenCode",
+        "description": "OpenCode AI 编程客户端",
+        "category": "agent",
+    },
+    "mcore": {
+        "display_name": "MemoryCore",
+        "description": "mcore 核心记忆中枢自省、治理与控制台",
+        "category": "system",
+    },
+}
+
+
+def register_app_presence(agent_id: str, dry_run: bool = False) -> bool:
+    """Register official agent metadata in SQLite agent_presence table."""
+    if dry_run or agent_id not in OFFICIAL_APP_REGISTRY:
+        return False
+    try:
+        import sqlite3
+        from memorycore.models import db_path, now
+        meta = OFFICIAL_APP_REGISTRY[agent_id]
+        payload = {
+            "display_name": meta["display_name"],
+            "description": meta["description"],
+            "category": meta["category"],
+            "is_active": True,
+        }
+        db_file = db_path()
+        with sqlite3.connect(db_file) as conn:
+            conn.execute(
+                """INSERT INTO agent_presence (agent_id, status, last_seen_at, metadata_json)
+                   VALUES (?, 'idle', ?, ?)
+                   ON CONFLICT(agent_id) DO UPDATE SET
+                     metadata_json = json_patch(COALESCE(metadata_json, '{}'), excluded.metadata_json)""",
+                (agent_id, now(), json.dumps(payload, ensure_ascii=False)),
+            )
+        return True
+    except Exception as exc:
+        log(f"  ! Failed to register app profile for {agent_id}: {exc}")
+        return False
+
+
 def log(msg: str) -> None:
     print(msg)
 
@@ -752,6 +815,15 @@ def main(argv: list[str] | None = None) -> int:
             log(f"Backups: {backup_dir}")
     else:
         log("No changes needed; all selected agents already point to the endpoint.")
+
+    # Register presence metadata in mcore for selected agents + mcore itself
+    if not args.dry_run:
+        registered = []
+        for ag in {*agents, "mcore"}:
+            if register_app_presence(ag, dry_run=False):
+                registered.append(ag)
+        if registered:
+            log(f"Registered app profiles in mcore: {', '.join(sorted(registered))}")
 
     # Hook registration
     if args.register_hooks:

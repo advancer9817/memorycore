@@ -54,6 +54,7 @@ from memorycore.frontend_helpers import (
     _read_memorycore_config,
     _simple_memory,
     _source_agents_for_app_id,
+    _update_app_details,
     _write_memorycore_config,
 )
 from memorycore.frontend_http import _bool_q, _int_q, _list_q, _str_q
@@ -319,7 +320,7 @@ def _dispatch_v1_compat(
     if len(parts) == 2 and parts[0] == "apps" and method == "DELETE":
         return _delete_app_memories(parts[1])
     if len(parts) == 2 and parts[0] == "apps" and method == "PUT":
-        return _app_details(parts[1])
+        return _update_app_details(parts[1], body)
     if parts == ["context", "test"] and method == "POST":
         return _context_lab_test(body)
     if parts == ["config"] and method == "GET":

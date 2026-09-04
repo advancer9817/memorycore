@@ -21,6 +21,11 @@ export interface AccessedMemory extends AppMemory {
 }
 
 export interface AppDetails {
+  id?: string;
+  name?: string;
+  display_name?: string;
+  description?: string;
+  category?: string;
   is_active: boolean;
   total_memories_created: number;
   total_memories_accessed: number;
@@ -31,6 +36,9 @@ export interface AppDetails {
 export interface App {
   id: string;
   name: string;
+  display_name?: string;
+  description?: string;
+  category?: string;
   total_memories_created: number;
   total_memories_accessed: number;
   is_active?: boolean;
