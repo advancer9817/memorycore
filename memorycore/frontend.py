@@ -312,6 +312,7 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
             retrieval_mode=body.get("retrieval_mode", "strict"),
             prefer_atomic=bool(body.get("prefer_atomic", True)),
             include_parent=bool(body.get("include_parent", False)),
+            verbose=bool(body.get("verbose", True)),
         )
     if parts == ["context", "stats"] and method == "GET":
         return get_context_quality_stats(_int_q(query, "limit", 500))

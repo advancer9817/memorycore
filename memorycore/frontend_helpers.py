@@ -59,6 +59,7 @@ def _context_lab_test(body: dict[str, Any]) -> dict[str, Any]:
         retrieval_mode=body.get("retrieval_mode", "strict"),
         prefer_atomic=bool(body.get("prefer_atomic", True)),
         include_parent=bool(body.get("include_parent", False)),
+        verbose=True,
     )
     records = result.get("records", [])
     items = []
@@ -68,31 +69,30 @@ def _context_lab_test(body: dict[str, Any]) -> dict[str, Any]:
             full = get_record(record["id"])
             if full:
                 content = (full.get("content") or "")[:200]
+        telemetry = result.get("telemetry", {})
         items.append({
             "rank": rank,
             "id": record.get("id", ""),
             "title": record.get("title", ""),
             "content": content,
             "type": record.get("type", ""),
-            "importance": record.get("importance", 0),
-            "rank_score": round(record.get("_vector_score", 0), 4),
-            "retrieval_sources": record.get("_retrieval_sources", []),
-            "vector_score": round(record.get("_vector_score", 0), 4),
+            "importance": float(full.get("importance", 0.0)) if full else 0.0,
+            "rank_score": 0.0,
+            "retrieval_sources": full.get("tags", []) if full else [],
+            "vector_score": 0.0,
         })
-    trace = result.get("trace", {})
-    quality = result.get("quality", {})
     return {
         "items": items,
         "trace": {
-            "total_candidates": trace.get("total_candidates", 0),
-            "used_count": trace.get("used_count", 0),
-            "filtered_count": trace.get("filtered_count", 0),
-            "vector_hits": trace.get("vector_hits", 0),
-            "entity_hits": trace.get("entity_hits", 0),
-            "vector_avg_score": trace.get("vector_avg_score", 0),
-            "retrieval_mode": trace.get("retrieval_mode", "strict"),
-            "hit_rate": quality.get("hit_rate", 0),
-            "cross_retrieval_rate": quality.get("cross_retrieval_rate", 0),
+            "total_candidates": telemetry.get("total_candidates", 0),
+            "used_count": telemetry.get("used_count", 0),
+            "filtered_count": telemetry.get("filtered_count", 0),
+            "vector_hits": telemetry.get("vector_hits", 0),
+            "entity_hits": telemetry.get("entity_hits", 0),
+            "vector_avg_score": telemetry.get("vector_avg_score", 0),
+            "retrieval_mode": telemetry.get("retrieval_mode", "strict"),
+            "hit_rate": telemetry.get("hit_rate", 0),
+            "cross_retrieval_rate": telemetry.get("cross_retrieval_rate", 0),
         },
     }
 

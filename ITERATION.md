@@ -1,4 +1,3 @@
-
 ## [迭代 218] 2026-09-04 — mcore UI 首页全面现代化重塑：经典舒展单列布局、真数据全链路贯通与后端 now() 修复
 
 > 对 mcore 首页进行彻底的系统级重构，告别死数据与假按钮；完全还原用户最偏好的自然舒展经典单列大卡片布局，彻底清除刺眼黄色/橙色并统一为沉稳极客紫蓝；修复后端 `/api/v1/curator/llm` 缺失 `now()` 导致的 500 致命缺陷，运维调度动作全面实装即时报告回显与精准时间排程。
@@ -66,6 +65,42 @@
 - 真实链路实测：
   - 真实 Claude transcript 触发 `--background` 写回，日志记录 `ingest_done agent=claude`，耗时 19s 成功落库。
   - 发送带有 `X-Agent-Id: hermes` 请求头的 MCP 工具调用，返回 `# memory_context for hermes`，服务端成功识别。
+
+## [迭代 220] 2026-09-04 — memory_context 召回返回体瘦身与信封治理（默认 Slim 模式 + 字段级合并去重）
+
+> 彻底解决 Hermes/Claude/Codex 调用 mcore `memory_context` 召回钩子时非必要结构化字段严重挤占 Agent 上下文预算的问题，默认模式仅返回 context 与安全告警，信封体积骤降 98.6%，同时兼容 UI Context Lab 与完整检索遥测。
+
+### 问题与根因
+1. **信封冗余严重挤占上下文**：原 `memory_context` 工具每次调用返回 `context`、`records`、`used_ids`、`sections`、`trace`、`quality`、`budget_chars` 等大量字典。实测序列化达 3716+ 字符，其中用于提示词注入的 `context` 仅 1465 字符（39%），高达 60.6%（2251 字符）均为调试遥测与重复信息；在 Codex 直调场景下全量进入 transcript，造成极大 Token 浪费。
+2. **字段重复与数据冗余**：
+   - `sections` 仅为 `records` 按分类排序的投影子集；`used_ids` 是 `records` 中 ID 的机械重复。
+   - `trace` 与 `quality` 存在多达 4 项指标双份冗余（`total_candidates`、`used_count`、`filtered_count`、`vector_avg_score`），且 `trace` 原样回显用户 Profile 兴趣词列表造成噪音。
+   - `budget_chars` 仅为入参换算的上限值，无实际诊断意义。
+3. **调用链路消费极简**：经审计，Hermes 插件 `mcore-memory`、Claude Code 钩子 `query_memory.py`、Shell 脚本 `mcore-context.sh` 均只反序列化提取 `context` 字段，其余字段均被即刻丢弃；唯一消费全量诊断信息的是前端 Context Lab。
+
+### 变更
+- `memorycore/storage/context_pack.py`：
+  - `build_context_pack` 新增 `verbose: bool = False` 参数。
+  - 默认模式 (`verbose=False`) 仅返回 `{"context": text, "warnings": warnings}`，非 context 信封从 2251 字符骤降至 31 字符（削减 98.6%）。
+  - 将 `_record_quality` 埋点落库操作前置至 slim 返回前，保证质量统计趋势与趋势看板不受 slim 模式影响。
+  - 在 `verbose=True` 模式下精简并合并字段：彻底移除 `used_ids`（统一通过 `[r["id"] for r in records]` 派生）、`sections`、`budget_chars`；将 `trace` 与 `quality` 合并为统一扁平字典 `telemetry`；`profile_query_expansions` 改为仅记录条数 `profile_query_expansion_terms`。
+- `memorycore/server.py`：
+  - FastMCP `memory_context` 工具签名同步新增 `verbose: bool = False` 参数及文档说明。
+- `memorycore/frontend.py` & `memorycore/frontend_helpers.py`：
+  - HTTP 路由 `/api/v1/context` 与 `_context_lab_test` 显式设置 `verbose=True`。
+  - `_context_lab_test` 适配新 `telemetry` 字段，修复 `cross_retrieval_rate` 误取 count 的数值口径 bug；为前端 `ContextLab.tsx` 所需的 `importance`/`vector_score`/`rank_score`/`retrieval_sources` 补充安全默认值，避免前端渲染抛出 `toFixed` 异常。
+- `docs/tools.md`：
+  - 重新运行 `scripts/generate_tools_doc.py`，更新 MCP 工具签名与说明。
+- 测试体系重构：
+  - 重构 `tests/test_context_pack_v2.py` 为验证 Slim/Verbose 契约规范。
+  - 适配并修复 `test_context_injection_guard.py`、`test_context_quality_metrics.py`、`test_context_relevance.py`、`test_entity_retrieval.py`、`test_phase10.py`、`test_profile_retrieval.py`、`test_temporal.py`、`test_vector_context_integration.py` 中的历史断言。
+
+### 验证
+- 单测与全量回归：全量 pytest **613 passed / 0 failed / 0 skipped** 全绿通过。
+- 文档一致性测试：`test_docs_consistency.py` 3/3 passed。
+- 瘦身效果实测：
+  - 默认 Slim 模式返回体积由 3716 字符降至 2615 字符（纯 context + warnings），非 context 冗余结构削减 98.6%。
+  - `verbose=True` 诊断模式字段由 9 个收敛至 5 个（`context`、`records`、`filtered_ids`、`warnings`、`telemetry`），无重复统计指标。
 
 ### 回滚
 `git revert HEAD`

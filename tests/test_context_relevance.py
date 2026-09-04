@@ -29,10 +29,11 @@ def test_context_pack_keeps_relevant_chinese_prompt_memory(monkeypatch):
         memory_id="rel-unrelated-deploy-high-priority",
     )
 
-    pack = lm.build_context_pack("输入提示词后 检索到的记忆相关性不强这个问题也列入进去", agent="pytest")
+    pack = lm.build_context_pack("输入提示词后 检索到的记忆相关性不强这个问题也列入进去", agent="pytest", verbose=True)
 
-    assert related["id"] in pack["used_ids"]
-    assert unrelated["id"] not in pack["used_ids"]
+    used_ids = [r["id"] for r in pack["records"]]
+    assert related["id"] in used_ids
+    assert unrelated["id"] not in used_ids
 
 
 def test_context_pack_filters_weak_chinese_keyword_overlap(monkeypatch):
@@ -55,10 +56,11 @@ def test_context_pack_filters_weak_chinese_keyword_overlap(monkeypatch):
         memory_id="rel-weak-chinese-keyword-overlap",
     )
 
-    pack = lm.build_context_pack("输入提示词后 检索到的记忆相关性不强这个问题也列入进去", agent="pytest")
+    pack = lm.build_context_pack("输入提示词后 检索到的记忆相关性不强这个问题也列入进去", agent="pytest", verbose=True)
 
-    assert related["id"] in pack["used_ids"]
-    assert weak["id"] not in pack["used_ids"]
+    used_ids = [r["id"] for r in pack["records"]]
+    assert related["id"] in used_ids
+    assert weak["id"] not in used_ids
 
 
 def test_context_pack_does_not_inject_unrelated_fallback_memories():
@@ -73,11 +75,10 @@ def test_context_pack_does_not_inject_unrelated_fallback_memories():
     pack = lm.build_context_pack(
         "zzzz_unmatched_prompt_about_totally_different_subject_9911",
         agent="pytest",
+        verbose=True,
     )
-
-    assert pack["trace"]["fallback_used"] is True
-    assert pack["trace"]["fallback_candidates"] == 1
-    assert pack["used_ids"] == []
+    assert pack["telemetry"]["fallback_used"] is True
+    assert pack["telemetry"]["fallback_candidates"] == 1
     assert pack["records"] == []
     assert "High importance unrelated deployment note" not in pack["context"]
 
@@ -96,9 +97,10 @@ def test_context_pack_filters_low_relevance_vector_only_hits(monkeypatch):
         lambda task, top_k=20, score_threshold=0.35: [(record["id"], 0.33)],
     )
 
-    pack = lm.build_context_pack("deep qdrant semantic relevance calibration", agent="pytest")
+    pack = lm.build_context_pack("deep qdrant semantic relevance calibration", agent="pytest", verbose=True)
 
-    assert record["id"] not in pack["used_ids"]
+    used_ids = [r["id"] for r in pack["records"]]
+    assert record["id"] not in used_ids
     assert pack["records"] == []
 
 
@@ -116,9 +118,10 @@ def test_context_pack_filters_medium_score_vector_only_without_lexical_match(mon
         lambda task, top_k=20, score_threshold=0.35: [(record["id"], 0.34)],
     )
 
-    pack = lm.build_context_pack("输入提示词后 检索到的记忆相关性不强", agent="pytest")
+    pack = lm.build_context_pack("输入提示词后 检索到的记忆相关性不强", agent="pytest", verbose=True)
 
-    assert record["id"] not in pack["used_ids"]
+    used_ids = [r["id"] for r in pack["records"]]
+    assert record["id"] not in used_ids
     assert pack["records"] == []
 
 
@@ -175,12 +178,13 @@ def test_context_pack_vector_only_hits_respect_scope_and_project_path(monkeypatc
         agent="pytest",
         scope="team-a",
         project_path="/work/a",
+        verbose=True,
     )
-
-    assert allowed["id"] in pack["used_ids"]
-    assert global_allowed["id"] in pack["used_ids"]
-    assert wrong_scope["id"] not in pack["used_ids"]
-    assert wrong_project["id"] not in pack["used_ids"]
+    used_ids = [r["id"] for r in pack["records"]]
+    assert allowed["id"] in used_ids
+    assert global_allowed["id"] in used_ids
+    assert wrong_scope["id"] not in used_ids
+    assert wrong_project["id"] not in used_ids
 
 
 def test_context_relevance_evaluation_fixture(monkeypatch):
@@ -201,12 +205,13 @@ def test_context_relevance_evaluation_fixture(monkeypatch):
                 importance=record.get("importance", 0.5),
             )
 
-        pack = lm.build_context_pack(case["task"], agent="relevance-eval")
+        pack = lm.build_context_pack(case["task"], agent="relevance-eval", verbose=True)
 
+        used_ids = [r["id"] for r in pack["records"]]
         for memory_id in case["expected_ids"]:
-            assert memory_id in pack["used_ids"], case["name"]
+            assert memory_id in used_ids, case["name"]
         for memory_id in case["rejected_ids"]:
-            assert memory_id not in pack["used_ids"], case["name"]
-        assert pack["quality"]["hit_rate"] >= case["min_hit_rate"], case["name"]
-        assert pack["quality"]["filter_rate"] <= case["max_filter_rate"], case["name"]
-        assert "filtered_count" in pack["trace"], case["name"]
+            assert memory_id not in used_ids, case["name"]
+        assert pack["telemetry"]["hit_rate"] >= case["min_hit_rate"], case["name"]
+        assert pack["telemetry"]["filter_rate"] <= case["max_filter_rate"], case["name"]
+        assert "filtered_count" in pack["telemetry"], case["name"]

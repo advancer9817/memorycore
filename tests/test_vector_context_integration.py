@@ -19,15 +19,16 @@ def test_vector_only_hits_retrieved():
 
     # We mock _vector_search_ids to return this record with a high score
     with patch("memorycore.storage.search._vector_search_ids", return_value=[(record["id"], 0.9)]):
-        pack = lm.build_context_pack("An entirely unlinked block of wording")
+        pack = lm.build_context_pack("An entirely unlinked block of wording", verbose=True)
 
-    assert record["id"] in pack["used_ids"]
+    used_ids = [r["id"] for r in pack["records"]]
+    assert record["id"] in used_ids
 
-    # Check trace
-    trace = pack["trace"]
-    assert trace["vector_hits"] == 1
-    assert trace["vector_only_count"] >= 1
-    assert trace["vector_avg_score"] == 0.9
+    # Check telemetry
+    telemetry = pack["telemetry"]
+    assert telemetry["vector_hits"] == 1
+    assert telemetry["vector_only_count"] >= 1
+    assert telemetry["vector_avg_score"] == 0.9
 
 def test_cross_retrieval_bonus_ranking():
     """Verify that records hit by BOTH fts and vector are ranked higher than single-source hits."""
@@ -59,9 +60,9 @@ def test_cross_retrieval_bonus_ranking():
     )
 
     with patch("memorycore.storage.search._vector_search_ids", return_value=[(record_b["id"], 0.8), (record_c["id"], 0.9)]):
-        pack = lm.build_context_pack("semantic matching keyword query")
+        pack = lm.build_context_pack("semantic matching keyword query", verbose=True)
         
-    used_ids = pack["used_ids"]
+    used_ids = [r["id"] for r in pack["records"]]
     assert record_b["id"] in used_ids
     
     # In ranking, record_b should ideally beat record_a because of cross-retrieval bonus
@@ -73,8 +74,8 @@ def test_cross_retrieval_bonus_ranking():
     
     assert idx_b < idx_a
 
-    trace = pack["trace"]
-    assert trace["cross_retrieval_count"] >= 1
+    telemetry = pack["telemetry"]
+    assert telemetry["cross_retrieval_count"] >= 1
 
 def test_qdrant_fallback_graceful():
     """If vector store fails or returns nothing, FTS still works and logs fallback."""
@@ -87,9 +88,10 @@ def test_qdrant_fallback_graceful():
     )
 
     with patch("memorycore.storage.search._vector_search_ids", side_effect=Exception("Qdrant offline")):
-        pack = lm.build_context_pack("Standard keyword hit")
+        pack = lm.build_context_pack("Standard keyword hit", verbose=True)
         
-    assert record["id"] in pack["used_ids"]
+    used_ids = [r["id"] for r in pack["records"]]
+    assert record["id"] in used_ids
     # We didn't explicitly implement catching exception from _vector_search_ids in build_context_pack,
     # wait, _vector_search_ids catches it and returns []. The fallback flag was requested for vs.available.
     # Let's mock get_vector_store to return unavailable

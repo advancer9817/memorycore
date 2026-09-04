@@ -66,6 +66,7 @@ Return a compact context pack for a task, grouped by memory class.
 | `retrieval_mode` | `str` | `'strict'` |
 | `prefer_atomic` | `bool` | `True` |
 | `include_parent` | `bool` | `False` |
+| `verbose` | `bool` | `False` |
 
 ### `memory_context_stats`
 

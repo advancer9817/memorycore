@@ -293,8 +293,14 @@ def memory_context(
     retrieval_mode: str = "strict",
     prefer_atomic: bool = True,
     include_parent: bool = False,
+    verbose: bool = False,
 ) -> dict[str, Any]:
-    """Return a compact context pack for a task, grouped by memory class."""
+    """Return a compact context pack for a task, grouped by memory class.
+
+    Default (verbose=False) returns only {"context", "warnings"} — the slim
+    envelope hooks and agents consume. Set verbose=True to also get records,
+    filtered_ids, and telemetry (retrieval diagnostics).
+    """
     return build_context_pack(
         task,
         agent,
@@ -304,6 +310,7 @@ def memory_context(
         retrieval_mode=retrieval_mode,
         prefer_atomic=prefer_atomic,
         include_parent=include_parent,
+        verbose=verbose,
     )
 
 

@@ -236,15 +236,15 @@ def test_build_context_pack_profile_boost_and_expansion(tmp_path, profile_cfg, m
     ])
 
     result = context_pack.build_context_pack(
-        "技术栈 方案", agent="test", token_budget=2000,
+        "技术栈 方案", agent="test", token_budget=2000, verbose=True,
     )
-    used = result["used_ids"]
+    used = [r["id"] for r in result["records"]]
     # Java memory is boosted and injected
     assert "prof-java-1" in used
     # contradicting user_profile memory filtered out (F4) -> in warnings
     assert "prof-python-1" not in used
     conflict_warnings = [w for w in result["warnings"] if w.get("type") == "profile_conflict"]
     assert any(w["memory_id"] == "prof-python-1" for w in conflict_warnings)
-    # trace shows expansion + conflict count
-    assert result["trace"]["profile_boost_weight"] == pytest.approx(0.15)
-    assert result["trace"]["profile_conflict_filtered"] >= 1
+    # telemetry shows expansion + conflict count
+    assert result["telemetry"]["profile_boost_weight"] == pytest.approx(0.15)
+    assert result["telemetry"]["profile_conflict_filtered"] >= 1

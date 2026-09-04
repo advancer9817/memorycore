@@ -114,6 +114,7 @@ def build_context_pack(
     retrieval_mode: str = "strict",
     prefer_atomic: bool = True,
     include_parent: bool = False,
+    verbose: bool = False,
 ) -> dict[str, Any]:
     max_chars = max(800, int(token_budget) * 4)
     mode = str(retrieval_mode or "strict").strip().lower()
@@ -448,7 +449,6 @@ def build_context_pack(
     grouped: dict[str, list[dict[str, Any]]] = {k: [] for k in groups_order}
     for r in rank_capped:
         grouped.setdefault(r.get("type", "episodic_memory"), []).append(r)
-    # Output: sorted by rank_score across all types, with type labels inline
     lines = [
         f"# memory_context for {agent}",
         f"task: {task}",
@@ -561,7 +561,6 @@ def build_context_pack(
 
     vector_avg_score = sum(vector_scores) / max(len(vector_scores), 1) if vector_scores else 0.0
     vector_max_score = max(vector_scores) if vector_scores else 0.0
-    cross_retrieval_rate = cross_retrieval_count / max(len(used_ids), 1)
 
     quality = {
         "total_candidates": len(records),
@@ -575,9 +574,16 @@ def build_context_pack(
         "filter_rate": filter_rate,
         "ineffective_rate": ineffective_rate,
         "vector_avg_score": round(vector_avg_score, 3),
-        "cross_retrieval_rate": round(cross_retrieval_rate, 3),
+        "cross_retrieval_rate": round(cross_retrieval_count / max(len(used_ids), 1), 3),
     }
+    # Quality events are recorded server-side BEFORE the slim early return so
+    # memory_context_stats trend data stays complete in both modes.
     _record_quality(task, task_type, agent, project_path, scope, quality, type_weights)
+    # Slim envelope (default): callers (hooks/plugins) only consume `context`;
+    # warnings are preserved because they carry injection-guard/profile-conflict
+    # signals. This cuts the MCP response by ~60%.
+    if not verbose:
+        return {"context": text, "warnings": warnings}
     used_record_map = {r["id"]: r for r in records if r["id"] in used_id_set}
     # records: slim view of injected records only (no content field to avoid bloat)
     slim_records = [
@@ -585,62 +591,57 @@ def build_context_pack(
             "id": r["id"],
             "type": r["type"],
             "title": r["title"],
-            "importance": r["importance"],
-            "scope": r["scope"],
-            "tags": r.get("tags", []),
-            "_retrieval_sources": r.get("_retrieval_sources", []),
-            "_vector_score": vector_hits.get(r["id"], 0.0),
         }
         for mid in used_ids
         if (r := used_record_map.get(mid))
     ]
-    sections: list[dict[str, Any]] = []
-    for group in groups_order:
-        group_records = [r for r in grouped.get(group, []) if r["id"] in used_id_set]
-        if group_records:
-            sections.append({"type": group, "records": [
-                {"id": r["id"], "title": r["title"], "importance": r["importance"]}
-                for r in group_records
-            ]})
+    # P1: trace + quality merged into a single telemetry dict, deduplicated
+    # (previously total_candidates/used_count/filtered_count/vector_avg_score
+    # appeared in both; profile_query_expansions truncated to its length).
+    telemetry = {
+        "total_candidates": len(records),
+        "used_count": len(used_ids),
+        "filtered_count": len(filtered_ids),
+        "active_ratio": round(active_count / max(len(records), 1), 3),
+        "avg_importance": round(sum(r["importance"] for r in records) / max(len(records), 1), 3),
+        "stale_in_results": sum(1 for r in records if r["status"] == "stale"),
+        "fallback_used": fallback_used,
+        "fallback_candidates": fallback_candidates,
+        "vector_hits": len(vector_hits),
+        "entity_hits": len(entity_hits),
+        "vector_avg_score": round(vector_avg_score, 3),
+        "vector_max_score": round(vector_max_score, 3),
+        "cross_retrieval_count": cross_retrieval_count,
+        "cross_retrieval_rate": round(cross_retrieval_count / max(len(used_ids), 1), 3),
+        "vector_only_count": vector_only_count,
+        "fts_only_count": fts_only_count,
+        "clustered_count": clustered_count,
+        "cluster_groups": cluster_groups,
+        "vector_fallback": not vs_available,
+        "retrieval_mode": mode,
+        "min_relevance_score": mode_settings["min_context_score"],
+        "min_vector_only_relevance_score": mode_settings["min_vector_only_score"],
+        "min_keyword_lexical_relevance_score": _MIN_KEYWORD_LEXICAL_RELEVANCE_SCORE,
+        "task_type": task_type,
+        "profile_boost_weight": _profile_boost_weight,
+        "profile_query_expansion_terms": len(_profile_expansions),
+        "profile_conflict_filtered": sum(
+            1 for w in injection_warnings if w.get("type") == "profile_conflict"
+        ),
+        "hit_rate": hit_rate,
+        "filter_rate": filter_rate,
+        "ineffective_rate": ineffective_rate,
+        "estimated_tokens": len(text) // 4,
+        "used_chars": len(text),
+    }
+    if not _profile_conflict_filter or not _profile_enabled:
+        telemetry.pop("profile_conflict_filtered", None)
     return {
         "context": text,
         "records": slim_records,
-        "used_ids": used_ids,
         "filtered_ids": filtered_ids,
         "warnings": warnings,
-        "budget_chars": max_chars,
-        "quality": quality,
-        "sections": sections,
-        "trace": {
-            "total_candidates": len(records),
-            "used_count": len(used_ids),
-            "filtered_count": len(filtered_ids),
-            "fallback_used": fallback_used,
-            "fallback_candidates": fallback_candidates,
-            "vector_hits": len(vector_hits),
-            "entity_hits": len(entity_hits),
-            "vector_avg_score": round(vector_avg_score, 3),
-            "vector_max_score": round(vector_max_score, 3),
-            "cross_retrieval_count": cross_retrieval_count,
-            "vector_only_count": vector_only_count,
-            "fts_only_count": fts_only_count,
-            "clustered_count": clustered_count,
-            "cluster_groups": cluster_groups,
-            "vector_fallback": not vs_available,
-            "retrieval_mode": mode,
-            "prefer_atomic": prefer_atomic,
-            "include_parent": include_parent,
-            "min_relevance_score": mode_settings["min_context_score"],
-            "min_vector_only_relevance_score": mode_settings["min_vector_only_score"],
-            "min_keyword_lexical_relevance_score": _MIN_KEYWORD_LEXICAL_RELEVANCE_SCORE,
-            "task_type": task_type,
-            "type_weights": type_weights,
-            "profile_boost_weight": _profile_boost_weight,
-            "profile_query_expansions": _profile_expansions,
-            "profile_conflict_filtered": sum(
-                1 for w in injection_warnings if w.get("type") == "profile_conflict"
-            ),
-        },
+        "telemetry": telemetry,
     }
 import math
 from typing import Any

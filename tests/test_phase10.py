@@ -63,7 +63,7 @@ def test_build_context_pack_increments_injected_count():
     assert before["injected_count"] == 0
     assert before["last_injected_at"] is None
 
-    lm.build_context_pack("injection test", agent="pytest")
+    lm.build_context_pack("injection test", agent="pytest", verbose=True)
 
     after = lm.get_record(mid)
     assert after["injected_count"] >= 1
@@ -117,10 +117,10 @@ def test_init_db_migrates_existing_memories_table_without_effectiveness_columns(
     monkeypatch.setenv("LOCAL_MEMORY_DB", str(db))
     lm._INITIALIZED_DB_PATHS.clear()
 
-    pack = lm.build_context_pack("legacy content", agent="pytest")
+    pack = lm.build_context_pack("legacy content", agent="pytest", verbose=True)
     migrated = lm.get_record("legacy-id")
 
-    assert "legacy-id" in pack["used_ids"]
+    assert "legacy-id" in [r["id"] for r in pack["records"]]
     assert migrated["effectiveness_score"] == pytest.approx(0.5, abs=0.05)
     assert migrated["injected_count"] >= 1
     assert migrated["ineffective_count"] == 0

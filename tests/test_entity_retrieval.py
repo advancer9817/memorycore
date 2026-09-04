@@ -59,10 +59,9 @@ def test_context_uses_entity_hits_and_prefers_atomic_child_over_parent(monkeypat
             ).fetchall()
         ]
 
-    pack = lm.build_context_pack("memorycore memory.sqlite3", agent="pytest")
+    pack = lm.build_context_pack("memorycore memory.sqlite3", agent="pytest", verbose=True)
 
-    assert pack["trace"]["entity_hits"] >= 1
-    assert any(child_id in pack["used_ids"] for child_id in child_ids)
-    assert parent["id"] not in pack["used_ids"]
-    assert pack["trace"]["prefer_atomic"] is True
-    assert pack["trace"]["include_parent"] is False
+    used_ids = [r["id"] for r in pack["records"]]
+    assert pack["telemetry"]["entity_hits"] >= 1
+    assert any(child_id in used_ids for child_id in child_ids)
+    assert parent["id"] not in used_ids

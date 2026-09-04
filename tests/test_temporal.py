@@ -97,8 +97,8 @@ def test_context_pack_recency_soft_boost_prefers_newer_equally_relevant_memory()
             (_future(0), new["id"]),
         )
 
-    pack = build_context_pack("shared recency ranking marker", token_budget=1000)
-    ordered_ids = pack["used_ids"]
+    pack = build_context_pack("shared recency ranking marker", token_budget=1000, verbose=True)
+    ordered_ids = [r["id"] for r in pack["records"]]
     assert ordered_ids.index(new["id"]) < ordered_ids.index(old["id"])
 
 
@@ -206,9 +206,10 @@ def test_context_pack_recency_weight_is_configurable(monkeypatch, tmp_path):
             (_future(0), new["id"]),
         )
 
-    pack = build_context_pack("shared recency config marker", token_budget=1000)
-    assert old["id"] in pack["used_ids"]
-    assert new["id"] in pack["used_ids"]
+    pack = build_context_pack("shared recency config marker", token_budget=1000, verbose=True)
+    used_ids = [r["id"] for r in pack["records"]]
+    assert old["id"] in used_ids
+    assert new["id"] in used_ids
 
 
 # ── auto_decay in curator_report ─────────────────────────────────────────────
