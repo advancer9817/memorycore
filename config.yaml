@@ -3,8 +3,9 @@ backend:
   primary: sqlite
 context_pack:
   default_token_budget: 2000
+  max_total_records: 12
+  max_records_per_group: 3
   include_stale_warnings: true
-  max_records_per_group: 6
   profile_boost_weight: 0.15
   profile_conflict_filter_enabled: true
   profile_conflict_penalty: 0.6

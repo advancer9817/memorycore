@@ -543,6 +543,7 @@ def init_db(conn: sqlite3.Connection) -> None:
         "memory_vec", "memory_vec_chunks", "memory_vec_info",
         "memory_vec_rowids", "memory_vec_vector_chunks00",
         "memory_embedding_index",
+        "agent_permissions",
     ])
     _ensure_column(conn, "memories", "injected_count", "INTEGER NOT NULL DEFAULT 0")
     _ensure_column(conn, "memories", "ineffective_count", "INTEGER NOT NULL DEFAULT 0")

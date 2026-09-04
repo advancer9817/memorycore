@@ -237,4 +237,36 @@
 ### 回滚
 `git revert HEAD`
 
+## [迭代 225] 2026-09-04 — 上下文单次注入条数精炼收敛 (Token 减半) 与数据库历史死表清理
+
+> 彻底解决检索单次注入条数过多挤占 Agent 上下文预算的问题；引入全局硬上限 `max_total_records=12` 与单类型 `max_records_per_group=3` 约束，注入字符数从 7,900+ 缩减至 3,100~4,600 字（Token 消耗缩减约 50%）；物理删除数据库历史死表 `agent_permissions` 并加入底层自动维护死表清单。
+
+### 问题与根因
+1. **注入条数偏多膨胀 Token**：原系统仅限制了单个类型上限为 6 条，但在 8~9 个类型并发召回且未超 8000 字符限制时，最终被塞进上下文的记忆多达 26~28 条，造成严重的信息过载并消耗约 2,600 Token。
+2. **历史死表残留**：数据库遗留的 `agent_permissions`（0行）是早期权限废弃表，无任何读写引用，占用 schema 空间。
+
+### 变更
+- `config.yaml`：
+  - `context_pack` 配置段新增 `max_total_records: 12`（全局上限 12 条）。
+  - `max_records_per_group` 从 6 调优为 3（单类型最多 3 条，防止某一类型霸屏）。
+- `memorycore/storage/context_pack.py`：
+  - 在分组截断逻辑前加入 `max_total_records` 硬截断；
+  - 实测输出精准收敛至 11~12 条高精记忆，Context 字符数从 7,500+ 降至 3,100~4,600 字符（估算 Token 仅 1,000~1,500）。
+- `memorycore/storage/db.py`：
+  - 将 `agent_permissions` 加入 `_drop_dead_tables` 清理清单；
+  - 生产 SQLite 数据库执行 `DROP TABLE IF EXISTS agent_permissions`。
+
+### 验证
+- 实测对比：
+  - “日常工程任务”：召回 11 条，3619 字符（约 1200 Token）；
+  - “用户偏好查询”：召回 12 条，3132 字符（约 1044 Token）；
+  - “架构决策检索”：召回 12 条，4395 字符（约 1465 Token）；
+  - 均比原先 26~28 条的 7900 字符减半收缩。
+- 单测与全量回归：全量 pytest **619 passed / 0 failed / 0 skipped** 全绿通过。
+- 服务验证：`mcore.service` 重启成功。
+
+### 回滚
+`git revert HEAD`
+
+
 

@@ -436,15 +436,19 @@ def build_context_pack(
         "project_memory", "decision", "timeline_event", "episodic_memory", "feedback",
     ]
     # Global rank-sorted output: records are already sorted by _rank_score.
-    # Apply per-type cap (max 6 each) but output in rank order, not type order.
+    # Apply total cap (default max 12) and per-type cap (default max 3 each) to prevent token bloating.
+    max_total_records = int(cp_cfg.get("max_total_records", 12))
+    max_per_group = int(cp_cfg.get("max_records_per_group", 3))
     type_counts: dict[str, int] = {}
     rank_capped: list[dict[str, Any]] = []
     for r in records:
+        if len(rank_capped) >= max_total_records:
+            break
         t = r.get("type", "episodic_memory")
         type_counts[t] = type_counts.get(t, 0) + 1
-        if t == "episodic_memory" and type_counts[t] > 4:
+        if t == "episodic_memory" and type_counts[t] > min(2, max_per_group):
             continue
-        if type_counts[t] > 6:
+        if type_counts[t] > max_per_group:
             continue
         rank_capped.append(r)
 
