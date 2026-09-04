@@ -50,19 +50,23 @@ def _start_auto_curator(interval_hours: float = 6.0) -> None:
                 from memorycore.storage.governance import auto_expire_stale_reviews
                 from memorycore.storage.audit import cleanup_stale_audit_events
                 from memorycore.storage.search import cleanup_stale_quality_events
+                from memorycore.storage.maintenance import reconcile_and_purge_orphans
                 handoff_cleanup = cleanup_expired_handoffs()
                 sync_result = _drain_vector_sync_queue()
                 expire_result = auto_expire_stale_reviews(stale_days=14, dry_run=False)
                 audit_cleaned = cleanup_stale_audit_events(retention_days=90)
                 quality_cleaned = cleanup_stale_quality_events(retention_days=30)
+                reconcile_res = reconcile_and_purge_orphans(dry_run=False, sync_missing=True)
                 logger.info(
-                    "[auto-curator] handoff_cleaned=%s sync_retried=%s/%s expired_reviews=%s audit_cleaned=%s quality_cleaned=%s",
+                    "[auto-curator] handoff_cleaned=%s sync_retried=%s/%s expired_reviews=%s audit_cleaned=%s quality_cleaned=%s vector_purged=%s vector_backfilled=%s",
                     handoff_cleanup.get("cleaned", 0),
                     sync_result.get("succeeded", 0),
                     sync_result.get("failed", 0),
                     expire_result.get("expired", 0),
                     audit_cleaned,
                     quality_cleaned,
+                    reconcile_res.get("orphans_purged", 0),
+                    reconcile_res.get("missing_resynced", 0),
                 )
             except Exception as exc:
                 logger.warning("[auto-curator] error: %s", exc)
@@ -213,6 +217,10 @@ def main(argv: list[str] | None = None) -> int:
                                help="Skip VACUUM after an applied archive")
     p_maintenance.add_argument("--stats", action="store_true",
                                help="List existing maintenance archive manifests")
+    p_reconcile = sub.add_parser("reconcile-vectors", help="Audit and purge Qdrant orphan vector points")
+    p_reconcile.add_argument("--apply", action="store_true", help="Actually execute orphan purge (default: dry-run)")
+    p_reconcile.add_argument("--no-sync-missing", action="store_true", help="Skip backfilling missing active memories")
+    p_reconcile.add_argument("--batch-size", type=int, default=500, help="Batch size for vector operations")
     p_serve = sub.add_parser("serve")
     p_serve.add_argument("--host", default="127.0.0.1", help="HTTP bind address")
     p_serve.add_argument("--port", type=int, default=8318, help="HTTP port (default=8318, /mcp plus frontend routes)")
@@ -416,6 +424,15 @@ def main(argv: list[str] | None = None) -> int:
                 archive_dir=args.archive_dir or None,
                 backup_path=args.backup_path or None,
             )
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    elif args.cmd == "reconcile-vectors":
+        from memorycore.storage.maintenance import reconcile_and_purge_orphans
+
+        payload = reconcile_and_purge_orphans(
+            dry_run=not args.apply,
+            sync_missing=not args.no_sync_missing,
+            batch_size=args.batch_size,
+        )
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     elif args.cmd == "serve":
         cfg = load_config()

@@ -528,6 +528,11 @@ class VectorStore:
             return False  # cooldown active, skip silently
         self._initialized = True
         try:
+            # Test isolation guard: never connect to production collection in tests
+            if "PYTEST_CURRENT_TEST" in os.environ and self.config.collection == "agent_memory":
+                self.config.collection = "test_agent_memory"
+                logger.info("vector_store: test mode detected, redirected collection to '%s'", self.config.collection)
+
             from qdrant_client import QdrantClient
             from qdrant_client.models import Distance, VectorParams
 

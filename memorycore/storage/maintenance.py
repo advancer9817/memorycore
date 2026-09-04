@@ -1199,3 +1199,149 @@ def execute_data_maintenance_clean(
         "backup_bytes": backup.get("bytes", 0),
     }
     return {"status": "succeeded", "deleted": len(deleted), "summary": summary, "backup_path": backup.get("path")}
+
+
+def reconcile_and_purge_orphans(
+    *,
+    dry_run: bool = True,
+    batch_size: int = 500,
+    sync_missing: bool = True,
+) -> dict[str, Any]:
+    """Reconcile Qdrant vector points with SQLite memories table.
+
+    Identifies and purges orphan points (IDs not in SQLite or not in active/candidate status),
+    and optionally backfills missing active memories into Qdrant.
+    """
+    import time
+    from memorycore.vector_store import get_vector_store
+    from memorycore.storage.crud import row_to_dict
+    from memorycore.vector_store import embed_text_batch_cached
+
+    start_time = time.time()
+    with read_conn() as conn:
+        all_rows = conn.execute("SELECT id, status FROM memories").fetchall()
+
+    sqlite_status_map = {r["id"]: r["status"] for r in all_rows}
+    valid_sqlite_ids = {
+        r["id"] for r in all_rows if r["status"] in ("active", "candidate")
+    }
+
+    vs = get_vector_store()
+    vs._ensure_init()
+    if not vs.available:
+        return {"status": "error", "error": "qdrant_unavailable"}
+
+    client = vs._client
+    collection = vs.config.collection
+    total_qdrant_points = client.count(collection_name=collection).count
+
+    orphan_ids: list[str] = []
+    orphan_reasons: dict[str, int] = {
+        "not_in_sqlite": 0,
+        "sqlite_archived": 0,
+        "sqlite_other_status": 0,
+    }
+    qdrant_matched_valid_ids: set[str] = set()
+
+    offset = None
+    scrolled = 0
+    while True:
+        points, offset = client.scroll(
+            collection_name=collection,
+            limit=1000,
+            offset=offset,
+            with_payload=False,
+            with_vectors=False,
+        )
+        if not points:
+            break
+        scrolled += len(points)
+        for p in points:
+            pid = str(p.id)
+            if pid not in sqlite_status_map:
+                orphan_ids.append(pid)
+                orphan_reasons["not_in_sqlite"] += 1
+            elif sqlite_status_map[pid] not in ("active", "candidate"):
+                orphan_ids.append(pid)
+                if sqlite_status_map[pid] == "archived":
+                    orphan_reasons["sqlite_archived"] += 1
+                else:
+                    orphan_reasons["sqlite_other_status"] += 1
+            else:
+                qdrant_matched_valid_ids.add(pid)
+        if offset is None:
+            break
+
+    missing_active_ids = list(valid_sqlite_ids - qdrant_matched_valid_ids)
+    deleted_count = 0
+
+    if not dry_run and orphan_ids:
+        from qdrant_client.models import PointIdsList
+        for i in range(0, len(orphan_ids), batch_size):
+            chunk = orphan_ids[i : i + batch_size]
+            client.delete(
+                collection_name=collection,
+                points_selector=PointIdsList(points=chunk),
+            )
+            deleted_count += len(chunk)
+
+        try:
+            log_audit_event(
+                "vector_orphan_purge",
+                agent="system",
+                detail={
+                    "purged_count": deleted_count,
+                    "reasons": orphan_reasons,
+                },
+            )
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Audit logging failed: %s", exc)
+
+    resynced_count = 0
+    if not dry_run and sync_missing and missing_active_ids:
+        with read_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT * FROM memories WHERE id IN ({','.join('?' for _ in missing_active_ids)})",
+                missing_active_ids,
+            )
+            missing_rows = [row_to_dict(r) for r in cur.fetchall()]
+
+        texts = [f"{r.get('title', '')} {r.get('content', '')}".strip() for r in missing_rows]
+        vectors = embed_text_batch_cached(texts, vs.config.embed)
+
+        from qdrant_client.models import PointStruct
+        points_to_upsert: list[PointStruct] = []
+        for r, vec in zip(missing_rows, vectors):
+            metadata = r.get("metadata") or {}
+            payload = {
+                "type": r.get("type", ""),
+                "scope": r.get("scope", ""),
+                "status": r.get("status", "active"),
+                "source_agent": r.get("source_agent", ""),
+                "tags": r.get("tags", []),
+                "kind": metadata.get("kind", ""),
+                "parent_id": metadata.get("parent_id", ""),
+            }
+            points_to_upsert.append(PointStruct(id=r["id"], vector=vec, payload=payload))
+
+        for i in range(0, len(points_to_upsert), batch_size):
+            chunk = points_to_upsert[i : i + batch_size]
+            client.upsert(collection_name=collection, points=chunk)
+            resynced_count += len(chunk)
+
+    final_count = client.count(collection_name=collection).count
+    return {
+        "status": "succeeded",
+        "dry_run": dry_run,
+        "scanned_points": scrolled,
+        "orphans_found": len(orphan_ids),
+        "orphan_reasons": orphan_reasons,
+        "orphans_purged": deleted_count,
+        "missing_active_in_qdrant": len(missing_active_ids),
+        "missing_resynced": resynced_count,
+        "initial_qdrant_points": total_qdrant_points,
+        "final_qdrant_points": final_count,
+        "elapsed_seconds": round(time.time() - start_time, 2),
+    }
+

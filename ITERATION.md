@@ -138,3 +138,37 @@
 
 ### 回滚
 `git revert HEAD`
+
+## [迭代 222] 2026-09-04 — Qdrant 向量库万级孤儿点根因根治：13,961 点极速清理、测试环境硬隔离与 6 小时常态化自动对账闭环
+
+> 彻底查明并根除 Qdrant 向量库中 13,961 个孤儿幽灵点，消除对语义召回 Top-K 窗口高达 90% 的严重污染；落地测试环境运行时集合硬隔离，实装常态化双库对账清理机制（CLI、底层维护函数与后台 6 小时自动巡检），实现 SQLite 与 Qdrant 100% 严丝合缝。
+
+### 问题与根因
+1. **孤儿向量严重霸占 Top-K**：Qdrant `agent_memory` 集合存量 15,290 个点，但 SQLite 主库仅匹配上 1,328 点，存在 13,961 个孤儿幽灵点。实测在查询“CPA 代理配置与 WSL 网络”和“用户偏好技术栈与转型”时，Top-20 结果中孤儿点高达 17~18 个（污染率 90%），导致真正有效的高价值记忆被挤出候选窗口。
+2. **根因一：Qdrant“只增不减”的单向同步架构缺陷**：历史数据瘦身或物理 `DELETE FROM memories` 时未同步反向删除 Qdrant 中的点；原向量重建仅做单向 upsert，无双向集合差集对账。
+3. **根因二：单元测试穿透写入生产集合**：历史测试用例直接连接了真实端口 6333 且指定了 `agent_memory` 生产集合，并发测试（thread-0~19 等）产生的上万条 mock 点位在测试结束后永久残留。
+4. **根因三：缺乏持续对账修复机制**：系统缺少双库 Diff 校验的巡检守护，导致脏数据单调累积。
+
+### 变更
+- `memorycore/vector_store.py`：
+  - 在 `VectorStore._ensure_init` 注入**运行时测试隔离护栏**：若检测到处于 pytest 环境且集合指向 `agent_memory`，强制重定向至 `test_agent_memory`，彻底杜绝单测污染生产集合。
+- `scripts/reconcile_vectors.py`（新增）：
+  - 编写独立的向量库对账与清理脚本，支持 `--dry-run` 与 `--apply`，批量使用 `PointIdsList` 进行分块秒级清理，并自动将 SQLite 中缺失的活跃记录生成 embedding 增量回填。
+- `memorycore/storage/maintenance.py`：
+  - 核心存储层新增 `reconcile_and_purge_orphans(dry_run, batch_size, sync_missing)` 纯函数，作为系统原生维护能力并落盘审计日志 `vector_orphan_purge`。
+- `memorycore/server_runtime.py`：
+  - 注册 CLI 子命令 `mcore reconcile-vectors [--apply] [--no-sync-missing]`。
+  - 在 `_start_auto_curator` 后台周期性巡检任务中接入 `reconcile_and_purge_orphans`，实现每 6 小时无感自愈对账。
+
+### 验证
+- 清洗实测：
+  - 执行 `reconcile_vectors.py --apply`，毫秒级清理 13,961 个孤儿点，回填 621 条缺失活跃向量，Qdrant 集合点数从 15,290 个精准收敛至 1,952 个（与 SQLite 100% 对齐）。
+- 召回效果实测：
+  - “CPA 代理配置与 WSL 网络” Top-20 污染率由 90.0% 降至 0.0%（有效率 2/20 → 20/20）；
+  - “用户偏好技术栈与转型” Top-20 污染率由 90.0% 降至 0.0%（有效率 2/20 → 20/20）。
+- 单测与全量回归：全量 pytest **619 passed / 0 failed / 0 skipped**（88s 全绿）。
+- 服务验证：`mcore.service` 平滑重启成功，CLI `mcore reconcile-vectors` 0.9s 完成扫描对账。
+
+### 回滚
+`git revert HEAD`
+
