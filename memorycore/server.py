@@ -31,6 +31,15 @@ from memorycore.frontend import (
 )
 
 from memorycore.models import DEFAULT_ROOT, load_config, validate_config
+from memorycore.mcp_views import (
+    to_mcp_add_result,
+    to_mcp_entity_hits,
+    to_mcp_feedback_result,
+    to_mcp_memories,
+    to_mcp_memory,
+    to_mcp_update_result,
+    to_mcp_vector_hits,
+)
 from memorycore.storage import (
     add_memory_record,
     add_feedback,
@@ -259,12 +268,13 @@ def memory_add(
         decay_policy: 'review', 'archive', etc.
         atomize: 'auto' (split long compound texts) or False
     """
-    return add_memory_record(
+    res = add_memory_record(
         type, title, content, scope, tags, source, source_agent,
         project_path, confidence, importance, status, decay_policy,
         related_ids, metadata, valid_from=valid_from, valid_until=valid_until,
         atomize=atomize,
     )
+    return to_mcp_add_result(res)
 
 
 @_threaded_tool(mcp)
@@ -279,7 +289,8 @@ def memory_search(
     limit: int = 10,
 ) -> list[dict[str, Any]]:
     """Search structured memory with SQLite FTS5 plus filters."""
-    return search_memory_records(query, types, scope, project_path, tags, status, limit)
+    rows = search_memory_records(query, types, scope, project_path, tags, status, limit)
+    return to_mcp_memories(rows)
 
 
 @_threaded_tool(mcp)
@@ -325,14 +336,16 @@ def memory_context_stats(limit: int = 500) -> dict[str, Any]:
 @_safe_tool
 def memory_get(id: str) -> dict[str, Any] | None:
     """Get one memory record by id."""
-    return get_record(id)
+    rec = get_record(id)
+    return to_mcp_memory(rec)
 
 
 @_threaded_tool(mcp)
 @_safe_tool
 def memory_list_recent(limit: int = 10) -> list[dict[str, Any]]:
     """List recently updated memory records."""
-    return list_recent(limit, cap=100)
+    rows = list_recent(limit, cap=100)
+    return to_mcp_memories(rows)
 
 
 @_threaded_tool(mcp)
@@ -341,21 +354,24 @@ def memory_feedback(
     id: str, score: float, note: str = "", source_agent: str = "agent"
 ) -> dict[str, Any]:
     """Record whether a retrieved memory helped. Score can be negative or positive."""
-    return add_feedback(id, score, note, source_agent)
+    raw = add_feedback(id, score, note, source_agent)
+    return to_mcp_feedback_result(raw, id, score)
 
 
 @_threaded_tool(mcp)
 @_safe_tool
 def memory_timeline(query: str = "", scope: str = "", limit: int = 20) -> list[dict[str, Any]]:
     """Return decision/timeline/feedback memories in chronological order."""
-    return timeline(query, scope, limit)
+    rows = timeline(query, scope, limit)
+    return to_mcp_memories(rows)
 
 
 @_threaded_tool(mcp)
 @_safe_tool
 def memory_entity_search(query: str, limit: int = 20) -> list[dict[str, Any]]:
     """Search active memories by deterministic entity and alias index."""
-    return entity_search(query, limit=limit)
+    hits = entity_search(query, limit=limit)
+    return to_mcp_entity_hits(hits)
 
 
 @_threaded_tool(mcp)
@@ -468,10 +484,7 @@ def memory_vector_search(
     try:
         vs = get_vector_store(load_config())
         results = vs.search(query, top_k=top_k, score_threshold=score_threshold)
-        return [
-            {"id": r.id, "score": round(r.score, 4), "text": r.text, "payload": r.payload}
-            for r in results
-        ]
+        return to_mcp_vector_hits(results)
     except Exception as exc:
         return [{"degraded": True, "reason": f"vector store unavailable: {type(exc).__name__}: {exc}"}]
 
@@ -631,7 +644,8 @@ def memory_update(
         The updated memory record dict.
     """
     try:
-        return update_memory_content(id, content, title, status, confidence, importance)
+        res = update_memory_content(id, content, title, status, confidence, importance)
+        return to_mcp_update_result(res)
     except ValueError as exc:
         return {"error": str(exc)}
 

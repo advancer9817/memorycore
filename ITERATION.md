@@ -102,5 +102,39 @@
   - 默认 Slim 模式返回体积由 3716 字符降至 2615 字符（纯 context + warnings），非 context 冗余结构削减 98.6%。
   - `verbose=True` 诊断模式字段由 9 个收敛至 5 个（`context`、`records`、`filtered_ids`、`warnings`、`telemetry`），无重复统计指标。
 
+## [迭代 221] 2026-09-04 — MCP 专用表现层隔离：落地 Agent 专属轻量 DTO 与底层 REST 全量模型物理解耦
+
+> 彻底隔离 MCP 协议通道与 HTTP REST 管理通道，建立独立的 `memorycore/mcp_views.py` 专用表现层。对 Agent 主动召回及变更类 MCP 工具全面推行轻量 Agent DTO，单次搜索体积削减 70.9%，并切断写操作回弹全量数据库记录的陈旧逻辑，Web 管理控制台 100% 零影响。
+
+### 问题与根因
+1. **通道职责混淆与模型耦合**：此前 `server.py`（MCP 服务端）与 `frontend.py`（HTTP REST 服务端）共同直接消费 `storage/` 层函数，导致 SQLite 数据库实体的完整 27 个列（包含 `injected_count`、`effectiveness_score`、`decay_policy`、`metadata` 等内部治理数据）无差别倾倒入 MCP 工具返回体中。
+2. **主动召回与操作工具膨胀严重**：
+   - Agent 主动调用 `memory_search` 获取 5 条记忆，便被迫接收 135 个键值对（5.1KB），其中 70% 为纯内部噪音。
+   - `memory_vector_search` 存在外层 `text` 与 `payload["text"]` 重复双写，且多层嵌套无用元数据。
+   - `memory_add`、`memory_update`、`memory_feedback` 在操作完成后，原样将整条 27 字段数据库记录回弹给 Agent，极其浪费 Token 并干扰 Agent 任务注意力。
+
+### 变更
+- `memorycore/mcp_views.py`（新增）：
+  - `to_mcp_memory` / `to_mcp_memories`：将 27 字段的 SQLite 行字典精简为包含 `id`、`title`、`content`、`type`、`tags`、`updated_at`（截取 YYYY-MM-DD）及可选 `project_path` 的 6~7 个核心知识字段，剥离 20 个底层内部状态与度量字段。
+  - `to_mcp_vector_hit` / `to_mcp_vector_hits`：扁平化 Qdrant 向量检索结果，消除 `payload` 嵌套与重复的 `text`。
+  - `to_mcp_entity_hit` / `to_mcp_entity_hits`：精简实体匹配内嵌的数据库记忆字典。
+  - `to_mcp_add_result`、`to_mcp_update_result`、`to_mcp_feedback_result`：为增改与反馈操作构建轻量确认回执，彻底切断全量记忆实体回弹。
+- `memorycore/server.py`：
+  - 导入并接入 `mcp_views` 转换层，对 `memory_search`、`memory_get`、`memory_list_recent`、`memory_timeline`、`memory_vector_search`、`memory_entity_search`、`memory_add`、`memory_update`、`memory_feedback` 实施专用视图拦截。
+  - HTTP REST (`frontend.py`) 不做任何改动，继续消费 Storage 层完整数据，保障 Web 仪表盘和控制台管理功能 100% 稳定运行。
+- `tests/test_mcp_views.py`（新增）：
+  - 覆盖内存视图字段过滤、project_path 动态裁剪、向量命中扁平化、实体嵌套清洗、操作回执以及通过 FastMCP 工具调用的端到端断言（共 6 项测试）。
+- `tests/test_server_agent_detection.py`：
+  - 适配轻量回执中的 `source_agent` 身份感知断言。
+
+### 验证
+- 单测与全量回归：全量 pytest **619 passed / 0 failed / 0 skipped** 全绿通过。
+- 文档一致性检查：`test_docs_consistency.py` 3/3 passed。
+- 实测指标对比：
+  - `memory_search(limit=5)` 返回体积从 5,134 字符降至 1,492 字符（**大幅削减 70.9%**），单条字段数由 27 个降至 7 个。
+  - `memory_add` / `memory_feedback` 改为轻量状态回执，回弹体积削减 85%~92%。
+- 服务验证：
+  - 前端 `pnpm build` 重新编译成功，`mcore-ui.service` 与 `mcore.service` 平滑重启正常（Active running）。
+
 ### 回滚
 `git revert HEAD`
