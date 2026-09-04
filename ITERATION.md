@@ -33,5 +33,39 @@
 - 服务验证：`mcore.service` 与 `mcore-ui.service` 重启成功，HTTP 200 响应稳定。
 - 业务验证：点击“运行规则扫描”即时回显动作报告；点击“唤醒 LLM 治理”成功派发异步任务并稳定轮询；0 条候选清洁状态准确呈现。
 
+- 单测与全量回归：全量 pytest **613 passed / 0 failed / 0 skipped**（原 607 passed / 7 skipped），测试盲区完全清零。
+- 服务验证：`mcore.service` 重启成功（Active running），`eval_context_quality.py` 7/7 用例顺利通过。
+
+## [迭代 219] 2026-09-03 — 修复 Ingest Hook NameError 崩溃 + 落地 MCP 服务端调用方身份自动感知与多 Agent 头信息注入
+
+> 彻底根除 mcore-ingest 钩子因变量名未对齐导致的写回瘫痪，并在 FastMCP 服务端实现调用方 Agent 身份三级动态感知，全链路打通 Hermes/Claude/Codex/Gemini/OpenCode 记忆源归属。
+
+### 问题与根因
+1. **Ingest Hook 静默崩溃**：`scripts/hooks/mcore-ingest.py` 在 `_ingest()` 调用 `_detect_project(agent)` 时引用了未定义变量 `agent`（此前重构改名为 `agent_id` 遗留），导致所有 Agent 在对话结束通过 Stop hook 写回时触发 `NameError`，且原 except 块吞掉 traceback 导致排查困难。
+2. **记忆来源泛化丢失 (`source_agent='agent'`)**：Claude Code 或 Hermes 在交互过程中主动调用 `memory_add` 保存记忆时，若未显式传参则落入函数默认值 `source_agent: str = "agent"`，后续长记忆原子化（`atomize_record`）又继承父记录来源，导致前端界面大量记忆显示为泛化的 `agent` 图标而非真实的 `Claude` 或 `Hermes`。
+
+### 变更
+- `scripts/hooks/mcore-ingest.py`：
+  - 修复 `_detect_project(agent_id)` 变量传参，消除 NameError。
+  - 异常捕获增加 `tb=traceback.format_exc()` 输出，方便日志定位。
+  - 同步更新至 `~/.hermes/agent-hooks/` 与 `hermes-local-agent-configs/` 运行时副本。
+- `memorycore/server.py`：
+  - 新增 `_infer_caller_agent(ctx)`：按「HTTP 请求头 (`X-Agent-Id`) → FastMCP 握手协议 (`clientInfo.name`) → 环境变量 (`MCORE_AGENT_ID`)」三级动态感知调用方真实身份。
+  - 重构 `_threaded_tool(mcp)` 装饰器：在异步线程派发时检测 `source_agent`、`agent`、`agent_id`，若缺省或为 `"agent"`，自动注入推断的 Agent 标识（如 `claude` / `hermes` / `codex` 等），并保留显式入参的高优先级。
+  - 更新 `memory_add` 工具文档与参数描述。
+- `scripts/setup-hooks.sh` & `scripts/connect_agents.py`：
+  - 更新所有 Agent 客户端配置生成逻辑，在 `mcpServers` / `mcp_servers` 中为各自 Agent 显式注入 `headers: { X-Agent-Id: <agent> }`。
+  - 清理 `AGENTS.md` 与 `~/.claude/CLAUDE.md` 中的历史 lmmcp 占位符，固化最新的 mcore 记忆双写与 `source_agent` 规范。
+- `tests/test_server_agent_detection.py`（新增）：
+  - 覆盖 clientInfo 识别、HTTP Header 提取、`memory_add` 缺省自动识别、显式参数保护及 `memory_context` 身份透传等 6 项测试。
+- `.gitignore`：
+  - 新增 `.superpowers/` 本地目录忽略。
+
+### 验证
+- 单元测试：全量 pytest **619 passed / 0 failed / 0 skipped** 全绿通过。
+- 真实链路实测：
+  - 真实 Claude transcript 触发 `--background` 写回，日志记录 `ingest_done agent=claude`，耗时 19s 成功落库。
+  - 发送带有 `X-Agent-Id: hermes` 请求头的 MCP 工具调用，返回 `# memory_context for hermes`，服务端成功识别。
+
 ### 回滚
 `git revert HEAD`

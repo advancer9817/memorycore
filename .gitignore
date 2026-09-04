@@ -23,6 +23,7 @@ Thumbs.db
 
 # OMC agent artifacts
 .omc/
+.superpowers/
 
 # Curator reports
 reports/

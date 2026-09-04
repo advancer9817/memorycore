@@ -102,6 +102,9 @@ def configure_hermes_config(path: Path, endpoint: str, backup_dir: Path, dry_run
         "url": endpoint,
         "timeout": 120,
         "connect_timeout": 60,
+        "headers": {
+            "X-Agent-Id": "hermes",
+        },
     }
     new = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
     if old_raw == new:
