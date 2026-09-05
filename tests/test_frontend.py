@@ -513,3 +513,34 @@ def test_frontend_v1_dashboard_health_and_legacy_fallback():
     assert "stats" in curator_v1.json()  # v1 surface returns the bare payload (no `data` wrapper)
     assert governance_v1.status_code == 200
     assert graph_v1.status_code == 200
+
+
+def test_frontend_v1_hooks_endpoints():
+    """Verify lightweight HTTP hook endpoints for session-start, context, and stop."""
+    with _client() as client:
+        # 1. session-start
+        res_start = client.post("/api/v1/hooks/session-start", json={})
+        assert res_start.status_code == 200
+
+        # 2. context with prompt
+        res_ctx = client.post(
+            "/api/v1/hooks/context",
+            json={"prompt": "testing memory context injection", "agent": "claude"},
+        )
+        assert res_ctx.status_code == 200
+        data = res_ctx.json()
+        assert "hookSpecificOutput" in data
+        assert data["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+        assert isinstance(data["hookSpecificOutput"]["additionalContext"], str)
+
+        # 3. context with empty prompt
+        res_empty = client.post("/api/v1/hooks/context", json={"prompt": ""})
+        assert res_empty.status_code == 200
+        empty_data = res_empty.json()
+        assert empty_data["hookSpecificOutput"]["additionalContext"] == ""
+
+        # 4. stop hook
+        res_stop = client.post("/api/v1/hooks/stop", json={"agent": "claude"})
+        assert res_stop.status_code == 200
+        assert res_stop.json().get("status") == "ok"
+

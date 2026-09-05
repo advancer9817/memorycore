@@ -268,5 +268,33 @@
 ### 回滚
 `git revert HEAD`
 
+## [迭代 226] 2026-09-06 — 原生 HTTP Hook 端点落地、跨平台 Transcript 发现与测试覆盖
+
+> 为 mcore 增加原生轻量 HTTP Hook 接口，免除跨环境（如 Windows 与 WSL）启动 Bash 进程的高延迟；增强 mcore-ingest 跨多盘符与项目根目录的会话记录发现能力，完成单元测试覆盖。
+
+### 问题与根因
+1. **进程启动延迟与环境依赖**：此前在 Windows 端 Claude Code 配置的 Hook 均依赖调用 WSL `wsl.exe bash ...`，在每次用户提交 Prompt 或结束会话时均产生 1-3 秒的子进程拉起开销与路径转换风险。
+2. **跨平台会话 Transcript 遗漏**：Windows 下运行的 Claude 会话保存在 Windows 宿主用户目录的 `.claude/projects` 中，原 `mcore-ingest.py` 仅硬编码扫描 WSL 的 `~/.claude/projects`，导致 Windows 端 Claude 会话未能自动写回。
+
+### 变更
+- `memorycore/frontend_v1.py`：
+  - 新增 `/api/v1/hooks/context`、`/api/v1/hooks/session-start`、`/api/v1/hooks/stop` 三个轻量 HTTP 钩子接口。
+  - 直接返回标准 `hookSpecificOutput` 结构，实现毫秒级上下文注入与后台异步全量摄取触发。
+- `scripts/connect_agents.py`：
+  - 支持为 Windows 环境注入原生 `http` 及 `curl.exe` 钩子配置，消除 WSL 桥接延迟。
+- `scripts/hooks/mcore-ingest.py`：
+  - 新增 `_claude_roots()`，自动探测并扫描 `/mnt/c/Users/*/.claude/projects` 与本地 `~/.claude/projects`。
+  - 增强 Windows 风格项目路径（如 `c--...`）还原为真实文件系统路径的能力。
+- `tests/test_frontend.py`：
+  - 新增 `test_frontend_v1_hooks_endpoints` 单元测试，覆盖会话启动、上下文注入、空 Prompt 保护及停止触发。
+
+### 验证
+- 单元测试：`pytest tests/test_frontend.py` 全部通过。
+- 接口测试：实测 `curl -X POST http://127.0.0.1:8318/api/v1/hooks/context` 返回标准格式 `hookSpecificOutput`，耗时 5ms。
+- 全量回归：pytest **620 passed / 0 failed**。
+
+### 回滚
+`git revert HEAD`
+
 
 

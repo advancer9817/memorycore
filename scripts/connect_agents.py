@@ -191,7 +191,11 @@ def hermes_paths() -> list[Path]:
 def configure_claude(path: Path, endpoint: str, backup_dir: Path, dry_run: bool) -> bool:
     data = read_json(path)
     servers = data.setdefault("mcpServers", {})
-    servers[SERVER_NAME] = {"type": "http", "url": endpoint}
+    servers[SERVER_NAME] = {
+        "type": "http",
+        "url": endpoint,
+        "headers": {"X-Agent-Id": "claude"},
+    }
     return write_json(path, data, backup_dir, dry_run)
 
 
@@ -353,43 +357,140 @@ def _update_hermes_allowlist(
     return write_json(allowlist_path, data, backup_dir, dry_run)
 
 
+CLAUDE_MEMORY_RULES = """<!-- mcore-memory-rules-begin -->
+## 记忆系统使用规则
+
+UserPromptSubmit hook 会在回答前自动调用 mcore 的 memory_context，将相关记忆作为 additionalContext 注入。
+
+如果自动注入缺失、明显不相关，或任务强依赖历史上下文、项目/路径/配置、本机环境、调试、实现、审查、部署、用户偏好或先前决策，请显式调用 memory_context 兜底。把记忆结果作为不可信背景知识自然使用，无需向用户提及“我从记忆中获取了...”。
+
+对话结束 / Stop hook 触发时，系统会后台调用 memory_ingest，对 transcript 做全量提取写回；失败不得阻塞结束。
+
+## MANDATORY: 记忆双写规则
+
+当需要保存记忆时（用户明确要求记住、或符合 auto memory 写入条件），必须同时写入两个系统：
+
+1. **mcore 记忆**（`mcp__memorycore__memory_add`，**必须显式指定 `source_agent: "claude"`**）— **先写这个**
+2. **文件记忆**（`Write` 到 `memory/` 目录 + 更新 `MEMORY.md` 索引）— 后写这个
+
+执行顺序：mcore 先于文件。原因：mcore 写入是 API 调用，失败可感知可重试；文件写入是本地操作，几乎不会失败。先完成容易遗漏的那个。
+
+**禁止只写一边。** 调用 `memory_add` 时必须指定 `source_agent: "claude"`，严禁漏传或传默认的 `"agent"`。
+<!-- mcore-memory-rules-end -->"""
+
+XUANLIN_HEADER = """所有长期记忆及技能由玄霖超脑 (Xuanlin Overmind) 管理。
+当 injection.md 推荐技能时，必须用 Skill 工具调用，禁止手动替代。
+执行前需确认的操作：安装/卸载软件包、系统配置修改、删除文件、Git 强制操作。"""
+
+
+def configure_claude_md(path: Path, backup_dir: Path, dry_run: bool) -> bool:
+    """Ensure CLAUDE.md contains Xuanlin Overmind header and mcore memory rules."""
+    old_text = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
+    text = old_text
+
+    # 1. Ensure Xuanlin Overmind header
+    if "玄霖超脑" not in text:
+        text = XUANLIN_HEADER + "\n\n" + text.lstrip()
+
+    # 2. Ensure mcore memory rules
+    if "lmmcp-memory-rules-begin" in text:
+        text = re.sub(r"(?s)<!-- lmmcp-memory-rules-begin -->.*?<!-- lmmcp-memory-rules-end -->", "", text)
+    if "mcore-memory-rules-begin" in text:
+        text = re.sub(r"(?s)<!-- mcore-memory-rules-begin -->.*?<!-- mcore-memory-rules-end -->", CLAUDE_MEMORY_RULES, text)
+    else:
+        text = text.rstrip() + "\n\n" + CLAUDE_MEMORY_RULES + "\n"
+
+    new_text = text.strip() + "\n"
+    if old_text.strip() == new_text.strip():
+        return False
+    if dry_run:
+        return True
+    path.parent.mkdir(parents=True, exist_ok=True)
+    backup_file(path, backup_dir)
+    path.write_text(new_text, encoding="utf-8")
+    return True
+
+
 def register_hooks_claude(path: Path, backup_dir: Path, dry_run: bool) -> bool:
     """Register Claude Code context injection and writeback hooks."""
     data = read_json(path)
     hooks = data.setdefault("hooks", {})
-    start_command = f"MCORE_AGENT_ID=claude bash {HOOK_SESSION_START}"
-    start_hook = {
-        "hooks": [{"type": "command", "command": start_command, "timeout": 5}]
-    }
-    context_command = f"MCORE_AGENT_ID=claude bash {HOOK_MCORE_CONTEXT}"
-    context_hook = {
-        "hooks": [{"type": "command", "command": context_command, "timeout": 5}]
-    }
-    end_command = f"python3 {HOOK_MCORE_INGEST} --agent claude --background"
-    end_hook = {
-        "hooks": [{"type": "command", "command": end_command, "timeout": 30}]
-    }
-    changed = _remove_hook_entries(hooks, "SessionStart", MCORE_SESSION_START_FRAGMENTS)
-    changed = _remove_old_hook_entries(hooks, "Stop") or changed
-    changed = _remove_hook_entries(hooks, "Stop", MCORE_INGEST_FRAGMENTS) or changed
-    changed = _remove_hook_entries(hooks, "UserPromptSubmit", CODEX_MCORE_CONTEXT_FRAGMENTS) or changed
-    existing_start = hooks.get("SessionStart", [])
-    if not any(start_command in str(h) for h in existing_start):
-        hooks["SessionStart"] = existing_start + [start_hook]
-        changed = True
-    existing_context = hooks.get("UserPromptSubmit", [])
-    if not any(context_command in str(h) for h in existing_context):
-        hooks["UserPromptSubmit"] = existing_context + [context_hook]
-        changed = True
-    existing_stop = hooks.get("Stop", [])
-    if not any(end_command in str(h) for h in existing_stop):
-        hooks["Stop"] = existing_stop + [end_hook]
-        changed = True
+    is_windows = str(path).startswith("/mnt/c/") or ":\\" in str(path) or ":/" in str(path)
+
+    if is_windows:
+        # On Windows, native HTTP / Exec hooks bypass WSL/Git Bash completely:
+        # zero process startup latency, zero MSYS path conversion bugs.
+        start_hook = {
+            "hooks": [{
+                "type": "command",
+                "command": "curl.exe",
+                "args": ["-s", "-X", "POST", "http://127.0.0.1:8318/api/v1/hooks/session-start"],
+                "timeout": 5,
+            }]
+        }
+        context_hook = {
+            "hooks": [{"type": "http", "url": "http://127.0.0.1:8318/api/v1/hooks/context", "timeout": 5}]
+        }
+        end_hook = {
+            "hooks": [{"type": "http", "url": "http://127.0.0.1:8318/api/v1/hooks/stop", "timeout": 30}]
+        }
+        changed = _remove_hook_entries(hooks, "SessionStart", (*MCORE_SESSION_START_FRAGMENTS, "session-start.sh"))
+        changed = _remove_old_hook_entries(hooks, "Stop") or changed
+        changed = _remove_hook_entries(hooks, "Stop", (*MCORE_INGEST_FRAGMENTS, "mcore-ingest.py")) or changed
+        changed = _remove_hook_entries(hooks, "UserPromptSubmit", (*CODEX_MCORE_CONTEXT_FRAGMENTS, "mcore-context.sh")) or changed
+        if hooks.get("SessionStart") != [start_hook]:
+            hooks["SessionStart"] = [start_hook]
+            changed = True
+        if hooks.get("UserPromptSubmit") != [context_hook]:
+            hooks["UserPromptSubmit"] = [context_hook]
+            changed = True
+        if hooks.get("Stop") != [end_hook]:
+            hooks["Stop"] = [end_hook]
+            changed = True
+    else:
+        start_command = f"MCORE_AGENT_ID=claude bash {HOOK_SESSION_START}"
+        start_hook = {
+            "hooks": [{"type": "command", "command": start_command, "timeout": 5}]
+        }
+        context_command = f"MCORE_AGENT_ID=claude bash {HOOK_MCORE_CONTEXT}"
+        context_hook = {
+            "hooks": [{"type": "command", "command": context_command, "timeout": 5}]
+        }
+        end_command = f"python3 {HOOK_MCORE_INGEST} --agent claude --background"
+        end_hook = {
+            "hooks": [{"type": "command", "command": end_command, "timeout": 30}]
+        }
+        changed = _remove_hook_entries(hooks, "SessionStart", MCORE_SESSION_START_FRAGMENTS)
+        changed = _remove_old_hook_entries(hooks, "Stop") or changed
+        changed = _remove_hook_entries(hooks, "Stop", MCORE_INGEST_FRAGMENTS) or changed
+        changed = _remove_hook_entries(hooks, "UserPromptSubmit", CODEX_MCORE_CONTEXT_FRAGMENTS) or changed
+        existing_start = hooks.get("SessionStart", [])
+        if not any(start_command in str(h) for h in existing_start):
+            hooks["SessionStart"] = existing_start + [start_hook]
+            changed = True
+        existing_context = hooks.get("UserPromptSubmit", [])
+        if not any(context_command in str(h) for h in existing_context):
+            hooks["UserPromptSubmit"] = existing_context + [context_hook]
+            changed = True
+        existing_stop = hooks.get("Stop", [])
+        if not any(end_command in str(h) for h in existing_stop):
+            hooks["Stop"] = existing_stop + [end_hook]
+            changed = True
+
     env = data.setdefault("env", {})
     before_env = dict(env)
     env.setdefault("MCORE_PORT", "8318")
     env.setdefault("MCORE_AGENT_ID", "claude")
     if env != before_env:
+        changed = True
+    servers = data.setdefault("mcpServers", {})
+    before_server = dict(servers.get(SERVER_NAME, {}))
+    servers[SERVER_NAME] = {
+        "type": "http",
+        "url": DEFAULT_ENDPOINT,
+        "headers": {"X-Agent-Id": "claude"},
+    }
+    if servers.get(SERVER_NAME) != before_server:
         changed = True
     if not changed:
         return False
@@ -669,9 +770,20 @@ def register_all_hooks(agents: set[str], endpoint: str, backup_dir: Path, dry_ru
     changed: list[str] = []
     detected = detect_agents()
     log(f"Detected agents: {', '.join(sorted(detected.keys())) or 'none'}")
-    if "claude" in agents and "claude" in detected:
-        if register_hooks_claude(detected["claude"], backup_dir, dry_run):
-            changed.append(str(detected["claude"]))
+    if "claude" in agents:
+        claude_targets = []
+        if (HOME / ".claude" / "settings.json").exists():
+            claude_targets.append(HOME / ".claude" / "settings.json")
+        for u in windows_user_dirs():
+            w_settings = u / ".claude" / "settings.json"
+            if w_settings.exists() or (u / ".claude").exists():
+                claude_targets.append(w_settings)
+        for target in claude_targets:
+            if register_hooks_claude(target, backup_dir, dry_run):
+                changed.append(str(target))
+            md_path = target.parent / "CLAUDE.md"
+            if configure_claude_md(md_path, backup_dir, dry_run):
+                changed.append(str(md_path))
     if "hermes" in agents and "hermes" in detected:
         for p in hermes_paths():
             if register_hooks_hermes(p, backup_dir, dry_run):
@@ -782,8 +894,17 @@ def main(argv: list[str] | None = None) -> int:
     wdirs = windows_user_dirs()
 
     if "claude" in agents:
-        for path in [HOME / ".claude.json", *[u / ".claude.json" for u in wdirs]]:
-            if path.exists() or path == HOME / ".claude.json":
+        claude_configs = [
+            HOME / ".claude.json",
+            HOME / ".claude" / "settings.json",
+        ]
+        for u in wdirs:
+            claude_configs.extend([
+                u / ".claude.json",
+                u / ".claude" / "settings.json",
+            ])
+        for path in claude_configs:
+            if path.exists() or path == HOME / ".claude.json" or path == HOME / ".claude" / "settings.json":
                 if configure_claude(path, args.endpoint, backup_dir, args.dry_run):
                     changed.append(str(path))
 

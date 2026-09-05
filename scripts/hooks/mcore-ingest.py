@@ -60,6 +60,18 @@ def _mcore_url() -> str:
     return f"http://{host}:{port}/mcp"
 
 
+def _claude_roots() -> list[Path]:
+    roots = [Path.home() / ".claude" / "projects"]
+    w_users = Path("/mnt/c/Users")
+    if w_users.exists():
+        for u in w_users.iterdir():
+            if u.is_dir() and not u.name.lower().startswith(("public", "default", "all users")):
+                p = u / ".claude" / "projects"
+                if p.exists():
+                    roots.append(p)
+    return roots
+
+
 def _detect_project(agent: str = "") -> dict:
     """Best-effort subject detection: which project does this conversation belong to.
 
@@ -106,14 +118,23 @@ def _detect_project(agent: str = "") -> dict:
             explicit = os.environ.get("CLAUDE_SESSION_FILE", "")
             source = Path(explicit) if explicit else None
             if source is None or not source.is_file():
-                root = Path.home() / ".claude" / "projects"
-                candidates = [p for p in root.glob("*/*.jsonl") if p.is_file()]
+                candidates: list[Path] = []
+                for root in _claude_roots():
+                    if root.exists():
+                        try:
+                            candidates.extend([p for p in root.glob("*/*.jsonl") if p.is_file()])
+                        except Exception:
+                            pass
                 if MARK.exists():
                     candidates = [p for p in candidates if p.stat().st_mtime >= MARK.stat().st_mtime]
                 if candidates:
                     source = max(candidates, key=lambda p: p.stat().st_mtime)
             if source is not None:
-                path = source.parent.name.replace("-", "/")
+                parent_name = source.parent.name
+                if len(parent_name) >= 3 and parent_name[1:3] == "--":
+                    path = parent_name[0] + ":/" + parent_name[3:].replace("-", "/")
+                else:
+                    path = parent_name.replace("-", "/")
         except Exception:
             path = ""
     if not path:
@@ -173,17 +194,22 @@ def _curl_post(payload: dict, session_id: str = "", timeout: float = 10.0) -> tu
     return headers, body
 
 
-def _find_transcript(root: Path, env_key: str, pattern: str) -> Path | None:
+def _find_transcript(roots: Path | list[Path], env_key: str, pattern: str) -> Path | None:
     explicit = os.environ.get(env_key, "")
     if explicit:
         path = Path(explicit)
         if path.is_file():
             return path
 
-    try:
-        candidates = [p for p in root.glob(pattern) if p.is_file()]
-    except Exception:
-        return None
+    root_list = [roots] if isinstance(roots, Path) else roots
+    candidates: list[Path] = []
+    for root in root_list:
+        if not root.exists():
+            continue
+        try:
+            candidates.extend([p for p in root.glob(pattern) if p.is_file()])
+        except Exception:
+            pass
 
     if not candidates:
         return None
@@ -610,7 +636,7 @@ def _messages_for_agent(agent: str) -> list[dict[str, str]]:
         return []
 
     if agent == "claude":
-        path = _find_transcript(Path.home() / ".claude" / "projects", "CLAUDE_SESSION_FILE", "*/*.jsonl")
+        path = _find_transcript(_claude_roots(), "CLAUDE_SESSION_FILE", "*/*.jsonl")
         return _extract_claude(path) if path else []
 
     if agent == "opencode":

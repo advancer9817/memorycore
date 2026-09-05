@@ -16,7 +16,7 @@ from urllib.parse import parse_qs
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
-from memorycore.models import MEMORY_TYPES, STATUSES, VALID_RELATION_TYPES, load_config, config_path, row_to_dict
+from memorycore.models import DEFAULT_ROOT, MEMORY_TYPES, STATUSES, VALID_RELATION_TYPES, load_config, config_path, row_to_dict
 from memorycore.storage.db import _managed_query
 from memorycore.storage import (
     add_feedback,
@@ -400,4 +400,76 @@ def _dispatch_v1_compat(
         if job is None:
             raise LookupError(f"maintenance job not found: {job_id}")
         return job
+
+    if parts == ["hooks", "context"] and method == "POST":
+        task = (
+            body.get("prompt")
+            or body.get("user_prompt")
+            or body.get("message")
+            or body.get("input")
+            or ""
+        )
+        if isinstance(body.get("tool_input"), dict):
+            task = body["tool_input"].get("prompt") or task
+        if isinstance(body.get("extra"), dict):
+            task = body["extra"].get("user_message") or task
+        task = str(task).strip()
+        if not task:
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": "",
+                }
+            }
+        project_path = (
+            body.get("project_path")
+            or body.get("cwd")
+            or body.get("working_directory")
+            or (body.get("extra", {}).get("cwd") if isinstance(body.get("extra"), dict) else "")
+            or ""
+        )
+        agent = str(body.get("agent") or "claude")
+        pack = build_context_pack(
+            task=task,
+            agent=agent,
+            project_path=str(project_path),
+            token_budget=2000,
+        )
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": pack.get("context", ""),
+            }
+        }
+
+    if parts == ["hooks", "session-start"] and method == "POST":
+        try:
+            from pathlib import Path
+            Path("/tmp/mcore-session-mark").touch()
+        except Exception:
+            pass
+        return {}
+
+    if parts == ["hooks", "stop"] and method == "POST":
+        agent = str(body.get("agent") or "claude")
+        try:
+            import sys
+            cmd = [
+                sys.executable or "python3",
+                str(DEFAULT_ROOT / "scripts" / "hooks" / "mcore-ingest.py"),
+                "--agent",
+                agent,
+                "--background",
+            ]
+            subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except Exception as exc:
+            logger.warning("[hooks/stop] background ingest error: %s", exc)
+        return {"status": "ok"}
+
     raise LookupError(f"route not found: /api/v1/{'/'.join(parts)}")
