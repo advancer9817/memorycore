@@ -149,6 +149,7 @@ export function MemoryOperationsView({
   onSelectMaintenanceAction,
 }: MemoryOperationsViewProps) {
   const [liveLlmElapsedMs, setLiveLlmElapsedMs] = useState(0);
+  const [decisionFilter, setDecisionFilter] = useState<"all" | "semantic_duplicate" | "contradiction">("all");
 
   useEffect(() => {
     if (!llmRunning && llmRunState.state !== "running") {
@@ -163,6 +164,16 @@ export function MemoryOperationsView({
     const timer = setInterval(update, 1000);
     return () => clearInterval(timer);
   }, [llmRunning, llmRunState.state, llmRunState.startedAt]);
+
+  const rawDecisions = llmRunState.decisions || [];
+  const dupDecisions = rawDecisions.filter((d) => d.decision_type === "semantic_duplicate");
+  const contraDecisions = rawDecisions.filter((d) => d.decision_type === "contradiction");
+  const filteredDecisions =
+    decisionFilter === "semantic_duplicate"
+      ? dupDecisions
+      : decisionFilter === "contradiction"
+      ? contraDecisions
+      : rawDecisions;
 
   const byStatus = status?.stats.by_status || {};
   const lastRunIso =
@@ -372,6 +383,181 @@ export function MemoryOperationsView({
                 <div>重要度重估：<b className="text-zinc-200">{llmRunState.summary?.importance_reassessments ?? 0}</b></div>
                 <div>拆分建议：<b className="text-zinc-200">{llmRunState.summary?.split_candidates ?? 0}</b></div>
               </div>
+
+              {/* 实时增长的详细决策列表 */}
+              <div className="space-y-2 border-t border-zinc-800/80 pt-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-zinc-200 flex items-center gap-1.5">
+                      <Bot className="h-3.5 w-3.5 text-sky-400" />
+                      治理决策与发现明细
+                    </span>
+                    <Badge variant="outline" className="border-zinc-700 bg-zinc-900 text-[10px] text-zinc-300">
+                      已捕获 {rawDecisions.length} 条
+                    </Badge>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 text-[11px]">
+                    {rawDecisions.length > 0 && (
+                      <div className="flex items-center gap-1 bg-zinc-950/80 rounded border border-zinc-800 p-0.5 mr-2">
+                        <button
+                          type="button"
+                          onClick={() => setDecisionFilter("all")}
+                          className={`px-2 py-0.5 rounded transition-colors ${
+                            decisionFilter === "all"
+                              ? "bg-zinc-800 text-zinc-100 font-medium"
+                              : "text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          全部 ({rawDecisions.length})
+                        </button>
+                        {dupDecisions.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setDecisionFilter("semantic_duplicate")}
+                            className={`px-2 py-0.5 rounded transition-colors ${
+                              decisionFilter === "semantic_duplicate"
+                                ? "bg-purple-900/60 text-purple-200 font-medium"
+                                : "text-zinc-400 hover:text-purple-300"
+                            }`}
+                          >
+                            去重 ({dupDecisions.length})
+                          </button>
+                        )}
+                        {contraDecisions.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setDecisionFilter("contradiction")}
+                            className={`px-2 py-0.5 rounded transition-colors ${
+                              decisionFilter === "contradiction"
+                                ? "bg-rose-900/60 text-rose-200 font-medium"
+                                : "text-zinc-400 hover:text-rose-300"
+                            }`}
+                          >
+                            冲突 ({contraDecisions.length})
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {llmRunState.state === "running" && (
+                      <span className="text-[11px] text-sky-400 flex items-center gap-1.5">
+                        <span className="h-1.5 w-1.5 rounded-full bg-sky-400 animate-pulse" />
+                        批次计算中 · 实时推入
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {filteredDecisions.length > 0 ? (
+                  <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
+                    {filteredDecisions.map((dec, idx) => {
+                      const isDup = dec.decision_type === "semantic_duplicate";
+                      const isContra = dec.decision_type === "contradiction";
+                      const finding = dec.finding || {};
+                      const keepTitle =
+                        finding.keep_title || dec.before_state?.[0]?.title || "基准记忆";
+                      const dropTitle =
+                        finding.drop_title || dec.before_state?.[1]?.title || "";
+                      const reason = finding.reason || dec.policy_reason || "";
+                      const scoreVal = finding.score ?? dec.llm_confidence;
+                      const scoreStr =
+                        scoreVal !== undefined && scoreVal !== null
+                          ? `${Math.round(Number(scoreVal) * 100)}%`
+                          : null;
+                      const actionLabel =
+                        dec.recommended_action === "archive_duplicate"
+                          ? "归档副本"
+                          : dec.recommended_action === "archive_and_merge_duplicate"
+                          ? "归档并合并"
+                          : dec.recommended_action === "mark_contradicted"
+                          ? "标记冲突"
+                          : dec.recommended_action;
+
+                      return (
+                        <div
+                          key={dec.id || idx}
+                          className="rounded-md border border-zinc-800/90 bg-zinc-950/70 p-2.5 transition-all hover:border-zinc-700/80 space-y-1.5 text-xs shadow-sm"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-1.5">
+                            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                              <Badge
+                                variant="outline"
+                                className={
+                                  isDup
+                                    ? "border-purple-800/60 bg-purple-500/10 text-purple-300 text-[10px] px-1.5 py-0"
+                                    : isContra
+                                    ? "border-rose-800/60 bg-rose-500/10 text-rose-300 text-[10px] px-1.5 py-0"
+                                    : "border-sky-800/60 bg-sky-500/10 text-sky-300 text-[10px] px-1.5 py-0"
+                                }
+                              >
+                                {isDup ? "语义去重" : isContra ? "事实冲突" : dec.decision_type}
+                              </Badge>
+
+                              <div className="font-medium text-zinc-200 truncate flex-1 text-[12px]">
+                                {isDup ? (
+                                  <span>
+                                    <span className="text-emerald-400 font-semibold">[保留]</span> {keepTitle}
+                                    {dropTitle && (
+                                      <>
+                                        <span className="text-zinc-500 mx-1.5">⟵</span>
+                                        <span className="text-rose-400/90">[合并归档]</span> {dropTitle}
+                                      </>
+                                    )}
+                                  </span>
+                                ) : isContra ? (
+                                  <span>
+                                    <span className="text-rose-400 font-semibold">[冲突项]</span> {keepTitle}
+                                    {dropTitle && (
+                                      <>
+                                        <span className="text-zinc-500 mx-1.5">⚡</span>
+                                        <span className="text-amber-400">{dropTitle}</span>
+                                      </>
+                                    )}
+                                  </span>
+                                ) : (
+                                  keepTitle
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0 text-[10px] text-zinc-400">
+                              {scoreStr && (
+                                <span className="font-mono text-zinc-300 bg-zinc-900 border border-zinc-800 px-1.5 py-0.5 rounded">
+                                  相似度 {scoreStr}
+                                </span>
+                              )}
+                              <Badge variant="outline" className="border-zinc-800 bg-zinc-900 text-zinc-400 text-[10px] px-1.5 py-0">
+                                {actionLabel}
+                              </Badge>
+                              <span className="text-zinc-500 font-mono text-[10px]">
+                                {dec.created_at ? formatTime(dec.created_at, locale) : ""}
+                              </span>
+                            </div>
+                          </div>
+
+                          {reason && (
+                            <p className="text-[11px] text-zinc-400 pl-2 border-l-2 border-zinc-800 leading-relaxed font-sans">
+                              {reason}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="py-5 text-center text-zinc-500 text-xs flex flex-col items-center justify-center gap-1.5 border border-dashed border-zinc-800/80 rounded-md bg-zinc-950/40">
+                    {llmRunState.state === "running" ? (
+                      <>
+                        <Bot className="h-4 w-4 text-sky-400 animate-pulse" />
+                        <span>大模型正逐批分析记忆候选对，发现重复或冲突将实时在此展示...</span>
+                      </>
+                    ) : (
+                      <span>当前治理分析未发现重复或冲突项。</span>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {llmRunState.error && <p className="text-rose-400 font-mono text-[11px]">{llmRunState.error}</p>}
             </div>
           )}

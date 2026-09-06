@@ -44,6 +44,33 @@ export type CuratorRunState = {
   error?: string;
 };
 
+export type LlmDecisionItem = {
+  id: string;
+  decision_type: string;
+  recommended_action: string;
+  llm_confidence: number;
+  risk_level: string;
+  review_status: string;
+  created_at: string;
+  finding?: {
+    action?: string;
+    reason?: string;
+    keep_title?: string;
+    drop_title?: string;
+    score?: number;
+    merge_info?: string;
+    [key: string]: any;
+  };
+  before_state?: Array<{
+    id: string;
+    title?: string;
+    content?: string;
+    type?: string;
+    [key: string]: any;
+  }>;
+  [key: string]: any;
+};
+
 export type LlmRunState = {
   state: "idle" | "running" | "succeeded" | "failed";
   jobId?: string;
@@ -53,6 +80,7 @@ export type LlmRunState = {
   progress?: { stage?: string; batch_index?: number };
   errors?: string[];
   error?: string;
+  decisions?: LlmDecisionItem[];
 };
 
 export type MaintenanceGroup = {

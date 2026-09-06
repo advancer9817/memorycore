@@ -403,11 +403,17 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
             return {"decision": decision, "applied": {"already_applied": True}}
         return apply_governance_decision(decision["id"], source_agent="frontend")
     if parts == ["curator", "llm", "latest"] and method == "GET":
-        from memorycore.storage.llm_curator_jobs import get_latest_llm_curator_job
+        from memorycore.storage.llm_curator_jobs import get_latest_llm_curator_job, list_llm_curator_decisions
         job = get_latest_llm_curator_job()
         if job is None:
-            return {"status": "idle", "job_id": None}
-        return {**job, "job_id": job["id"]}
+            return {"status": "idle", "job_id": None, "decisions": [], "total_decisions": 0}
+        dec_res = list_llm_curator_decisions(job["id"], limit=200, review_status="all")
+        return {
+            **job,
+            "job_id": job["id"],
+            "decisions": dec_res.get("items", []),
+            "total_decisions": dec_res.get("total", 0),
+        }
     if len(parts) == 4 and parts[:2] == ["curator", "llm"] and parts[3] == "decisions" and method == "GET":
         from memorycore.storage.llm_curator_jobs import get_llm_curator_job, list_llm_curator_decisions
         job_id = parts[2]
@@ -432,7 +438,7 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
             raise LookupError(f"job {job_id} not found")
         return {**list_llm_curator_batches(job_id, after=_str_q(query, "after", None), limit=_int_q(query, "limit", 50)), "job": {**job, "job_id": job["id"]}}
     if len(parts) == 3 and parts[:2] == ["curator", "llm"] and method == "GET":
-        from memorycore.storage.llm_curator_jobs import get_llm_curator_job
+        from memorycore.storage.llm_curator_jobs import get_llm_curator_job, list_llm_curator_decisions
         job_id = parts[2]
         job = get_llm_curator_job(job_id)
         if job is None:
@@ -445,7 +451,13 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
                 from memorycore.storage.governance import filter_applied_or_rejected_findings
                 filtered_job["result"] = filter_applied_or_rejected_findings(filtered_job["result"])
             return filtered_job
-        return {**job, "job_id": job["id"]}
+        dec_res = list_llm_curator_decisions(job_id, limit=200, review_status="all")
+        return {
+            **job,
+            "job_id": job["id"],
+            "decisions": dec_res.get("items", []),
+            "total_decisions": dec_res.get("total", 0),
+        }
     if parts == ["links"] and method == "POST":
         return add_link(body.get("source_id", ""), body.get("target_id", ""), body.get("relation_type", "related_to"), body.get("weight", 1.0), body.get("note", ""), body.get("source_agent", "frontend"))
     if len(parts) == 2 and parts[0] == "links" and method == "GET":

@@ -422,3 +422,35 @@
 
 ### 回滚
 `git revert HEAD`
+
+## [迭代 230] 2026-09-06 — LLM 治理执行结果明细流式列表呈现与实时增长推送
+
+### 目的
+应用户需求：
+1. 在控制台 Dashboard 运维执行中枢的「LLM 治理报告」中，将原本仅有4个统计数字的概览扩展为完整的决策发现明细列表；
+2. 在 LLM Curator 后台增量分批分析执行期间，使该列表随轮询批次完成实时推入与动态增长，无需等待全部任务完成即可直观查阅各决策详情。
+
+### 变更内容
+- **后端服务** (`memorycore/frontend.py`)：
+  - `/api/v1/curator/llm/:job_id` 与 `/api/v1/curator/llm/latest`：直接附带当前 job 已生成的决策明细列表 `decisions`（复用 `list_llm_curator_decisions(job_id, limit=200, review_status="all")`）及总数 `total_decisions`，提供高效的单请求轻量轮询响应。
+- **前端类型定义** (`ui/components/dashboard/memory-operations-types.ts`)：
+  - 新增 `LlmDecisionItem` 接口定义，包含 `id`, `decision_type`, `recommended_action`, `finding` (keep_title/drop_title/reason/score), `llm_confidence`, `review_status`, `created_at` 等全量字段；
+  - `LlmRunState` 补充 `decisions?: LlmDecisionItem[]` 字段。
+- **控制台交互与流式列表渲染** (`ui/components/dashboard/`)：
+  - `MemoryOperationsPanel.tsx`：
+    - `pollJob` 轮询时实时同步接收 `data.decisions`，并在 running 态持续动态累加；
+    - 初始化自动拉取 latest 任务详情并呈现最新治理决策。
+  - `MemoryOperationsView.tsx`：
+    - 在 4 项概览指标下方增加「治理决策与发现明细」实时列表区；
+    - 运行中显示呼吸式状态「批次计算中 · 实时推入」；
+    - 支持按类别过滤（全部 / 语义去重 / 事实冲突）；
+    - 针对去重清晰展示 `[保留] 记忆A ⟵ [合并归档] 记忆B`，针对冲突清晰展示 `[冲突项] 记忆A ⚡ 记忆B`；
+    - 呈现 LLM 具体判决依据（reason）、相似度/置信度百分比与操作状态。
+
+### 验证
+- **自动化测试**：全量回归测试 `pytest tests/ -q` 耗时 100.39s，**628 passed / 0 failed**。
+- **构建与部署**：`pnpm run build` 成功通过，Next.js standalone 生产编译完成，`mcore.service` 与 `mcore-ui.service` 重启正常（HTTP 200）。
+- **实测验证**：调用 `/api/v1/curator/llm/latest` 正确返回 41 条真实决策并完整携带 `finding.reason`、`keep_title` 等信息；前端界面成功渲染明细列表，支持筛选与平滑滚动。
+
+### 回滚
+`git revert HEAD`

@@ -105,19 +105,48 @@ export const MemoryOperationsPanel = () => {
       const data = payload.data || payload;
       const parsedStartedAt = data.started_at ? new Date(data.started_at).getTime() : NaN;
       const effectiveStartedAt = !Number.isNaN(parsedStartedAt) ? parsedStartedAt : startedAt;
+      const decisions = Array.isArray(data.decisions) ? data.decisions : [];
 
       if (data.status === "done" || data.status === "succeeded") {
-        setLlmRunState({ state: "succeeded", jobId, startedAt: effectiveStartedAt, elapsedMs: Date.now() - effectiveStartedAt, summary: data.summary || data.result?.summary || {}, errors: data.errors || data.result?.errors || [], progress: data.progress });
+        setLlmRunState({
+          state: "succeeded",
+          jobId,
+          startedAt: effectiveStartedAt,
+          elapsedMs: Date.now() - effectiveStartedAt,
+          summary: data.summary || data.result?.summary || {},
+          errors: data.errors || data.result?.errors || [],
+          progress: data.progress,
+          decisions,
+        });
         setLlmRunning(false);
         localStorage.removeItem(LLM_JOB_KEY);
         void fetchStatus();
       } else if (data.status === "error" || data.status === "failed") {
-        setLlmRunState({ state: "failed", jobId, startedAt: effectiveStartedAt, elapsedMs: Date.now() - effectiveStartedAt, summary: data.summary, progress: data.progress, errors: data.errors, error: data.error || (Array.isArray(data.errors) ? data.errors.join("; ") : "LLM Curator job failed") });
+        setLlmRunState({
+          state: "failed",
+          jobId,
+          startedAt: effectiveStartedAt,
+          elapsedMs: Date.now() - effectiveStartedAt,
+          summary: data.summary,
+          progress: data.progress,
+          errors: data.errors,
+          error: data.error || (Array.isArray(data.errors) ? data.errors.join("; ") : "LLM Curator job failed"),
+          decisions,
+        });
         setLlmRunning(false);
         localStorage.removeItem(LLM_JOB_KEY);
       } else {
-        setLlmRunState((previous) => ({ ...previous, state: "running", jobId, startedAt: effectiveStartedAt, summary: data.summary || previous.summary, progress: data.progress || previous.progress, errors: data.errors || previous.errors }));
-        llmPollRef.current = setTimeout(() => void pollJob(jobId, effectiveStartedAt), 3000);
+        setLlmRunState((previous) => ({
+          ...previous,
+          state: "running",
+          jobId,
+          startedAt: effectiveStartedAt,
+          summary: data.summary || previous.summary,
+          progress: data.progress || previous.progress,
+          errors: data.errors || previous.errors,
+          decisions: decisions.length > 0 ? decisions : previous.decisions || [],
+        }));
+        llmPollRef.current = setTimeout(() => void pollJob(jobId, effectiveStartedAt), 2000);
       }
     } catch {
       llmPollRef.current = setTimeout(() => void pollJob(jobId, startedAt), 3000);
@@ -129,13 +158,30 @@ export const MemoryOperationsPanel = () => {
     if (!saved) {
       fetch(`${getApiBaseUrl()}/api/v1/curator/llm/latest`).then((response) => response.json()).then((payload) => {
         const data = payload.data || payload;
+        const decisions = Array.isArray(data.decisions) ? data.decisions : [];
         if (data.status === "running" && data.job_id) {
           const parsedStartedAt = data.started_at ? new Date(data.started_at).getTime() : NaN;
           const startedAt = !Number.isNaN(parsedStartedAt) ? parsedStartedAt : Date.now();
           setLlmRunning(true);
-          setLlmRunState({ state: "running", jobId: data.job_id, startedAt, summary: data.summary || {}, progress: data.progress || {} });
+          setLlmRunState({ state: "running", jobId: data.job_id, startedAt, summary: data.summary || {}, progress: data.progress || {}, decisions });
           localStorage.setItem(LLM_JOB_KEY, JSON.stringify({ jobId: data.job_id, startedAt }));
           llmPollRef.current = setTimeout(() => void pollJob(data.job_id, startedAt), 2000);
+        } else if ((data.status === "succeeded" || data.status === "done") && data.job_id) {
+          const parsedStartedAt = data.started_at ? new Date(data.started_at).getTime() : NaN;
+          const parsedFinishedAt = data.finished_at ? new Date(data.finished_at).getTime() : NaN;
+          const elapsedMs = !Number.isNaN(parsedStartedAt) && !Number.isNaN(parsedFinishedAt)
+            ? parsedFinishedAt - parsedStartedAt
+            : undefined;
+          setLlmRunState({
+            state: "succeeded",
+            jobId: data.job_id,
+            startedAt: !Number.isNaN(parsedStartedAt) ? parsedStartedAt : undefined,
+            elapsedMs,
+            summary: data.summary || {},
+            errors: data.errors || [],
+            progress: data.progress,
+            decisions,
+          });
         }
       }).catch(() => undefined);
     } else {
@@ -158,7 +204,7 @@ export const MemoryOperationsPanel = () => {
     if (llmRunning) return;
     const startedAt = Date.now();
     setLlmRunning(true);
-    setLlmRunState({ state: "running", startedAt });
+    setLlmRunState({ state: "running", startedAt, decisions: [] });
     try {
       const response = await fetch(`${getApiBaseUrl()}/api/v1/curator/llm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ dry_run: true }) });
       const payload = await response.json();
@@ -166,10 +212,10 @@ export const MemoryOperationsPanel = () => {
       const jobId = (payload.data || payload)?.job_id;
       if (!jobId) throw new Error("No job_id returned from server");
       localStorage.setItem(LLM_JOB_KEY, JSON.stringify({ jobId, startedAt }));
-      setLlmRunState({ state: "running", jobId, startedAt });
+      setLlmRunState({ state: "running", jobId, startedAt, decisions: [] });
       llmPollRef.current = setTimeout(() => void pollJob(jobId, startedAt), 2000);
     } catch (error: unknown) {
-      setLlmRunState({ state: "failed", startedAt, elapsedMs: Date.now() - startedAt, error: getErrorMessage(error, "LLM Curator failed") });
+      setLlmRunState({ state: "failed", startedAt, elapsedMs: Date.now() - startedAt, error: getErrorMessage(error, "LLM Curator failed"), decisions: [] });
       setLlmRunning(false);
       localStorage.removeItem(LLM_JOB_KEY);
     }
