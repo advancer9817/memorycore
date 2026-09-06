@@ -16,6 +16,7 @@ import { RootState } from "@/store/store";
 import { constants } from "@/components/shared/source-app";
 import { RelatedMemories } from "./RelatedMemories";
 import { MemoryLineage } from "./MemoryLineage";
+import { DiffViewer } from "@/components/shared/DiffViewer";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/hooks/useI18n";
 
@@ -249,11 +250,16 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                   )}
                 </div>
 
-                {/* <div className="flex justify-end gap-2 w-full mt-2">
-                <p className="text-sm font-semibold text-primary my-auto">
-                    {new Date(memory.created_at).toLocaleString()}
-                  </p>
-                </div> */}
+                {(memory?.state === "superseded" || memory?.state === "contradicted") && (
+                  <div className="mt-4">
+                    <DiffViewer
+                      oldText={memory?.memory || ""}
+                      newText="[提示] 该事实已被标记废弃或冲突，请参阅右侧知识血统 (MemoryLineage) 获取最新演进。"
+                      oldTitle={`原条目内容 (${memory?.state})`}
+                      newTitle="知识演化提示"
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </div>

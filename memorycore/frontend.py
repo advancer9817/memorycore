@@ -264,6 +264,17 @@ def _dispatch_api_sync(method: str, parts: list[str], query: dict[str, list[str]
         else:
             return _dispatch_v1_compat(method, parts[1:], query, body)
 
+    if parts == ["curator", "last-digest"] and method == "GET":
+        from pathlib import Path
+        digest_file = Path.home() / ".agent-memory" / "last_curator_digest.json"
+        if digest_file.exists():
+            try:
+                import json
+                return json.loads(digest_file.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        return {"changed": False, "status": "no_digest"}
+
     if parts == ["memories"] and method == "GET":
         return search_memory_records(
             query=_str_q(query, "query", _str_q(query, "q", "")),

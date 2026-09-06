@@ -183,6 +183,9 @@ class IngestResult:
     updated: int = 0
     skipped: int = 0
     errors: int = 0
+    added_titles: list[str] = field(default_factory=list)
+    updated_titles: list[str] = field(default_factory=list)
+    skipped_details: list[dict[str, Any]] = field(default_factory=list)
     decisions: list[DedupDecision] = field(default_factory=list)
     elapsed_s: float = 0.0
     extraction_elapsed_s: float = 0.0
@@ -392,6 +395,7 @@ def ingest(
             # Batch-internal dedup: skip if very similar to a fact already processed in this batch
             if _batch_similar(fact.text, batch_texts):
                 result.skipped += 1
+                result.skipped_details.append({"title": fact_title, "reason": "batch_similar"})
                 logger.debug("dedup: BATCH_SKIP %s", fact.text[:60])
                 continue
 
@@ -438,6 +442,7 @@ def ingest(
                 existing_id = str(title_match["id"])
                 if str(title_match.get("content") or "").strip() == fact.text.strip():
                     result.skipped += 1
+                    result.skipped_details.append({"title": fact_title, "reason": "exact_title_match", "existing_id": existing_id})
                     result.decisions.append(DedupDecision(
                         action="skip",
                         fact_text=fact.text,
@@ -458,6 +463,7 @@ def ingest(
                             "agent_id": agent_id,
                         })
                     result.updated += 1
+                    result.updated_titles.append(fact_title)
                     result.decisions.append(DedupDecision(
                         action="update",
                         fact_text=fact.text,
@@ -491,6 +497,12 @@ def ingest(
 
             if decision.action == "skip":
                 result.skipped += 1
+                result.skipped_details.append({
+                    "title": fact_title,
+                    "reason": "vector_similar",
+                    "existing_id": decision.existing_id,
+                    "similarity": round(decision.similarity, 2),
+                })
                 logger.debug("dedup: SKIP  [%.3f] %s", decision.similarity, fact.text[:60])
 
             elif decision.action == "update":
@@ -551,7 +563,14 @@ def ingest(
                         "agent_id": agent_id,
                     })
                 _seed_feedback(new_id, fact, decision, fact_type, _add_feedback_fn)
+                # Auto-supersede: link and mark old memory superseded
+                try:
+                    from memorycore.storage.crud import supersede_memory_record
+                    supersede_memory_record(decision.existing_id, new_id, source_agent=agent_id, note="Auto-superseded on ingest update")
+                except Exception as _sup_exc:
+                    logger.debug("dedup: auto-supersede note: %s", _sup_exc)
                 result.updated += 1
+                result.updated_titles.append(fact_title)
                 batch_texts.append(fact.text)
                 logger.debug("dedup: UPDATE [%.3f] %s", decision.similarity, fact.text[:60])
 
@@ -583,6 +602,7 @@ def ingest(
                     })
                 _seed_feedback(new_id, fact, decision, fact_type, _add_feedback_fn)
                 result.added += 1
+                result.added_titles.append(fact_title)
                 batch_texts.append(fact.text)
                 logger.debug("dedup: ADD    [%.3f] %s", decision.similarity, fact.text[:60])
 

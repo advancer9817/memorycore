@@ -12,6 +12,11 @@ context_pack:
   profile_query_expand_enabled: true
   profile_query_expand_max_terms: 3
   profile_query_expand_min_overlap: 1
+  hard_constraints:
+    enabled: true
+    rules:
+      - "交付文件统一输出到 /mnt/c/Users/Advancer/Desktop/output/"
+      - "代码提交/推送前必须在仓库根目录追加 ITERATION.md 迭代记录"
 embedding:
   api_key: ''
   api_url: ''
@@ -139,6 +144,19 @@ user_profile:
   extract_limit: 200
   max_snapshot_chars: 800
   min_confidence: 0.6
+  task_slices:
+    enabled: true
+    tech_attributes:
+      - 技术栈
+      - 常用工具
+      - 当前项目
+      - 模型偏好
+      - 沟通偏好
+    doc_attributes:
+      - 输出偏好
+      - 沟通偏好
+      - 语言
+      - 工作领域
   schema:
   - description: 用户的姓名
     name: 姓名

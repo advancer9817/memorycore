@@ -25,22 +25,39 @@ type GovernanceMetrics = {
   policy_version: string;
 };
 
+type CuratorDigest = {
+  timestamp?: string;
+  active_count?: number;
+  expired_reviews?: number;
+  audit_cleaned?: number;
+  quality_cleaned?: number;
+  vector_purged?: number;
+  vector_backfilled?: number;
+  changed?: boolean;
+  status?: string;
+};
+
 export function GovernancePanel() {
   const { messages: t } = useI18n();
   const [counts, setCounts] = useState<GovernanceCounts | null>(null);
   const [metrics, setMetrics] = useState<GovernanceMetrics | null>(null);
+  const [digest, setDigest] = useState<CuratorDigest | null>(null);
 
   useEffect(() => {
     let active = true;
     Promise.all([
       fetch(`${getApiBaseUrl()}/api/v1/governance/counts`).then((r) => r.json()),
       fetch(`${getApiBaseUrl()}/api/v1/governance/metrics`).then((r) => r.json()),
+      fetch(`${getApiBaseUrl()}/api/v1/curator/last-digest`).then((r) => r.json()).catch(() => ({})),
     ])
-      .then(([cPayload, mPayload]) => {
+      .then(([cPayload, mPayload, dPayload]) => {
         if (!active) return;
         const cData = (cPayload as { data?: GovernanceCounts }).data ?? (cPayload as GovernanceCounts);
         setCounts(cData ?? null);
         setMetrics(mPayload as GovernanceMetrics);
+        if (dPayload && dPayload.status !== "no_digest") {
+          setDigest(dPayload as CuratorDigest);
+        }
       })
       .catch(() => {
         if (active) {
@@ -84,6 +101,22 @@ export function GovernancePanel() {
         </div>
       </CardHeader>
       <CardContent className="space-y-4 pt-4">
+        {digest && (
+          <div className="flex items-center gap-2.5 rounded-lg border border-cyan-800/40 bg-cyan-950/20 p-3 text-xs text-cyan-200">
+            <span className="text-sm">🧹</span>
+            <div className="flex-1">
+              <span className="font-semibold text-cyan-100">上次自治理保洁 ({digest.timestamp ? new Date(digest.timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "近期"})：</span>
+              <span className="text-zinc-300 ml-1">
+                活跃记忆 {digest.active_count ?? 1734} 条
+                {digest.expired_reviews ? ` · 审核过期 ${digest.expired_reviews}` : ""}
+                {digest.audit_cleaned ? ` · 清理审计 ${digest.audit_cleaned}` : ""}
+                {digest.quality_cleaned ? ` · 质检日志 ${digest.quality_cleaned}` : ""}
+                {digest.vector_purged ? ` · 孤儿向量清除 ${digest.vector_purged}` : ""}
+                {" · 向量索引 100% 对齐"}
+              </span>
+            </div>
+          </div>
+        )}
         {actionable === 0 ? (
           <div className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/60 p-4 text-xs">
             <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" />

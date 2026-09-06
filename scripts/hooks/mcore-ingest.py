@@ -615,10 +615,50 @@ def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:
         )
         preview = " ".join(body.split())[:500]
         _log(f"ingest_done agent={agent_id} messages={len(messages)} response={preview}")
-    except Exception:
+        try:
+            from datetime import datetime
+            resp = json.loads(body)
+            tool_res = resp.get("result", {})
+            content_list = tool_res.get("content", [])
+            text_val = content_list[0].get("text", "{}") if content_list else "{}"
+            data = json.loads(text_val) if isinstance(text_val, str) else text_val
+            report = {
+                "timestamp": datetime.now().isoformat(),
+                "agent": agent_id,
+                "added": data.get("added", 0),
+                "updated": data.get("updated", 0),
+                "skipped": data.get("skipped", 0),
+                "errors": data.get("errors", 0),
+                "added_titles": data.get("added_titles", []),
+                "updated_titles": data.get("updated_titles", []),
+                "skipped_details": data.get("skipped_details", []),
+                "degraded": data.get("degraded", False),
+                "read": False,
+            }
+            report_path = Path.home() / ".agent-memory" / "last_ingest.json"
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as r_exc:
+            _log(f"ingest_report_save_failed: {r_exc}")
+    except Exception as exc:
         import traceback
-
         _log(f"ingest_exception agent={agent_id} tb={traceback.format_exc()[-1500:]}")
+        try:
+            from datetime import datetime
+            report = {
+                "timestamp": datetime.now().isoformat(),
+                "agent": agent_id,
+                "added": 0, "updated": 0, "skipped": 0, "errors": 1,
+                "added_titles": [], "updated_titles": [], "skipped_details": [],
+                "degraded": True,
+                "error": str(exc),
+                "read": False,
+            }
+            report_path = Path.home() / ".agent-memory" / "last_ingest.json"
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
 
 
 def _messages_for_agent(agent: str) -> list[dict[str, str]]:

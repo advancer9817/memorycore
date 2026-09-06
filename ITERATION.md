@@ -296,5 +296,55 @@
 ### 回滚
 `git revert HEAD`
 
+## [迭代 227] 2026-09-06 — 全面打磨现有核心体验：上下文高密度注入、提炼透明通报、自治理感知与UI日常微操
+
+> 彻底消除系统后台“静默黑盒感”与终端“长篇画像噪音”，构建“对话前高信噪比注入、对话后自动演进提炼、日常微操免弹窗、后台治理晨报感知”的全链路闭环体验。不新增多余复杂架构，专注将现有功能打磨顺手。
+
+### 问题与根因
+1. **注入画像冗长霸屏**：原先无论提问多么轻量，`build_context_pack` 均机械倾泻 13 项完整画像（800+ 字符），缺乏工程底线强制护栏，且记忆未标注召回依据，产生黑盒感。
+2. **提炼静默无感知**：`mcore-ingest.py` 后台异步跑完无声无息，用户完全无法感知沉淀了哪些新事实，且缺乏自动替换旧冲突事实的时态演进能力。
+3. **后台治理沉默**：定时运行的 auto-curator 与 rule curator 的清理成果仅存在日志中，用户无法感知系统的日常保洁动作。
+4. **Web UI 操作路径长**：搜索缺乏关键词高亮，状态变更需反复点开模态框，废弃与冲突记忆缺乏直观新旧对比。
+
+### 变更
+- `config.yaml`：
+  - `context_pack` 新增 `hard_constraints`（强制底线护栏配置）；
+  - `user_profile` 新增 `task_slices`（场景画像白名单，区分开发工程类与文档类）。
+- `memorycore/storage/context_pack.py`：
+  - 顶层硬编码置顶交付路径与 `ITERATION.md` 强制护栏；
+  - 接入 `task_slices` 动态微画像，开发场景仅保留 5 项核心画像（技术栈、工具、项目、模型、沟通），字符数压缩 60% 至 ≤250 字；
+  - 记忆卡片格式化追加 `[类型 | 语义/词法/相关 命中理由]` 透明化标签。
+- `memorycore/storage/profile.py`：
+  - `profile_snapshot` 支持传入 `task` 并根据任务类型自动执行属性白名单切片，闲聊场景跳过画像注入。
+- `memorycore/storage/crud.py`：
+  - `add_memory_record` 新增类型智能推导，缺省类型时按关键词自动推断为 `decision` / `environment_fact` / `user_profile`。
+- `memorycore/extraction.py`：
+  - 提炼 Prompt 强化“三必存、四不存”原则，严格锁定纠偏、环境事实与决策，剔除排查过程日志与通用常识。
+- `memorycore/dedup.py` & `server.py`：
+  - `IngestResult` 扩展 `added_titles`、`updated_titles`、`skipped_details` 透传；
+  - 引入 Auto-Supersede 机制，在判定更新时自动对冲突旧记忆执行 `supersede_memory_record` 并建立演进链接。
+- `scripts/hooks/`：
+  - `mcore-context.sh`：注入完成向控制台输出 `🎯 [mcore] 上下文就绪` 极简 HUD；
+  - `mcore-ingest.py`：提取完毕持久化单行摘要至 `~/.agent-memory/last_ingest.json`；
+  - `session-start.sh`：启动时首屏三态感知通报（`💡 新增沉淀` / `💤 保持干净` / `⚠️ 异常`），并支持夜间治理完成后的极简晨报（`🧹 [mcore 晨报]`，无变动则静默）；
+  - `git-push.sh`：syncpush 导出记忆后输出彩色终端健康体检卡片。
+- `memorycore/frontend_v1.py` & `frontend.py`：
+  - HTTP hooks 路由顶部注入 HUD 注释；
+  - 新增 `GET /api/v1/curator/last-digest` 只读接口；
+  - 补齐 `PATCH /api/v1/memories/:id` 快速微操接口。
+- `ui/`（Web 前端）：
+  - 新增 `HighlightText.tsx`，在 `MemoryTable.tsx` 中对搜索词黄色高亮；
+  - 表格操作列增加一键归档/恢复、一键加星置顶保鲜、一键废弃（Supersede）等行内快捷按钮；
+  - 新增 `DiffViewer.tsx`，在记忆详情页为 `superseded` / `contradicted` 状态提供零依赖文本演进对比；
+  - `GovernancePanel.tsx` 增加自治理保洁简报卡片。
+
+### 验证
+- 自动化单测：编写 `test_context_injection_experience.py` 与 `test_ingest_experience.py`，全量回归 pytest 全部通过。
+- 前端编译：`ui/` 下 `pnpm run build` 成功完成，Next.js standalone 资源就绪，`mcore-ui.service` 重启正常。
+- 真实调用：实测 `hooks/context`、`hooks/session-start`、`curator/last-digest` 接口及 `git syncpush` 报表，响应均符合设计预期。
+
+### 回滚
+`git revert HEAD`
+
 
 

@@ -264,6 +264,16 @@ def add_memory_record(
     valid_until: str | None = None,
     atomize: str | bool = "auto",
 ) -> dict[str, Any]:
+    if not memory_type or memory_type in ("episodic_memory", "general"):
+        combined = f"{title} {content}".lower()
+        if any(k in combined for k in ("决定", "规范", "重构", "必须", "禁止", "原则", "方案", "约定", "规定", "决策")):
+            memory_type = "decision"
+        elif any(k in combined for k in ("端口", "路径", "环境变量", "安装", "service", "配置", "ip", "host", "port", "url")):
+            memory_type = "environment_fact"
+        elif any(k in combined for k in ("偏好", "习惯", "喜欢", "风格", "要求我", "我的角色", "技术栈")):
+            memory_type = "user_profile"
+        elif not memory_type:
+            memory_type = "episodic_memory"
     validate_type(memory_type)
     validate_status(status)
     if not title.strip() or not content.strip():

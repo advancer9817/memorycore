@@ -68,6 +68,38 @@ def _start_auto_curator(interval_hours: float = 6.0) -> None:
                     reconcile_res.get("orphans_purged", 0),
                     reconcile_res.get("missing_resynced", 0),
                 )
+                try:
+                    from datetime import datetime
+                    from pathlib import Path
+                    from memorycore.storage.crud import get_memory_stats
+                    stats = get_memory_stats()
+                    changed = any([
+                        handoff_cleanup.get("cleaned", 0) > 0,
+                        sync_result.get("succeeded", 0) > 0,
+                        expire_result.get("expired", 0) > 0,
+                        audit_cleaned > 0,
+                        quality_cleaned > 0,
+                        reconcile_res.get("orphans_purged", 0) > 0,
+                        reconcile_res.get("missing_resynced", 0) > 0,
+                    ])
+                    digest = {
+                        "timestamp": datetime.now().isoformat(),
+                        "active_count": stats.get("total", 0),
+                        "handoff_cleaned": handoff_cleanup.get("cleaned", 0),
+                        "sync_succeeded": sync_result.get("succeeded", 0),
+                        "expired_reviews": expire_result.get("expired", 0),
+                        "audit_cleaned": audit_cleaned,
+                        "quality_cleaned": quality_cleaned,
+                        "vector_purged": reconcile_res.get("orphans_purged", 0),
+                        "vector_backfilled": reconcile_res.get("missing_resynced", 0),
+                        "changed": changed,
+                        "read": False,
+                    }
+                    digest_path = Path.home() / ".agent-memory" / "last_curator_digest.json"
+                    digest_path.parent.mkdir(parents=True, exist_ok=True)
+                    digest_path.write_text(json.dumps(digest, ensure_ascii=False, indent=2), encoding="utf-8")
+                except Exception as d_exc:
+                    logger.debug("[auto-curator] digest save error: %s", d_exc)
             except Exception as exc:
                 logger.warning("[auto-curator] error: %s", exc)
             time.sleep(interval_hours * 3600)

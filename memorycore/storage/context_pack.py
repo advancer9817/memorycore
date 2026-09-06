@@ -388,6 +388,10 @@ def build_context_pack(
         score = _rank_score(record)
         sources = record.get("_retrieval_sources", [])
         lexical = _lexical_relevance(task, record)
+        v_hit = float(vector_hits.get(record["id"], 0.0))
+        record["_vector_hit_score"] = v_hit
+        record["_lexical_hit_score"] = lexical
+        record["_rank_score_val"] = score
         if "keyword" in sources and lexical < _MIN_KEYWORD_LEXICAL_RELEVANCE_SCORE:
             continue
         is_vector_only = sources == ["vector"]
@@ -460,9 +464,22 @@ def build_context_pack(
         f"task: {task}",
         f"scope: {scope}",
         f"project_path: {project_path or '(none)'}",
-        f"safety: {BOUNDARY_NOTICE}",
+        f"safety: {BOUNDARY_NOTICE} 若背景记忆存在过时/冲突，请指出或调用 memory_feedback / memory_supersede 纠偏。",
         "",
     ]
+    # Top-level hard constraints
+    hard_constraints_cfg = cp_cfg.get("hard_constraints") or {}
+    if hard_constraints_cfg.get("enabled", True) and not _is_greeting(task):
+        rules = hard_constraints_cfg.get("rules") or [
+            "交付文件统一输出到 /mnt/c/Users/Advancer/Desktop/output/",
+            "代码提交/推送前必须在仓库根目录追加 ITERATION.md 迭代记录",
+        ]
+        if rules:
+            lines.append("## 强制护栏")
+            for idx, rule in enumerate(rules, 1):
+                lines.append(f"{idx}. {rule}")
+            lines.append("")
+
     # Fixed structured user-profile snapshot — always injected (no retrieval dependency)
     try:
         from memorycore.storage.profile import (
@@ -476,7 +493,12 @@ def build_context_pack(
                 decay_profile_attributes(user_id="default", cfg=cfg)
             except Exception:
                 pass
-            snap = profile_snapshot(user_id="default", cfg=cfg, max_chars=int(cfg.get("user_profile", {}).get("max_snapshot_chars", 800)))
+            snap = profile_snapshot(
+                user_id="default",
+                cfg=cfg,
+                max_chars=int(cfg.get("user_profile", {}).get("max_snapshot_chars", 800)),
+                task=task,
+            )
             if snap:
                 lines.append(f"{snap}\n")
             try:
@@ -526,7 +548,21 @@ def build_context_pack(
         snippet = item["content"].replace("\n", " ")
         if len(snippet) > 420:
             snippet = snippet[:417] + "..."
-        candidate_line = f"- [{item['id']}] {item['title']}: {snippet}"
+
+        v_score = float(item.get("_vector_hit_score") or vector_hits.get(item["id"], 0.0))
+        lex_score = float(item.get("_lexical_hit_score") or 0.0)
+        srcs = item.get("_retrieval_sources", [])
+
+        if v_score >= 0.70 or ("vector" in srcs and v_score >= 0.50):
+            reason_tag = f"语义 {v_score:.2f}"
+        elif "keyword" in srcs or lex_score > 0.08:
+            reason_tag = "词法精准匹配"
+        elif "vector" in srcs:
+            reason_tag = f"语义 {v_score:.2f}"
+        else:
+            reason_tag = "相关推荐"
+
+        candidate_line = f"- [{item['id']} | {reason_tag}] {item['title']}: {snippet}"
         test_text = "\n".join(lines + [candidate_line])
         if len(test_text) > max_chars:
             break

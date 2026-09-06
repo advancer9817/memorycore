@@ -131,4 +131,93 @@ PY
 [ -n "$PRESENCE_ARGS" ] && call_tool 1 agent_presence_update "$PRESENCE_ARGS"
 [ -n "$CAPABILITY_ARGS" ] && call_tool 2 agent_capability_register "$CAPABILITY_ARGS"
 
+python3 - <<'PY' 2>/dev/null || true
+import json
+from pathlib import Path
+from datetime import datetime
+
+report_file = Path.home() / ".agent-memory" / "last_ingest.json"
+if not report_file.exists():
+    exit(0)
+
+try:
+    data = json.loads(report_file.read_text(encoding="utf-8"))
+    if data.get("read", False):
+        exit(0)
+
+    ts_str = data.get("timestamp", "")
+    if ts_str:
+        dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+        if (now - dt).total_seconds() > 86400:
+            exit(0)
+
+    data["read"] = True
+    report_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    added = data.get("added", 0)
+    updated = data.get("updated", 0)
+    skipped = data.get("skipped", 0)
+    errors = data.get("errors", 0)
+    titles = data.get("added_titles", []) or data.get("updated_titles", [])
+    title_summary = ("（" + "、".join(titles[:2]) + ("等" if len(titles) > 2 else "") + "）") if titles else ""
+
+    if errors > 0 or data.get("degraded", False):
+        err_msg = data.get("error", "外部抽取端点响应异常")
+        print(f"\033[33m⚠️ [mcore] 上次会话提炼未完成: {err_msg}，对话记录已暂存待重试\033[0m")
+    elif added > 0 or updated > 0:
+        action_desc = f"沉淀 {added} 条新事实" if added else ""
+        if updated:
+            action_desc += f"{'，' if action_desc else ''}更新/废弃 {updated} 条旧规则"
+        skip_desc = f"，跳过 {skipped} 条重复" if skipped else ""
+        print(f"\033[32m💡 [mcore] 上次会话提炼完成: {action_desc}{title_summary}{skip_desc}。\033[0m")
+    else:
+        print("\033[36m💤 [mcore] 上次会话已归档: 未发现新增长期规则，保持知识库干净。\033[0m")
+except Exception:
+    pass
+PY
+
+python3 - <<'PY' 2>/dev/null || true
+import json
+from pathlib import Path
+from datetime import datetime
+
+digest_file = Path.home() / ".agent-memory" / "last_curator_digest.json"
+if not digest_file.exists():
+    exit(0)
+
+try:
+    data = json.loads(digest_file.read_text(encoding="utf-8"))
+    if data.get("read", False) or not data.get("changed", False):
+        exit(0)
+
+    ts_str = data.get("timestamp", "")
+    if ts_str:
+        dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+        if (now - dt).total_seconds() > 86400:
+            exit(0)
+
+    data["read"] = True
+    digest_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    active_cnt = data.get("active_count", 0)
+    details = []
+    if data.get("expired_reviews", 0) > 0:
+        details.append(f"过期审核 {data['expired_reviews']} 条")
+    if data.get("audit_cleaned", 0) > 0:
+        details.append(f"清理审计 {data['audit_cleaned']} 条")
+    if data.get("quality_cleaned", 0) > 0:
+        details.append(f"质检日志 {data['quality_cleaned']} 条")
+    if data.get("vector_purged", 0) > 0:
+        details.append(f"清除孤儿向量 {data['vector_purged']} 个")
+    if data.get("vector_backfilled", 0) > 0:
+        details.append(f"补齐向量 {data['vector_backfilled']} 个")
+
+    detail_str = ("，" + "、".join(details)) if details else ""
+    print(f"\033[36m🧹 [mcore 晨报] 夜间治理完成: 活跃库容 {active_cnt} 条{detail_str}，系统自检健康。\033[0m")
+except Exception:
+    pass
+PY
+
 exit 0

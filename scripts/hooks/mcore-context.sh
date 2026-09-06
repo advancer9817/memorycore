@@ -174,4 +174,16 @@ else:
 print(json.dumps(payload, ensure_ascii=False))
 ' "$CONTEXT" "$HOOK_EVENT" 2>/dev/null || true
 
+if [ -n "$CONTEXT" ]; then
+  python3 -c '
+import sys
+ctx = sys.argv[1]
+lines = ctx.splitlines()
+rec_count = sum(1 for line in lines if line.strip().startswith("- ["))
+tok_est = max(1, len(ctx) // 4)
+if rec_count > 0 or "## 强制护栏" in ctx:
+    sys.stderr.write(f"\033[32m🎯 [mcore] 上下文就绪: 命中记忆 {rec_count} 条 (约 {tok_est} Token)\033[0m\n")
+' "$CONTEXT" 2>/dev/null || true
+fi
+
 exit 0

@@ -200,6 +200,7 @@ def profile_snapshot(
     user_id: str = "default",
     cfg: dict[str, Any] | None = None,
     max_chars: int | None = None,
+    task: str = "",
 ) -> str:
     """Build '## user_profile_snapshot\\n- <attr>: <value>\\n...' text.
 
@@ -211,20 +212,57 @@ def profile_snapshot(
         return ""
     if max_chars is None:
         max_chars = int(up.get("max_snapshot_chars", _DEFAULT_MAX_SNAPSHOT_CHARS))
+
+    task_slices_cfg = up.get("task_slices") or {}
+    slices_enabled = task_slices_cfg.get("enabled", True)
+    allowed_attrs: set[str] | None = None
+
+    if slices_enabled and task:
+        try:
+            from memorycore.storage.search import _classify_task, _is_greeting
+
+            if _is_greeting(task):
+                return ""
+
+            task_type = _classify_task(task)
+            task_lower = task.lower()
+            tech_keywords = (
+                "git", "bash", "code", "error", "bug", "配置", "脚本", "重构",
+                "路径", "服务", "python", "java", "test", "curl", "npm", "pnpm",
+                "cpa", "wsl", "docker", "端口", "port", "mcore", "service",
+            )
+            doc_keywords = ("文档", "报告", "总结", "周报", "写", "翻译", "doc", "report")
+
+            if any(k in task_lower for k in doc_keywords):
+                allowed_attrs = set(task_slices_cfg.get("doc_attributes", [
+                    "输出偏好", "沟通偏好", "语言", "工作领域",
+                ]))
+            elif task_type in ("code", "debug", "refactor", "ops", "architecture") or any(k in task_lower for k in tech_keywords):
+                allowed_attrs = set(task_slices_cfg.get("tech_attributes", [
+                    "技术栈", "常用工具", "当前项目", "模型偏好", "沟通偏好",
+                ]))
+        except Exception:
+            allowed_attrs = None
+
     attrs = get_user_profile(user_id)
     if not attrs:
         return ""
     lines = ["## user_profile_snapshot"]
     for attr in attrs:
+        attr_name = attr.get("attribute", "")
+        if allowed_attrs is not None and attr_name not in allowed_attrs:
+            continue
         value = str(attr.get("value") or "").strip()
         if not value:
             continue
         safe = value.replace("\n", " ").replace("\r", " ")
-        line = f"- {attr['attribute']}: {safe}"
+        line = f"- {attr_name}: {safe}"
         budget = max_chars - len("\n".join(lines)) - len(line) - 2
         if budget < 0 and len(lines) > 1:
             break
         lines.append(line)
+    if len(lines) <= 1:
+        return ""
     text = "\n".join(lines).strip()
     if len(text) > max_chars:
         text = text[: max(max_chars - 3, 0)].rstrip() + "..."

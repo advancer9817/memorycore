@@ -435,12 +435,28 @@ def _dispatch_v1_compat(
             project_path=str(project_path),
             token_budget=2000,
         )
+        context_text = pack.get("context", "")
+        if context_text:
+            rec_count = sum(1 for l in context_text.splitlines() if l.strip().startswith("- ["))
+            hud_line = f"<!-- mcore: 上下文就绪 (记忆 {rec_count} 条 / 约 {len(context_text)//4} Token) -->\n"
+            context_text = hud_line + context_text
         return {
             "hookSpecificOutput": {
                 "hookEventName": "UserPromptSubmit",
-                "additionalContext": pack.get("context", ""),
+                "additionalContext": context_text,
             }
         }
+
+    if parts == ["curator", "last-digest"] and method == "GET":
+        from pathlib import Path
+        digest_file = Path.home() / ".agent-memory" / "last_curator_digest.json"
+        if digest_file.exists():
+            try:
+                import json
+                return json.loads(digest_file.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        return {"changed": False, "status": "no_digest"}
 
     if parts == ["hooks", "session-start"] and method == "POST":
         try:
@@ -449,6 +465,20 @@ def _dispatch_v1_compat(
         except Exception:
             pass
         return {}
+
+    if len(parts) == 2 and parts[0] == "memories" and method == "PATCH":
+        mem_id = parts[1]
+        from memorycore.storage.db import managed_conn
+        if "status" in body:
+            update_status(mem_id, str(body["status"]))
+        if "importance" in body or "tags" in body:
+            with managed_conn() as conn:
+                if "importance" in body:
+                    conn.execute("UPDATE memories SET importance=? WHERE id=?", (float(body["importance"]), mem_id))
+                if "tags" in body:
+                    import json
+                    conn.execute("UPDATE memories SET tags_json=? WHERE id=?", (json.dumps(body["tags"], ensure_ascii=False), mem_id))
+        return {"status": "ok", "id": mem_id}
 
     if parts == ["hooks", "stop"] and method == "POST":
         agent = str(body.get("agent") or "claude")

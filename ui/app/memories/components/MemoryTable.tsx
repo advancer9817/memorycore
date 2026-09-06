@@ -1,3 +1,4 @@
+import { HighlightText } from "@/components/shared/HighlightText";
 import {
   Edit,
   MoreHorizontal,
@@ -7,6 +8,8 @@ import {
   Play,
   ArrowUp,
   ArrowDown,
+  Star,
+  Ban,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -58,6 +61,7 @@ export function MemoryTable() {
 
   const currentSort = searchParams.get("sort") || "created_at";
   const currentDir = (searchParams.get("dir") || "desc") as "asc" | "desc";
+  const searchQuery = searchParams.get("query") || searchParams.get("q") || "";
 
   const handleSortByCreatedAt = () => {
     const params = new URLSearchParams(searchParams.toString());
@@ -218,7 +222,7 @@ export function MemoryTable() {
                         onClick={() => handleMemoryClick(memory.id)}
                         className="font-medium text-zinc-400 cursor-pointer"
                       >
-                        {memory.memory}
+                        <HighlightText text={memory.memory} query={searchQuery} />
                       </div>
                     </TooltipTrigger>
                     <TooltipContent>
@@ -232,7 +236,7 @@ export function MemoryTable() {
                     onClick={() => handleMemoryClick(memory.id)}
                     className="font-medium text-white cursor-pointer"
                   >
-                    {memory.memory}
+                    <HighlightText text={memory.memory} query={searchQuery} />
                   </div>
                 )}
               </TableCell>
@@ -251,7 +255,39 @@ export function MemoryTable() {
               <TableCell className="w-[140px] text-center">
                 {formatDate(memory.created_at, locale)}
               </TableCell>
-              <TableCell className="text-right flex justify-center">
+              <TableCell className="text-right flex items-center justify-end gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-zinc-400 hover:text-amber-400 hover:bg-zinc-800"
+                  title="加星置顶保鲜 (重要度 0.95)"
+                  onClick={async () => {
+                    try {
+                      await fetch(`/api/v1/memories/${memory.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ importance: 0.95 }),
+                      });
+                      toast({ title: "已加星置顶", description: "该记忆重要度提升至 0.95 并受防衰减保护。" });
+                    } catch {
+                      toast({ title: "置顶失败", variant: "destructive" });
+                    }
+                  }}
+                >
+                  <Star className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={`h-8 w-8 ${memory.state === "archived" ? "text-emerald-400" : "text-zinc-400"} hover:bg-zinc-800`}
+                  title={memory.state === "archived" ? "恢复活跃" : "一键归档"}
+                  onClick={() => {
+                    const newState = memory.state === "active" ? "archived" : "active";
+                    handleUpdateMemoryState(memory.id, newState);
+                  }}
+                >
+                  <Archive className="h-3.5 w-3.5" />
+                </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -267,6 +303,24 @@ export function MemoryTable() {
                     align="end"
                     className="bg-zinc-900 border-zinc-800"
                   >
+                    <DropdownMenuItem
+                      className="cursor-pointer text-amber-500 focus:text-amber-500"
+                      onClick={async () => {
+                        const reason = window.prompt("请输入废弃原因或替代记忆ID:");
+                        if (reason !== null) {
+                          try {
+                            await handleUpdateMemoryState(memory.id, "superseded");
+                            toast({ title: "已标记为废弃 (Superseded)", description: reason || "已标记" });
+                          } catch {
+                            toast({ title: "废弃操作失败", variant: "destructive" });
+                          }
+                        }
+                      }}
+                    >
+                      <Ban className="mr-2 h-4 w-4" />
+                      标记废弃 (Supersede)
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem
                       className="cursor-pointer"
                       onClick={() => {
