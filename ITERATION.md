@@ -332,16 +332,21 @@
   - HTTP hooks 路由顶部注入 HUD 注释；
   - 新增 `GET /api/v1/curator/last-digest` 只读接口；
   - 补齐 `PATCH /api/v1/memories/:id` 快速微操接口。
+- `memorycore/frontend_helpers.py`：
+  - 修复 `_memory_item` 与 `_simple_memory` 透传真实 `status`（不再将 superseded/contradicted 抹平为 active），补齐 `superseded_by` 字段。
+- `memorycore/server_runtime.py`：
+  - 修复 `last_curator_digest` 的 `active_count` 统计口径为真实活跃数（`stats.by_status.active`）。
 - `ui/`（Web 前端）：
   - 新增 `HighlightText.tsx`，在 `MemoryTable.tsx` 中对搜索词黄色高亮；
   - 表格操作列增加一键归档/恢复、一键加星置顶保鲜、一键废弃（Supersede）等行内快捷按钮；
-  - 新增 `DiffViewer.tsx`，在记忆详情页为 `superseded` / `contradicted` 状态提供零依赖文本演进对比；
+  - 升级 `DiffViewer.tsx` 为纯前端 LCS 词级红绿 Diff 算法；
+  - `MemoryDetails.tsx` 联动 `/api/lineage/{id}` 自动提取对端替代/冲突新旧记忆，实现真实演进双栏溯源对比；
   - `GovernancePanel.tsx` 增加自治理保洁简报卡片。
 
 ### 验证
-- 自动化单测：编写 `test_context_injection_experience.py` 与 `test_ingest_experience.py`，全量回归 pytest 全部通过。
+- 自动化单测：编写 `test_context_injection_experience.py` 与 `test_ingest_experience.py`，全量回归 pytest **628 passed / 0 failed (105.60s)** 全绿真实通过。
 - 前端编译：`ui/` 下 `pnpm run build` 成功完成，Next.js standalone 资源就绪，`mcore-ui.service` 重启正常。
-- 真实调用：实测 `hooks/context`、`hooks/session-start`、`curator/last-digest` 接口及 `git syncpush` 报表，响应均符合设计预期。
+- 真实调用：实测 `hooks/context`、`hooks/session-start`、`curator/last-digest`、`/api/v1/memories/:id`（state/status/superseded_by 正确反映真实状态）及 `git syncpush` 报表（1743/1743 100% 对齐），响应均符合设计预期。
 
 ### 回滚
 `git revert HEAD`

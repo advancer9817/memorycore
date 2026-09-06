@@ -82,9 +82,10 @@ def _start_auto_curator(interval_hours: float = 6.0) -> None:
                         reconcile_res.get("orphans_purged", 0) > 0,
                         reconcile_res.get("missing_resynced", 0) > 0,
                     ])
+                    active_cnt = stats.get("by_status", {}).get("active", 0) or stats.get("total", 0)
                     digest = {
                         "timestamp": datetime.now().isoformat(),
-                        "active_count": stats.get("total", 0),
+                        "active_count": active_cnt,
                         "handoff_cleaned": handoff_cleanup.get("cleaned", 0),
                         "sync_succeeded": sync_result.get("succeeded", 0),
                         "expired_reviews": expire_result.get("expired", 0),

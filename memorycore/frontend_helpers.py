@@ -190,13 +190,18 @@ def _write_memorycore_config(body: dict[str, Any]) -> dict[str, Any]:
 
 def _memory_item(record: dict[str, Any]) -> dict[str, Any]:
     tags = [str(tag) for tag in record.get("tags", [])]
-    state = "archived" if record.get("status") == "archived" else "active"
+    status_val = record.get("status", "active")
+    state = "archived" if status_val == "archived" else ("paused" if status_val == "paused" else status_val)
     return {
         "id": record["id"],
         "content": record.get("content", ""),
         "created_at": record.get("created_at"),
         "updated_at": record.get("updated_at"),
         "state": state,
+        "status": status_val,
+        "superseded_by": record.get("superseded_by") or "",
+        "title": record.get("title", ""),
+        "type": record.get("type", ""),
         "app_id": record.get("source_agent") or "manual",
         "app_name": record.get("source_agent") or "manual",
         "categories": tags,
@@ -211,7 +216,12 @@ def _simple_memory(record: dict[str, Any]) -> dict[str, Any]:
         "text": item["content"],
         "content": item["content"],
         "created_at": item["created_at"],
+        "updated_at": item["updated_at"],
         "state": item["state"],
+        "status": item["status"],
+        "superseded_by": item["superseded_by"],
+        "title": item["title"],
+        "type": item["type"],
         "categories": item["categories"],
         "app_name": item["app_name"],
         "metadata_": item["metadata_"],

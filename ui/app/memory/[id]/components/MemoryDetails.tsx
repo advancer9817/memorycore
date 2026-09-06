@@ -17,6 +17,7 @@ import { constants } from "@/components/shared/source-app";
 import { RelatedMemories } from "./RelatedMemories";
 import { MemoryLineage } from "./MemoryLineage";
 import { DiffViewer } from "@/components/shared/DiffViewer";
+import { getApiBaseUrl } from "@/lib/api-url";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/hooks/useI18n";
 
@@ -53,6 +54,13 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
   const [validUntil, setValidUntil] = useState("");
   const [validitySaved, setValiditySaved] = useState(false);
   const [validityExpanded, setValidityExpanded] = useState(false);
+  const [counterpart, setCounterpart] = useState<{
+    id: string;
+    title: string;
+    content: string;
+    status: string;
+    direction: "superseded_by" | "supersedes";
+  } | null>(null);
   const appConfig =
     constants[memory?.app_name as keyof typeof constants] || constants.default;
   const appLabel =
@@ -82,6 +90,60 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
       setValidUntil(memory.valid_until ? memory.valid_until.slice(0, 10) : "");
     }
   }, [memory?.id]);
+
+  useEffect(() => {
+    if (!memory_id) return;
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/api/lineage/${memory_id}`);
+        if (!res.ok) return;
+        const payload = await res.json();
+        if (!active || !payload?.ok || !payload?.data) return;
+
+        const { records, current_head_id } = payload.data;
+        if (!Array.isArray(records) || records.length <= 1) return;
+
+        const others = records.filter((r: any) => r.id !== memory_id);
+        if (others.length === 0) return;
+
+        const isCurrentSuperseded =
+          memory?.state === "superseded" ||
+          (memory as any)?.status === "superseded" ||
+          Boolean((memory as any)?.superseded_by);
+
+        let target = null;
+        let dir: "superseded_by" | "supersedes" = "superseded_by";
+
+        if (isCurrentSuperseded) {
+          target =
+            others.find((r: any) => r.id === current_head_id || r.status === "active") ||
+            others[others.length - 1];
+          dir = "superseded_by";
+        } else {
+          target =
+            others.find((r: any) => r.status === "superseded" || r.superseded_by === memory_id) ||
+            others[0];
+          dir = "supersedes";
+        }
+
+        if (target && active) {
+          setCounterpart({
+            id: target.id,
+            title: target.title || "知识演进条目",
+            content: target.content || target.text || "",
+            status: target.status || "active",
+            direction: dir,
+          });
+        }
+      } catch (err) {
+        console.debug("Failed to fetch lineage for diff:", err);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [memory_id, memory?.id, memory?.state]);
 
   return (
     <div>
@@ -250,13 +312,51 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                   )}
                 </div>
 
-                {(memory?.state === "superseded" || memory?.state === "contradicted") && (
+                {(counterpart || memory?.state === "superseded" || memory?.state === "contradicted") && (
                   <div className="mt-4">
                     <DiffViewer
-                      oldText={memory?.memory || ""}
-                      newText="[提示] 该事实已被标记废弃或冲突，请参阅右侧知识血统 (MemoryLineage) 获取最新演进。"
-                      oldTitle={`原条目内容 (${memory?.state})`}
-                      newTitle="知识演化提示"
+                      oldText={
+                        counterpart
+                          ? counterpart.direction === "superseded_by"
+                            ? memory?.memory || ""
+                            : counterpart.content
+                          : memory?.memory || ""
+                      }
+                      newText={
+                        counterpart
+                          ? counterpart.direction === "superseded_by"
+                            ? counterpart.content
+                            : memory?.memory || ""
+                          : "[提示] 该事实已被标记废弃或冲突，请参阅右侧知识血统获取最新演进。"
+                      }
+                      oldTitle={
+                        counterpart
+                          ? counterpart.direction === "superseded_by"
+                            ? `${memory?.title || "当前记忆"} (已废弃)`
+                            : `${counterpart.title || "历史记忆"} (已废弃)`
+                          : `原条目内容 (${memory?.state})`
+                      }
+                      newTitle={
+                        counterpart
+                          ? counterpart.direction === "superseded_by"
+                            ? `${counterpart.title || "当前生效记忆"} (最新)`
+                            : `${memory?.title || "当前生效记忆"} (最新)`
+                          : "知识演化提示"
+                      }
+                      oldId={
+                        counterpart
+                          ? counterpart.direction === "superseded_by"
+                            ? memory?.id
+                            : counterpart.id
+                          : memory?.id
+                      }
+                      newId={
+                        counterpart
+                          ? counterpart.direction === "superseded_by"
+                            ? counterpart.id
+                            : memory?.id
+                          : undefined
+                      }
                     />
                   </div>
                 )}
