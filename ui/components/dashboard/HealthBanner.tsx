@@ -12,6 +12,7 @@ type HealthScore = {
   risk: number;
   llmGovernance: number;
   llmStatus: string;
+  llmStartedAt?: string;
   metrics: {
     active: number;
     active_reuse_coverage: number;
@@ -56,24 +57,55 @@ function scoreColor(score: number): { text: string; bg: string; border: string; 
   };
 }
 
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  if (m > 0) {
+    return `${m}m ${s.toString().padStart(2, "0")}s`;
+  }
+  return `${s}s`;
+}
+
 export function HealthBanner() {
   const { messages: t } = useI18n();
   const [health, setHealth] = useState<HealthScore | null>(null);
+  const [llmElapsedMs, setLlmElapsedMs] = useState(0);
 
   useEffect(() => {
     let active = true;
-    fetch(`${getApiBaseUrl()}/api/v1/health-score`)
-      .then((res) => res.json() as Promise<HealthScore>)
-      .then((payload) => {
-        if (active) setHealth(payload);
-      })
-      .catch(() => {
-        if (active) setHealth(null);
-      });
+    const fetchHealth = () => {
+      fetch(`${getApiBaseUrl()}/api/v1/health-score`)
+        .then((res) => res.json() as Promise<HealthScore>)
+        .then((payload) => {
+          if (active) setHealth(payload);
+        })
+        .catch(() => {
+          if (active) setHealth(null);
+        });
+    };
+
+    fetchHealth();
+    const timer = setInterval(fetchHealth, 5000);
     return () => {
       active = false;
+      clearInterval(timer);
     };
   }, []);
+
+  useEffect(() => {
+    if (health?.llmStatus !== "running" || !health?.llmStartedAt) {
+      setLlmElapsedMs(0);
+      return;
+    }
+    const start = new Date(health.llmStartedAt).getTime();
+    if (Number.isNaN(start)) return;
+
+    const update = () => setLlmElapsedMs(Math.max(0, Date.now() - start));
+    update();
+    const timer = setInterval(update, 1000);
+    return () => clearInterval(timer);
+  }, [health?.llmStatus, health?.llmStartedAt]);
 
   if (!health) {
     return (
@@ -188,10 +220,17 @@ export function HealthBanner() {
               className={
                 health.llmStatus === "success" || health.llmStatus === "succeeded"
                   ? "border-emerald-700 bg-emerald-500/10 text-emerald-300 text-xs"
+                  : health.llmStatus === "running"
+                  ? "border-sky-700 bg-sky-500/10 text-sky-300 text-xs animate-pulse"
                   : "border-zinc-700 bg-zinc-800 text-zinc-400 text-xs"
               }
             >
-              LLM 治理: {health.llmStatus}
+              LLM 治理:{" "}
+              {health.llmStatus === "running"
+                ? `运行中 (${formatDuration(llmElapsedMs)})`
+                : health.llmStatus === "success" || health.llmStatus === "succeeded"
+                ? "就绪"
+                : health.llmStatus}
             </Badge>
           </div>
         </div>

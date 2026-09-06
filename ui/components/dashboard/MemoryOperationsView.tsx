@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Activity,
@@ -77,6 +77,16 @@ function formatRelativeDiff(targetIso?: string | null): string {
   }
 }
 
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  if (m > 0) {
+    return `${m}m ${s.toString().padStart(2, "0")}s`;
+  }
+  return `${s}s`;
+}
+
 type MemoryOperationsViewProps = {
   messages: Messages;
   locale: Locale;
@@ -138,6 +148,22 @@ export function MemoryOperationsView({
   onExecuteMaintenance,
   onSelectMaintenanceAction,
 }: MemoryOperationsViewProps) {
+  const [liveLlmElapsedMs, setLiveLlmElapsedMs] = useState(0);
+
+  useEffect(() => {
+    if (!llmRunning && llmRunState.state !== "running") {
+      setLiveLlmElapsedMs(0);
+      return;
+    }
+    const start = llmRunState.startedAt || Date.now();
+    const update = () => {
+      setLiveLlmElapsedMs(Math.max(0, Date.now() - start));
+    };
+    update();
+    const timer = setInterval(update, 1000);
+    return () => clearInterval(timer);
+  }, [llmRunning, llmRunState.state, llmRunState.startedAt]);
+
   const byStatus = status?.stats.by_status || {};
   const lastRunIso =
     status?.schedules?.rule_curator?.last_run_at ||
@@ -254,9 +280,11 @@ export function MemoryOperationsView({
             >
               <div className="flex items-center gap-1.5 font-medium text-zinc-200">
                 <Bot className={`h-4 w-4 text-sky-400 ${llmRunning ? "animate-pulse" : ""}`} />
-                <span>{llmRunning ? "语义分析中..." : "唤醒 LLM 治理"}</span>
+                <span>{llmRunning ? `语义分析中 (${formatDuration(liveLlmElapsedMs)})...` : "唤醒 LLM 治理"}</span>
               </div>
-              <span className="text-[11px] text-zinc-500">GLM 深度合并决策</span>
+              <span className="text-[11px] text-zinc-500">
+                {llmRunning ? `已运行 ${formatDuration(liveLlmElapsedMs)}` : "语义深度合并决策"}
+              </span>
             </Button>
 
             <Button
@@ -333,7 +361,9 @@ export function MemoryOperationsView({
                   LLM 语义大模型治理报告
                 </span>
                 <span className="font-mono text-xs text-zinc-400">
-                  {llmRunState.state === "running" ? "后台深度分析中" : `耗时 ${((llmRunState.elapsedMs || 0) / 1000).toFixed(1)}s`}
+                  {llmRunState.state === "running"
+                    ? `后台深度分析中 · 已运行 ${formatDuration(liveLlmElapsedMs)}`
+                    : `耗时 ${((llmRunState.elapsedMs || 0) / 1000).toFixed(1)}s`}
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-2 text-zinc-400 sm:grid-cols-4">

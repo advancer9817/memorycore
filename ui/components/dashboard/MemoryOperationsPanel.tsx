@@ -103,18 +103,21 @@ export const MemoryOperationsPanel = () => {
       }
       const payload = await response.json();
       const data = payload.data || payload;
+      const parsedStartedAt = data.started_at ? new Date(data.started_at).getTime() : NaN;
+      const effectiveStartedAt = !Number.isNaN(parsedStartedAt) ? parsedStartedAt : startedAt;
+
       if (data.status === "done" || data.status === "succeeded") {
-        setLlmRunState({ state: "succeeded", jobId, startedAt, elapsedMs: Date.now() - startedAt, summary: data.summary || data.result?.summary || {}, errors: data.errors || data.result?.errors || [], progress: data.progress });
+        setLlmRunState({ state: "succeeded", jobId, startedAt: effectiveStartedAt, elapsedMs: Date.now() - effectiveStartedAt, summary: data.summary || data.result?.summary || {}, errors: data.errors || data.result?.errors || [], progress: data.progress });
         setLlmRunning(false);
         localStorage.removeItem(LLM_JOB_KEY);
         void fetchStatus();
       } else if (data.status === "error" || data.status === "failed") {
-        setLlmRunState({ state: "failed", jobId, startedAt, elapsedMs: Date.now() - startedAt, summary: data.summary, progress: data.progress, errors: data.errors, error: data.error || (Array.isArray(data.errors) ? data.errors.join("; ") : "LLM Curator job failed") });
+        setLlmRunState({ state: "failed", jobId, startedAt: effectiveStartedAt, elapsedMs: Date.now() - effectiveStartedAt, summary: data.summary, progress: data.progress, errors: data.errors, error: data.error || (Array.isArray(data.errors) ? data.errors.join("; ") : "LLM Curator job failed") });
         setLlmRunning(false);
         localStorage.removeItem(LLM_JOB_KEY);
       } else {
-        setLlmRunState((previous) => ({ ...previous, state: "running", jobId, startedAt, summary: data.summary || previous.summary, progress: data.progress || previous.progress, errors: data.errors || previous.errors }));
-        llmPollRef.current = setTimeout(() => void pollJob(jobId, startedAt), 3000);
+        setLlmRunState((previous) => ({ ...previous, state: "running", jobId, startedAt: effectiveStartedAt, summary: data.summary || previous.summary, progress: data.progress || previous.progress, errors: data.errors || previous.errors }));
+        llmPollRef.current = setTimeout(() => void pollJob(jobId, effectiveStartedAt), 3000);
       }
     } catch {
       llmPollRef.current = setTimeout(() => void pollJob(jobId, startedAt), 3000);
@@ -127,7 +130,8 @@ export const MemoryOperationsPanel = () => {
       fetch(`${getApiBaseUrl()}/api/v1/curator/llm/latest`).then((response) => response.json()).then((payload) => {
         const data = payload.data || payload;
         if (data.status === "running" && data.job_id) {
-          const startedAt = Date.now();
+          const parsedStartedAt = data.started_at ? new Date(data.started_at).getTime() : NaN;
+          const startedAt = !Number.isNaN(parsedStartedAt) ? parsedStartedAt : Date.now();
           setLlmRunning(true);
           setLlmRunState({ state: "running", jobId: data.job_id, startedAt, summary: data.summary || {}, progress: data.progress || {} });
           localStorage.setItem(LLM_JOB_KEY, JSON.stringify({ jobId: data.job_id, startedAt }));

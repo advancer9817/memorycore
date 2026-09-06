@@ -390,3 +390,33 @@
 ### 回滚
 - 数据库回滚：还原 `backups/memory.sqlite3.bak_20260906_213250`；
 - 代码回滚：`git revert HEAD`。
+
+## [迭代 229] 2026-09-06 — 移除前端 GLM 硬编码显示与支持 LLM 运行耗时秒级动态透传
+
+### 目的
+根据用户反馈：
+1. 移除控制台 UI 中遗留的特定模型厂商名称（"GLM"）；
+2. 当 LLM Curator 处于后台运行中（`running`）状态时，前端各指示卡片与按钮应动态实时显示当前已运行的耗时（运行时间）。
+
+### 变更内容
+- **后端服务** (`memorycore/frontend_helpers.py`)：
+  - `health_score_v1_payload`：增加透传 `llmStartedAt`（取自 `latest_job.started_at`），使系统健康雷达支持秒级计算运行耗时。
+- **前端组件** (`ui/components/dashboard/`)：
+  - `MemoryOperationsView.tsx`：
+    - 移除按钮下方硬编码文字 `"GLM 深度合并决策"`，统一替换为 `"语义深度合并决策"`；
+    - 增加 1 秒周期局部定时器 `liveLlmElapsedMs`；
+    - 唤醒按钮在运行中时，主标题动态显示为 `语义分析中 (Xs)...`，副标题动态显示为 `已运行 Xs`；
+    - 治理报告卡片标题处，运行中状态由静态的 `"后台深度分析中"` 优化为动态显示 `后台深度分析中 · 已运行 Xs`。
+  - `MemoryOperationsPanel.tsx`：
+    - 优化 `pollJob` 及首次载入逻辑，优先采用服务端返回的准确 `started_at` 时间戳作为计算起点，解决刷新浏览器后计时重置的问题。
+  - `HealthBanner.tsx`：
+    - `HealthScore` 增加 `llmStartedAt` 字段定义，支持 5 秒轻量健康轮询；
+    - 运行状态时徽章从静态 `"running"` 优化为呼吸徽章 `"运行中 (Xs)"`。
+
+### 验证
+- **全量测试**：`pytest tests/ -q` 运行耗时 110.45s，**628 passed / 0 failed**。
+- **构建与部署**：`ui/` 下 `pnpm run build` 成功完成，Next.js standalone 资源就绪，`mcore.service` 与 `mcore-ui.service` 重启正常（HTTP 200）。
+- **实测验证**：调用 `/api/v1/health-score` 正确返回 `llmStartedAt`；前端面板已无任何 "GLM" 显示，计时格式在 <60s 显示为 `${s}s`、>=60s 显示为 `${m}m ${s}s`。
+
+### 回滚
+`git revert HEAD`

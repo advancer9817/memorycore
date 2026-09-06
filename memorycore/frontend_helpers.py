@@ -710,12 +710,16 @@ def health_score_v1_payload() -> dict[str, Any]:
 
     llm_score = 50.0
     llm_status = "unknown"
+    llm_started_at = ""
     try:
         curator = _curator_status_payload(limit=50)
         llm = curator.get("llm_curator") or {}
+        latest_job = llm.get("latest_job") or {}
         llm_status = str(
-            llm.get("last_result") or (llm.get("latest_job") or {}).get("status") or "unknown"
+            llm.get("last_result") or latest_job.get("status") or "unknown"
         )
+        if latest_job.get("started_at"):
+            llm_started_at = str(latest_job.get("started_at"))
         if llm_status in ("success", "succeeded"):
             llm_score = 100.0
         elif llm_status == "running":
@@ -747,6 +751,7 @@ def health_score_v1_payload() -> dict[str, Any]:
         "risk": risk_score,
         "llmGovernance": llm_score,
         "llmStatus": llm_status,
+        "llmStartedAt": llm_started_at,
         "metrics": {
             "active": active,
             "stale": stale,
