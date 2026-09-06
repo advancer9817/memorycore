@@ -20,6 +20,11 @@ _ALIAS_GROUPS = [
 _ALIAS_TO_CANONICAL: dict[str, str] = {}
 _CANONICAL_ALIASES: dict[str, list[str]] = {}
 
+_PROVENANCE_TAG_RE = re.compile(
+    r"^(extracted|rollup|atomic_fact|agent:.+|project:.+|windows|claude|hermes|codex|gemini|opencode)$",
+    re.IGNORECASE,
+)
+
 
 def normalize_entity(value: str) -> str:
     text = (value or "").strip().lower()
@@ -72,7 +77,7 @@ def extract_entities(text: str, tags: list[str] | None = None) -> list[dict[str,
     candidates.extend(re.findall(r"\b[\w.-]+\.(?:sqlite3?|ya?ml|toml|json|db|py|md)\b", source, flags=re.I))
     candidates.extend(re.findall(r"(?::|port\s+|端口\s*)(\d{2,5})\b", source, flags=re.I))
     candidates.extend(re.findall(r"\b(?:mcore|memorycore|memory\.sqlite3|qdrant|ollama|nomic-embed-text|openmemory|mem0|mcp|fts5)\b", source, flags=re.I))
-    candidates.extend(tags or [])
+    candidates.extend(t for t in (tags or []) if not _PROVENANCE_TAG_RE.match(str(t).strip()))
 
     by_norm: dict[str, dict[str, Any]] = {}
     for raw in candidates:

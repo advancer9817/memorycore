@@ -353,3 +353,40 @@
 
 
 
+
+## [迭代 228] 2026-09-06 — 全面审查治理落地：彻底清除假反馈数据、实体索引去污染、UI 孤儿组件瘦身与应用活跃状态动态化
+
+### 目的
+根据 2026-09-06 全面审查发现的逻辑自洽与冗余问题，完成深度闭环治理：
+1. 清除历史残留的 `auto:injected` / `auto:seed` 虚假 feedback 数据，删除死函数 `_auto_feedback_for_used`，精确重放受影响记忆的三项质量指标；
+2. 修复实体索引中混入 `extracted`、`rollup`、`atomic_fact`、`agent:*` 等流程标签的污染问题，建立黑名单并全量重建实体索引；
+3. 清理 Web UI 中 14 个确认无外部引用的孤儿组件（-1,785 行代码），合并 Memories 页面过度嵌套的三层筛选链为两层结构；
+4. 修正 Apps 页面 presence 恒为 idle 的假语义状态，改为基于真实记忆写入与交互时间动态推导在线/空闲/离线状态。
+
+### 变更内容
+- **后端存储与清理** (`memorycore/storage/`)：
+  - `context_pack.py`：移除死函数 `_auto_feedback_for_used`；
+  - `entities.py`：引入 `_PROVENANCE_TAG_RE` 正则黑名单，在实体提取阶段严格拦截流程标签与溯源标签；
+  - `scripts/maintenance/clean_auto_feedback.py`：删除 10,601 条虚假 feedback 事件及 839 条对应 audit 记录，精确重算 1,801 条受影响记忆的 `feedback_score`、`injected_count` 和 `effectiveness_score`；
+  - `scripts/maintenance/rebuild_entities.py`：全量清洗重建 `memory_entities` 表，实体行数从 7,276 净化至 3,602（污染行归零）；
+  - `memorycore/memory.sqlite3`：删除包目录中误存的 0 字节杂物文件。
+- **状态与表现层** (`memorycore/frontend_helpers.py`)：
+  - `_apps_list`：结合记忆表真实最近活跃时间戳与当前时间窗口，将状态细化为活跃（<30min online）、空闲（<24h idle）、离线（>24h offline）。
+- **前端重构与瘦身** (`ui/`)：
+  - 删除孤儿组件目录 `ui/components/dashboard/widgets/`（7 个文件，含与在用组件重复的 OperationsWidget）；
+  - 删除孤儿组件 `ui/components/dashboard/MemoryIntelligenceCenter.tsx` 及关联的 `intelligence/` 未使用面板（CurationActivityPanel、HealthMetricsPanel、Primitives、ReviewFlowPanel、SourceBreakdownPanel、helpers）；
+  - 合并 `ui/app/memories/components/FilterComponent.tsx` 至 `MemoryFilters.tsx`，将筛选交互收敛为「工具栏 + 筛选弹窗」直连两层结构；
+  - 重新编译 Next.js standalone 生产产物，服务热重启正常。
+
+### 验证
+- **单测全绿**：全量测试套件 `.venv/bin/python -m pytest tests/ -q` 运行耗时 93.15s，**628 passed / 0 failed**。
+- **数据面实测**：
+  - `SELECT count(*) FROM feedback_events` 为 0（虚假自打分彻底归零）；
+  - `memory_entities` 中 polluted 实体（extracted/rollup/atomic_fact/agent:*）严格为 0；
+  - Qdrant 向量数量 1743/1743 与 active 记忆保持 100% 对齐；
+  - live MCP handshake 与 `memory_entity_search('mcore')` 验证通过。
+- **前端编译与服务**：`pnpm run build` 成功通过，Next.js standalone 部署更新，`mcore.service` 与 `mcore-ui.service` 均 active 运行正常。
+
+### 回滚
+- 数据库回滚：还原 `backups/memory.sqlite3.bak_20260906_213250`；
+- 代码回滚：`git revert HEAD`。

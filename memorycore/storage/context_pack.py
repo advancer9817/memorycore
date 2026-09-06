@@ -80,16 +80,6 @@ def _parent_id(record: dict[str, Any]) -> str:
     return str(_metadata(record).get("parent_id") or "")
 
 
-def _auto_feedback_for_used(ids: list[str]) -> None:
-    """Auto-positive feedback for memories that were actually injected into context."""
-    from memorycore.storage.crud import add_feedback
-    for mid in ids:
-        try:
-            add_feedback(mid, score=0.5, note="auto:injected", source_agent="system")
-        except Exception:
-            logger.warning("auto feedback write failed for memory %s", mid, exc_info=True)
-
-
 def _context_recency_weight() -> float:
     from memorycore.models import load_config as _lc_w
     cfg = _lc_w()

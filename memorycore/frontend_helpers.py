@@ -392,6 +392,22 @@ def _apps_list(
             if presence.get("status"):
                 item["status"] = presence["status"]
                 item["last_seen_at"] = presence.get("last_seen_at") or ""
+                # Dynamically determine online/idle based on recent activity or seen time
+                act_time_str = str(item.get("last_activity_at") or item["last_seen_at"] or "")
+                if act_time_str:
+                    try:
+                        ts = datetime.fromisoformat(act_time_str.replace("Z", "+00:00"))
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        age = now - ts
+                        if age < timedelta(minutes=30):
+                            item["status"] = "online"
+                        elif age < timedelta(hours=24):
+                            item["status"] = "idle"
+                        else:
+                            item["status"] = "offline"
+                    except Exception:
+                        pass
                 if "is_active" not in item:
                     item["is_active"] = item["status"] in {"online", "idle", "busy"}
                 if str(item["last_seen_at"]) > str(item.get("last_activity_at") or ""):
