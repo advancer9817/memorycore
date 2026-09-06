@@ -66,7 +66,7 @@ try:
 except Exception:
     pass
 PY
-else:
+else
   echo "[syncpush] WARNING: memory export failed, pushing without sync." >&2
 fi
 

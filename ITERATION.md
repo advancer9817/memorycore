@@ -412,6 +412,8 @@
   - `HealthBanner.tsx`：
     - `HealthScore` 增加 `llmStartedAt` 字段定义，支持 5 秒轻量健康轮询；
     - 运行状态时徽章从静态 `"running"` 优化为呼吸徽章 `"运行中 (Xs)"`。
+- **Hook 脚本** (`scripts/hooks/git-push.sh`)：
+  - 修复 bash 语法错误（`else:` 修正为 `else`），确保 `git syncpush` 正常执行推送。
 
 ### 验证
 - **全量测试**：`pytest tests/ -q` 运行耗时 110.45s，**628 passed / 0 failed**。
