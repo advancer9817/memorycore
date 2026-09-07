@@ -482,3 +482,24 @@
 
 ### 回滚
 `git revert HEAD`
+
+
+## [迭代 232] 2026-09-07 — 沙箱反向穿透技术方案架构升级：默认隧穿直连本地电脑 (0云服务器成本与零公网时延)
+
+### 目的
+- 全面调整沙箱反向穿透实施手册与交接文档的技术选型优先级：将「隧穿直连个人本地电脑」确立为**第一推荐的默认工程方案**。
+- 消除长期使用公网跳板机 ECS 的按量计费成本与广域网 50Mbps 带宽限制，让用户在本地以 `localhost:2222` 与 `localhost:3389` 享受近乎零延迟的满帧操作体验与数据闭环。
+
+### 变更内容
+- **实施指南重构** (`workbuddy-sandbox-tunneling-guide.md` & `docs/sandbox-architecture-handover.md`)：
+  - 将阶段一前置准备升级为「本地 Windows OpenSSH 服务端开启、GatewayPorts 激活与 Tailscale/DDNS 组网」；
+  - 阐明沙箱内部 `tunnel-guard.sh` 默认将反向端口 `2222` 与 `3389` 直抛到本地电脑；
+  - 客户端验收全面转为本地环回（`ssh -p 2222 root@127.0.0.1`、`mstsc ➔ 127.0.0.1:3389`、Hermes Desktop 直绑 `127.0.0.1`）；
+  - 将原有阿里云 ECS 公网中转方案明确降级为「无常开电脑/无组网条件时的备选通道」。
+
+### 验证
+- **文档输出与落盘**：`workbuddy-sandbox-tunneling-guide.md` 与 `sandbox-architecture-handover.md` 在桌面 `Desktop/output/` 与 `mcore/docs/` 均完成高标准覆盖。
+- **技术可行性验证**：Windows OpenSSH 的 `GatewayPorts` 监听、SSH 密钥认证、本地 MSTSC 环回机制已完成理论与配置推演闭环。
+
+### 回滚
+`git revert HEAD`
