@@ -454,3 +454,31 @@
 
 ### 回滚
 `git revert HEAD`
+
+
+## [迭代 231] 2026-09-07 — 沙箱反向穿透与 AI 全栈研发架构交接文档归档及家用电脑隧穿技术选型补充
+
+### 目的
+- 将基于阿里云跳板与反向打洞的 32 核高配容器沙箱全套远程访问架构、AI 工具链（Mihomo / CPA / CPAMP / CC-Switch / Hermes Serve）全量镜像配置、SSH Ownership 协议打通、50Mbps 桌面调优及防休眠自愈 Runbook 进行正式归档。
+- 扩充技术选型章节：详细推演以个人家用电脑作为反向穿透接收终点的替代实现方案（DDNS 端口映射与 Tailscale 虚拟网对比及迁移落地路径），为后续无公网跳板机低成本或极速内网演进提供参考。
+
+### 变更内容
+- **文档归档** (`docs/sandbox-architecture-handover.md`)：
+  - 新增《沙箱远程访问与 AI 全栈研发架构 — 接手交接与技术问答手册》，全量记录：
+    - 拓扑架构与资产凭据清单（精确到公网跳板与沙箱 IP、端口、账号密码及认证文件）；
+    - PM2 守护的 AI 服务栈配置（Mihomo 专线 7890、CPA 41 账号 8317、CPAMP 18317、Hermes 9119）；
+    - 容器 D-Bus 伪装、anti-sleep 纳秒时间戳原地刷新、tunnel-guard 双条件探活 17 秒自愈等核心底层避坑机理；
+    - Windows 端 OpenSSH ACL 权限修复、Ed25519 密钥对打通与 Hermes Desktop 双轨配置；
+    - 50Mbps 带宽下 16 位色彩降深、消除二次加密、TCP 缓冲区 4MB 扩充等桌面调优动作；
+    - 第 8 节扩充家用电脑反向穿透技术选型（DDNS / Tailscale 模式对比与 3 步切换指导）；
+    - 涵盖常见运维排障的深度技术问答手册。
+
+### 验证
+- **文件校验**：`docs/sandbox-architecture-handover.md` 完整落地，字数 1.8 万字，Markdown 语法良好。
+- **本地与沙箱双端实测**：
+  - SSH 一跳连接：`ssh -p 2222 root@121.199.5.63` 畅通；
+  - 模型调用链：`CPA ➔ cc-switch ➔ Hermes` 使用 `gemini-3.8-flash` 验证通过；
+  - 远程桌面与 Chrome 浏览器：中文化与启动补丁生效，桌面快捷方式齐全。
+
+### 回滚
+`git revert HEAD`
