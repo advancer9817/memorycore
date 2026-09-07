@@ -503,3 +503,23 @@
 
 ### 回滚
 `git revert HEAD`
+
+
+## [迭代 233] 2026-09-07 — 文档体系规整：在 mcore/docs 下新建「沙箱」专用目录归档两份实战手册
+
+### 目的
+- 按照统一的知识资产组织规范，在 `docs/` 下设立专属的 `沙箱/` 子目录，将沙箱穿透与 AI 研发相关的两份重磅实施手册进行聚合归档，保持 `docs/` 根目录清爽。
+
+### 变更内容
+- **目录新建与文件归档** (`docs/沙箱/`)：
+  - 新建目录 `docs/沙箱/`；
+  - 归档《沙箱远程访问与 AI 全栈研发架构 — 接手交接与技术问答手册》至 `docs/沙箱/sandbox-architecture-handover.md`；
+  - 归档《从 WorkBuddy 对话孵化沙箱到默认隧穿本地电脑 SOP》至 `docs/沙箱/workbuddy-sandbox-tunneling-guide.md`；
+  - 移除了原根目录下的临时文件 `docs/sandbox-architecture-handover.md`。
+
+### 验证
+- **文件检查**：`docs/沙箱/` 包含上述 2 份完整 Markdown 文档，总计 31KB，权限 0644/0755。
+- **Git 状态**：变更清晰（1 个重命名移动 + 1 个新增）。
+
+### 回滚
+`git revert HEAD`
