@@ -19,6 +19,9 @@ export interface SimpleMemory {
   app_name: string;
   valid_from?: string;
   valid_until?: string;
+  title?: string;
+  memory?: string;
+  content?: string;
 }
 
 // Define the shape of the API response item

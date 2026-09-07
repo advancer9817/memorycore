@@ -318,15 +318,15 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                       oldText={
                         counterpart
                           ? counterpart.direction === "superseded_by"
-                            ? memory?.memory || ""
+                            ? memory?.memory || memory?.text || ""
                             : counterpart.content
-                          : memory?.memory || ""
+                          : memory?.memory || memory?.text || ""
                       }
                       newText={
                         counterpart
                           ? counterpart.direction === "superseded_by"
                             ? counterpart.content
-                            : memory?.memory || ""
+                            : memory?.memory || memory?.text || ""
                           : "[提示] 该事实已被标记废弃或冲突，请参阅右侧知识血统获取最新演进。"
                       }
                       oldTitle={
