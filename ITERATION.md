@@ -523,3 +523,33 @@
 
 ### 回滚
 `git revert HEAD`
+
+## [迭代 234] 2026-09-07 — 同步远端最新记忆与文档、导入外键孤儿清洗、向量对齐与前端重新构建部署
+
+### 目的
+响应用户更新 mcore 指令：
+1. 从 GitHub 远端同步拉取最新的 9 个提交（包括迭代 231~233 沙箱穿透文档、前端 MemoryDetails 修复与 4551 条跨设备记忆数据）；
+2. 解决记忆导入过程中的外键孤儿约束问题，确保全量记忆完整入库；
+3. 执行数据卫生清洗（清除重入库的虚假反馈与流程标签实体），完成 Qdrant 向量全量对齐与前端生产构建部署。
+
+### 变更内容
+- **代码与数据同步**：
+  - `git merge --ff-only origin/main`：合入远端沙箱架构文档、`f9e6602` 前端修复与记忆快照；
+  - 过滤 `memory-sync/memories.json` 中 6 条悬空 orphan links 与 1 条 orphan entity，成功将记忆表完整升级至 4,551 条；
+  - 执行 `clean_auto_feedback.py` 与 `rebuild_entities.py`，保持全库 0 虚假反馈与 3,870 条纯净语义实体。
+- **向量对齐与补全**：
+  - 执行 `reconcile-vectors --apply`：清理 112 个已归档/废弃记忆的孤儿向量点，自动增量补全 246 条新增活跃记忆的向量嵌入，Qdrant 向量数与 SQLite 活跃记忆数达到 1,780/1,780（100% 对齐）。
+- **Hooks 与 Agent 协同**：
+  - 执行 `setup-hooks.sh` 确保 git hook 最新；
+  - 执行 `connect_agents.py` 同步 Hermes、Claude、Codex 等 Agent 的 MCP 连接配置。
+- **前端构建与服务升级**：
+  - `ui/` 目录下执行 `pnpm run build` 成功完成 Next.js standalone 生产编译；
+  - 用户级 systemd 服务 `mcore.service` 与 `mcore-ui.service` 完成重启并确认就绪（HTTP 200）。
+
+### 验证
+- **全量测试**：`pytest tests/ -q` 耗时 181.70s，**628 passed / 0 failed**。
+- **服务健康**：MCP `:8318` 握手正常，UI `:18318` 页面加载正常。
+- **向量状态**：`semantic-status` 显示 `count: 1780`，与 SQLite `status='active'` 的 1,780 条完全一致。
+
+### 回滚
+`git revert HEAD`
