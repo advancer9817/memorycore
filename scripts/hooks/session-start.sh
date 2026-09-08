@@ -15,7 +15,9 @@ NAMESPACE="${MCORE_AGENT_NAMESPACE:-default}"
 INIT_TIMEOUT="${MCORE_SESSION_START_INIT_TIMEOUT:-1.5}"
 CALL_TIMEOUT="${MCORE_SESSION_START_CALL_TIMEOUT:-1.5}"
 
-ensure_mcore_running 2>/dev/null || true
+if [ "$MCORE_HOST" = "127.0.0.1" ] || [ "$MCORE_HOST" = "localhost" ]; then
+  ensure_mcore_running 2>/dev/null || true
+fi
 
 touch /tmp/mcore-session-mark 2>/dev/null || true
 
@@ -42,7 +44,7 @@ esac
 CAPABILITIES="${MCORE_AGENT_CAPABILITIES:-$DEFAULT_CAPABILITIES}"
 
 INIT_PAYLOAD='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"mcore-session-start-hook","version":"1.0"}}}'
-INIT_RESPONSE="$(curl -sS -i --max-time "$INIT_TIMEOUT" -X POST "$MCORE_URL" \
+INIT_RESPONSE="$(curl -sS -i --noproxy "*" --max-time "$INIT_TIMEOUT" -X POST "$MCORE_URL" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d "$INIT_PAYLOAD" 2>/dev/null || true)"
@@ -93,7 +95,7 @@ call_tool() {
   local payload
   payload="$(tool_payload "$request_id" "$tool_name" "$arguments")"
   [ -z "$payload" ] && return 0
-  curl -sS --max-time "$CALL_TIMEOUT" -X POST "$MCORE_URL" \
+  curl -sS --noproxy "*" --max-time "$CALL_TIMEOUT" -X POST "$MCORE_URL" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -H "Mcp-Session-Id: $SESSION_ID" \

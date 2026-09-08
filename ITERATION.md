@@ -1,3 +1,32 @@
+## [迭代 237] 2026-09-08 — 支持 mcore 远程 HTTPS 穿透接入与全 Agent (Hermes/Claude/Codex) 钩子适配
+
+### 目的
+- 解决 OpenFrp 宁德节点运营商 DPI 对明文 HTTP 深度审查拦截（302 跳转 disable.htm）问题。
+- 在沙箱端部署 Nginx TLS 终结代理与自签名 SAN 证书（包含 59.60.79.74、700b5e2ab48a.ofalias.net、localhost），实现端到端流量强加密。
+- 升级本地 hook 脚本与客户端配置，支持远程 HTTPS MCP 与 HTTP 原生 Hook 调用。
+
+### 变更内容
+1. **沙箱端配置**：
+   - 生成 10 年期包含多 SAN（IP:59.60.79.74, DNS:700b5e2ab48a.ofalias.net）的自签名 SSL 证书。
+   - 部署并持久化 PM2 常驻进程 `nginx-tls`，将 8443 (HTTPS) 反向代理至本地 FastMCP/REST API (8318)。
+   - 更新 OpenFrp 隧道配置：将 `mcore_mcp` 映射本地端口调整为 8443，实现公网 `https://59.60.79.74:55749` 纯密文穿透。
+2. **本地 WSL CA 根证书注册**：
+   - 将沙箱生成的 SAN 根证书导入本地 WSL `/usr/local/share/ca-certificates/mcore-sandbox.crt` 并执行 `update-ca-certificates`，实现本地 `curl` 与系统网络协议栈的原生 100% 信任（免 `-k`）。
+3. **三端 Agent MCP 与 Hook 切换**：
+   - **Hermes**：通过 `hermes config` 将 `mcp_servers.memorycore.url` 切换至 `https://59.60.79.74:55749/mcp`。
+   - **Claude Code**：`~/.claude.json` 与 `~/.claude/settings.json` 中 `mcpServers.memorycore` 切换为 `https://59.60.79.74:55749/mcp`；`UserPromptSubmit` 与 `Stop` 升级为原生 HTTP Hook（`/api/v1/hooks/context`、`/api/v1/hooks/stop`）。
+   - **Codex**：`~/.codex/config.toml` 更新 MCP 端点；`~/.codex/hooks.json` 注入 `MCORE_URL=https://59.60.79.74:55749/mcp` 与 `MCORE_HOST=59.60.79.74`。
+4. **Hook 脚本远程健壮性增强**：
+   - `scripts/hooks/mcore-context.sh`、`session-start.sh`、`session-end.sh`、`mcore-ingest.py`：
+     - 支持读取 `MCORE_URL`、`MCORE_HOST` 环境变量；
+     - 自动检测并跳过本地端口 probe，直连远程端点；
+     - curl 请求显式加入 `--noproxy "*"`，防止被本地 Clash 代理环路劫持。
+
+### 验证
+- `curl https://59.60.79.74:55749/health` ➔ 返回 `{"ok":true,"data":{"status":"ok","total_memories":4566}}`（HTTP 200，系统原生验证通过）。
+- FastMCP 端到端握手与 `memory_stats`、`memory_context` 工具调用测试全部通过。
+- 本地 `mcore-context.sh` 执行测试 ➔ 成功返回包含 4,566 条记忆中枢资产的 HUD 上下文注入包。
+
 ## [迭代 236] 2026-09-08 — 彻底废弃并移除 8318 内置旧前端，固化 18318 为唯一法定 Web UI
 
 ### 目的

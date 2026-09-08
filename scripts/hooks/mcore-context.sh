@@ -3,7 +3,7 @@ set -uo pipefail
 
 MCORE_PORT="${MCORE_PORT:-8318}"
 MCORE_HOST="${MCORE_HOST:-127.0.0.1}"
-MCORE_URL="http://${MCORE_HOST}:${MCORE_PORT}/mcp"
+MCORE_URL="${MCORE_URL:-http://${MCORE_HOST}:${MCORE_PORT}/mcp}"
 AGENT="${MCORE_AGENT_ID:-claude}"
 
 STDIN_JSON="$(cat)"
@@ -60,12 +60,14 @@ touch /tmp/mcore-session-mark 2>/dev/null || true
 
 [ -z "$PROMPT" ] && exit 0
 
-if command -v ss >/dev/null 2>&1; then
-  ss -tln 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${MCORE_PORT}$" || exit 0
+if [ "$MCORE_HOST" = "127.0.0.1" ] || [ "$MCORE_HOST" = "localhost" ]; then
+  if command -v ss >/dev/null 2>&1; then
+    ss -tln 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${MCORE_PORT}$" || exit 0
+  fi
 fi
 
 INIT_PAYLOAD='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"mcore-context-hook","version":"1.0"}}}'
-INIT_RESPONSE="$(curl -sS -i --max-time 1.0 -X POST "$MCORE_URL" \
+INIT_RESPONSE="$(curl -sS -i --noproxy "*" --max-time 3.0 -X POST "$MCORE_URL" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d "$INIT_PAYLOAD" 2>/dev/null || true)"
@@ -92,7 +94,7 @@ print(json.dumps(payload, ensure_ascii=False))
 
 [ -z "$PAYLOAD" ] && exit 0
 
-RESPONSE="$(curl -sS --max-time 3.0 -X POST "$MCORE_URL" \
+RESPONSE="$(curl -sS --noproxy "*" --max-time 5.0 -X POST "$MCORE_URL" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "Mcp-Session-Id: $SESSION_ID" \

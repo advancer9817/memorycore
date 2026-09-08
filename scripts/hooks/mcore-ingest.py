@@ -55,6 +55,8 @@ def _spawn_background(agent: str, force: bool) -> None:
 
 
 def _mcore_url() -> str:
+    if os.environ.get("MCORE_URL"):
+        return os.environ["MCORE_URL"]
     host = os.environ.get("MCORE_HOST", "127.0.0.1")
     port = os.environ.get("MCORE_PORT", "8318")
     return f"http://{host}:{port}/mcp"
