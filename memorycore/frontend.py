@@ -187,9 +187,7 @@ def _is_loopback_host(host: str) -> bool:
 
 
 async def frontend_index(request: Request) -> Response:
-    if not _CONFIG.enabled:
-        return Response("frontend disabled", status_code=404)
-    return HTMLResponse(_FRONTEND_HTML)
+    return Response("8318 embedded frontend has been removed. Active UI is on http://127.0.0.1:18318/", status_code=404, media_type="text/plain")
 
 
 async def frontend_health(request: Request) -> Response:
@@ -585,7 +583,6 @@ from memorycore.frontend_metrics import (  # noqa: E402,F401
     _get_recall_metrics,
 )
 from memorycore.frontend_http import (  # noqa: E402,F401
-    _FRONTEND_HTML,
     _bool_q,
     _check_auth,
     _check_origin,

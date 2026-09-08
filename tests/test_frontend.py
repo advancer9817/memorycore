@@ -35,8 +35,8 @@ def test_frontend_root_and_health():
         root = client.get("/")
         health = client.get("/health")
 
-    assert root.status_code == 200
-    assert "Local Memory MCP Control" in root.text
+    assert root.status_code == 404
+    assert "8318" in root.text
     assert health.status_code == 200
     assert health.json()["data"]["status"] == "ok"
 

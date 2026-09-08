@@ -1,3 +1,21 @@
+## [迭代 236] 2026-09-08 — 彻底废弃并移除 8318 内置旧前端，固化 18318 为唯一法定 Web UI
+
+### 目的
+- 按照用户明确架构决策，彻底废弃并下线 8318 端口下的单页旧版内嵌控制台（`_FRONTEND_HTML` 与根目录 `dashboard.html`）。
+- 确保 8318 专注于 FastMCP 协议接口与 RESTful API，明确唯一法定前端 UI 端口为 `18318`（Next.js Standalone 仪表盘服务）。
+
+### 变更内容
+1. `memorycore/frontend_http.py`：完全移除 50+ 行硬编码的内嵌 HTML 字符串常量 `_FRONTEND_HTML`。
+2. `memorycore/frontend.py`：重构 `frontend_index` 路由，访问根路径 `/` 时显式返回 404 并提示转向 `http://127.0.0.1:18318/`。
+3. `tests/test_frontend.py`：对齐单测断言，验证 `/` 响应状态码为 404 且健康端点 `/health` 持续正常，20 个测试 100% 通过。
+4. 清理废弃静态导出产物：移除根目录下 1.8MB 旧版 `dashboard.html`。
+5. 服务热重载：通过 systemd --user 重启 `mcore` 服务，验证 8318 彻底下线旧前端，18318 独立 UI (Next.js) 稳定在线 (HTTP 200)。
+
+### 验证
+- `curl http://127.0.0.1:8318/` ➔ 返回 `8318 embedded frontend has been removed. Active UI is on http://127.0.0.1:18318/`
+- `curl http://127.0.0.1:8318/health` ➔ `{"ok":true,"data":{"status":"ok","total_memories":4601}}`
+- `curl -I http://127.0.0.1:18318/` ➔ `HTTP/1.1 200 OK` (Next.js 独立 UI 响应流畅)
+
 ## [迭代 218] 2026-09-04 — mcore UI 首页全面现代化重塑：经典舒展单列布局、真数据全链路贯通与后端 now() 修复
 
 > 对 mcore 首页进行彻底的系统级重构，告别死数据与假按钮；完全还原用户最偏好的自然舒展经典单列大卡片布局，彻底清除刺眼黄色/橙色并统一为沉稳极客紫蓝；修复后端 `/api/v1/curator/llm` 缺失 `now()` 导致的 500 致命缺陷，运维调度动作全面实装即时报告回显与精准时间排程。
