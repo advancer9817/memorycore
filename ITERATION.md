@@ -553,3 +553,25 @@
 
 ### 回滚
 `git revert HEAD`
+
+## [迭代 235] 2026-09-07 — 公网跳板机平滑迁移至 Google Cloud (34.81.84.197) 与全链路配置自动刷新
+
+### 目的
+- 适应公网跳板机资产变动：原阿里云实例释放，全面切换至 Google Cloud 高速跳板服务器（`34.81.84.197`）。
+- 自动同步刷新 Windows 本地终端、Hermes Desktop 连接注册表与文档资产，确保无缝切换。
+
+### 变更内容
+- **客户端与桌面连接切换**：
+  - Windows `~/.ssh/config`：更新 `aliyun-hermes` 并新增 `google-hermes` 别名，指向 `34.81.84.197:2222`（Ed25519 免密直连通过）；
+  - Windows Terminal：`settings.json` 快捷选项更新为「沙箱远程-Google」（`ssh -p 2222 root@34.81.84.197`）；
+  - Hermes Desktop：`connection.json` 与 `connections.json` 目标 IP 更新为 `34.81.84.197`。
+- **沙箱与文档资产同步**：
+  - 沙箱内部 `tunnel-guard.sh` 与 autossh 确认指向 `34.81.84.197`，PM2 守护集群（Mihomo/CPA/CPAMP/Hermes）全量复活恢复监听；
+  - 同步更新 `docs/沙箱/` 下的架构交接手册与工作流 SOP，全量替换为当前有效 IP。
+
+### 验证
+- **连通性实测**：Windows PowerShell 执行 `ssh google-hermes` 1 秒免密登录成功，精准返回沙箱主机名 `ce0dd874cd23`；
+- **核心端口**：沙箱内 2222、3389、7890、8317、18317、9119 全部正常监听。
+
+### 回滚
+`git revert HEAD`

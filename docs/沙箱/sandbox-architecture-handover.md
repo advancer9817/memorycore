@@ -28,13 +28,13 @@
 3. **平台空闲回收**：若 300 秒内无用户交互 Prompt，沙箱实例会被自动冻结或休眠。
 
 ### 1.2 解决方案：反向穿透 + 边缘反休眠 + 多层守护
-用户采购了一台固定公网 IP 的阿里云 ECS 作为锚点跳板机。沙箱主动出站向阿里云建立 SSH 反向加密隧道（`autossh` + `tunnel-guard.sh`），把沙箱内部的 **SSH (22)** 与 **XRDP (3389)** 端口反向“焊”在阿里云的公网端口上；并通过逆向平台会话机制原地刷新纳秒时间戳（`anti-sleep.py`）实现持久不休眠。
+用户采购了一台固定公网 IP 的Google Cloud / 跳板机 ECS 作为锚点跳板机。沙箱主动出站向Google Cloud / 跳板机建立 SSH 反向加密隧道（`autossh` + `tunnel-guard.sh`），把沙箱内部的 **SSH (22)** 与 **XRDP (3389)** 端口反向“焊”在Google Cloud / 跳板机的公网端口上；并通过逆向平台会话机制原地刷新纳秒时间戳（`anti-sleep.py`）实现持久不休眠。
 
 ```text
 【物理终端 / 客户端】              【公网跳板机 (ECS)】                 【内网容器沙箱 (高配)】
 Windows Terminal / Hermes          Ubuntu 24 (真机 systemd)           WorkBuddy 容器 (无 systemd)
 ┌───────────────────────┐         ┌─────────────────────────┐         ┌─────────────────────────┐
-│ • Windows OpenSSH     │ ──3389─>│ 121.199.5.63            │         │ 172.24.0.x (纯内网NAT)  │
+│ • Windows OpenSSH     │ ──3389─>│ 34.81.84.197            │         │ 172.24.0.x (纯内网NAT)  │
 │   (ed25519 免密私钥)  │ ──2222─>│ • GatewayPorts yes      │ ◄────── │ • autossh 反向隧道心跳  │
 │ • Hermes Desktop (SSH)│         │ • 安全组: 22/2222/3389  │ (反向)  │ • tunnel-guard.sh (探活)│
 └───────────────────────┘         └─────────────────────────┘ 隧道    │ • anti-sleep.py (防休眠)│
@@ -52,9 +52,9 @@ Windows Terminal / Hermes          Ubuntu 24 (真机 systemd)           WorkBudd
 
 ## 2. 关键节点资产与凭据清单
 
-### 2.1 阿里云跳板机（公网中转锚点）
-* **公网 IP**：`121.199.5.63`
-* **SSH 端口**：`22`（阿里云自身 sshd 监听端口）
+### 2.1 Google Cloud / 跳板机跳板机（公网中转锚点）
+* **公网 IP**：`34.81.84.197`
+* **SSH 端口**：`22`（Google Cloud / 跳板机自身 sshd 监听端口）
 * **系统账户**：`root`
 * **系统密码**：`xinxin123`
 * **公网出带宽**：峰值 **50Mbps**
@@ -76,11 +76,11 @@ Windows Terminal / Hermes          Ubuntu 24 (真机 systemd)           WorkBudd
 * **系统密码**：`xinxin123`（SSH 与 RDP 桌面登录通用密码）
 * **连接命令（公网一跳直达）**：
   ```bash
-  ssh -p 2222 root@121.199.5.63
+  ssh -p 2222 root@34.81.84.197
   # 密码：xinxin123 (或使用已绑定的 Windows id_ed25519 密钥免密登录)
   ```
 * **远程桌面连接（MSTSC）**：
-  * 地址：`121.199.5.63:3389`
+  * 地址：`34.81.84.197:3389`
   * 账户：`root`
   * 密码：`xinxin123`
 * **Web 备用终端**：`https://a84ff2b76fb63e8f9.app.workbuddy.link/`（ttyd，无认证）
@@ -175,7 +175,7 @@ Windows Terminal / Hermes          Ubuntu 24 (真机 systemd)           WorkBudd
 ### 4.3 隧道双条件自愈守护（`tunnel-guard.sh`）
 * **现象**：网络抖动或误杀进程后，`autossh` 无法恢复。
 * **解决方案**（脚本位于 `/workspace/webtty/tunnel-guard.sh`）：
-  每 20 秒执行探活：既检查到阿里云 22 端口的 `ESTABLISHED`，又用 `timeout 6 bash -c "exec 3<>/dev/tcp/121.199.5.63/3389"` 验证真实 TCP 传输能力。断线时彻底清理僵尸子进程，17 秒内拉起重建。
+  每 20 秒执行探活：既检查到Google Cloud / 跳板机 22 端口的 `ESTABLISHED`，又用 `timeout 6 bash -c "exec 3<>/dev/tcp/34.81.84.197/3389"` 验证真实 TCP 传输能力。断线时彻底清理僵尸子进程，17 秒内拉起重建。
 
 ### 4.4 避坑禁令：严禁在命令行使用 `pkill -f`
 在终端执行 `pkill -f <name>` 时，当前的 Shell（bash/zsh）自身的进程参数中就包含了该字符串，会直接把当前登录的 Shell 自身干掉造成**连接瞬间暴毙**！
@@ -194,7 +194,7 @@ Windows Terminal / Hermes          Ubuntu 24 (真机 systemd)           WorkBudd
 文件路径：`C:\Users\e-pengyang.DU\.ssh\config`
 ```text
 Host aliyun-hermes
-    HostName 121.199.5.63
+    HostName 34.81.84.197
     Port 2222
     User root
     IdentityFile C:\Users\e-pengyang.DU\.ssh\id_ed25519
@@ -211,7 +211,7 @@ Windows Hermes Desktop 配置文件路径：`C:\Users\e-pengyang.DU\AppData\Roam
      "mode": "ssh",
      "remote": {
        "mode": "ssh",
-       "host": "121.199.5.63",
+       "host": "34.81.84.197",
        "user": "root",
        "port": 2222,
        "keyPath": "C:\\Users\\e-pengyang.DU\\.ssh\\id_ed25519",
@@ -256,13 +256,13 @@ Windows Hermes Desktop 配置文件路径：`C:\Users\e-pengyang.DU\AppData\Roam
 
 ## 8. 技术选型扩展：家用电脑作为反向穿透终点替代方案 (DDNS / Tailscale)
 
-如果未来不使用按量付费的公网云服务器（如阿里云 ECS），而是希望以**个人家用电脑（Windows/Linux）作为反向隧道的接收终点**，技术选型与改造方案如下：
+如果未来不使用按量付费的公网云服务器（如Google Cloud / 跳板机 ECS），而是希望以**个人家用电脑（Windows/Linux）作为反向隧道的接收终点**，技术选型与改造方案如下：
 
 ### 8.1 架构差异对比
 
-| 维度 | 阿里云 ECS 方案（当前落地） | 家用电脑 + DDNS 方案 | 家用电脑 + Tailscale 方案 |
+| 维度 | Google Cloud / 跳板机 ECS 方案（当前落地） | 家用电脑 + DDNS 方案 | 家用电脑 + Tailscale 方案 |
 | :--- | :--- | :--- | :--- |
-| **公网 IP** | 固定公网 IPv4 (`121.199.5.63`) | 动态公网 IPv4 或 IPv6 | 无需公网 IP (虚拟 Mesh 内网) |
+| **公网 IP** | 固定公网 IPv4 (`34.81.84.197`) | 动态公网 IPv4 或 IPv6 | 无需公网 IP (虚拟 Mesh 内网) |
 | **费用成本** | 按量计费 (带宽+实例费) | 0 成本 | 0 成本 (免费版支持多设备) |
 | **本地操作体验**| 经过公网跳板传输 (50Mbps 上限) | **极速本地总线 (走 localhost)** | 局域网直连或 P2P 打洞 |
 | **断电/休眠风险**| 云端 7×24 小时高可用 | 家用电脑关机/睡眠即断联 | 家用电脑关机/睡眠即断联 |
@@ -290,7 +290,7 @@ AllowTcpForwarding yes
 编辑沙箱内的 `/workspace/webtty/tunnel-guard.sh`：
 将原先的固定 IP：
 ```bash
-ALIYUN_IP="121.199.5.63"
+ALIYUN_IP="34.81.84.197"
 ```
 替换为家用电脑的 DDNS 域名（如 `home.example.com`）或 Tailscale 分配的内网 IP（如 `100.64.0.2`），命令改为：
 ```bash
@@ -319,8 +319,8 @@ autossh -M 0 -f -o StrictHostKeyChecking=no -o ServerAliveInterval=20 \
 python3 -c "import json,time;d=json.load(open('/root/proxy/data/sessions.json'));print('%.1f 秒前'%(time.time()-d['sessions'][0]['lastPromptTime']/1e9))"
 
 # 2. 验证反向隧道连通性
-timeout 5 bash -c 'exec 3<>/dev/tcp/121.199.5.63/2222' && echo "SSH 通" || echo "断"
-timeout 5 bash -c 'exec 3<>/dev/tcp/121.199.5.63/3389' && echo "RDP 通" || echo "断"
+timeout 5 bash -c 'exec 3<>/dev/tcp/34.81.84.197/2222' && echo "SSH 通" || echo "断"
+timeout 5 bash -c 'exec 3<>/dev/tcp/34.81.84.197/3389' && echo "RDP 通" || echo "断"
 ```
 
 ### Q3：CPA 的 41 个账号如何更新与维护？
