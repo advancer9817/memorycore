@@ -711,3 +711,30 @@
 
 ### 回滚
 `git revert HEAD`
+
+## [迭代 238] 2026-09-10 — Java 17 + Spring Boot 3 + Spring AI + Vue 3 独立库多租户全栈重构架构规划方案落地
+
+### 目的
+- 遵照用户顶层规划决策，制定 MemoryCore 现代化全栈重构方案：从 Python 原型单机中枢升级为 **Java 17 (LTS) + Spring Boot 3.3.3 + Spring AI 1.0.0-M2 + PostgreSQL 16 (pgvector) + Vue 3.4 (Vite + TypeScript + Pinia)** 企业级工业架构，支撑物理库级（Database-per-Tenant）多租户隔离与单 JAR 极简运行。
+
+### 变更内容
+- **多租户物理库隔离规划** (`docs/mcore-database-per-tenant-detailed-design.md`)：
+  - 设计控制面系统库 `mcore_system`（用户鉴权、租户数据库映射、API Key 凭据、配额限制）；
+  - 基于 PostgreSQL `template_mcore` 模板库实现新注册用户 30~50ms 极速写时复制（COW）克隆开辟独立私有库（`mcore_u_<uid>`）；
+  - 设计全租户自动化批量迁移升级引擎 (`scripts/migrate_all_tenants.py`)。
+- **后端中枢工程规划** (`docs/mcore-spring-ai-multi-tenant-architecture.md`)：
+  - 明确基于 **Java 17 (LTS)** 与 **Spring Boot 3.3.3**，引入官方 `spring-ai-mcp-server-spring-boot-starter` 原生实现 MCP 协议服务（8318 端口）；
+  - 设计 `DynamicTenantRoutingDataSource`，基于 `AbstractRoutingDataSource` + `Caffeine` (LRU 淘汰) + `HikariCP` 管理微型租户池（`min=1, max=3`），空闲 15 分钟自动回收，严格受控于全局 150 连接上限；
+  - 基于 `JdbcClient` 与 `com.pgvector:pgvector` 实现单 SQL 混合余弦距离与三元词联合检索打分。
+- **前端现代化与轻量化规划** (`docs/mcore-vue3-frontend-architecture.md`)：
+  - 全面切为 Vue 3.4 (Composition API `<script setup>`) + Vite 5 + TypeScript + Pinia + Tailwind CSS + Apache ECharts；
+  - 消除 Next.js 15 Node.js 常驻常态守护负担，构建产物 `dist/` 支持嵌入 Spring Boot `resources/static/` 达成单体二进制运行。
+- **集成全景实施计划** (`docs/plans/2026-09-10-mcore-spring-boot-vue3-multi-tenant-architecture-plan.md`)：
+  - 汇总四阶段落地路径（物理底座 ➔ Java 脚手架 ➔ Vue 3 迁移 ➔ 多租户联调割接）。
+
+### 验证
+- **文档体系一致性门禁**：`.venv/bin/python -m pytest tests/test_docs_consistency.py` 3 项校验全部通过 (100% passed)；
+- **全栈规划文档存盘**：4 份架构规范文档全部完整保存在 `docs/` 与 `docs/plans/`。
+
+### 回滚
+`git revert HEAD`
