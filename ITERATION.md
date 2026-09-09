@@ -640,3 +640,20 @@
 
 ### 回滚
 `git revert HEAD`
+
+## [迭代 236] 2026-09-09 — PostgreSQL + pgvector 彻底重构规划方案落地与架构蓝图确立
+
+### 目的
+- 针对当前 SQLite + Qdrant 双栈架构存在的跨库事务缺失、双写一致性脆弱、锁争用及多服务维护冗余问题，制定彻底重构规划方案，收敛为 PostgreSQL + pgvector 单一存储中枢。
+
+### 变更内容
+- **重构方案设计与配置规划**：
+  - `docs/plans/2026-09-09-mcore-pgvector-refactor-detailed-plan.md`（新增）：编制全景重构规划文档，细化到配置项级（移除 Qdrant/SQLite 配置段，新增 `database` 连接池配置）、依赖项级（引入 `psycopg[binary,pool]` 与 `pgvector`）、文件代码级变更列表；
+  - `docs/mcore-pgvector-refactor-detailed-plan.md`（新增）：同步放置于 docs 根目录供查阅；
+  - 明确 8 张核心表结构 DDL（集成 `embedding vector(768)` 与 HNSW/GIN 索引）、单 SQL 混合检索算法规范、及基于已有向量的无损数据迁移工具设计。
+
+### 验证
+- 文档落盘校验完毕，对应 WSL 内部路径与 Windows 桌面输出交付目录双向对齐。
+
+### 回滚
+`git revert HEAD`
