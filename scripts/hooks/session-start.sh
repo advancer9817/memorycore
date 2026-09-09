@@ -9,13 +9,13 @@ source "$SCRIPT_DIR/../mcore-daemon.sh" 2>/dev/null || true
 
 MCORE_PORT="${MCORE_PORT:-8318}"
 MCORE_HOST="${MCORE_HOST:-127.0.0.1}"
-MCORE_URL="http://${MCORE_HOST}:${MCORE_PORT}/mcp"
+MCORE_URL="${MCORE_URL:-http://${MCORE_HOST}:${MCORE_PORT}/mcp}"
 AGENT="${MCORE_AGENT_ID:-agent}"
 NAMESPACE="${MCORE_AGENT_NAMESPACE:-default}"
 INIT_TIMEOUT="${MCORE_SESSION_START_INIT_TIMEOUT:-1.5}"
 CALL_TIMEOUT="${MCORE_SESSION_START_CALL_TIMEOUT:-1.5}"
 
-if [ "$MCORE_HOST" = "127.0.0.1" ] || [ "$MCORE_HOST" = "localhost" ]; then
+if [[ "$MCORE_URL" == *"127.0.0.1"* ]] || [[ "$MCORE_URL" == *"localhost"* ]]; then
   ensure_mcore_running 2>/dev/null || true
 fi
 

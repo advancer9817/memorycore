@@ -100,9 +100,7 @@ async def _frontend_metrics_route(request):
     return await frontend_metrics(request)
 
 
-@mcp.custom_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"], include_in_schema=False)
-async def _frontend_proxy_route(request):
-    return await frontend_index(request)
+# 8318 已废弃前端页面，无需全局 SPA 通配代理
 
 SQLITE_VEC_AVAILABLE = False  # removed; vector search now via vector_store.py (Qdrant)
 

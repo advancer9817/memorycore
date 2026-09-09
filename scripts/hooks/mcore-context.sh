@@ -60,7 +60,7 @@ touch /tmp/mcore-session-mark 2>/dev/null || true
 
 [ -z "$PROMPT" ] && exit 0
 
-if [ "$MCORE_HOST" = "127.0.0.1" ] || [ "$MCORE_HOST" = "localhost" ]; then
+if [[ "$MCORE_URL" == *"127.0.0.1"* ]] || [[ "$MCORE_URL" == *"localhost"* ]]; then
   if command -v ss >/dev/null 2>&1; then
     ss -tln 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${MCORE_PORT}$" || exit 0
   fi

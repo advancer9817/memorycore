@@ -1,3 +1,21 @@
+## [迭代 238] 2026-09-09 — 接入 Cloudflare 权威 TLS 隧道端点与 Hook 自动化环境变量解耦
+
+### 目的
+- 全面适配 Cloudflare Tunnel 权威域名端点 (`https://mcore.099817.xyz/mcp`)，替代旧有易遭运营商阻断或引发 TLS 证书兼容问题的临时端口。
+- 增强本地 Hook 脚本与三端 Agent（Hermes、Claude Code、Codex）对 `MCORE_URL` 的动态识别，消除对本地 8318 监听状态的硬编码强校验。
+
+### 变更内容
+1. `scripts/hooks/mcore-context.sh`：
+   - 优化本地端口监听探测逻辑，仅当 `MCORE_URL` 指向 `127.0.0.1` 或 `localhost` 时才执行 `ss` 探针检查，远程端点直通无阻塞。
+2. `scripts/hooks/session-start.sh` 与 `scripts/hooks/session-end.sh`：
+   - 支持动态继承外部环境变量 `MCORE_URL`；非本地连接时跳过本地守护进程的拉起探测。
+3. `memorycore/server.py`：
+   - 移除已废弃的旧版 SPA 全局通配代理，防止拦截 FastMCP 内部子路由。
+
+### 验证
+- 本地调用 `mcore-context.sh` 配合 `MCORE_URL=https://mcore.099817.xyz/mcp`，成功跨公网完成 MCP 初始化与上下文召回。
+- Hermes、Claude Code、Codex 均已成功对齐至 `https://mcore.099817.xyz/mcp`。
+
 ## [迭代 237] 2026-09-08 — 支持 mcore 远程 HTTPS 穿透接入与全 Agent (Hermes/Claude/Codex) 钩子适配
 
 ### 目的
