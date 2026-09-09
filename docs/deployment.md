@@ -22,28 +22,29 @@ The default deployment:
 
 1. Installs missing host packages where supported; use `--no-bootstrap-deps` to disable.
 2. Creates `.venv` with Python 3.11+.
-3. Installs `requirements.txt`.
+3. Installs dependencies (`pyproject.toml` / `requirements.txt`).
 4. Writes `config.yaml` if missing.
 5. Initializes `memory.sqlite3`.
-6. Renders `dashboard.html`.
+6. Builds Next.js frontend standalone package in `ui/`.
 7. Ensures Ollama is installed/running and pulls the embedding model; use `--no-ollama` to rely on fallback embeddings.
 8. Installs user systemd services:
-   - `qdrant.service`
-   - `mcore.service`
-   - `mcore-curator.timer` / `mcore-curator.service`
+   - `qdrant.service` (Docker Qdrant 向量存储)
+   - `mcore.service` (FastMCP & REST API, 端口 8318)
+   - `mcore-ui.service` (Next.js Standalone Web UI, 端口 18318)
+   - `mcore-curator.timer` / `mcore-curator.service` (定时记忆治理)
 9. Pulls the Qdrant Docker image unless `--no-pull-images` is used.
-10. Starts Qdrant and mcore.
+10. Starts services and verifies health.
 11. Runs curator summary and health checks.
 12. Runs pytest unless `--skip-tests` is used.
 
 Default unified endpoint layout:
 
 ```text
-http://127.0.0.1:8318/        frontend control console
-http://127.0.0.1:8318/api/*   frontend REST API
-http://127.0.0.1:8318/mcp     MCP endpoint
-http://127.0.0.1:8318/health  health check
-http://127.0.0.1:8318/metrics metrics
+http://127.0.0.1:8318/mcp        FastMCP endpoint (Agent tools gateway)
+http://127.0.0.1:8318/api/v1/*   Core REST API & Agent Native Hooks
+http://127.0.0.1:8318/health     Health check
+http://127.0.0.1:8318/metrics    Prometheus metrics
+http://127.0.0.1:18318/          MemoryCore Web Console (Next.js Standalone)
 ```
 
 The default bind host is loopback-only. For remote access, provide a token:
@@ -183,6 +184,7 @@ CLI options have priority over environment defaults.
 
 - `qdrant.service`: runs Docker `qdrant/qdrant` with persistent storage.
 - `mcore.service`: starts the HTTP MCP server and has `Wants/After=qdrant.service`.
+- `mcore-ui.service`: runs the Next.js standalone web console on port `18318`.
 - `mcore-curator.timer`: runs hourly.
 - `mcore-curator.service`: runs `run_curator.sh` from the deployed root with
   `LOCAL_MEMORY_CURATOR_APPLY=1` by default.
@@ -190,17 +192,19 @@ CLI options have priority over environment defaults.
 Useful commands:
 
 ```bash
-systemctl --user status qdrant.service mcore.service mcore-curator.timer
+systemctl --user status qdrant.service mcore.service mcore-ui.service mcore-curator.timer
 journalctl --user -u mcore.service -f
+journalctl --user -u mcore-ui.service -f
 tail -80 /path/to/memorycore/logs/curator.log
 ```
 
 ## MCP client configuration
 
-All clients should point to the same HTTP endpoint:
+All clients should point to the FastMCP endpoint (local or remote tunnel):
 
 ```text
-http://127.0.0.1:8318/mcp
+http://127.0.0.1:8318/mcp        # Local direct connection
+https://mcore.099817.xyz/mcp     # Cloudflare Tunnel authoritative endpoint
 ```
 
 Hermes:
@@ -210,7 +214,7 @@ mcp_servers:
   mcore:
     enabled: true
     type: http
-    url: http://127.0.0.1:8318/mcp
+    url: http://127.0.0.1:8318/mcp # or https://mcore.099817.xyz/mcp
 ```
 
 Codex `~/.codex/config.toml`:
@@ -218,7 +222,7 @@ Codex `~/.codex/config.toml`:
 ```toml
 [mcp_servers.mcore]
 type = "http"
-url = "http://127.0.0.1:8318/mcp"
+url = "http://127.0.0.1:8318/mcp" # or https://mcore.099817.xyz/mcp
 ```
 
 Claude Code user config:

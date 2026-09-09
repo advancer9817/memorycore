@@ -536,4 +536,29 @@ Step 4（扩展能力）— 独立，可与 Step 1-3 并行
 
 ### 运维观察（非迭代欠账）
 
-- [ ] 矛盾/待清理回升收敛确认：09-01 收官后矛盾 7→16、待清理 36→62 属新数据正常增长；确认下次维护计划（或手动一键维护）后回落至低位
+- [x] 矛盾/待清理回升收敛确认：09-01 收官后矛盾 7→16、待清理 36→62 属新数据正常增长；确认下次维护计划（或手动一键维护）后回落至低位
+
+---
+
+## 2026-09 最新迭代成果与文档对齐（迭代 218 ~ 238）
+
+- [x] **[迭代 218] UI 首页全面现代化重塑**：经典舒展单列大卡片布局、四核心资产看板、LLM 治理即时耗时回显与无候选安全态
+- [x] **[迭代 219] 调用方 Agent 身份多级感知**：`X-Agent-Id` 请求头 + `clientInfo` 动态捕获，自动消除 source_agent='agent' 泛化
+- [x] **[迭代 220] 上下文召回返回体瘦身**：`memory_context` 默认 Slim 模式（削减 98.6% 非 context 信封），按需 verbose 诊断
+- [x] **[迭代 221] MCP 专用表现层隔离**：`mcp_views.py` 隔离 Agent 轻量 DTO，主动查询工具单次搜索体积削减 70.9%，切断写操作 27 字段全量回弹
+- [x] **[迭代 226~227] 原生 HTTP Hooks 与知识血统 Diff 对比**：`/api/v1/hooks/*` 端点支持，UI 落地 `DiffViewer` 废弃与演进对比组件
+- [x] **[迭代 228~230] 治理与控制台流式优化**：虚假 feedback 与实体去噪、LLM Curator 治理决策明细实时流式增量推入
+- [x] **[迭代 236] 彻底废弃 8318 内置前端**：8318 专注于 FastMCP 与 REST API，固化 18318 为唯一法定 Web UI
+- [x] **[迭代 237~238] 远程 HTTPS 穿透与 Cloudflare Tunnel 端点支持**：适配 `https://mcore.099817.xyz/mcp`，Hook 脚本解耦本地端口强绑定与 noproxy 限制
+- [x] **文档体系全面同步**：系统性更新 `README.md`、`docs/deployment.md`，新增 `docs/architecture-and-api-reference.md` 权威技术规范，锁定 628+ 全绿测试守护
+
+---
+
+## 规划中核心任务 (Next Major Evolution)
+
+- [ ] **PostgreSQL 16 + pgvector 单一中枢重构**（架构首要任务）：
+  - 彻底废除 SQLite + Qdrant 双栈架构，统一重构为 PostgreSQL 16 + pgvector 单一存储中枢
+  - 实现单条 SQL 混合检索（向量余弦距离 `<=>` + `pg_trgm` 词法匹配加权融合）
+  - 提供无损平滑迁移脚本 `scripts/migrate_sqlite_to_pg.py`
+  - 详见完整规划文档：[`docs/mcore-pgvector-refactor-detailed-plan.md`](docs/mcore-pgvector-refactor-detailed-plan.md)
+

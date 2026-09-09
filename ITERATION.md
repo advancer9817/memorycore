@@ -1,3 +1,27 @@
+## [迭代 239] 2026-09-09 — 系统文档体系与最新架构规范对齐：双端口拓扑、MCP 表现层隔离与权威端点指南
+
+### 目的
+- 针对近期演进成果（迭代 218~238 涉及的 8318/18318 双端口隔离、MCP 专属轻量 DTO、极简 Slim 上下文信封、Cloudflare 权威 TLS 穿透）进行文档层面的系统性梳理与对齐。
+- 消除 `README.md` 与 `docs/deployment.md` 中指向已废弃内嵌单页控制台的陈旧描述，新增权威技术架构参考指南。
+
+### 变更内容
+1. `README.md`：
+   - 路径列表更新：移除已删除的 `dashboard.html`，新增 `memorycore/mcp_views.py` 与独立 Next.js 控制台 `ui/`（端口 18318）。
+   - 端口端点明确化：明晰 8318 专注于 FastMCP 与核心 REST API（根路径返回 404 并引导转向 18318），18318 承载现代化 Next.js Web 仪表盘。
+   - 功能与特性矩阵扩充：增补 Slim 上下文信封（-98.6% 体积）、MCP 专属表现层隔离（-70.9% 搜索体积）、Agent 身份自动识别及 Cloudflare 权威端点。
+   - 前端部署说明重构：对齐用户级 systemd 单元 `mcore-ui.service` 与 standalone 生产启动规范。
+   - 架构路线更新：指引向 PostgreSQL 16 + pgvector 单一中枢重构方案。
+2. `docs/deployment.md`：
+   - 部署步骤与端点拓扑同步更新，登记 `mcore-ui.service` 单元与 Cloudflare Tunnel 权威端点。
+3. `docs/architecture-and-api-reference.md`（新增）：
+   - 系统梳理并确立双端口物理隔离拓扑、MCP 专用表现层（`McpMemoryItem` 规范）、极简 Slim 契约、多级 Agent 身份感知与三端接入标准。
+4. `TODO.md`：
+   - 登记迭代 218~238 全部里程碑成果，明确下一阶段核心任务为 PostgreSQL + pgvector 单一存储中枢重构。
+
+### 验证
+- 运行文档一致性测试 `pytest tests/test_docs_consistency.py` ➔ 3 passed。
+- 运行全量测试套件 `pytest tests -q` ➔ 628 passed / 0 failed / 1 warning，全绿守护。
+
 ## [迭代 238] 2026-09-09 — 接入 Cloudflare 权威 TLS 隧道端点与 Hook 自动化环境变量解耦
 
 ### 目的
