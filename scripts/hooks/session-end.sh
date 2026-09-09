@@ -15,7 +15,7 @@ command -v python3 >/dev/null 2>&1 || exit 0
 
 # ── 1. initialize to obtain a fresh MCP session id ────────────────────────
 INIT_PAYLOAD='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"mcore-session-end-hook","version":"1.0"}}}'
-INIT_RESPONSE="$(curl -sS -i --noproxy "*" --max-time "$INIT_TIMEOUT" -X POST "$MCORE_URL" \
+INIT_RESPONSE="$(curl -sS -i --max-time "$INIT_TIMEOUT" -X POST "$MCORE_URL" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d "$INIT_PAYLOAD" 2>/dev/null || true)"
@@ -54,7 +54,7 @@ PY
 )"
 [ -z "$PAYLOAD" ] && exit 0
 
-curl -sS --noproxy "*" --max-time "$CALL_TIMEOUT" -X POST "$MCORE_URL" \
+curl -sS --max-time "$CALL_TIMEOUT" -X POST "$MCORE_URL" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "Mcp-Session-Id: $SESSION_ID" \

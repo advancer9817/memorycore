@@ -7,8 +7,10 @@
 ### 变更内容
 1. `scripts/hooks/mcore-context.sh`：
    - 优化本地端口监听探测逻辑，仅当 `MCORE_URL` 指向 `127.0.0.1` 或 `localhost` 时才执行 `ss` 探针检查，远程端点直通无阻塞。
+   - 移除硬编码的 `--noproxy "*"` 参数，使 curl 能够自适应遵循网络环境中的代理路由规则。
 2. `scripts/hooks/session-start.sh` 与 `scripts/hooks/session-end.sh`：
    - 支持动态继承外部环境变量 `MCORE_URL`；非本地连接时跳过本地守护进程的拉起探测。
+   - 同步移除硬编码 `--noproxy "*"` 参数，保障跨网请求畅通。
 3. `memorycore/server.py`：
    - 移除已废弃的旧版 SPA 全局通配代理，防止拦截 FastMCP 内部子路由。
 

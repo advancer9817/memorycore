@@ -67,7 +67,7 @@ if [[ "$MCORE_URL" == *"127.0.0.1"* ]] || [[ "$MCORE_URL" == *"localhost"* ]]; t
 fi
 
 INIT_PAYLOAD='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"mcore-context-hook","version":"1.0"}}}'
-INIT_RESPONSE="$(curl -sS -i --noproxy "*" --max-time 3.0 -X POST "$MCORE_URL" \
+INIT_RESPONSE="$(curl -sS -i --max-time 3.0 -X POST "$MCORE_URL" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d "$INIT_PAYLOAD" 2>/dev/null || true)"
@@ -94,7 +94,7 @@ print(json.dumps(payload, ensure_ascii=False))
 
 [ -z "$PAYLOAD" ] && exit 0
 
-RESPONSE="$(curl -sS --noproxy "*" --max-time 5.0 -X POST "$MCORE_URL" \
+RESPONSE="$(curl -sS --max-time 5.0 -X POST "$MCORE_URL" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "Mcp-Session-Id: $SESSION_ID" \
