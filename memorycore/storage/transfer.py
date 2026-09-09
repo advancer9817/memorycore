@@ -1,6 +1,7 @@
 """Export, import, backup, and vector rebuild helpers."""
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -322,12 +323,16 @@ def _rebuild_indexes_after_import() -> dict[str, Any]:
 
 def memory_backup(path: str | None = None) -> dict[str, Any]:
     stamp = now().replace(":", "").replace("+", "p")
-    destination = Path(path) if path else DEFAULT_ROOT / "backups" / f"memory-{stamp}.sqlite3"
+    destination = Path(path) if path else DEFAULT_ROOT / "backups" / f"memory-{stamp}.json"
     destination = destination.expanduser()
     destination.parent.mkdir(parents=True, exist_ok=True)
     source = connect()
-    with sqlite3.connect(destination) as target:
-        source.backup(target)
+    if hasattr(source, "backup"):
+        with sqlite3.connect(destination) as target:
+            source.backup(target)
+    else:
+        data = memory_export()
+        destination.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     log_audit_event("memory_backup", detail={"path": str(destination)})
     return {"path": str(destination), "bytes": destination.stat().st_size}
 

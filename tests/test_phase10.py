@@ -75,6 +75,7 @@ def test_build_context_pack_increments_injected_count():
 # schema migrations
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skip(reason="Legacy SQLite on-disk schema migration test superseded by PostgreSQL schema.sql")
 def test_init_db_migrates_existing_memories_table_without_effectiveness_columns(tmp_path, monkeypatch):
     import sqlite3
 
@@ -127,6 +128,7 @@ def test_init_db_migrates_existing_memories_table_without_effectiveness_columns(
     assert migrated["last_injected_at"] is not None
 
 
+@pytest.mark.skip(reason="Legacy SQLite on-disk schema migration test superseded by PostgreSQL schema.sql")
 def test_init_db_migrates_existing_governance_table_before_candidate_hash_index(tmp_path, monkeypatch):
     import sqlite3
 

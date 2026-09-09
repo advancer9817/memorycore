@@ -374,19 +374,24 @@ def _keyword_scan_records(
     scope_params.extend(sp_params)
     scope_where = " AND ".join(scope_clauses)
 
-    # --- Fast path: FTS5 OR query ---
-    fts_query = " OR ".join(f'"{t}"' for t in terms[:8])
-    fts_params = [fts_query] + scope_params + [max(1, min(int(limit), 100))]
+    # --- Fast path: PostgreSQL Trigram + ILIKE query ---
+    term_conditions = []
+    t_params: list[Any] = []
+    for t in terms[:8]:
+        term_conditions.append("(m.title ILIKE ? OR m.content ILIKE ? OR similarity(m.title, ?) > 0.15)")
+        pat = f"%{t}%"
+        t_params.extend([pat, pat, t])
+    trgm_where = " OR ".join(term_conditions) if term_conditions else "1=1"
+    query_params = t_params + scope_params + [max(1, min(int(limit), 100))]
     try:
         with read_conn() as conn:
             rows = conn.execute(
                 f"""SELECT m.* FROM memories m
-                    JOIN memories_fts f ON f.id = m.id
-                    WHERE memories_fts MATCH ?
+                    WHERE ({trgm_where})
                       AND {scope_where}
                     ORDER BY importance DESC, effectiveness_score DESC, updated_at DESC
                     LIMIT ?""",
-                fts_params,
+                query_params,
             ).fetchall()
         records = [row_to_dict(r) for r in rows]
     except Exception:
@@ -453,33 +458,12 @@ def search_memory_records(
         terms = [t for t in terms if t.lower() not in _STOP_TERMS and not _is_cjk_stopword(t)]
         if not terms:
             return []
-        base += " JOIN memories_fts f ON f.id = m.id"
-        # Smart FTS query: short queries use AND, long queries split to avoid zero-hit
-        # Expand alphanumeric tokens: phase3 → "phase3" OR "phase 3"
-        def _fts_term_variants(term: str) -> str:
-            variants = [fts_phrase(term)]
-            m = re.match(r"^([a-zA-Z_]+)(\d+)$", term)
-            if m:
-                spaced = f"{m.group(1)} {m.group(2)}"
-                variants.append(fts_phrase(spaced))
-            return " OR ".join(variants)
-
-        if len(terms) <= 3:
-            connector = " AND " if len(terms) >= 2 else " OR "
-            fts_query = connector.join(f"({_fts_term_variants(term)})" for term in terms)
-        elif len(terms) <= 6:
-            mid = len(terms) // 2
-            left = " AND ".join(f"({_fts_term_variants(t)})" for t in terms[:mid])
-            right = " AND ".join(f"({_fts_term_variants(t)})" for t in terms[mid:])
-            fts_query = f"({left}) OR ({right})"
-        else:
-            top_terms = terms[:6]
-            mid = len(top_terms) // 2
-            left = " AND ".join(f"({_fts_term_variants(t)})" for t in top_terms[:mid])
-            right = " AND ".join(f"({_fts_term_variants(t)})" for t in top_terms[mid:])
-            fts_query = f"({left}) OR ({right})"
-        clauses.append("memories_fts MATCH ?")
-        params.append(fts_query)
+        term_conditions = []
+        for t in terms[:8]:
+            term_conditions.append("(m.title ILIKE ? OR m.content ILIKE ? OR similarity(m.title, ?) > 0.15)")
+            pat = f"%{t}%"
+            params.extend([pat, pat, t])
+        clauses.append("(" + " OR ".join(term_conditions) + ")")
         fts_active = True
     if types_list:
         clauses.append("m.type IN (%s)" % ",".join("?" for _ in types_list))
@@ -489,7 +473,7 @@ def search_memory_records(
     params.extend(sp_params)
     if tags_list:
         clauses.append(
-            "EXISTS (SELECT 1 FROM json_each(m.tags_json) WHERE lower(json_each.value) IN (%s))"
+            "EXISTS (SELECT 1 FROM unnest(m.tags) t WHERE lower(t) IN (%s))"
             % ",".join("?" for _ in tags_list)
         )
         params.extend(tags_list)
@@ -507,14 +491,13 @@ def search_memory_records(
     sql = base
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
-    # When FTS is active, blend text relevance (rank, lower=better) with importance/effectiveness.
-    # rank is negative in FTS5 so we negate it: -rank gives a positive relevance score.
     if fts_active:
         sql += (
-            " ORDER BY "
-            "(-f.rank * 0.4 + m.importance * 0.3 + m.effectiveness_score * 0.2 + m.feedback_score * 0.1) DESC, "
-            "m.updated_at DESC"
+            " ORDER BY ("
+            "similarity(m.title, ?) * 0.4 + m.importance * 0.3 + m.effectiveness_score * 0.2 + m.feedback_score * 0.1"
+            ") DESC, m.updated_at DESC"
         )
+        params.append(query.strip())
     else:
         sql += " ORDER BY m.importance DESC, m.effectiveness_score DESC, m.feedback_score DESC, m.updated_at DESC"
     sql += " LIMIT ?"

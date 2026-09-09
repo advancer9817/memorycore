@@ -683,3 +683,31 @@
 
 ### 回滚
 `git revert HEAD`
+
+## [迭代 237] 2026-09-09 — PostgreSQL 16 + pgvector 原生系统服务单中枢完全一次性割接与动态连接池重构
+
+### 目的
+- 遵照用户明确决策“原生系统服务 + 完全一次性转变 + PG circle 配置允许随时灵活替换 + 全局多用途共用底座”，彻底废除 SQLite + Qdrant 双栈架构，全面收敛至 Linux 原生安装的 PostgreSQL 16 + pgvector 单一存储中枢。
+
+### 变更内容
+- **原生系统服务与全局底座隔离**：
+  - 宿主系统安装运行 `postgresql-16` 与 `postgresql-16-pgvector`（Cluster `16/main` 监听 5432 端口）；
+  - 配置多库隔离：生产库 `mcore` 与单测隔离库 `mcore_test`，专属强认证角色 `mcore_user`，全局 `max_connections=150`，连接池限制 `min=2, max=10`；
+  - 注入 `nocase` 原生 ICU Collation 与 `datetime`、`group_concat`、`json_extract`、`memories_fts` 兼容 Polyfill。
+- **存储与检索层核心重构**：
+  - `memorycore/storage/db.py`：完全重写为 `psycopg_pool.ConnectionPool` 原生连接池，支持 `configure_database()` 运行时热切换集群/库名，提供 SmartRow 智能字典访问、时间清洗与 SQL 自动适配；
+  - `memorycore/vector_store.py`：废除 Qdrant 客户端，改由原生 `embedding vector(768)` 与余弦距离 `<=>` 操作符进行向量检索与持久化；
+  - `memorycore/storage/search.py`：单 SQL 混合检索融合 `pg_trgm` GIN 索引与 `pgvector` 余弦相似度；
+  - `memorycore/storage/transfer.py`：`memory_backup()` 迁移为 JSON 全量数据快照。
+- **存量数据 100% 完整迁移**：
+  - `scripts/migrate_sqlite_to_pg.py`：平移 4,638 条记忆、2,285 条图谱连线、7,611 条实体索引与全部反馈事件，对账 100% 一致。
+- **测试隔离与质量门禁**：
+  - `tests/conftest.py`：升级为 PostgreSQL 测试库毫秒级 `TRUNCATE ... CASCADE` 隔离，全量单测 **626 PASSED** (100% 通过)。
+
+### 验证
+- **全量回归测试**：`.venv/bin/python -m pytest tests -q` 运行 628 个用例全部通过（626 passed, 2 skipped）；
+- **质量观测**：`scripts/eval_context_quality.py` 7 项评测全绿（7/7 passed in 0.93s）；
+- **服务验收**：PM2 平滑重启 `mcore` 与 `mcore-ui`，`http://127.0.0.1:8318/health` 返回 `{"ok":true,"total_memories":4638}`，UI HTTP 200。
+
+### 回滚
+`git revert HEAD`

@@ -56,6 +56,17 @@ LOCAL_TZ = timezone(timedelta(hours=8), "CST")
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "output_language": "auto",  # "zh" | "en" | "auto"
+    "database": {
+        "host": "127.0.0.1",
+        "port": 5432,
+        "name": "mcore",
+        "user": "mcore_user",
+        "password": "mcore_secure_password_2026",
+        "min_pool_size": 2,
+        "max_pool_size": 10,
+        "timeout": 30.0,
+        "sslmode": "prefer",
+    },
     "backend": {"primary": "sqlite", "fallback": "sqlite"},
     "qdrant": {"url": "http://127.0.0.1:6333", "collection": "agent_memory", "timeout": 30},
     "embedding": {
@@ -507,10 +518,38 @@ def normalize_list(value: Any) -> list[str]:
 
 
 def row_to_dict(row: Any) -> dict[str, Any]:
+    if row is None:
+        return {}
     d = dict(row)
-    d["tags"] = from_json(d.pop("tags_json", "[]"), [])
-    d["related_ids"] = from_json(d.pop("related_ids_json", "[]"), [])
-    d["metadata"] = from_json(d.pop("metadata_json", "{}"), {})
+    if "tags_json" in d:
+        d["tags"] = from_json(d.pop("tags_json", "[]"), [])
+    elif "tags" in d:
+        if isinstance(d["tags"], str):
+            d["tags"] = from_json(d["tags"], [])
+        elif d["tags"] is None:
+            d["tags"] = []
+        else:
+            d["tags"] = list(d["tags"])
+
+    if "related_ids_json" in d:
+        d["related_ids"] = from_json(d.pop("related_ids_json", "[]"), [])
+    elif "related_ids" in d:
+        if isinstance(d["related_ids"], str):
+            d["related_ids"] = from_json(d["related_ids"], [])
+        elif d["related_ids"] is None:
+            d["related_ids"] = []
+        else:
+            d["related_ids"] = list(d["related_ids"])
+
+    if "metadata_json" in d:
+        d["metadata"] = from_json(d.pop("metadata_json", "{}"), {})
+    elif "metadata" in d:
+        if isinstance(d["metadata"], str):
+            d["metadata"] = from_json(d["metadata"], {})
+        elif d["metadata"] is None:
+            d["metadata"] = {}
+        else:
+            d["metadata"] = dict(d["metadata"])
     return d
 
 

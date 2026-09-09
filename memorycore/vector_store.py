@@ -246,7 +246,9 @@ def embed_text_cached(text: str, config: EmbedConfig | None = None) -> list[floa
     try:
         with _embed_cache_conn() as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO vector_cache(text_hash, model, vector_json, updated_at) VALUES (?,?,?,?)",
+                """INSERT INTO vector_cache(text_hash, model, vector_json, updated_at)
+                   VALUES (?,?,?,?)
+                   ON CONFLICT (text_hash, model) DO UPDATE SET vector_json=EXCLUDED.vector_json, updated_at=EXCLUDED.updated_at""",
                 (cache_key, config.model, json.dumps(vec), time.strftime("%Y-%m-%dT%H:%M:%S")),
             )
     except Exception as exc:
@@ -299,7 +301,9 @@ def embed_text_batch_cached(
         with _embed_cache_conn() as conn:
             now = time.strftime("%Y-%m-%dT%H:%M:%S")
             conn.executemany(
-                "INSERT OR REPLACE INTO vector_cache(text_hash, model, vector_json, updated_at) VALUES (?,?,?,?)",
+                """INSERT INTO vector_cache(text_hash, model, vector_json, updated_at)
+                   VALUES (?,?,?,?)
+                   ON CONFLICT (text_hash, model) DO UPDATE SET vector_json=EXCLUDED.vector_json, updated_at=EXCLUDED.updated_at""",
                 [(hashes[i], config.model, json.dumps(results[i]), now) for i in miss_idx],
             )
     except Exception as exc:
@@ -508,65 +512,23 @@ class SearchResult:
 
 
 class VectorStore:
-    """Thin wrapper around qdrant-client (local file or server URL mode)."""
+    """PostgreSQL 16 + pgvector native implementation of VectorStore."""
 
     def __init__(self, config: VectorStoreConfig | None = None):
         self.config = config or VectorStoreConfig()
-        self._client = None
         self._initialized = False
-        self._last_fail_ts: float = 0.0
-        atexit.register(self.close)
-
-    # ------------------------------------------------------------------
-    # Lazy init
-    # ------------------------------------------------------------------
 
     def _ensure_init(self) -> bool:
         if self._initialized:
-            return self._client is not None
-        if time.time() - self._last_fail_ts < 30.0:
-            return False  # cooldown active, skip silently
-        self._initialized = True
+            return True
         try:
-            # Test isolation guard: never connect to production collection in tests
-            if "PYTEST_CURRENT_TEST" in os.environ and self.config.collection == "agent_memory":
-                self.config.collection = "test_agent_memory"
-                logger.info("vector_store: test mode detected, redirected collection to '%s'", self.config.collection)
-
-            from qdrant_client import QdrantClient
-            from qdrant_client.models import Distance, VectorParams
-
-            # Prefer server URL mode; fall back to local file mode
-            if self.config.url:
-                self._client = QdrantClient(url=self.config.url, timeout=30)
-                logger.info("vector_store: connected to Qdrant server at %s", self.config.url)
-            else:
-                Path(self.config.path).mkdir(parents=True, exist_ok=True)
-                self._client = QdrantClient(path=self.config.path)
-                logger.info("vector_store: using local file mode at %s", self.config.path)
-
-            # Create collection if it doesn't exist
-            existing = [c.name for c in self._client.get_collections().collections]
-            if self.config.collection not in existing:
-                self._client.create_collection(
-                    collection_name=self.config.collection,
-                    vectors_config=VectorParams(
-                        size=self.config.dim,
-                        distance=Distance.COSINE,
-                    ),
-                )
-                logger.info("vector_store: created collection '%s' dim=%d",
-                            self.config.collection, self.config.dim)
-            else:
-                logger.info("vector_store: opened collection '%s'",
-                            self.config.collection)
-            self._last_fail_ts = 0.0
+            from memorycore.storage.db import read_conn
+            with read_conn() as conn:
+                conn.execute("SELECT 1")
+            self._initialized = True
             return True
         except Exception as exc:
-            logger.error("vector_store: init failed: %s", exc)
-            self._client = None
-            self._initialized = False  # allow retry on next call
-            self._last_fail_ts = time.time()
+            logger.debug("vector_store: PG DB connection check failed: %s", exc)
             return False
 
     @property
@@ -583,50 +545,42 @@ class VectorStore:
         text: str,
         payload: dict[str, Any] | None = None,
     ) -> bool:
-        """Insert or update a vector by UUID string id."""
+        """Insert or update a vector for a memory by UUID string id."""
         if not self.available:
             return False
         try:
-            from qdrant_client.models import PointStruct
             vec = embed_text_cached(text, self.config.embed)
-            p = dict(payload or {})
-            p["text"] = text
-            # Qdrant needs integer or UUID point ids; use UUID string directly
-            self._client.upsert(
-                collection_name=self.config.collection,
-                points=[PointStruct(id=id, vector=vec, payload=p)],
-            )
+            if len(vec) != 768:
+                if len(vec) < 768:
+                    vec = list(vec) + [0.0] * (768 - len(vec))
+                else:
+                    vec = list(vec)[:768]
+            from memorycore.storage.db import managed_conn
+            with managed_conn() as conn:
+                conn.execute("""
+                    INSERT INTO memories (id, type, scope, title, content, embedding)
+                    VALUES (%s, 'episodic_memory', 'global', %s, %s, %s)
+                    ON CONFLICT (id) DO UPDATE SET embedding = EXCLUDED.embedding, content = EXCLUDED.content
+                """, (str(id), text[:80], text, vec))
             return True
         except Exception as exc:
             logger.error("vector_store: upsert failed for id=%s: %s", id, exc)
             return False
 
     def upsert_batch(self, items: list[tuple[str, str, dict]]) -> bool:
-        """Batch upsert multiple points in a single Qdrant request.
-
-        Embeddings are computed with a content-hash cache and in batches,
-        so repeated identical texts are never re-embedded.
-        """
+        """Batch upsert multiple points directly into PostgreSQL memories.embedding."""
         if not self.available or not items:
             return False
         try:
-            from qdrant_client.models import PointStruct
             ids = [str(item_id) for item_id, _, _ in items]
             texts = [text for _, text, _ in items]
             vectors = embed_text_batch_cached(texts, self.config.embed)
-            points = [
-                PointStruct(
-                    id=item_id,
-                    vector=vec,
-                    payload={"text": text, **payload},
+            from memorycore.storage.db import managed_conn
+            with managed_conn() as conn:
+                conn.executemany(
+                    "UPDATE memories SET embedding = %s WHERE id = %s",
+                    list(zip(vectors, ids)),
                 )
-                for (item_id, text, payload), vec in zip(items, vectors)
-            ]
-            self._client.upsert(
-                collection_name=self.config.collection,
-                points=points,
-                wait=True,
-            )
             return True
         except Exception as exc:
             logger.warning("VectorStore.upsert_batch failed: %s", exc)
@@ -639,97 +593,90 @@ class VectorStore:
         filters: dict[str, Any] | None = None,
         score_threshold: float = 0.0,
     ) -> list[SearchResult]:
-        """Semantic search.  filters: {"status": "active", "user_id": "..."} etc."""
+        """Semantic vector search against PostgreSQL pgvector."""
         if not self.available:
             return []
         try:
-            from qdrant_client.models import Filter, FieldCondition, MatchValue
-
             vec = embed_text(text, self.config.embed)
-
-            qdrant_filter = None
+            if len(vec) != 768:
+                if len(vec) < 768:
+                    vec = list(vec) + [0.0] * (768 - len(vec))
+                else:
+                    vec = list(vec)[:768]
+            select_params = [vec]
+            where_params: list[Any] = []
+            where_clauses = ["embedding IS NOT NULL"]
+            if score_threshold > 0:
+                where_clauses.append("(1 - (embedding <=> %s::vector)) >= %s")
+                where_params.extend([vec, score_threshold])
             if filters:
-                conditions = [
-                    FieldCondition(key=k, match=MatchValue(value=v))
-                    for k, v in filters.items()
-                ]
-                qdrant_filter = Filter(must=conditions)
-
-            # qdrant-client >= 1.7 uses query_points; older uses search
-            if hasattr(self._client, "query_points"):
-                from qdrant_client.models import QueryRequest
-                result = self._client.query_points(
-                    collection_name=self.config.collection,
-                    query=vec,
-                    limit=top_k,
-                    query_filter=qdrant_filter,
-                    score_threshold=score_threshold if score_threshold > 0 else None,
-                    with_payload=True,
+                for k, v in filters.items():
+                    where_clauses.append(f"{k} = %s")
+                    where_params.append(v)
+            sql = f"""
+                SELECT id, (1 - (embedding <=> %s::vector)) as score, title, content
+                FROM memories
+                WHERE {" AND ".join(where_clauses)}
+                ORDER BY (embedding <=> %s::vector) ASC
+                LIMIT %s
+            """
+            params = select_params + where_params + [vec, max(1, min(int(top_k), 100))]
+            from memorycore.storage.db import read_conn
+            with read_conn() as conn:
+                rows = conn.execute(sql, tuple(params)).fetchall()
+            results = []
+            for r in rows:
+                c = r.get("content", "")
+                t = r.get("title", "")
+                text_val = c if (not t or t in c) else f"{t} {c}".strip()
+                results.append(
+                    SearchResult(
+                        id=str(r["id"]),
+                        score=float(r["score"]),
+                        payload={"text": text_val},
+                        text=text_val,
+                    )
                 )
-                hits = result.points
-            else:
-                hits = self._client.search(
-                    collection_name=self.config.collection,
-                    query_vector=vec,
-                    limit=top_k,
-                    query_filter=qdrant_filter,
-                    score_threshold=score_threshold if score_threshold > 0 else None,
-                    with_payload=True,
-                )
-
-            return [
-                SearchResult(
-                    id=str(h.id),
-                    score=float(h.score),
-                    payload=dict(h.payload or {}),
-                    text=str((h.payload or {}).get("text", "")),
-                )
-                for h in hits
-            ]
+            return results
         except Exception as exc:
             logger.error("vector_store: search failed: %s", exc)
             return []
 
     def delete(self, id: str) -> bool:
-        """Delete a point by UUID string id."""
+        """Clear the vector embedding for a memory."""
         if not self.available:
             return False
         try:
-            from qdrant_client.models import PointIdsList
-            self._client.delete(
-                collection_name=self.config.collection,
-                points_selector=PointIdsList(points=[id]),
-            )
+            from memorycore.storage.db import managed_conn
+            with managed_conn() as conn:
+                conn.execute("UPDATE memories SET embedding = NULL WHERE id = %s", (str(id),))
             return True
         except Exception as exc:
             logger.error("vector_store: delete failed for id=%s: %s", id, exc)
             return False
 
     def count(self) -> int:
-        """Return number of vectors in the collection."""
+        """Return number of non-null vectors in PostgreSQL memories."""
         if not self.available:
             return 0
         try:
-            result = self._client.count(collection_name=self.config.collection)
-            return result.count
+            from memorycore.storage.db import read_conn
+            with read_conn() as conn:
+                row = conn.execute("SELECT count(*) FROM memories WHERE embedding IS NOT NULL").fetchone()
+                return int(row[0]) if row else 0
         except Exception as exc:
             logger.error("vector_store: count failed: %s", exc)
             return 0
 
     def close(self) -> None:
-        if self._client is not None:
-            try:
-                self._client.close()
-            except Exception:
-                pass
-            self._client = None
+        pass
 
     def status(self) -> dict[str, Any]:
         return {
             "available": self.available,
-            "path": self.config.path,
-            "url": self.config.url,
+            "provider": "pgvector",
             "collection": self.config.collection,
+            "table": "memories",
             "dim": self.config.dim,
             "embed_provider": self.config.embed.provider,
             "embed_model": self.config.embed.model,

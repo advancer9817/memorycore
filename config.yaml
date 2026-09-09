@@ -1,6 +1,16 @@
 backend:
   fallback: sqlite
   primary: sqlite
+database:
+  host: 127.0.0.1
+  port: 5432
+  name: mcore
+  user: mcore_user
+  password: mcore_secure_password_2026
+  min_pool_size: 2
+  max_pool_size: 10
+  timeout: 30.0
+  sslmode: prefer
 context_pack:
   default_token_budget: 2000
   max_total_records: 12
@@ -15,7 +25,6 @@ context_pack:
   hard_constraints:
     enabled: true
     rules:
-      - "交付文件统一输出到 /mnt/c/Users/Advancer/Desktop/output/"
       - "代码提交/推送前必须在仓库根目录追加 ITERATION.md 迭代记录"
 embedding:
   api_key: ''

@@ -1,616 +1,599 @@
-"""SQLite connection management and schema initialisation."""
+"""PostgreSQL 16 + pgvector native connection management and schema initialisation.
+
+Replaces legacy SQLite connection management with high-performance psycopg ConnectionPool,
+native pgvector extension support, smart row factory, and transparent SQL translation.
+Supports dynamic PG circle / cluster configuration overrides via configure_database().
+"""
 from __future__ import annotations
 
+import datetime
+import json
 import logging
-import sqlite3
+import os
+import re
 import threading
 import time
 from contextlib import contextmanager
-from typing import Any
+from pathlib import Path
+from typing import Any, Iterator, Sequence
+
+import psycopg
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
+from pgvector.psycopg import register_vector
 
 from memorycore.models import (
+    DEFAULT_ROOT,
     _INITIALIZED_DB_PATHS,
-    db_path,
+    load_config,
     now,
     row_to_dict,
 )
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Global Configuration & Pool State
+# ---------------------------------------------------------------------------
+_pool_lock = threading.RLock()
+_active_pool: ConnectionPool | None = None
+_active_config: dict[str, Any] | None = None
+_config_overrides: dict[str, Any] = {}
 _thread_local = threading.local()
-_LOCK_RETRY_ATTEMPTS = 3
-_LOCK_RETRY_DELAY = 0.1
-_write_lock = threading.RLock()
-_checkpoint_thread_started = False
-_checkpoint_thread_lock = threading.Lock()
-_init_lock = threading.Lock()
 
 
-def _run_checkpoint_loop() -> None:
-    """Background daemon: run PASSIVE WAL checkpoint every 60 seconds."""
-    while True:
-        time.sleep(60)
-        for key in list(_INITIALIZED_DB_PATHS):
+def get_database_config() -> dict[str, Any]:
+    """Resolve active PostgreSQL configuration with precedence:
+
+    1. Explicit runtime overrides via configure_database()
+    2. Environment variables:
+       - MCORE_DATABASE_URL / DATABASE_URL (full URI)
+       - MCORE_PG_DATABASE / LOCAL_MEMORY_PG_DB / PGDATABASE
+       - MCORE_PG_HOST / PGHOST
+       - MCORE_PG_PORT / PGPORT
+       - MCORE_PG_USER / PGUSER
+       - MCORE_PG_PASSWORD / PGPASSWORD
+       - MCORE_PG_MIN_POOL / MCORE_PG_MAX_POOL / MCORE_PG_TIMEOUT / PGSSLMODE
+    3. config.yaml database section
+    4. Hardcoded safe production defaults (127.0.0.1:5432 / mcore / mcore_user)
+    """
+    cfg_file = load_config().get("database", {}) if callable(load_config) else {}
+
+    # Environment variables
+    env_url = os.environ.get("MCORE_DATABASE_URL") or os.environ.get("DATABASE_URL")
+    env_host = os.environ.get("MCORE_PG_HOST") or os.environ.get("PGHOST")
+    env_port = os.environ.get("MCORE_PG_PORT") or os.environ.get("PGPORT")
+    env_db = (
+        os.environ.get("MCORE_PG_DATABASE")
+        or os.environ.get("LOCAL_MEMORY_PG_DB")
+        or os.environ.get("PGDATABASE")
+    )
+    env_user = os.environ.get("MCORE_PG_USER") or os.environ.get("PGUSER")
+    env_password = os.environ.get("MCORE_PG_PASSWORD") or os.environ.get("PGPASSWORD")
+    env_ssl = os.environ.get("PGSSLMODE")
+    env_min_pool = os.environ.get("MCORE_PG_MIN_POOL")
+    env_max_pool = os.environ.get("MCORE_PG_MAX_POOL")
+    env_timeout = os.environ.get("MCORE_PG_TIMEOUT")
+
+    host = _config_overrides.get("host") or env_host or cfg_file.get("host") or "127.0.0.1"
+    port = int(
+        _config_overrides.get("port")
+        or (env_port and int(env_port))
+        or cfg_file.get("port")
+        or 5432
+    )
+    name = (
+        _config_overrides.get("name")
+        or env_db
+        or cfg_file.get("name")
+        or "mcore"
+    )
+    user = (
+        _config_overrides.get("user")
+        or env_user
+        or cfg_file.get("user")
+        or "mcore_user"
+    )
+    password = (
+        _config_overrides.get("password")
+        or env_password
+        or cfg_file.get("password")
+        or "mcore_secure_password_2026"
+    )
+    sslmode = (
+        _config_overrides.get("sslmode")
+        or env_ssl
+        or cfg_file.get("sslmode")
+        or "prefer"
+    )
+    min_pool_size = int(
+        _config_overrides.get("min_pool_size")
+        or (env_min_pool and int(env_min_pool))
+        or cfg_file.get("min_pool_size")
+        or 2
+    )
+    max_pool_size = int(
+        _config_overrides.get("max_pool_size")
+        or (env_max_pool and int(env_max_pool))
+        or cfg_file.get("max_pool_size")
+        or 10
+    )
+    timeout = float(
+        _config_overrides.get("timeout")
+        or (env_timeout and float(env_timeout))
+        or cfg_file.get("timeout")
+        or 30.0
+    )
+
+    return {
+        "url": env_url or f"postgresql://{user}:{password}@{host}:{port}/{name}?sslmode={sslmode}",
+        "host": host,
+        "port": port,
+        "name": name,
+        "user": user,
+        "password": password,
+        "sslmode": sslmode,
+        "min_pool_size": min_pool_size,
+        "max_pool_size": max_pool_size,
+        "timeout": timeout,
+    }
+
+
+def configure_database(**kwargs: Any) -> dict[str, Any]:
+    """Hot-replace or override PostgreSQL circle/cluster configuration at runtime.
+
+    Example:
+        configure_database(name="mcore_test", max_pool_size=5)
+    """
+    global _config_overrides
+    with _pool_lock:
+        _config_overrides.update(kwargs)
+        close_pool()
+        cfg = get_database_config()
+        logger.info("PostgreSQL configuration updated: %s:%s/%s (user=%s)", cfg["host"], cfg["port"], cfg["name"], cfg["user"])
+        return cfg
+
+
+def reset_database_config() -> None:
+    """Clear explicit overrides and reload defaults."""
+    global _config_overrides
+    with _pool_lock:
+        _config_overrides.clear()
+        close_pool()
+
+
+# ---------------------------------------------------------------------------
+# Smart Row Factory
+# ---------------------------------------------------------------------------
+class SmartRow(dict):
+    """Row object supporting both dictionary key access and integer tuple index access.
+
+    Ensures zero friction across legacy SQLite row indexing (e.g. row[0]) and
+    modern key mapping (e.g. row["title"]).
+    Also normalizes:
+    - datetime/date objects to ISO format strings
+    - *_json columns that were returned by psycopg as dict/list into json strings
+    """
+
+    def __init__(self, values: Sequence[Any], description: Sequence[Any]):
+        super().__init__()
+        normalized_values = []
+        for col, val in zip(description, values):
+            if isinstance(val, (datetime.datetime, datetime.date)):
+                val = val.isoformat()
+            elif col.name.endswith("_json") and isinstance(val, (dict, list)):
+                val = json.dumps(val, ensure_ascii=False)
+            self[col.name] = val
+            normalized_values.append(val)
+        self._values = normalized_values
+
+    def __getitem__(self, item: Any) -> Any:
+        if isinstance(item, int):
+            return self._values[item]
+        return super().__getitem__(item)
+
+    def __iter__(self) -> Iterator[Any]:
+        return iter(self._values)
+
+
+def smart_row_factory(cursor: Any):
+    desc = cursor.description
+    if not desc:
+        return lambda values: values
+
+    def make_row(values: Sequence[Any]) -> SmartRow:
+        return SmartRow(values, desc)
+
+    return make_row
+
+
+# ---------------------------------------------------------------------------
+# SQL Translation & Emulation Engine
+# ---------------------------------------------------------------------------
+def translate_query(sql: str) -> str:
+    """Translate SQLite idioms to PostgreSQL 16 standard syntax.
+
+    - Replaces '?' parameter markers with '%s' (ignoring string literals).
+    - Translates PRAGMA table_info(<table>) to information_schema.columns query.
+    - Translates sqlite_master to information_schema.tables.
+    - Adapts INSERT OR IGNORE to ON CONFLICT DO NOTHING.
+    - Handles memories_fts dummy checks.
+    """
+    raw = sql.strip()
+
+    # Intercept PRAGMA table_info & PRAGMA index_list
+    if raw.upper().startswith("PRAGMA "):
+        m = re.match(r"PRAGMA\s+table_info\s*\(\s*([a-zA-Z0-9_]+)\s*\)", raw, re.I)
+        if m:
+            table = m.group(1)
+            return (
+                f"SELECT 0 as cid, column_name as name, data_type as type, "
+                f"CASE WHEN is_nullable = 'NO' THEN 1 ELSE 0 END as notnull, "
+                f"column_default as dflt_value, 0 as pk "
+                f"FROM information_schema.columns "
+                f"WHERE table_name = '{table}' AND table_schema = 'public' "
+                f"ORDER BY ordinal_position"
+            )
+        m_idx = re.match(r"PRAGMA\s+index_list\s*\(\s*([a-zA-Z0-9_]+)\s*\)", raw, re.I)
+        if m_idx:
+            table = m_idx.group(1)
+            return (
+                f"SELECT 0 as seq, indexname as name, 0 as \"unique\", 'c' as origin, 0 as partial "
+                f"FROM pg_indexes "
+                f"WHERE tablename = '{table}' AND schemaname = 'public'"
+            )
+        return "SELECT 1 WHERE 1=0"
+
+    # Tokenize and replace ? placeholders with %s outside quotes
+    parts: list[str] = []
+    in_quote = False
+    quote_char = None
+    i = 0
+    while i < len(raw):
+        c = raw[i]
+        if not in_quote:
+            if c in ("'", '"'):
+                in_quote = True
+                quote_char = c
+                parts.append(c)
+            elif c == "?":
+                parts.append("%s")
+            else:
+                parts.append(c)
+        else:
+            parts.append(c)
+            if c == quote_char:
+                if i + 1 < len(raw) and raw[i + 1] == quote_char:
+                    parts.append(raw[i + 1])
+                    i += 1
+                else:
+                    in_quote = False
+        i += 1
+    translated = "".join(parts)
+
+    # INSERT OR IGNORE translation
+    translated = re.sub(r"INSERT\s+OR\s+IGNORE\s+INTO\s+", "INSERT INTO ", translated, flags=re.I)
+    if "INSERT INTO schema_version" in translated and "ON CONFLICT" not in translated:
+        translated += " ON CONFLICT (version) DO NOTHING"
+
+    # INSERT OR REPLACE translation
+    if re.search(r"INSERT\s+OR\s+REPLACE\s+INTO\s+", raw, re.I):
+        if "vector_sync_queue" in raw:
+            translated = re.sub(r"INSERT\s+OR\s+REPLACE\s+INTO\s+", "INSERT INTO ", translated, flags=re.I)
+            translated += " ON CONFLICT (id) DO UPDATE SET operation=EXCLUDED.operation, retry_count=EXCLUDED.retry_count, max_retries=EXCLUDED.max_retries, last_attempt_at=EXCLUDED.last_attempt_at, error=EXCLUDED.error"
+        elif "agent_presence" in raw:
+            translated = re.sub(r"INSERT\s+OR\s+REPLACE\s+INTO\s+", "INSERT INTO ", translated, flags=re.I)
+            translated += " ON CONFLICT (agent_id) DO UPDATE SET status=EXCLUDED.status, last_seen_at=EXCLUDED.last_seen_at, metadata_json=EXCLUDED.metadata_json"
+        elif "curator_review_log" in raw:
+            translated = re.sub(r"INSERT\s+OR\s+REPLACE\s+INTO\s+", "INSERT INTO ", translated, flags=re.I)
+            translated += " ON CONFLICT (memory_id, review_type) DO UPDATE SET reviewed_at=EXCLUDED.reviewed_at"
+        elif "llm_curator_batches" in raw:
+            translated = re.sub(r"INSERT\s+OR\s+REPLACE\s+INTO\s+", "INSERT INTO ", translated, flags=re.I)
+            translated += " ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status, candidate_count=EXCLUDED.candidate_count, finding_count=EXCLUDED.finding_count, decision_count=EXCLUDED.decision_count, cursor_token=EXCLUDED.cursor_token, error_json=EXCLUDED.error_json"
+        elif "user_profile_attrs" in raw:
+            translated = re.sub(r"INSERT\s+OR\s+REPLACE\s+INTO\s+", "INSERT INTO ", translated, flags=re.I)
+            translated += " ON CONFLICT (user_id, attribute) DO UPDATE SET value=EXCLUDED.value, confidence=EXCLUDED.confidence, immutable=EXCLUDED.immutable, source_ids_json=EXCLUDED.source_ids_json, updated_at=EXCLUDED.updated_at"
+        else:
+            translated = re.sub(r"INSERT\s+OR\s+REPLACE\s+INTO\s+", "INSERT INTO ", translated, flags=re.I)
+            m_cols = re.search(r"\(([^)]+)\)\s+VALUES", translated)
+            pk = "agent_id" if "agent_presence" in raw else "id"
+            if m_cols:
+                cols = [c.strip() for c in m_cols.group(1).split(",")]
+                updates = [f"{c}=EXCLUDED.{c}" for c in cols if c != pk]
+                if updates:
+                    set_clause = ", ".join(updates)
+                    translated += f" ON CONFLICT ({pk}) DO UPDATE SET {set_clause}"
+                else:
+                    translated += f" ON CONFLICT ({pk}) DO NOTHING"
+            else:
+                translated += f" ON CONFLICT ({pk}) DO NOTHING"
+
+    # Replace SQLite rowid with PostgreSQL ctid
+    if "rowid" in translated:
+        translated = re.sub(r"\browid\b", "ctid", translated, flags=re.I)
+
+    # Timestamp syntax cleaning (SQLite text timestamp compatibility on PG TIMESTAMPTZ)
+    if "_at" in translated or "_until" in translated or "_from" in translated:
+        translated = re.sub(r"NULLIF\s*\(\s*([a-zA-Z0-9_]+_(?:at|until|from))\s*,\s*['\"]['\"]\s*\)", r"\1", translated, flags=re.I)
+        translated = re.sub(r"([a-zA-Z0-9_]+_(?:at|until|from))\s*=\s*['\"]['\"]", r"\1 IS NULL", translated, flags=re.I)
+        translated = re.sub(r"([a-zA-Z0-9_]+_(?:at|until|from))\s*!=\s*['\"]['\"]", r"\1 IS NOT NULL", translated, flags=re.I)
+
+    # Tie-breaker for created_at sorting
+    if "ORDER BY created_at DESC" in translated and "ctid" not in translated:
+        translated = translated.replace("ORDER BY created_at DESC", "ORDER BY created_at DESC, ctid DESC")
+
+    # sqlite_master emulation
+    if "sqlite_master" in translated:
+        translated = translated.replace(
+            "sqlite_master",
+            "(SELECT table_name as name, 'table' as type FROM information_schema.tables WHERE table_schema='public' "
+            "UNION ALL "
+            "SELECT indexname as name, 'index' as type FROM pg_indexes WHERE schemaname='public') sm",
+        )
+
+    # memories_fts dummy count probe
+    if "memories_fts" in translated and "WHERE id IS NULL" in translated:
+        return "SELECT 0 as count"
+
+    return translated
+
+
+# ---------------------------------------------------------------------------
+# PgCursorWrapper & PgConnectionWrapper
+# ---------------------------------------------------------------------------
+def _adapt_param(val: Any) -> Any:
+    if isinstance(val, dict):
+        return json.dumps(val, ensure_ascii=False)
+    return val
+
+
+def _adapt_params(params: Any) -> Any:
+    if isinstance(params, (list, tuple)):
+        return tuple(_adapt_param(v) for v in params)
+    return _adapt_param(params)
+
+
+class PgCursorWrapper:
+    """Wraps psycopg Cursor to provide transparent SQL translation and SQLite parity."""
+
+    def __init__(self, cursor: psycopg.Cursor):
+        self._cursor = cursor
+
+    def execute(self, sql: str, params: Any = None) -> PgCursorWrapper:
+        translated = translate_query(sql)
+        if params is not None:
+            adapted = _adapt_params(params)
+            self._cursor.execute(translated, adapted)
+        else:
+            self._cursor.execute(translated)
+        return self
+
+    def executemany(self, sql: str, seq_of_params: Sequence[Any]) -> PgCursorWrapper:
+        translated = translate_query(sql)
+        adapted_seq = [_adapt_params(p) for p in seq_of_params]
+        self._cursor.executemany(translated, adapted_seq)
+        return self
+
+    def fetchone(self) -> Any:
+        return self._cursor.fetchone()
+
+    def fetchall(self) -> list[Any]:
+        return self._cursor.fetchall()
+
+    def fetchmany(self, size: int = 1) -> list[Any]:
+        return self._cursor.fetchmany(size)
+
+    @property
+    def rowcount(self) -> int:
+        return self._cursor.rowcount
+
+    @property
+    def description(self) -> Any:
+        return self._cursor.description
+
+    @property
+    def lastrowid(self) -> Any:
+        return None
+
+    def close(self) -> None:
+        self._cursor.close()
+
+    def __iter__(self) -> Iterator[Any]:
+        return iter(self._cursor)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._cursor, name)
+
+
+class PgConnectionWrapper:
+    """Wraps psycopg Connection to mimic sqlite3.Connection behavior."""
+
+    def __init__(self, raw_conn: psycopg.Connection):
+        self._raw_conn = raw_conn
+        self.row_factory = smart_row_factory
+
+    def cursor(self) -> PgCursorWrapper:
+        cur = self._raw_conn.cursor(row_factory=smart_row_factory)
+        return PgCursorWrapper(cur)
+
+    def execute(self, sql: str, params: Any = None) -> PgCursorWrapper:
+        cur = self.cursor()
+        return cur.execute(sql, params)
+
+    def executemany(self, sql: str, seq_of_params: Sequence[Any]) -> PgCursorWrapper:
+        cur = self.cursor()
+        return cur.executemany(sql, seq_of_params)
+
+    def executescript(self, script: str) -> None:
+        with self._raw_conn.cursor() as cur:
+            cur.execute(script)
+        self.commit()
+
+    def commit(self) -> None:
+        self._raw_conn.commit()
+
+    def rollback(self) -> None:
+        self._raw_conn.rollback()
+
+    def close(self) -> None:
+        # If pool-managed, raw_conn.close() returns it to pool
+        self._raw_conn.close()
+
+    def __enter__(self) -> PgConnectionWrapper:
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        if exc_type:
+            self.rollback()
+        else:
+            self.commit()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._raw_conn, name)
+
+
+# ---------------------------------------------------------------------------
+# Connection Pool Management
+# ---------------------------------------------------------------------------
+def _configure_pool_connection(conn: psycopg.Connection) -> None:
+    """Invoked on each freshly created pooled connection."""
+    conn.row_factory = smart_row_factory
+    register_vector(conn)
+
+
+def get_pool() -> ConnectionPool:
+    """Retrieve or initialize the active PostgreSQL ConnectionPool."""
+    global _active_pool, _active_config
+    if _active_pool is not None and not _active_pool.closed:
+        return _active_pool
+
+    with _pool_lock:
+        if _active_pool is not None and not _active_pool.closed:
+            return _active_pool
+
+        cfg = get_database_config()
+        conninfo = (
+            f"host={cfg['host']} port={cfg['port']} dbname={cfg['name']} "
+            f"user={cfg['user']} password={cfg['password']} sslmode={cfg['sslmode']}"
+        )
+        logger.info("Initializing PostgreSQL ConnectionPool to %s:%s/%s (min=%d, max=%d)", cfg["host"], cfg["port"], cfg["name"], cfg["min_pool_size"], cfg["max_pool_size"])
+        pool = ConnectionPool(
+            conninfo=conninfo,
+            min_size=cfg["min_pool_size"],
+            max_size=cfg["max_pool_size"],
+            timeout=cfg["timeout"],
+            configure=_configure_pool_connection,
+            open=True,
+        )
+        _active_pool = pool
+        _active_config = cfg
+
+        # Auto-initialize schema once
+        try:
+            with pool.connection() as raw:
+                wrapper = PgConnectionWrapper(raw)
+                init_db(wrapper)
+        except Exception as exc:
+            logger.warning("Auto init_db on pool startup: %s", exc)
+
+        return _active_pool
+
+
+def reset_pool() -> None:
+    """Close and reset current connection pool."""
+    close_pool()
+
+
+def close_pool() -> None:
+    """Close active pool if open."""
+    global _active_pool, _active_config
+    with _pool_lock:
+        if _active_pool is not None:
             try:
-                conn = sqlite3.connect(key, timeout=5, check_same_thread=False)
-                try:
-                    conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
-                finally:
-                    conn.close()
+                _active_pool.close()
             except Exception:
                 pass
+            _active_pool = None
+            _active_config = None
 
 
-def _ensure_checkpoint_thread() -> None:
-    """Start the background checkpoint thread exactly once (lazy)."""
-    global _checkpoint_thread_started
-    if _checkpoint_thread_started:
-        return
-    with _checkpoint_thread_lock:
-        if _checkpoint_thread_started:
-            return
-        t = threading.Thread(target=_run_checkpoint_loop, daemon=True, name="wal-checkpoint")
-        t.start()
-        _checkpoint_thread_started = True
-
-
-def _get_thread_conn(path) -> sqlite3.Connection:
-    """Return a thread-local SQLite connection, creating it if needed."""
-    key = str(path.resolve())
-    cache: dict = getattr(_thread_local, "conns", None)
-    if cache is None:
-        _thread_local.conns = {}
-        cache = _thread_local.conns
-    if key not in cache:
-        with _init_lock:
-            conn = sqlite3.connect(path, timeout=30, check_same_thread=False)
-            conn.row_factory = sqlite3.Row
-            if key not in _INITIALIZED_DB_PATHS:
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("PRAGMA wal_autocheckpoint=0")
-                conn.execute("PRAGMA foreign_keys=ON")
-                conn.execute("PRAGMA busy_timeout=30000")
-                try:
-                    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                except Exception:
-                    pass
-                init_db(conn)
-                _INITIALIZED_DB_PATHS.add(key)
-            else:
-                conn.execute("PRAGMA foreign_keys=ON")
-                conn.execute("PRAGMA busy_timeout=30000")
-            cache[key] = conn
-            _ensure_checkpoint_thread()
-    return cache[key]
-
-
-def connect() -> sqlite3.Connection:
-    """Return the thread-local SQLite connection for the configured DB path."""
-    return _get_thread_conn(db_path())
+# ---------------------------------------------------------------------------
+# Public Connection Interfaces
+# ---------------------------------------------------------------------------
+def connect() -> PgConnectionWrapper:
+    """Return a wrapped connection for the active PostgreSQL database."""
+    pool = get_pool()
+    raw = pool.getconn()
+    return PgConnectionWrapper(raw)
 
 
 @contextmanager
 def managed_conn():
-    with _write_lock:
-        conn = connect()
+    """Context manager for write transactions with auto-commit and rollback."""
+    pool = get_pool()
+    with pool.connection() as raw:
+        wrapper = PgConnectionWrapper(raw)
         try:
-            yield conn
-            _commit_with_retry(conn)
+            yield wrapper
+            wrapper.commit()
         except Exception:
-            conn.rollback()
+            wrapper.rollback()
             raise
 
 
 @contextmanager
 def read_conn():
-    """Shared read-only context — no write lock, no commit overhead."""
-    conn = connect()
-    yield conn
-
-
-def _commit_with_retry(conn: sqlite3.Connection) -> None:
-    for attempt in range(_LOCK_RETRY_ATTEMPTS):
-        try:
-            conn.commit()
-            return
-        except sqlite3.OperationalError as exc:
-            if "database is locked" not in str(exc) or attempt >= _LOCK_RETRY_ATTEMPTS - 1:
-                raise
-            logger.warning("db locked on commit, retrying (%d/%d)", attempt + 1, _LOCK_RETRY_ATTEMPTS)
-            time.sleep(_LOCK_RETRY_DELAY * (attempt + 1))
+    """Context manager for read queries."""
+    pool = get_pool()
+    with pool.connection() as raw:
+        wrapper = PgConnectionWrapper(raw)
+        yield wrapper
 
 
 def _managed_query(sql: str, params: tuple = ()) -> list[dict[str, Any]]:
+    """Execute a read query and return rows formatted as dictionaries."""
     with read_conn() as conn:
-        return [row_to_dict(r) for r in conn.execute(sql, params).fetchall()]
+        rows = conn.execute(sql, params).fetchall()
+        return [row_to_dict(r) for r in rows]
 
 
-def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
-    cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-    if column not in cols:
+def _ensure_column(conn: Any, table: str, column: str, definition: str) -> None:
+    """Ensure a column exists in a PostgreSQL table."""
+    cur = conn.execute(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = %s AND column_name = %s AND table_schema = 'public'",
+        (table, column),
+    )
+    if not cur.fetchone():
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
-def _drop_dead_tables(conn: sqlite3.Connection, table_names: list[str]) -> None:
-    """Drop tables that may be vec0 virtual tables or shadow tables.
-
-    sqlite-vec's vec0 module is no longer loaded; DROP TABLE on a vec0 virtual
-    table raises OperationalError("no such module: vec0"). We instead delete the
-    sqlite_master rows (with writable_schema) — safe for empty dead tables that
-    no code references.
-    """
+def _drop_dead_tables(conn: Any, table_names: list[str]) -> None:
+    """Drop obsolete dead tables."""
     for name in table_names:
         try:
-            conn.execute(f'DROP TABLE IF EXISTS "{name}"')
-            continue
-        except sqlite3.OperationalError:
-            pass  # likely vec0 virtual table — fall through to sqlite_master removal
-        try:
-            conn.execute("PRAGMA writable_schema=ON")
-            conn.execute('DELETE FROM sqlite_master WHERE type IN ("table","index","trigger","view") AND name=?', (name,))
-            conn.execute("PRAGMA writable_schema=OFF")
+            conn.execute(f'DROP TABLE IF EXISTS "{name}" CASCADE')
         except Exception:
-            logger.warning("failed to remove dead table %s from sqlite_master", name, exc_info=True)
+            pass
 
 
-def init_db(conn: sqlite3.Connection) -> None:
-    conn.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS memories (
-          id TEXT PRIMARY KEY,
-          type TEXT NOT NULL,
-          scope TEXT NOT NULL DEFAULT 'global',
-          title TEXT NOT NULL,
-          content TEXT NOT NULL,
-          tags_json TEXT NOT NULL DEFAULT '[]',
-          source TEXT NOT NULL DEFAULT 'manual',
-          source_agent TEXT NOT NULL DEFAULT 'unknown',
-          project_path TEXT NOT NULL DEFAULT '',
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL,
-          last_accessed_at TEXT,
-          confidence REAL NOT NULL DEFAULT 0.70,
-          importance REAL NOT NULL DEFAULT 0.50,
-          status TEXT NOT NULL DEFAULT 'active',
-          decay_policy TEXT NOT NULL DEFAULT 'review',
-          feedback_score REAL NOT NULL DEFAULT 0,
-          related_ids_json TEXT NOT NULL DEFAULT '[]',
-          metadata_json TEXT NOT NULL DEFAULT '{}',
-          injected_count INTEGER NOT NULL DEFAULT 0,
-          ineffective_count INTEGER NOT NULL DEFAULT 0,
-          effectiveness_score REAL NOT NULL DEFAULT 0.5,
-          last_injected_at TEXT,
-          valid_from TEXT,
-          valid_until TEXT,
-          superseded_by TEXT,
-          fact_lineage_root TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS feedback_events (
-          id TEXT PRIMARY KEY,
-          memory_id TEXT NOT NULL,
-          score REAL NOT NULL,
-          note TEXT NOT NULL DEFAULT '',
-          source_agent TEXT NOT NULL DEFAULT 'unknown',
-          created_at TEXT NOT NULL,
-          FOREIGN KEY(memory_id) REFERENCES memories(id) ON DELETE CASCADE
-        );
-
-        CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
-          id UNINDEXED,
-          title,
-          content,
-          tags,
-          type,
-          scope
-        );
-
-        CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-          INSERT INTO memories_fts(id, title, content, tags, type, scope)
-          VALUES (new.id, new.title, new.content, new.tags_json, new.type, new.scope);
-        END;
-        CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-          DELETE FROM memories_fts WHERE id = old.id;
-        END;
-        CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-          DELETE FROM memories_fts WHERE id = old.id;
-          INSERT INTO memories_fts(id, title, content, tags, type, scope)
-          VALUES (new.id, new.title, new.content, new.tags_json, new.type, new.scope);
-        END;
-
-        CREATE INDEX IF NOT EXISTS idx_memories_type_status ON memories(type, status);
-        CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope);
-        CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project_path);
-        CREATE INDEX IF NOT EXISTS idx_memories_updated ON memories(updated_at);
-
-        CREATE TABLE IF NOT EXISTS memory_links (
-          id TEXT PRIMARY KEY,
-          source_id TEXT NOT NULL,
-          target_id TEXT NOT NULL,
-          relation_type TEXT NOT NULL DEFAULT 'related_to',
-          weight REAL NOT NULL DEFAULT 1.0,
-          note TEXT NOT NULL DEFAULT '',
-          created_at TEXT NOT NULL,
-          source_agent TEXT NOT NULL DEFAULT 'unknown',
-          FOREIGN KEY(source_id) REFERENCES memories(id) ON DELETE CASCADE,
-          FOREIGN KEY(target_id) REFERENCES memories(id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_links_source ON memory_links(source_id);
-        CREATE INDEX IF NOT EXISTS idx_links_target ON memory_links(target_id);
-        CREATE INDEX IF NOT EXISTS idx_links_relation ON memory_links(relation_type);
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_links_unique ON memory_links(source_id, target_id, relation_type);
-
-        CREATE TABLE IF NOT EXISTS memory_entities (
-          id TEXT PRIMARY KEY,
-          memory_id TEXT NOT NULL,
-          entity TEXT NOT NULL,
-          normalized_entity TEXT NOT NULL,
-          aliases_json TEXT NOT NULL DEFAULT '[]',
-          entity_type TEXT NOT NULL DEFAULT 'concept',
-          weight REAL NOT NULL DEFAULT 1.0,
-          created_at TEXT NOT NULL,
-          FOREIGN KEY(memory_id) REFERENCES memories(id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_memory_entities_memory ON memory_entities(memory_id);
-        CREATE INDEX IF NOT EXISTS idx_memory_entities_norm ON memory_entities(normalized_entity);
-        CREATE INDEX IF NOT EXISTS idx_memory_entities_type ON memory_entities(entity_type);
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_entities_unique ON memory_entities(memory_id, normalized_entity);
-
-        CREATE TABLE IF NOT EXISTS audit_events (
-          id TEXT PRIMARY KEY,
-          event_type TEXT NOT NULL,
-          memory_id TEXT,
-          agent TEXT NOT NULL DEFAULT 'unknown',
-          detail_json TEXT NOT NULL DEFAULT '{}',
-          created_at TEXT NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_audit_memory ON audit_events(memory_id);
-        CREATE INDEX IF NOT EXISTS idx_audit_type ON audit_events(event_type);
-        CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_events(created_at);
-
-        CREATE TABLE IF NOT EXISTS governance_decisions (
-          id TEXT PRIMARY KEY,
-          decision_type TEXT NOT NULL,
-          source_ids_json TEXT NOT NULL DEFAULT '[]',
-          recommended_action TEXT NOT NULL,
-          llm_confidence REAL NOT NULL DEFAULT 0.0,
-          risk_level TEXT NOT NULL DEFAULT 'medium',
-          review_status TEXT NOT NULL DEFAULT 'needs_review',
-          policy_reason TEXT NOT NULL DEFAULT '',
-          finding_json TEXT NOT NULL DEFAULT '{}',
-          llm_trace_json TEXT NOT NULL DEFAULT '{}',
-          raw_response_ref TEXT NOT NULL DEFAULT '',
-          before_state_json TEXT NOT NULL DEFAULT '[]',
-          after_state_json TEXT NOT NULL DEFAULT '[]',
-          rollback_json TEXT NOT NULL DEFAULT '{}',
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL,
-          applied_at TEXT,
-          rolled_back_at TEXT,
-          source_agent TEXT NOT NULL DEFAULT 'llm_curator',
-          candidate_hash TEXT NOT NULL DEFAULT '',
-          policy_reasons_json TEXT NOT NULL DEFAULT '[]',
-          policy_version TEXT NOT NULL DEFAULT '',
-          judge_model TEXT NOT NULL DEFAULT '',
-          judge_schema_version TEXT NOT NULL DEFAULT '',
-          decision_version TEXT NOT NULL DEFAULT '',
-          execution_id TEXT NOT NULL DEFAULT '',
-          applied_by TEXT NOT NULL DEFAULT '',
-          rolled_back_by TEXT NOT NULL DEFAULT '',
-          approval_kind TEXT NOT NULL DEFAULT '',
-          curator_job_id TEXT NOT NULL DEFAULT '',
-          curator_batch_id TEXT NOT NULL DEFAULT ''
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_governance_review ON governance_decisions(review_status);
-        CREATE INDEX IF NOT EXISTS idx_governance_created ON governance_decisions(created_at);
-        CREATE INDEX IF NOT EXISTS idx_governance_type ON governance_decisions(decision_type);
-
-        CREATE TABLE IF NOT EXISTS llm_curator_jobs (
-          id TEXT PRIMARY KEY,
-          status TEXT NOT NULL,
-          started_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL,
-          finished_at TEXT,
-          params_json TEXT NOT NULL DEFAULT '{}',
-          progress_json TEXT NOT NULL DEFAULT '{}',
-          summary_json TEXT NOT NULL DEFAULT '{}',
-          error_json TEXT NOT NULL DEFAULT '[]',
-          governance_run_id TEXT NOT NULL DEFAULT '',
-          created_by TEXT NOT NULL DEFAULT 'frontend'
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_llm_curator_jobs_status_updated ON llm_curator_jobs(status, updated_at);
-        CREATE INDEX IF NOT EXISTS idx_llm_curator_jobs_started ON llm_curator_jobs(started_at);
-
-        CREATE TABLE IF NOT EXISTS maintenance_jobs (
-          id TEXT PRIMARY KEY,
-          plan_token TEXT NOT NULL DEFAULT '',
-          kind TEXT NOT NULL DEFAULT 'archive',
-          status TEXT NOT NULL DEFAULT 'running',
-          summary_json TEXT NOT NULL DEFAULT '{}',
-          backup_path TEXT NOT NULL DEFAULT '',
-          error TEXT NOT NULL DEFAULT '',
-          created_at TEXT NOT NULL,
-          finished_at TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_maintenance_jobs_plan_token ON maintenance_jobs(plan_token);
-        CREATE INDEX IF NOT EXISTS idx_maintenance_jobs_created ON maintenance_jobs(created_at);
-
-        CREATE TABLE IF NOT EXISTS llm_curator_batches (
-          id TEXT PRIMARY KEY,
-          job_id TEXT NOT NULL,
-          stage TEXT NOT NULL,
-          batch_index INTEGER NOT NULL,
-          status TEXT NOT NULL,
-          started_at TEXT NOT NULL,
-          finished_at TEXT,
-          candidate_count INTEGER NOT NULL DEFAULT 0,
-          finding_count INTEGER NOT NULL DEFAULT 0,
-          decision_count INTEGER NOT NULL DEFAULT 0,
-          cursor_token TEXT NOT NULL DEFAULT '',
-          error_json TEXT,
-          FOREIGN KEY(job_id) REFERENCES llm_curator_jobs(id) ON DELETE CASCADE
-        );
-
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_curator_batches_unique ON llm_curator_batches(job_id, stage, batch_index);
-        CREATE INDEX IF NOT EXISTS idx_llm_curator_batches_job_started ON llm_curator_batches(job_id, started_at);
-
-        CREATE TABLE IF NOT EXISTS governance_runs (
-          id TEXT PRIMARY KEY,
-          source TEXT NOT NULL,
-          mode TEXT NOT NULL,
-          policy_version TEXT NOT NULL,
-          status TEXT NOT NULL,
-          started_at TEXT NOT NULL,
-          finished_at TEXT,
-          summary_json TEXT,
-          error_json TEXT,
-          created_by TEXT NOT NULL,
-          metadata_json TEXT
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_governance_runs_source_status ON governance_runs(source, status);
-        CREATE INDEX IF NOT EXISTS idx_governance_runs_started_at ON governance_runs(started_at);
-
-        CREATE TABLE IF NOT EXISTS governance_executions (
-          id TEXT PRIMARY KEY,
-          run_id TEXT,
-          decision_id TEXT,
-          approval_kind TEXT NOT NULL,
-          risk_level TEXT NOT NULL,
-          status TEXT NOT NULL,
-          idempotency_key TEXT NOT NULL,
-          policy_snapshot_json TEXT NOT NULL,
-          started_at TEXT NOT NULL,
-          finished_at TEXT,
-          error_json TEXT,
-          created_by TEXT NOT NULL,
-          metadata_json TEXT,
-          FOREIGN KEY(run_id) REFERENCES governance_runs(id) ON DELETE SET NULL,
-          FOREIGN KEY(decision_id) REFERENCES governance_decisions(id) ON DELETE SET NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_governance_executions_run_id ON governance_executions(run_id);
-        CREATE INDEX IF NOT EXISTS idx_governance_executions_decision_id ON governance_executions(decision_id);
-        CREATE INDEX IF NOT EXISTS idx_governance_executions_status ON governance_executions(status);
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_governance_executions_idempotency_key
-          ON governance_executions(COALESCE(run_id, ''), COALESCE(decision_id, ''), approval_kind, idempotency_key);
-
-        CREATE TABLE IF NOT EXISTS governance_mutation_log (
-          id TEXT PRIMARY KEY,
-          execution_id TEXT NOT NULL,
-          seq INTEGER NOT NULL,
-          mutation_type TEXT NOT NULL,
-          entity_type TEXT NOT NULL,
-          entity_id TEXT,
-          operation TEXT NOT NULL,
-          risk_level TEXT NOT NULL,
-          policy_decision TEXT NOT NULL,
-          policy_reason TEXT,
-          request_json TEXT NOT NULL,
-          before_json TEXT,
-          after_json TEXT,
-          inverse_json TEXT,
-          index_effect_json TEXT,
-          status TEXT NOT NULL,
-          idempotency_key TEXT NOT NULL,
-          created_at TEXT NOT NULL,
-          applied_at TEXT,
-          rolled_back_at TEXT,
-          error_json TEXT,
-          FOREIGN KEY(execution_id) REFERENCES governance_executions(id) ON DELETE CASCADE
-        );
-
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_governance_mutation_log_execution_seq
-          ON governance_mutation_log(execution_id, seq);
-        CREATE INDEX IF NOT EXISTS idx_governance_mutation_log_entity ON governance_mutation_log(entity_type, entity_id);
-        CREATE INDEX IF NOT EXISTS idx_governance_mutation_log_status ON governance_mutation_log(status);
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_governance_mutation_log_idempotency_key
-          ON governance_mutation_log(execution_id, seq, idempotency_key);
-
-        CREATE TABLE IF NOT EXISTS agent_messages (
-          id TEXT PRIMARY KEY,
-          from_agent TEXT NOT NULL,
-          to_agent TEXT NOT NULL,
-          subject TEXT NOT NULL,
-          body TEXT NOT NULL DEFAULT '',
-          priority TEXT NOT NULL DEFAULT 'normal',
-          status TEXT NOT NULL DEFAULT 'unread',
-          created_at TEXT NOT NULL,
-          read_at TEXT,
-          metadata_json TEXT NOT NULL DEFAULT '{}',
-          expires_at TEXT
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_agent_msg_to ON agent_messages(to_agent, status);
-        CREATE INDEX IF NOT EXISTS idx_agent_msg_from ON agent_messages(from_agent);
-        CREATE INDEX IF NOT EXISTS idx_agent_msg_created ON agent_messages(created_at);
-
-        CREATE TABLE IF NOT EXISTS agent_presence (
-          agent_id TEXT PRIMARY KEY,
-          status TEXT NOT NULL DEFAULT 'offline',
-          last_seen_at TEXT NOT NULL,
-          metadata_json TEXT NOT NULL DEFAULT '{}'
-        );
-
-        CREATE TABLE IF NOT EXISTS context_quality_events (
-          id TEXT PRIMARY KEY,
-          task TEXT NOT NULL,
-          task_type TEXT NOT NULL DEFAULT 'general',
-          agent TEXT NOT NULL DEFAULT 'agent',
-          project_path TEXT NOT NULL DEFAULT '',
-          scope TEXT NOT NULL DEFAULT 'global',
-          total_candidates INTEGER NOT NULL DEFAULT 0,
-          used_count INTEGER NOT NULL DEFAULT 0,
-          filtered_count INTEGER NOT NULL DEFAULT 0,
-          hit_rate REAL NOT NULL DEFAULT 0,
-          filter_rate REAL NOT NULL DEFAULT 0,
-          ineffective_rate REAL NOT NULL DEFAULT 0,
-          type_weights_json TEXT NOT NULL DEFAULT '{}',
-          created_at TEXT NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_context_quality_task_type ON context_quality_events(task_type);
-        CREATE INDEX IF NOT EXISTS idx_context_quality_created ON context_quality_events(created_at);
-
-        CREATE TABLE IF NOT EXISTS agent_capabilities (
-          agent_id TEXT PRIMARY KEY,
-          namespace TEXT NOT NULL DEFAULT 'default',
-          capabilities_json TEXT NOT NULL DEFAULT '[]',
-          metadata_json TEXT NOT NULL DEFAULT '{}',
-          updated_at TEXT NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_agent_capabilities_namespace ON agent_capabilities(namespace);
-        CREATE TABLE IF NOT EXISTS schema_version (
-          version INTEGER PRIMARY KEY,
-          applied_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS curator_review_log (
-          memory_id TEXT NOT NULL,
-          review_type TEXT NOT NULL DEFAULT 'llm_curator',
-          reviewed_at TEXT NOT NULL,
-          PRIMARY KEY(memory_id, review_type)
-        );
-        CREATE INDEX IF NOT EXISTS idx_curator_review_reviewed_at ON curator_review_log(reviewed_at);
-
-        CREATE TABLE IF NOT EXISTS vector_sync_queue (
-          id TEXT PRIMARY KEY,
-          memory_id TEXT NOT NULL,
-          operation TEXT NOT NULL DEFAULT 'upsert',
-          retry_count INTEGER NOT NULL DEFAULT 0,
-          max_retries INTEGER NOT NULL DEFAULT 3,
-          created_at TEXT NOT NULL,
-          last_attempt_at TEXT,
-          error TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_vector_sync_queue_memory ON vector_sync_queue(memory_id);
-
-        CREATE TABLE IF NOT EXISTS vector_cache (
-          text_hash TEXT NOT NULL,
-          model TEXT NOT NULL DEFAULT '',
-          vector_json TEXT NOT NULL,
-          updated_at TEXT NOT NULL,
-          PRIMARY KEY (text_hash, model)
-        );
-
-        CREATE TABLE IF NOT EXISTS user_profile_attrs (
-          user_id        TEXT NOT NULL DEFAULT 'default',
-          attribute      TEXT NOT NULL,
-          value          TEXT NOT NULL,
-          confidence     REAL NOT NULL DEFAULT 0.5,
-          immutable      INTEGER NOT NULL DEFAULT 0,
-          source_ids_json TEXT NOT NULL DEFAULT '[]',
-          updated_at     TEXT NOT NULL,
-          PRIMARY KEY (user_id, attribute)
-        );
-        CREATE INDEX IF NOT EXISTS idx_user_profile_attrs_user ON user_profile_attrs(user_id);
-        """
-    )
-    conn.execute(
-        "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES (?, ?)",
-        (1, now()),
-    )
-
-    # Dead tables from the sqlite-vec era (Qdrant is the vector backend now).
-    # memory_vec is a vec0 virtual table; the vec0 module is gone, so DROP TABLE
-    # fails with "no such module" — remove the sqlite_master rows directly.
-    _drop_dead_tables(conn, [
-        "memory_vec", "memory_vec_chunks", "memory_vec_info",
-        "memory_vec_rowids", "memory_vec_vector_chunks00",
-        "memory_embedding_index",
-        "agent_permissions",
-    ])
-    _ensure_column(conn, "memories", "injected_count", "INTEGER NOT NULL DEFAULT 0")
-    _ensure_column(conn, "memories", "ineffective_count", "INTEGER NOT NULL DEFAULT 0")
-    _ensure_column(conn, "memories", "effectiveness_score", "REAL NOT NULL DEFAULT 0.5")
-    _ensure_column(conn, "memories", "last_injected_at", "TEXT")
-    _ensure_column(conn, "agent_messages", "expires_at", "TEXT")
-    _ensure_column(conn, "memories", "valid_from", "TEXT")
-    _ensure_column(conn, "memories", "valid_until", "TEXT")
-    _ensure_column(conn, "memories", "superseded_by", "TEXT")
-    _ensure_column(conn, "memories", "fact_lineage_root", "TEXT")
-    _ensure_column(conn, "user_profile_attrs", "decayed_at", "TEXT")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_superseded_by ON memories(superseded_by)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_lineage_root ON memories(fact_lineage_root)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_status_lineage ON memories(status, fact_lineage_root)")
-    _ensure_column(conn, "governance_decisions", "llm_trace_json", "TEXT NOT NULL DEFAULT '{}'")
-    _ensure_column(conn, "governance_decisions", "before_state_json", "TEXT NOT NULL DEFAULT '[]'")
-    _ensure_column(conn, "governance_decisions", "after_state_json", "TEXT NOT NULL DEFAULT '[]'")
-    _ensure_column(conn, "governance_decisions", "candidate_hash", "TEXT NOT NULL DEFAULT ''")
-    _ensure_column(conn, "governance_decisions", "policy_reasons_json", "TEXT NOT NULL DEFAULT '[]'")
-    _ensure_column(conn, "governance_decisions", "policy_version", "TEXT NOT NULL DEFAULT ''")
-    _ensure_column(conn, "governance_decisions", "judge_model", "TEXT NOT NULL DEFAULT ''")
-    _ensure_column(conn, "governance_decisions", "judge_schema_version", "TEXT NOT NULL DEFAULT ''")
-    _ensure_column(conn, "governance_decisions", "decision_version", "TEXT NOT NULL DEFAULT ''")
-    _ensure_column(conn, "governance_decisions", "execution_id", "TEXT NOT NULL DEFAULT ''")
-    _ensure_column(conn, "governance_decisions", "applied_by", "TEXT NOT NULL DEFAULT ''")
-    _ensure_column(conn, "governance_decisions", "rolled_back_by", "TEXT NOT NULL DEFAULT ''")
-    _ensure_column(conn, "governance_decisions", "approval_kind", "TEXT NOT NULL DEFAULT ''")
-    _ensure_column(conn, "governance_decisions", "curator_job_id", "TEXT NOT NULL DEFAULT ''")
-    _ensure_column(conn, "governance_decisions", "curator_batch_id", "TEXT NOT NULL DEFAULT ''")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_governance_candidate_hash ON governance_decisions(candidate_hash)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_governance_curator_job_created ON governance_decisions(curator_job_id, created_at)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_governance_curator_job_id ON governance_decisions(curator_job_id, id)")
-
-    _ensure_column(conn, "context_quality_events", "vector_avg_score", "REAL NOT NULL DEFAULT 0.0")
-    _ensure_column(conn, "context_quality_events", "cross_retrieval_rate", "REAL NOT NULL DEFAULT 0.0")
-
+def init_db(conn: Any) -> None:
+    """Initialize PostgreSQL database schema from schema.sql."""
+    schema_file = Path(__file__).resolve().parent / "schema.sql"
+    if schema_file.is_file():
+        sql_text = schema_file.read_text(encoding="utf-8")
+        conn.executescript(sql_text)
+    else:
+        logger.warning("schema.sql not found at %s", schema_file)
     try:
-        null_fts = conn.execute("SELECT COUNT(*) FROM memories_fts WHERE id IS NULL").fetchone()[0]
-    except sqlite3.OperationalError:
-        null_fts = 0
-    if null_fts:
-        conn.executescript(
-            """
-            DROP TRIGGER IF EXISTS memories_ai;
-            DROP TRIGGER IF EXISTS memories_ad;
-            DROP TRIGGER IF EXISTS memories_au;
-            DROP TABLE IF EXISTS memories_fts;
-            CREATE VIRTUAL TABLE memories_fts USING fts5(
-              id UNINDEXED, title, content, tags, type, scope
-            );
-            CREATE TRIGGER memories_ai AFTER INSERT ON memories BEGIN
-              INSERT INTO memories_fts(id, title, content, tags, type, scope)
-              VALUES (new.id, new.title, new.content, new.tags_json, new.type, new.scope);
-            END;
-            CREATE TRIGGER memories_ad AFTER DELETE ON memories BEGIN
-              DELETE FROM memories_fts WHERE id = old.id;
-            END;
-            CREATE TRIGGER memories_au AFTER UPDATE ON memories BEGIN
-              DELETE FROM memories_fts WHERE id = old.id;
-              INSERT INTO memories_fts(id, title, content, tags, type, scope)
-              VALUES (new.id, new.title, new.content, new.tags_json, new.type, new.scope);
-            END;
-            """
+        conn.execute(
+            "INSERT INTO schema_version(version, applied_at) VALUES (%s, %s) ON CONFLICT (version) DO NOTHING",
+            (1, now()),
         )
-        rows = conn.execute("SELECT id,title,content,tags_json,type,scope FROM memories").fetchall()
-        conn.executemany(
-            "INSERT INTO memories_fts(id,title,content,tags,type,scope) VALUES (?,?,?,?,?,?)",
-            [(r["id"], r["title"], r["content"], r["tags_json"], r["type"], r["scope"]) for r in rows],
-        )
-    conn.commit()
+    except Exception as exc:
+        logger.debug("init_db schema_version insert: %s", exc)
+
+
+def db_path() -> Path:
+    """Compatibility helper returning a string-like Path descriptor of the DB."""
+    cfg = get_database_config()
+    return Path(f"{cfg['host']}:{cfg['port']}/{cfg['name']}")

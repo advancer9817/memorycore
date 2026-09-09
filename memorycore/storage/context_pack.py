@@ -461,7 +461,6 @@ def build_context_pack(
     hard_constraints_cfg = cp_cfg.get("hard_constraints") or {}
     if hard_constraints_cfg.get("enabled", True) and not _is_greeting(task):
         rules = hard_constraints_cfg.get("rules") or [
-            "交付文件统一输出到 /mnt/c/Users/Advancer/Desktop/output/",
             "代码提交/推送前必须在仓库根目录追加 ITERATION.md 迭代记录",
         ]
         if rules:

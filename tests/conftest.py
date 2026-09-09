@@ -5,21 +5,37 @@ import memorycore as lm
 
 @pytest.fixture(autouse=True)
 def isolated_memory_db(tmp_path, monkeypatch):
+    from memorycore.storage.db import configure_database, managed_conn
+    configure_database(name="mcore_test")
+
+    with managed_conn() as conn:
+        conn.execute("""
+            TRUNCATE TABLE
+                memories, memory_links, memory_entities, feedback_events,
+                context_quality_events, user_profile_attrs, governance_decisions,
+                curator_review_log, llm_curator_jobs, llm_curator_batches,
+                maintenance_jobs, audit_events, vector_cache, vector_sync_queue,
+                agent_presence, agent_messages, schema_version
+            CASCADE;
+        """)
+        from memorycore.storage.db import init_db
+        init_db(conn)
+
     db = tmp_path / "test_memory.sqlite3"
     config = tmp_path / "config.yaml"
     config.write_text(
+        "database:\n"
+        "  name: mcore_test\n"
         "temporal:\n"
         "  enabled: false\n"
         "  auto_supersede_enabled: false\n"
         "embedding:\n"
-        "  provider: hashing\n"
-        "qdrant:\n"
-        "  url: ''\n"
-        f"  path: {tmp_path / 'qdrant'}\n",
+        "  provider: hashing\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("LOCAL_MEMORY_DB", str(db))
     monkeypatch.setenv("LOCAL_MEMORY_CONFIG", str(config))
+    monkeypatch.setenv("MCORE_PG_DATABASE", "mcore_test")
     # 隔离维护锁：测试不得与生产 curator（mcore-curator.timer 持 flock）抢锁。
     monkeypatch.setenv("LOCAL_MEMORY_MAINTENANCE_LOCK", str(tmp_path / "maint.lock"))
     lm._INITIALIZED_DB_PATHS.clear()
