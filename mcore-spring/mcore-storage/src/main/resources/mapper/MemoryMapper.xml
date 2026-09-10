@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.mcore.storage.mapper.MemoryMapper">
+
+    <resultMap id="MemoryResultMap" type="org.mcore.common.model.MemoryDO">
+        <id property="id" column="id"/>
+        <result property="type" column="type"/>
+        <result property="scope" column="scope"/>
+        <result property="title" column="title"/>
+        <result property="content" column="content"/>
+        <result property="source" column="source"/>
+        <result property="sourceAgent" column="source_agent"/>
+        <result property="projectPath" column="project_path"/>
+        <result property="confidence" column="confidence"/>
+        <result property="importance" column="importance"/>
+        <result property="status" column="status"/>
+        <result property="decayPolicy" column="decay_policy"/>
+        <result property="feedbackScore" column="feedback_score"/>
+        <result property="injectedCount" column="injected_count"/>
+        <result property="ineffectiveCount" column="ineffective_count"/>
+        <result property="effectivenessScore" column="effectiveness_score"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="lastAccessedAt" column="last_accessed_at"/>
+        <result property="lastInjectedAt" column="last_injected_at"/>
+        <result property="validFrom" column="valid_from"/>
+        <result property="validUntil" column="valid_until"/>
+        <result property="supersededBy" column="superseded_by"/>
+        <result property="factLineageRoot" column="fact_lineage_root"/>
+    </resultMap>
+
+    <select id="countTotal" resultType="long">
+        SELECT count(*) FROM memories
+    </select>
+
+    <select id="countActive" resultType="long">
+        SELECT count(*) FROM memories WHERE status = 'active'
+    </select>
+
+    <select id="countGroupedByStatus" resultType="map">
+        SELECT status, count(*) as cnt FROM memories GROUP BY status
+    </select>
+
+    <select id="selectById" resultMap="MemoryResultMap">
+        SELECT * FROM memories WHERE id = #{id}
+    </select>
+
+    <select id="selectRecent" resultMap="MemoryResultMap">
+        SELECT * FROM memories ORDER BY created_at DESC LIMIT #{limit}
+    </select>
+
+    <insert id="insert" parameterType="org.mcore.common.model.MemoryDO">
+        INSERT INTO memories (
+            id, type, scope, title, content, source, source_agent, project_path,
+            confidence, importance, status, decay_policy, feedback_score,
+            injected_count, ineffective_count, effectiveness_score,
+            valid_from, valid_until, superseded_by, fact_lineage_root,
+            created_at, updated_at
+        ) VALUES (
+            #{id}, #{type}, #{scope}, #{title}, #{content}, #{source}, #{sourceAgent}, #{projectPath},
+            #{confidence}, #{importance}, #{status}, #{decayPolicy}, #{feedbackScore},
+            #{injectedCount}, #{ineffectiveCount}, #{effectivenessScore},
+            #{validFrom}, #{validUntil}, #{supersededBy}, #{factLineageRoot},
+            clock_timestamp(), clock_timestamp()
+        )
+    </insert>
+
+    <update id="update" parameterType="org.mcore.common.model.MemoryDO">
+        UPDATE memories
+        <set>
+            updated_at = clock_timestamp(),
+            <if test="title != null and title != ''">title = #{title},</if>
+            <if test="content != null and content != ''">content = #{content},</if>
+            <if test="importance != null">importance = #{importance},</if>
+            <if test="confidence != null">confidence = #{confidence},</if>
+            <if test="status != null and status != ''">status = #{status},</if>
+            <if test="supersededBy != null and supersededBy != ''">superseded_by = #{supersededBy},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <update id="batchUpdateStatus">
+        UPDATE memories
+        SET status = #{status}, updated_at = clock_timestamp()
+        WHERE id IN
+        <foreach item="id" collection="ids" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </update>
+
+    <select id="countFilterMemories" resultType="long">
+        SELECT count(*) FROM memories
+        <where>
+            <choose>
+                <when test="status != null and status != '' and status != 'all'">
+                    AND status = #{status}
+                </when>
+                <when test="show_archived != true and (status == null or status == '' or status != 'all')">
+                    AND status != 'archived'
+                </when>
+            </choose>
+            <if test="search_query != null and search_query != ''">
+                AND (title ILIKE concat('%', #{search_query}, '%') OR content ILIKE concat('%', #{search_query}, '%'))
+            </if>
+            <if test="app_ids != null and app_ids.size() > 0">
+                AND source_agent IN
+                <foreach item="aid" collection="app_ids" open="(" separator="," close=")">
+                    #{aid}
+                </foreach>
+            </if>
+            <if test="category_ids != null and category_ids.size() > 0">
+                AND type IN
+                <foreach item="cid" collection="category_ids" open="(" separator="," close=")">
+                    #{cid}
+                </foreach>
+            </if>
+        </where>
+    </select>
+
+    <select id="selectFilterMemories" resultType="map">
+        SELECT id, type, scope, title, content, source, source_agent, status,
+               importance, confidence, effectiveness_score AS effectiveness, injected_count AS access_count,
+               created_at, updated_at
+        FROM memories
+        <where>
+            <choose>
+                <when test="status != null and status != '' and status != 'all'">
+                    AND status = #{status}
+                </when>
+                <when test="show_archived != true and (status == null or status == '' or status != 'all')">
+                    AND status != 'archived'
+                </when>
+            </choose>
+            <if test="search_query != null and search_query != ''">
+                AND (title ILIKE concat('%', #{search_query}, '%') OR content ILIKE concat('%', #{search_query}, '%'))
+            </if>
+            <if test="app_ids != null and app_ids.size() > 0">
+                AND source_agent IN
+                <foreach item="aid" collection="app_ids" open="(" separator="," close=")">
+                    #{aid}
+                </foreach>
+            </if>
+            <if test="category_ids != null and category_ids.size() > 0">
+                AND type IN
+                <foreach item="cid" collection="category_ids" open="(" separator="," close=")">
+                    #{cid}
+                </foreach>
+            </if>
+        </where>
+        <choose>
+            <when test="sort_column == 'updated_at'">ORDER BY updated_at</when>
+            <when test="sort_column == 'importance'">ORDER BY importance</when>
+            <when test="sort_column == 'confidence'">ORDER BY confidence</when>
+            <when test="sort_column == 'effectiveness_score'">ORDER BY effectiveness_score</when>
+            <otherwise>ORDER BY created_at</otherwise>
+        </choose>
+        <choose>
+            <when test="sort_direction == 'asc' or sort_direction == 'ASC'">ASC</when>
+            <otherwise>DESC</otherwise>
+        </choose>
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="selectCategories" resultType="map">
+        SELECT type as category_id, type as name, COUNT(*) as count
+        FROM memories
+        WHERE type IS NOT NULL AND type != ''
+        GROUP BY type
+        ORDER BY count DESC
+    </select>
+
+    <select id="selectNeedEmbedding" resultMap="MemoryResultMap">
+        SELECT id, title, content FROM memories WHERE embedding IS NULL AND content != '' LIMIT #{limit}
+    </select>
+
+    <update id="updateEmbedding">
+        UPDATE memories
+        SET embedding = #{embedding, typeHandler=org.mcore.storage.mybatis.handler.PGvectorTypeHandler}
+        WHERE id = #{id}
+    </update>
+
+    <select id="selectWarnings" resultType="map">
+        SELECT l.source_id, l.target_id, l.relation_type,
+               s.title as source_title, t.title as target_title
+        FROM memory_links l
+        JOIN memories s ON l.source_id = s.id
+        JOIN memories t ON l.target_id = t.id
+        WHERE l.relation_type IN ('contradicts', 'supersedes')
+        LIMIT 50
+    </select>
+
+    <select id="selectAuditLogs" resultType="map">
+        SELECT id, memory_id, action, operator, details, created_at
+        FROM memory_audit_logs
+        ORDER BY created_at DESC
+        LIMIT #{limit}
+    </select>
+
+    <insert id="insertAuditLog">
+        INSERT INTO memory_audit_logs (id, memory_id, action, operator, details, created_at)
+        VALUES (#{id}, #{memoryId}, #{action}, #{operator}, #{details}, clock_timestamp())
+    </insert>
+
+</mapper>

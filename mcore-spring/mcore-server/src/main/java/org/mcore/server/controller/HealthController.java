@@ -16,7 +16,7 @@ public class HealthController {
         this.memoryRepository = memoryRepository;
     }
 
-    @GetMapping("/health")
+    @GetMapping({"/health", "/api/v1/health"})
     public ResponseEntity<Map<String, Object>> health() {
         try {
             long count = memoryRepository.countActiveMemories();

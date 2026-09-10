@@ -7,6 +7,8 @@ const nextConfig = {
       { source: "/api/v1/:path*",         destination: `${apiUrl}/api/v1/:path*` },
       { source: "/api/curator/:path*",    destination: `${apiUrl}/api/curator/:path*` },
       { source: "/api/governance/:path*", destination: `${apiUrl}/api/governance/:path*` },
+      { source: "/api/:path*",            destination: `${apiUrl}/api/:path*` },
+      { source: "/memories/:path*",       destination: `${apiUrl}/api/v1/memories/:path*` },
     ];
   },
   eslint: {

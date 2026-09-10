@@ -36,29 +36,23 @@ async function renderChart() {
   chartInstance.showLoading({ color: '#6366f1', textColor: '#a1a1aa' });
 
   try {
-    const res = await apiClient.get('/memories/recent?limit=40');
-    const records: any[] = (res.data && res.data.data) ? res.data.data : [];
+    const res = await apiClient.get('/graph?limit=60');
+    const graphData = res.data || { nodes: [], links: [] };
 
-    const nodes = records.map((r) => ({
-      name: r.title || r.id.substring(0, 8),
+    const nodes = (graphData.nodes || []).map((r: any) => ({
+      name: r.name || r.id.substring(0, 8),
       id: r.id,
       category: r.type,
       value: r.importance,
       symbolSize: Math.max(16, (r.importance || 0.5) * 36),
-      content: r.content
+      content: r.title || r.name
     }));
 
-    // 构建力导向关联连线
-    const links = [];
-    for (let i = 1; i < nodes.length; i++) {
-      if (i % 3 !== 0) {
-        links.push({
-          source: nodes[i].name,
-          target: nodes[Math.floor(i / 2)].name,
-          lineStyle: { opacity: 0.3, width: 1, curveness: 0.1 }
-        });
-      }
-    }
+    const links = (graphData.links || []).map((l: any) => ({
+      source: l.source,
+      target: l.target,
+      lineStyle: { opacity: 0.4, width: 1.5, curveness: 0.1 }
+    }));
 
     const option: echarts.EChartsOption = {
       backgroundColor: 'transparent',

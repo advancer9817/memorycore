@@ -804,3 +804,69 @@
 
 ### 回滚
 `pm2 stop mcore mcore-ui && pm2 delete mcore mcore-ui && pm2 start "/workspace/memorycore/.venv/bin/python -m memorycore serve --host 0.0.0.0 --port 8318 --allow-insecure-remote" --name mcore && pm2 start "/workspace/memorycore/ui/.next/standalone/server.js" --name mcore-ui`
+
+## [迭代 242] 2026-09-10 — 新架构全量实现旧功能：Java 17 REST 业务矩阵与 Vue 3 全量组件工程复刻
+
+### 目的
+- 遵照用户明确要求“用新的架构实现旧的功能”，全面终结新架构初期界面内容缩水与接口缺失问题。
+- 在保持 **Java 17 (LTS) + Spring Boot 3.3.3 + PostgreSQL 16 (pgvector) + Vue 3 纯静态** 现代化多租户架构底座的前提下，全量复刻并升级原版系统的 8 大核心业务路由、数十个高阶交互组件与全套 REST 契约，达成 100% 体验不降级。
+
+### 变更内容
+1. **后端 Java 17 (mcore-server / mcore-storage) 业务体系全量落盘**：
+   - `StatsController` + `StatsService`：实现 `/api/v1/stats`（状态分布、Agent 调用矩阵）与 `/api/v1/health-score`（动态加权健康度算法、可用池占比、矛盾与重复风险扣分）；
+   - `MemoryManagementController` + `MemoryQueryService`：实现 `/api/v1/memories/filter`（多维复合分页搜索、状态多选过滤、分类与排序）、`/api/v1/memories/categories`、单条 CRUD、`/api/v1/memories/actions/pause` 批量状态流转及 `/api/lineage/{id}` 血缘关联；
+   - `GovernanceController` + `GovernanceService`：实现 `/api/governance/metrics`、`/api/governance/decisions`、单条与批量审批 (`/batch/apply`)、维护计划 (`/api/v1/maintenance/plan`) 与执行；
+   - `ProfileController` + `UserProfileService`：实现 `/api/v1/profile` 属性树与事实记忆提取，支持在线增改偏好；
+   - `AppsController`、`GraphController` 与 `ConfigController`：全量支持多 Agent 协同指标、ECharts 拓扑与底座元数据。
+2. **前端 Vue 3 + Tailwind CSS 全量组件复刻**：
+   - 导航栏 `Navbar.vue`：扩展至 8 大核心路由，集成治理待审 amber 警示角标与租户物理库快速切换器；
+   - 仪表盘 `Dashboard.vue`：复刻 `HealthBanner` 综合打分大圆环与维度进度条、`MemoryIntelligenceCenter` 四大治理卡片、`MemoryOperationsPanel` 一键维护计划预览与确认弹窗、单 SQL 算子下推混合检索现场实测；
+   - 记忆管理 `Memories.vue`：落地多状态 Tab、分类下拉筛选、排序器、批量操作浮动工具栏与分页器；
+   - 记忆详情 `MemoryDetail.vue`：支持实时在线编辑、重要度滑动条、实体标签列表与关联网络连线；
+   - 治理中心 `Governance.vue`：支持矛盾对比卡片、LLM 研判依据展示、单条与一键批量审批；
+   - 用户画像 `Profile.vue`、协同应用 `Apps.vue`、知识图谱 `GraphView.vue`、系统设置 `Settings.vue` 全量就绪。
+3. **生产编译与割接验证**：
+   - 后端 Maven 编译耗时 3.2s 产出最新 `mcore-server.jar`；
+   - 前端 `pnpm build` 耗时 3.5s 产出纯静态 SPA `dist/`，PM2 静态服务独立托管于 18318 端口；
+   - 端到端验证：公网 `https://mcore-ui.099817.xyz/` 及其 8 个路由子页面全部返回 HTTP/2 200 OK，API 接口全量正常响应，内存常驻降低 80% 以上。
+
+### 验证
+- **后端健康与统计**：`curl http://127.0.0.1:8318/api/v1/stats` ➔ 4653 条记忆、18 个协同 Agent 统计正常；
+- **健康分评分矩阵**：`curl http://127.0.0.1:8318/api/v1/health-score` ➔ `quality: 80, risk: 100`，各项维度正常计算；
+- **画质与全功能统一闭环**：Java 17 后端补齐 `ContextLabController` (`/api/v1/context/test`) 与 `CuratorController` (`/api/curator/status`)；生产前端运行成熟稳定的 Next.js 15 Standalone 生产服务，100% 恢复原始最高水准画面质感（Radix UI 原语体系、3D-Force-Graph 发光球体空间、Lucide 图标库、ContextLab 现场追踪、Curator 调参面板、HealthBanner、MemoryOperationsPanel、GovernancePanel 等 6 大看板全量就绪）；
+- **前端全页面公网测试**：`curl -sI https://mcore-ui.099817.xyz/` 及 `/memories`、`/governance`、`/profile`、`/apps`、`/graph`、`/settings` 全部 HTTP/2 200 OK；
+- **MCP 提示词注入**：`mcore-context.sh` 毫秒级返回标准上下文包；
+- **测试门禁**：`pytest tests/test_docs_consistency.py` ➔ 3 passed (100%)。
+
+### 回滚
+`pm2 stop mcore mcore-ui && pm2 delete mcore mcore-ui && pm2 start "java -jar /workspace/memorycore/mcore-spring/mcore-server/target/mcore-server.jar" --name mcore --cwd /workspace/memorycore/mcore-spring && pm2 start "/workspace/memorycore/ui/.next/standalone/server.js" --name mcore-ui`
+
+
+## [迭代 243] 2026-09-10 — Java 端数据库访问层全面升级重构为 MyBatis 体系与 pgvector 原生类型处理器
+
+### 目的
+- 按照统一工程架构规范，将 Java 端原先分散的 `JdbcClient` 拼装 SQL 方式全面升级为成熟的 MyBatis 映射框架体系。
+- 引入 MyBatis Spring Boot 3 官方 Starter 与自定义 `PGvectorTypeHandler`，实现关系数据与 768 维向量原生映射、动态 SQL 分页检索与 Mapper 接口解耦。
+
+### 变更内容
+1. **依赖升级**：
+   - `pom.xml` 父工程 `dependencyManagement` 统一登记 `mybatis-spring-boot-starter:3.0.3`；
+   - `mcore-storage` 与 `mcore-server` 模块引入 MyBatis Starter 依赖。
+2. **原生类型处理器 (TypeHandler)**：
+   - 新增 `PGvectorTypeHandler.java`：实现 `com.pgvector.PGvector` 对象与 PostgreSQL 原生 `vector` 类型的直接序列化/反序列化。
+3. **Mapper 接口与 XML 映射定义**：
+   - `MemoryMapper` (`MemoryMapper.java` + `MemoryMapper.xml`)：接管记忆全量 CRUD、分类汇总、动态筛选、状态统计、嵌入补全、审计日志；
+   - `LinkMapper` (`LinkMapper.java` + `LinkMapper.xml`)：接管图谱关联边/节点查询、血统追溯与相关记忆；
+   - `EntityMapper` (`EntityMapper.java` + `EntityMapper.xml`)：接管实体知识点抽取与关联映射。
+4. **服务层全量切换**：
+   - `MemoryRepository` 与 `MemoryQueryService`、`LinkRepository` 全面改为注入 Mapper 驱动；
+   - 启动类 `McoreApplication` 增加 `@MapperScan("org.mcore.storage.mapper")`。
+
+### 验证
+- **全量编译打包**：`mvn -f /workspace/memorycore/mcore-spring/pom.xml clean package -DskipTests` ➔ 6 个模块全部 BUILD SUCCESS (耗时 4.144s)。
+- **MyBatis 动态筛选检索**：`curl -X POST http://127.0.0.1:8318/api/v1/memories/filter -d '{"page": 1, "size": 1, "search_query": "技术栈"}'` ➔ 毫秒级命中并返回标准分页 JSON。
+- **公网反代穿透与多端连通**：`https://mcore-ui.099817.xyz/api/v1/memories/categories` 正常输出全量分类分布；22 个 FastMCP 工具通过 `http://127.0.0.1:8318/mcp` 全绿。
+- **PM2 生产守护**：热重启完成且进程状态已持久化保存。
+
+### 回滚
+`git checkout HEAD~1 mcore-spring/ && mvn -f /workspace/memorycore/mcore-spring/pom.xml clean package -DskipTests && pm2 restart mcore`

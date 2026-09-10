@@ -2,6 +2,7 @@ package org.mcore.storage.search;
 
 import com.pgvector.PGvector;
 import org.mcore.common.model.MemoryDO;
+import org.mcore.storage.embedding.EmbeddingService;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 
@@ -9,52 +10,81 @@ import java.sql.Timestamp;
 import java.util.List;
 
 /**
- * 单阶段（Single-Pass）单 SQL 混合检索与联合加权打分服务
+ * 单阶段（Single-Pass）真正双模单 SQL 混合检索引擎
+ * 融合 768 维 pgvector 余弦距离 (<=>) 与 pg_trgm 三元词相似度 (similarity)
  */
 @Service
 public class HybridSearchService {
 
     private final JdbcClient jdbcClient;
+    private final EmbeddingService embeddingService;
 
     public record SearchHit(MemoryDO record, double finalScore, double vectorScore, double textScore) {}
 
-    public HybridSearchService(JdbcClient jdbcClient) {
+    public HybridSearchService(JdbcClient jdbcClient, EmbeddingService embeddingService) {
         this.jdbcClient = jdbcClient;
+        this.embeddingService = embeddingService;
     }
 
     /**
-     * 混合检索执行
-     *
-     * @param query     文本搜索词
-     * @param embedding 向量数组 (可为 null)
-     * @param type      记忆分类 (可选过滤)
-     * @param limit     返回限制条数
+     * 自动向量化并执行混合检索
      */
+    public List<SearchHit> hybridSearch(String query, String type, int limit) {
+        float[] queryVec = embeddingService.embedText(query);
+        return hybridSearch(query, queryVec, type, limit);
+    }
+
+    /**
+     * 纯向量余弦距离检索 (供 memory_vector_search 工具使用)
+     */
+    public List<SearchHit> pureVectorSearch(String query, int limit) {
+        float[] queryVec = embeddingService.embedText(query);
+        PGvector vec = new PGvector(queryVec);
+        int fetchLimit = limit > 0 ? limit : 10;
+
+        String sql = """
+            SELECT id, type, scope, title, content, source, source_agent, status,
+                   importance, confidence, effectiveness_score, created_at, updated_at,
+                   (1.0 - (embedding <=> :vec)) AS vector_sim,
+                   0.0 AS text_sim,
+                   (1.0 - (embedding <=> :vec)) AS final_score
+            FROM memories
+            WHERE status = 'active' AND embedding IS NOT NULL
+            ORDER BY embedding <=> :vec ASC
+            LIMIT :limit
+        """;
+
+        return jdbcClient.sql(sql)
+                .param("vec", vec)
+                .param("limit", fetchLimit)
+                .query((rs, rowNum) -> mapRow(rs))
+                .list();
+    }
+
     public List<SearchHit> hybridSearch(String query, float[] embedding, String type, int limit) {
         PGvector vec = (embedding != null && embedding.length > 0) ? new PGvector(embedding) : null;
-        boolean hasVector = (vec != null);
         int fetchLimit = limit > 0 ? limit : 10;
         String q = query != null ? query : "";
         String t = (type != null && !type.isBlank()) ? type.trim() : null;
 
-        if (hasVector) {
+        if (vec != null) {
             String sql = """
                 SELECT 
                     id, type, scope, title, content, source, source_agent, status,
-                    importance, confidence, effectiveness_score AS effectiveness, created_at, updated_at,
-                    (1.0 - (embedding <=> :vec)) AS vector_sim,
+                    importance, confidence, effectiveness_score, created_at, updated_at,
+                    (CASE WHEN embedding IS NOT NULL THEN (1.0 - (embedding <=> :vec)) ELSE 0.0 END) AS vector_sim,
                     similarity(content, :query) AS text_sim,
                     (
-                        ((1.0 - (embedding <=> :vec)) * 0.65) +
-                        (similarity(content, :query) * 0.25) +
+                        (CASE WHEN embedding IS NOT NULL THEN (1.0 - (embedding <=> :vec)) * 0.65 ELSE 0.0 END) +
+                        (similarity(content, :query) * (CASE WHEN embedding IS NOT NULL THEN 0.25 ELSE 0.85 END)) +
                         (COALESCE(importance, 0.5) * 0.10)
                     ) AS final_score
                 FROM memories
                 WHERE status = 'active'
             """ + (t != null ? " AND type = :type " : "") + """
                   AND (
-                      ((embedding <=> :vec) < 0.50) OR
-                      (similarity(content, :query) > 0.10) OR
+                      (embedding IS NOT NULL AND (embedding <=> :vec) < 0.60) OR
+                      (similarity(content, :query) > 0.08) OR
                       (:query = '')
                   )
                 ORDER BY final_score DESC
@@ -73,7 +103,7 @@ public class HybridSearchService {
             String sql = """
                 SELECT 
                     id, type, scope, title, content, source, source_agent, status,
-                    importance, confidence, effectiveness_score AS effectiveness, created_at, updated_at,
+                    importance, confidence, effectiveness_score, created_at, updated_at,
                     0.0 AS vector_sim,
                     similarity(content, :query) AS text_sim,
                     (
@@ -113,7 +143,7 @@ public class HybridSearchService {
         mem.setStatus(rs.getString("status"));
         mem.setImportance(rs.getDouble("importance"));
         mem.setConfidence(rs.getDouble("confidence"));
-        mem.setEffectiveness(rs.getDouble("effectiveness"));
+        mem.setEffectivenessScore(rs.getDouble("effectiveness_score"));
         Timestamp cAt = rs.getTimestamp("created_at");
         if (cAt != null) mem.setCreatedAt(cAt.toInstant());
         Timestamp uAt = rs.getTimestamp("updated_at");

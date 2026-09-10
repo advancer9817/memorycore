@@ -6,7 +6,14 @@ function getBaseUrl(): string {
     return import.meta.env.VITE_API_BASE_URL;
   }
   if (typeof window !== 'undefined' && window.location && window.location.hostname) {
-    return `${window.location.protocol}//${window.location.hostname}:8318/api/v1`;
+    const { protocol, hostname } = window.location;
+    if (hostname.startsWith('mcore-ui.')) {
+      return `${protocol}//${hostname.replace(/^mcore-ui\./, 'mcore.')}/api/v1`;
+    }
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'http://127.0.0.1:8318/api/v1';
+    }
+    return `${protocol}//${hostname}:8318/api/v1`;
   }
   return 'http://127.0.0.1:8318/api/v1';
 }

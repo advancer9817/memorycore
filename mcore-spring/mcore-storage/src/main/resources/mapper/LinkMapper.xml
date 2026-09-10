@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.mcore.storage.mapper.LinkMapper">
+
+    <insert id="insert" parameterType="org.mcore.common.model.MemoryLinkDO">
+        INSERT INTO memory_links (id, source_id, target_id, relation_type, weight, created_at)
+        VALUES (#{id}, #{sourceId}, #{targetId}, #{relationType}, #{weight}, clock_timestamp())
+    </insert>
+
+    <select id="selectLinksBySourceId" resultType="map">
+        SELECT l.id, l.source_id, l.target_id, l.relation_type, l.weight,
+               m.title as target_title, m.type as target_type
+        FROM memory_links l
+        LEFT JOIN memories m ON l.target_id = m.id
+        WHERE l.source_id = #{sourceId}
+    </select>
+
+    <select id="selectLineageLinks" resultType="map">
+        SELECT l.id, l.source_id, l.target_id, l.relation_type,
+               s.title as source_title, s.type as source_type, s.status as source_status,
+               t.title as target_title, t.type as target_type, t.status as target_status
+        FROM memory_links l
+        LEFT JOIN memories s ON l.source_id = s.id
+        LEFT JOIN memories t ON l.target_id = t.id
+        WHERE l.source_id = #{memoryId} OR l.target_id = #{memoryId}
+    </select>
+
+    <select id="selectGraphNodes" resultType="map">
+        SELECT id, title, type, status, importance
+        FROM memories
+        WHERE status != 'archived'
+        ORDER BY importance DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectGraphEdges" resultType="map">
+        SELECT source_id, target_id, relation_type, weight
+        FROM memory_links
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectRelatedMemories" resultType="map">
+        SELECT m.id, m.type, m.scope, m.title, m.content, m.source, m.source_agent, m.status,
+               m.importance, m.confidence, m.created_at, m.updated_at
+        FROM memories m
+        JOIN memory_links l ON (l.target_id = m.id OR l.source_id = m.id)
+        WHERE (l.source_id = #{memoryId} OR l.target_id = #{memoryId}) AND m.id != #{memoryId}
+        LIMIT #{limit}
+    </select>
+
+</mapper>
