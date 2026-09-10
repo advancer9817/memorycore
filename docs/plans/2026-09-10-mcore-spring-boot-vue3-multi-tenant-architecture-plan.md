@@ -17,7 +17,10 @@
    - 利用 **`AbstractRoutingDataSource` + `HikariCP` + `Caffeine` LRU 缓存** 实现微型租户连接池（`min=1, max=3`，最多常驻 25 活跃池），空闲 15 分钟自动关闭连接，严格守护全局 150 连接上限。
 3. **前端现代化与轻量化 (Vue 3 + Vite + TypeScript)**：
    - 彻底废除 Next.js 15 (React 19) 的独立 Node.js 常驻进程（18318 端口）与构建 standalone 资产缺失报错；
-   - Vue 3 编译为纯静态 SPA，既可独立托管，也可直接打包至 Spring Boot `resources/static/`，实现 **“一个 JAR 包搞定 MCP + REST + Web UI”** 的终极零运维体验。
+   - 确立**前后端严格分离、独立打包、独立部署**架构：
+     - **后端**：输出纯净的 Spring Boot 可执行 JAR 包，专注于 FastMCP 服务（8318 端口 `/mcp`）与核心 REST API，不夹带任何前端静态文件；
+     - **前端**：Vite 一键构建生成纯静态 SPA 产物（`dist/`），由高性能 Web 服务器（Nginx / Caddy / 轻量静态 Web 服务）独立承载（监听 18318 端口）；
+     - **运维效益**：动静分离，前端界面与图表迭代无需重启后端 Java 虚拟机，后端升级不影响静态页面稳定访问。
 
 ---
 
@@ -44,7 +47,7 @@
      - Axios 拦截器全自动注入 `X-Tenant-Id` 与 Bearer Token；
      - Pinia 租户状态机与顶栏极质感「私有记忆库快速切换器」组件；
      - Apache ECharts 驱动的高性能 2D 向量拓扑图谱组件；
-     - 单体 JAR 静态打包与前后端分离双模部署指南。
+     - 独立打包、动静分离与多环境部署指南 (Nginx 反向代理 + CORS 跨域解耦)。
 
 ---
 
@@ -65,7 +68,7 @@
 - [ ] 初始化 `mcore-ui-vue` 工程（Vue 3.4 + Vite 5 + Tailwind + Pinia）；
 - [ ] 对齐现存 Next.js 的看板、记忆管理、图谱与自治理页面；
 - [ ] 挂载顶栏私有库切换器与 ECharts 知识图谱；
-- [ ] 验证将 `dist/` 嵌入 Spring Boot `resources/static/` 单 JAR 运行。
+- [ ] 验证前端独立构建纯静态产物（`pnpm build` -> `dist/`），Nginx / 静态服务独立托管并与后端 8318 接口联通。
 
 ### Phase 4: 多租户全链路联调与正式割接
 - [ ] 控制面租户注册 API 接入，实测新用户注册 50ms 自动开辟 `mcore_u_<uid>` 私有库；
