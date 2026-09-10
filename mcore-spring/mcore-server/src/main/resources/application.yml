@@ -1,0 +1,20 @@
+server:
+  port: ${SERVER_PORT:8318}
+
+spring:
+  application:
+    name: mcore-server
+  datasource:
+    host: ${MCORE_DB_HOST:127.0.0.1}
+    port: ${MCORE_DB_PORT:5432}
+    username: ${MCORE_DB_USER:mcore_user}
+    password: ${MCORE_DB_PASSWORD:mcore_secure_password_2026}
+    default-db: ${MCORE_DEFAULT_DB:mcore}
+  sql:
+    init:
+      mode: never
+
+logging:
+  level:
+    root: INFO
+    org.mcore: INFO

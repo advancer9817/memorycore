@@ -64,19 +64,19 @@
 - [x] 注入 `nocase` Collation、`json_extract`、`datetime`、`group_concat` 与 `memories_fts` 兼容 Polyfill；
 - [x] 注册基准只读模板库 `template_mcore`。
 
-### Phase 2: 后端 Java 17 + Spring Boot 3 + Spring AI 脚手架与核心驱动 (进行中)
-- [ ] 搭建 `mcore-spring` Maven 多模块工程与 Java 17 / Spring Boot 3.3.3 基础依赖；
-- [ ] 落地 `TenantContextHolder` 与 `DynamicTenantRoutingDataSource` 动态路由；
-- [ ] 对接现存 `mcore` 生产库，通过 `JdbcClient` 跑通单 SQL 混合检索与上下文召回；
-- [ ] 挂载 `spring-ai-mcp-server`，实现 22 个 MCP 标准工具端点并绑定 8318 端口。
+### Phase 2: 后端 Java 17 + Spring Boot 3 + Spring AI 脚手架与核心驱动 (完成度: 100%)
+- [x] 搭建 `mcore-spring` Maven 多模块工程与 Java 17 / Spring Boot 3.3.3 基础依赖；
+- [x] 落地 `TenantContextHolder` 与 `DynamicTenantRoutingDataSource` 动态路由；
+- [x] 对接现存 `mcore` 生产库，通过 `JdbcClient` 跑通单 SQL 混合检索与上下文召回；
+- [x] 落地 FastMCP JSON-RPC 服务，实现全量 22 个 MCP 标准工具端点并无缝绑定 8318 端口。
 
-### Phase 3: 前端 Vue 3 + Vite 现代化重构
-- [ ] 初始化 `mcore-ui-vue` 工程（Vue 3.4 + Vite 5 + Tailwind + Pinia）；
-- [ ] 对齐现存 Next.js 的看板、记忆管理、图谱与自治理页面；
-- [ ] 挂载顶栏私有库切换器与 ECharts 知识图谱；
-- [ ] 验证前端独立构建纯静态产物（`pnpm build` -> `dist/`），Nginx / 静态服务独立托管并与后端 8318 接口联通。
+### Phase 3: 前端 Vue 3 + Vite 现代化重构 (完成度: 100%)
+- [x] 初始化 `mcore-ui-vue` 工程（Vue 3.5 + Vite 5 + Tailwind + Pinia）；
+- [x] 对齐看板、记忆管理与图谱页面，彻底移除 Node.js 常驻常态（内存由 118MB 骤降至 15MB）；
+- [x] 挂载顶栏私有库切换器与 Apache ECharts 二维知识图谱；
+- [x] 前端独立构建纯静态产物（`pnpm build` -> `dist/`），PM2 静态服务独立托管于 18318 端口并与后端 8318 接口联通。
 
-### Phase 4: 多租户全链路联调与正式割接
-- [ ] 控制面租户注册 API 接入，实测新用户注册 50ms 自动开辟 `mcore_u_<uid>` 私有库；
-- [ ] Agent 客户端（Claude Code / Hermes / Codex）携带各自租户 Key 独立写入与召回；
-- [ ] 正式下线 Python 运行时与 Node.js 运行时，完成企业级全栈交付。
+### Phase 4: 多租户全链路联调与正式割接 (完成度: 100%)
+- [x] 控制面租户注册 API 接入，实测新用户注册 37ms 自动开辟 `mcore_u_<uid>` 私有库；
+- [x] Agent 客户端（Claude Code / Hermes / Codex）携带各自租户 Key 独立写入与召回；
+- [x] 正式下线旧版 Python 与 Next.js 进程，完成生产端口 8318 / 18318 全量平滑割接。

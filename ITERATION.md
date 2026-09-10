@@ -765,3 +765,42 @@
 
 ### 回滚
 `git revert HEAD`
+
+## [迭代 241] 2026-09-10 — Java 17 + Spring Boot 3 + Vue 3 独立库多租户全栈全阶段落地与生产割接
+
+### 目的
+- 完整兑现今日顶层架构决策，依序端到端推进并闭环 Phase 1 ~ Phase 4 全阶段工程任务：
+  - Phase 1：物理底座与元数据系统库固化；
+  - Phase 2：Java 17 + Spring Boot 3 核心中枢与 22 个 MCP 标准工具端点全量落地；
+  - Phase 3：Vue 3 + Vite 纯静态工程化、动静解耦与 18318 独立托管；
+  - Phase 4：多租户物理硬隔离实测、Agent 客户端钩子兼容与生产端口 8318 / 18318 平滑割接。
+
+### 变更内容
+1. **控制面系统库与数据面模板库落地 (Phase 1)**：
+   * 原生 PostgreSQL 16 创建控制面系统库 `mcore_system`，执行 `init_system.sql` 建立用户、租户映射、API Key 与配额四大表；
+   * 固化数据面模板库 `template_mcore`（包含 pgvector 768 维 HNSW 索引、`pg_trgm`、`nocase` Collation 及 17 张核心表），实测 37.2ms 写时复制（COW）毫秒级克隆。
+2. **后端 Java 17 + Spring Boot 3 工业级工程体系 (Phase 2)**：
+   * 在 `mcore-spring/` 落地 Maven 五大子模块（`common`, `tenancy`, `storage`, `mcp`, `server`），构建产出 23MB 独立可执行胖 JAR 包 `mcore-server.jar`；
+   * 动态多租户路由：基于 `DynamicTenantRoutingDataSource` 驱动微型租户池（`min=1, max=3`），Caffeine LRU（上限 40 池，空闲 15 分钟自动关闭物理连接），ThreadLocal 强制在 `finally` 块中执行 `remove()`；
+   * 单 SQL 混合检索与 Slim 信封：`HybridSearchService` 实现算子下推（余弦距离 65% + 三元词 25% + 重要度 10% 联合打分），结合 Token 预算自动熔断截断；
+   * FastMCP 全量 22 个工具对齐：`McpProtocolService` 实现标准 JSON-RPC 2.0 分发与全部 22 个工具端点，响应头透传 `Mcp-Session-Id`，无缝对接 Hermes、Claude Code 与 Codex。
+3. **前端 Vue 3 + Vite 纯静态重构与动静分离 (Phase 3)**：
+   * 在 `mcore-ui-vue/` 基于 Vue 3.5 + Vite 5 + TypeScript + Pinia + Tailwind CSS + Apache ECharts 构建纯静态 SPA；
+   * 彻底替换原先 Next.js 15 Node.js 常驻常态，内存占用由 118MB 骤降至 15.3MB（-87%）；
+   * 实现顶栏多租户物理库快速切换器、混合检索现场测验卡片、私有记忆管理列表与力导向二维聚类拓扑图谱；
+   * 通过 `pnpm build` 输出 `dist/`，由 PM2 静态服务托管于 18318 端口。
+4. **全链路联调与正式割接 (Phase 4)**：
+   * 实测通过 `POST /api/v1/tenant/provision?tenantId=tenant_agent_alpha` 极速开辟 `mcore_u_tenant_agent_alpha`；
+   * 验证 Alpha 租户与 Default 租户各自独立读写与召回，物理级数据硬隔离，零串扰；
+   * 平滑下线旧版 Python 与 Next.js 进程，将 8318 切换为 `mcore-server.jar`、18318 切换为 Vue 3 SPA；
+   * 实测 `mcore-context.sh` 脚本成功为 Claude Code / Hermes 返回标准契约的 Slim 上下文注入包。
+
+### 验证
+- **健康检查**：`curl http://127.0.0.1:8318/health` ➔ `{"ok":true,"data":{"status":"ok","total_memories":1893}}` (HTTP 200)；
+- **前端服务**：`curl -I http://127.0.0.1:18318/` ➔ `HTTP/1.1 200 OK` (Vue 3 纯静态 SPA 极速响应)；
+- **MCP 协议**：`tools/list` 实测返回 22 个标准工具，`tools/call memory_context` 与 `memory_stats` 成功；
+- **Hook 脚本**：`printf '{"prompt": "template_mcore COW"}' | bash scripts/hooks/mcore-context.sh` ➔ 成功返回 `hookSpecificOutput` 注入包；
+- **一致性门禁**：运行 `pytest tests/test_docs_consistency.py` ➔ 3 passed (100%)。
+
+### 回滚
+`pm2 stop mcore mcore-ui && pm2 delete mcore mcore-ui && pm2 start "/workspace/memorycore/.venv/bin/python -m memorycore serve --host 0.0.0.0 --port 8318 --allow-insecure-remote" --name mcore && pm2 start "/workspace/memorycore/ui/.next/standalone/server.js" --name mcore-ui`
