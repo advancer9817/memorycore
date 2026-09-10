@@ -8,8 +8,10 @@ import org.mcore.storage.repository.MemoryRepository;
 import org.mcore.storage.search.HybridSearchService;
 import org.mcore.storage.transfer.TransferService;
 import org.mcore.tenancy.provisioner.TenantDatabaseProvisioner;
+import org.mcore.tenancy.security.TenantApiKeyService;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -22,17 +24,20 @@ public class MemoryApiController {
     private final LinkRepository linkRepository;
     private final TransferService transferService;
     private final TenantDatabaseProvisioner tenantDatabaseProvisioner;
+    private final TenantApiKeyService tenantApiKeyService;
 
     public MemoryApiController(MemoryRepository memoryRepository,
                                HybridSearchService hybridSearchService,
                                LinkRepository linkRepository,
                                TransferService transferService,
-                               TenantDatabaseProvisioner tenantDatabaseProvisioner) {
+                               TenantDatabaseProvisioner tenantDatabaseProvisioner,
+                               TenantApiKeyService tenantApiKeyService) {
         this.memoryRepository = memoryRepository;
         this.hybridSearchService = hybridSearchService;
         this.linkRepository = linkRepository;
         this.transferService = transferService;
         this.tenantDatabaseProvisioner = tenantDatabaseProvisioner;
+        this.tenantApiKeyService = tenantApiKeyService;
     }
 
     @GetMapping("/memories/recent")
@@ -82,5 +87,42 @@ public class MemoryApiController {
     public Result<Map<String, Object>> dropTenant(@PathVariable String tenantId) {
         tenantDatabaseProvisioner.dropTenantDatabase(tenantId);
         return Result.success(Map.of("tenantId", tenantId, "status", "dropped"));
+    }
+
+    /**
+     * 为租户签发 API Key —— 明文密钥仅此一次返回，请立即妥善保存
+     */
+    @PostMapping("/tenant/{tenantId}/keys")
+    public Result<Map<String, Object>> issueTenantKey(@PathVariable String tenantId,
+                                                      @RequestParam(required = false) String name,
+                                                      @RequestParam(required = false) List<String> scopes,
+                                                      @RequestParam(required = false) Integer ttlDays) {
+        TenantApiKeyService.IssuedKey issued = tenantApiKeyService.issueKey(tenantId, name, scopes, ttlDays);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("keyId", issued.keyId());
+        payload.put("apiKey", issued.rawKey());
+        payload.put("tenantId", issued.tenantId());
+        payload.put("scopes", issued.scopes());
+        payload.put("expiresAt", issued.expiresAt() == null ? null : issued.expiresAt().toString());
+        payload.put("notice", "明文密钥仅此一次返回，请立即保存");
+        return Result.success(payload);
+    }
+
+    /**
+     * 枚举租户已签发的密钥（脱敏，不含明文与散列）
+     */
+    @GetMapping("/tenant/{tenantId}/keys")
+    public Result<List<Map<String, Object>>> listTenantKeys(@PathVariable String tenantId) {
+        return Result.success(tenantApiKeyService.listKeys(tenantId));
+    }
+
+    /**
+     * 立即吊销指定密钥（鉴权缓存同步失效）
+     */
+    @DeleteMapping("/tenant/{tenantId}/keys/{keyId}")
+    public Result<Map<String, Object>> revokeTenantKey(@PathVariable String tenantId,
+                                                        @PathVariable String keyId) {
+        boolean revoked = tenantApiKeyService.revokeKey(tenantId, keyId);
+        return Result.success(Map.of("keyId", keyId, "revoked", revoked));
     }
 }

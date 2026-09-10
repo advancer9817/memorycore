@@ -29,3 +29,11 @@ logging:
     root: INFO
     org.mcore: INFO
     org.mybatis: INFO
+
+# 多租户安全策略
+mcore:
+  security:
+    # 是否启用租户鉴权（关闭后任意 X-Tenant-Id 均可访问，仅供本地调试）
+    enabled: ${MCORE_SECURITY_ENABLED:true}
+    # 共享默认租户，免密钥访问以兼容本地 Agent 钩子
+    default-tenant: ${MCORE_DEFAULT_TENANT:default}

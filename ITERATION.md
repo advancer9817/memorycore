@@ -935,3 +935,46 @@
 
 ### 回滚
 `git revert HEAD && mvn -f /workspace/memorycore/mcore-spring/pom.xml clean package -DskipTests && pm2 restart mcore`
+
+## [迭代 246] 2026-09-10 — 堵住跨租户越权漏洞：API Key 鉴权与租户管理面加固
+
+### 目的
+- 修复**跨租户越权漏洞**：`TenantAuthFilter` 此前仅从 `X-Tenant-Id` 请求头取值并直接绑定上下文，**全程零鉴权**，任意调用方追加一个 HTTP 头即可完整读写他人租户数据。控制面 `sys_tenant_api_keys`（含 `key_hash`/`allowed_scopes`/`expires_at`）早已建表却完全未被使用。
+
+### 变更内容
+1. **新增 `TenantApiKeyService`（mcore-tenancy）**：
+   - 密钥格式 `mk_<8位hex>.<32位hex>`（128 位熵），数据库**只存 secret 段 SHA-256 散列**，明文仅签发瞬间返回一次；
+   - `MessageDigest.isEqual()` 恒定时间比较，规避时序侧信道；
+   - 校验结果按「明文密钥的 SHA-256」为键缓存于 Caffeine（`maxSize=2000`，`expireAfterWrite=60s`），缓存键不含明文；
+   - 提供 `issueKey` / `listKeys`（脱敏）/ `revokeKey`（吊销时 `invalidateAll()` 做到即时生效）；
+   - 鉴权成功后异步回写 `last_used_at`，失败不影响主链路。
+2. **重写 `TenantAuthFilter` 为双层授权模型**：
+   - **数据面**：`default` 租户免密钥（兼容本地 Agent 钩子），其余租户必须持有效且**归属一致**的密钥，否则 401 / 跨租户则 403；
+   - **管理面** `/api/v1/tenant/**`：仅限本机直连，外部来源一律需密钥；
+   - 授权通过后才 `setTenantId()`，并在 `finally` 中强制 `remove()` 清理 ThreadLocal；
+   - 错误响应统一为 `Result` 信封（`A0401` / `A0403`）。
+3. **本机直连判定（关键安全点）**：Cloudflare Tunnel 回源 `127.0.0.1`，仅凭 `remoteAddr` 无法区分内外网。判定需同时满足「回环地址」**且**「不含任何代理注入头（`X-Forwarded-For` / `X-Real-IP` / `CF-Connecting-IP` / `True-Client-IP`）」，否则隧道流量会被误判为本地运维通道。
+4. **REST 端点补齐**：`POST/GET /api/v1/tenant/{tenantId}/keys`、`DELETE /api/v1/tenant/{tenantId}/keys/{keyId}`。
+5. **新增配置项**：`mcore.security.enabled`（默认 true）、`mcore.security.default-tenant`（默认 default），支持环境变量 `MCORE_SECURITY_ENABLED` / `MCORE_DEFAULT_TENANT` 热切换。
+6. **新增设计文档** `docs/mcore-multi-tenant-security-model.md`：信任模型、密钥规范、威胁矩阵、后续演进建议。
+
+### 验证（威胁矩阵 9 项实测全绿）
+| 场景 | 预期 | 实测 |
+|---|---|---|
+| 默认租户无头调用 `/mcp` | 200 | ✅ 200 |
+| 无凭证访问 `X-Tenant-Id: user_1002` | 401 | ✅ `A0401` |
+| 持正确密钥访问本租户 | 200 | ✅ 200（返回该租户 1 条记忆） |
+| 用 user_1002 密钥访问 demo | 403 | ✅ `A0403` |
+| 伪造密钥 `mk_deadbeef.000...` | 401 | ✅ `A0401` |
+| `X-Forwarded-For` 访问管理面 | 401 | ✅ `A0401` |
+| `CF-Connecting-IP` 访问租户枚举 | 401 | ✅ `A0401` |
+| 本机 `GET /tenant/list` | 200 | ✅ 200 |
+| 吊销后立即使用 | 401 | ✅ 401（Caffeine 缓存即时失效） |
+
+- **落库形态核验**：`sys_tenant_api_keys` 中 `hash_len=64`（SHA-256），无明文残留；`last_used_at` 正常回写。
+- **编译打包**：`mvn clean package -DskipTests` ➔ 6 模块 BUILD SUCCESS。
+- **兼容性**：本地 Agent 钩子（`mcore-context.sh` 等经 `/mcp` 走 default 租户）实测未受影响。
+
+### 回滚
+`git revert HEAD && mvn -f /workspace/memorycore/mcore-spring/pom.xml clean package -DskipTests && pm2 restart mcore`
+（应急开关：`MCORE_SECURITY_ENABLED=false` 可临时退回鉴权关闭态）
