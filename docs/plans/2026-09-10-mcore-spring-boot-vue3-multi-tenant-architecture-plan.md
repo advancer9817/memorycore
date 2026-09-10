@@ -48,6 +48,12 @@
      - Pinia 租户状态机与顶栏极质感「私有记忆库快速切换器」组件；
      - Apache ECharts 驱动的高性能 2D 向量拓扑图谱组件；
      - 独立打包、动静分离与多环境部署指南 (Nginx 反向代理 + CORS 跨域解耦)。
+4. 📂 **`docs/mcore-aliyun-coding-guidelines-and-implementation-details.md`**：
+   - **阿里工程规约与技术细节实现方向规范**：
+     - 四层分层架构（Web ➔ Service ➔ Manager ➔ DAO）与领域模型流转红线（DO/DTO/VO/Query）；
+     - 自定义有界线程池与 ThreadLocal `try-finally remove()` 防泄漏守则；
+     - 最小化事务边界与 `@Transactional(rollbackFor = Exception.class)`；
+     - 五位标准错误码与统一 `Result<T>` 响应契约及日志脱敏规范。
 
 ---
 

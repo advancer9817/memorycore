@@ -740,3 +740,28 @@
 
 ### 回滚
 `git revert HEAD`
+
+## [迭代 240] 2026-09-10 — 阿里工程与编程规约全面对齐：确定 mcore 多租户与混合检索技术实现细节规范
+
+### 目的
+- 遵照《阿里巴巴 Java 开发手册》与阿里云企业级编程守则，确立 MemoryCore (Java 17 + Spring Boot 3 + Spring AI + PostgreSQL 16 + Vue 3) 独立库多租户全栈重构的技术细节实现方向与编码红线。
+- 完成《阿里工程规约与技术细节实现方向规范》文档正式落库与规划方案对齐，涵盖领域分层模型、秒级物理库开辟、微型连接池 LRU 调度、单 SQL 混合检索、并发防泄漏、统一异常错误码以及前后端独立部署体系。
+
+### 变更内容
+1. **新建《阿里工程规约与技术细节实现方向规范》** (`docs/mcore-aliyun-coding-guidelines-and-implementation-details.md`，同步镜像至 `/workspace/output/`)：
+   - **分层与领域模型**：严格划分 Web ➔ Service ➔ Manager ➔ DAO 四层，规范 `DO`、`DTO`、`VO`、`Query` 的流转边界，禁 `is` 前缀布尔属性与包装类型要求；
+   - **物理多租户开辟**：控制面系统库解耦，基于 `template_mcore` 写时复制（COW）非事务原生连接实现 30~50ms 极速克隆，正则白名单阻断 SQL/DDL 注入；
+   - **动态数据源与连接熔断**：单租户微型连接池（`min=1, max=3`），Caffeine LRU 活跃池上限 40（峰值 120 连接守护整机 150 上限），空闲 15 分钟自动回收，ThreadLocal 强制在 `finally` 块中执行 `remove()`；
+   - **单 SQL 混合检索与 Slim 信封**：pgvector 余弦距离与 pg_trgm 三元词相似度单阶段算子下推联合打分，双通道保底过滤，Slim 信封结合混合语言 Token 预算熔断截断；
+   - **并发与线程安全**：严禁 `Executors` 静态工厂，统一通过 `ThreadPoolExecutor` 指定有界阻塞队列、具名线程工厂与 `CallerRunsPolicy` 拒绝策略，无锁原子统计；
+   - **异常、事务与安全**：五位标准错误码（`Axxxx`/`Bxxxx`/`Cxxxx`）、统一 `Result<T>` 响应契约、SLF4J 占位符日志、敏感凭据 `[REDACTED]` 强制脱敏、`@Transactional(rollbackFor = Exception.class)` 严禁在事务内执行远程 HTTP/LLM 调用；
+   - **前后端解耦部署**：后端纯 Java 17 + Spring Boot 3（8318 端口 MCP/REST），前端 Vue 3 静态产物托管于 18318 端口，Pinia 状态机与 Axios 拦截器透传 `X-Tenant-Id`，ECharts 2D 向量拓扑可视化。
+2. **更新集成全景实施计划** (`docs/plans/2026-09-10-mcore-spring-boot-vue3-multi-tenant-architecture-plan.md`)：
+   - 将阿里工程规约与技术实现方向文档正式纳入架构设计索引。
+
+### 验证
+- **文档体系一致性门禁**：运行 `.venv/bin/python -m pytest tests/test_docs_consistency.py` ➔ 3 passed (100%)；
+- **全栈文档归档**：规范文档完整保存于 `docs/` 并在 `/workspace/output/` 生成镜像。
+
+### 回滚
+`git revert HEAD`
