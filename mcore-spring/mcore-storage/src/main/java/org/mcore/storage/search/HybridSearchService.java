@@ -43,14 +43,13 @@ public class HybridSearchService {
         int fetchLimit = limit > 0 ? limit : 10;
 
         String sql = """
-            SELECT id, type, scope, title, content, source, source_agent, status,
-                   importance, confidence, effectiveness_score, created_at, updated_at,
-                   (1.0 - (embedding <=> :vec)) AS vector_sim,
+            SELECT m.*,
+                   (1.0 - (m.embedding <=> :vec)) AS vector_sim,
                    0.0 AS text_sim,
-                   (1.0 - (embedding <=> :vec)) AS final_score
-            FROM memories
-            WHERE status = 'active' AND embedding IS NOT NULL
-            ORDER BY embedding <=> :vec ASC
+                   (1.0 - (m.embedding <=> :vec)) AS final_score
+            FROM memories m
+            WHERE m.status = 'active' AND m.embedding IS NOT NULL
+            ORDER BY m.embedding <=> :vec ASC
             LIMIT :limit
         """;
 
@@ -69,22 +68,20 @@ public class HybridSearchService {
 
         if (vec != null) {
             String sql = """
-                SELECT 
-                    id, type, scope, title, content, source, source_agent, status,
-                    importance, confidence, effectiveness_score, created_at, updated_at,
-                    (CASE WHEN embedding IS NOT NULL THEN (1.0 - (embedding <=> :vec)) ELSE 0.0 END) AS vector_sim,
-                    similarity(content, :query) AS text_sim,
+                SELECT m.*,
+                    (CASE WHEN m.embedding IS NOT NULL THEN (1.0 - (m.embedding <=> :vec)) ELSE 0.0 END) AS vector_sim,
+                    similarity(m.content, :query) AS text_sim,
                     (
-                        (CASE WHEN embedding IS NOT NULL THEN (1.0 - (embedding <=> :vec)) * 0.65 ELSE 0.0 END) +
-                        (similarity(content, :query) * (CASE WHEN embedding IS NOT NULL THEN 0.25 ELSE 0.85 END)) +
-                        (COALESCE(importance, 0.5) * 0.10)
+                        (CASE WHEN m.embedding IS NOT NULL THEN (1.0 - (m.embedding <=> :vec)) * 0.65 ELSE 0.0 END) +
+                        (similarity(m.content, :query) * (CASE WHEN m.embedding IS NOT NULL THEN 0.25 ELSE 0.85 END)) +
+                        (COALESCE(m.importance, 0.5) * 0.10)
                     ) AS final_score
-                FROM memories
-                WHERE status = 'active'
-            """ + (t != null ? " AND type = :type " : "") + """
+                FROM memories m
+                WHERE m.status = 'active'
+            """ + (t != null ? " AND m.type = :type " : "") + """
                   AND (
-                      (embedding IS NOT NULL AND (embedding <=> :vec) < 0.60) OR
-                      (similarity(content, :query) > 0.08) OR
+                      (m.embedding IS NOT NULL AND (m.embedding <=> :vec) < 0.60) OR
+                      (similarity(m.content, :query) > 0.08) OR
                       (:query = '')
                   )
                 ORDER BY final_score DESC
@@ -101,20 +98,18 @@ public class HybridSearchService {
             return spec.query((rs, rowNum) -> mapRow(rs)).list();
         } else {
             String sql = """
-                SELECT 
-                    id, type, scope, title, content, source, source_agent, status,
-                    importance, confidence, effectiveness_score, created_at, updated_at,
+                SELECT m.*,
                     0.0 AS vector_sim,
-                    similarity(content, :query) AS text_sim,
+                    similarity(m.content, :query) AS text_sim,
                     (
-                        (similarity(content, :query) * 0.85) +
-                        (COALESCE(importance, 0.5) * 0.15)
+                        (similarity(m.content, :query) * 0.85) +
+                        (COALESCE(m.importance, 0.5) * 0.15)
                     ) AS final_score
-                FROM memories
-                WHERE status = 'active'
-            """ + (t != null ? " AND type = :type " : "") + """
+                FROM memories m
+                WHERE m.status = 'active'
+            """ + (t != null ? " AND m.type = :type " : "") + """
                   AND (
-                      (similarity(content, :query) > 0.05) OR
+                      (similarity(m.content, :query) > 0.05) OR
                       (:query = '')
                   )
                 ORDER BY final_score DESC
@@ -140,14 +135,31 @@ public class HybridSearchService {
         mem.setContent(rs.getString("content"));
         mem.setSource(rs.getString("source"));
         mem.setSourceAgent(rs.getString("source_agent"));
+        mem.setProjectPath(rs.getString("project_path"));
         mem.setStatus(rs.getString("status"));
+        mem.setDecayPolicy(rs.getString("decay_policy"));
         mem.setImportance(rs.getDouble("importance"));
         mem.setConfidence(rs.getDouble("confidence"));
         mem.setEffectivenessScore(rs.getDouble("effectiveness_score"));
+        mem.setFeedbackScore(rs.getDouble("feedback_score"));
+        mem.setInjectedCount(rs.getInt("injected_count"));
+        mem.setIneffectiveCount(rs.getInt("ineffective_count"));
+        mem.setSupersededBy(rs.getString("superseded_by"));
+        mem.setFactLineageRoot(rs.getString("fact_lineage_root"));
+        mem.setValidFrom(rs.getString("valid_from"));
+        mem.setValidUntil(rs.getString("valid_until"));
+        mem.setTags(readStringArray(rs, "tags"));
+        mem.setRelatedIds(readStringArray(rs, "related_ids"));
+        mem.setMetadata(readJsonMap(rs, "metadata"));
+
         Timestamp cAt = rs.getTimestamp("created_at");
         if (cAt != null) mem.setCreatedAt(cAt.toInstant());
         Timestamp uAt = rs.getTimestamp("updated_at");
         if (uAt != null) mem.setUpdatedAt(uAt.toInstant());
+        Timestamp aAt = rs.getTimestamp("last_accessed_at");
+        if (aAt != null) mem.setLastAccessedAt(aAt.toInstant());
+        Timestamp iAt = rs.getTimestamp("last_injected_at");
+        if (iAt != null) mem.setLastInjectedAt(iAt.toInstant());
 
         double vSim = rs.getDouble("vector_sim");
         double tSim = rs.getDouble("text_sim");
@@ -155,4 +167,47 @@ public class HybridSearchService {
 
         return new SearchHit(mem, fScore, vSim, tSim);
     }
+
+    /**
+     * 读取 PostgreSQL 原生 TEXT[] 数组列 (tags / related_ids)
+     */
+    private List<String> readStringArray(java.sql.ResultSet rs, String column) {
+        try {
+            java.sql.Array array = rs.getArray(column);
+            if (array == null) {
+                return new java.util.ArrayList<>();
+            }
+            Object raw = array.getArray();
+            if (raw instanceof Object[] objects) {
+                List<String> out = new java.util.ArrayList<>(objects.length);
+                for (Object obj : objects) {
+                    if (obj != null) {
+                        out.add(String.valueOf(obj));
+                    }
+                }
+                return out;
+            }
+            return new java.util.ArrayList<>();
+        } catch (Exception e) {
+            return new java.util.ArrayList<>();
+        }
+    }
+
+    /**
+     * 读取 PostgreSQL 原生 JSONB 列 (metadata)
+     */
+    private java.util.Map<String, Object> readJsonMap(java.sql.ResultSet rs, String column) {
+        try {
+            String raw = rs.getString(column);
+            if (raw == null || raw.isBlank()) {
+                return new java.util.HashMap<>();
+            }
+            return JSON_MAPPER.readValue(raw, new com.fasterxml.jackson.core.type.TypeReference<>() {});
+        } catch (Exception e) {
+            return new java.util.HashMap<>();
+        }
+    }
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON_MAPPER =
+            new com.fasterxml.jackson.databind.ObjectMapper();
 }

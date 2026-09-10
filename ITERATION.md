@@ -870,3 +870,68 @@
 
 ### 回滚
 `git checkout HEAD~1 mcore-spring/ && mvn -f /workspace/memorycore/mcore-spring/pom.xml clean package -DskipTests && pm2 restart mcore`
+
+## [迭代 244] 2026-09-10 — 修复多租户写入 NOT NULL 崩溃与读路径 PostgreSQL 原生类型映射缺失
+
+### 目的
+- 修复 Java 17 端在多租户场景下暴露的两个阻断级缺陷：① 新建记忆时 `scope`/`project_path` 等 NOT NULL 列落库为 NULL 导致 500；② 检索回显丢失 `tags`、`metadata`、`project_path`、`decay_policy`、`feedback_score`、`injected_count` 等字段，与 Python 原版契约不一致。
+
+### 变更内容
+1. **写入链路加固（防御式 SQL + 服务层补齐）**：
+   - `MemoryMapper.xml` 的 `insert` 语句全面改为 `COALESCE`/`NULLIF` 双层兜底（type/scope/source/source_agent/status/decay_policy/confidence/importance 等），任何调用方漏传字段都不会再触发 NOT NULL 约束崩溃；
+   - `insert` 新增 `tags_json`、`metadata_json`、`related_ids_json` 三列写入，交由表内触发器 `sync_memories_json_columns` 自动同步至 `tags TEXT[]` / `metadata JSONB` / `related_ids TEXT[]`，彻底解决标签静默丢弃问题。
+2. **`MemoryDO` 新增 JSON 投影 getter**：`getTagsJson()` / `getMetadataJson()` / `getRelatedIdsJson()`（基于 Jackson 序列化），供 MyBatis 写入原生 `_json` 列。
+3. **`MemoryQueryService.createMemory` 字段补齐**：显式设置 `project_path`、`decay_policy`、`feedback_score`、`injected_count`、`ineffective_count`、`effectiveness_score`，并解析请求体 `tags`（兼容数组与逗号分隔字符串）与 `metadata` 对象；修复标题截取使用 `content.length()` 导致首行较短时 `StringIndexOutOfBounds` 的隐患。
+4. **读路径全字段映射（消除契约缺口）**：
+   - `HybridSearchService` 三处检索 SQL（向量检索 / 混合检索 / 纯文本检索）由「显式列出十余列」改为 `SELECT m.*` 全字段投影；
+   - 重写 `mapRow` 覆盖全部 24 个业务字段，新增 `readStringArray()`（PostgreSQL 原生 `TEXT[]` ➔ `List<String>`）与 `readJsonMap()`（原生 `JSONB` ➔ `Map`）解析逻辑。
+5. **MyBatis 原生类型处理器补齐**：
+   - 新增 `StringArrayTypeHandler`（`TEXT[]` ↔ `List<String>`，含 `Array.free()` 资源释放）；
+   - 新增 `JsonMapTypeHandler`（`JSONB` ↔ `Map`）；
+   - `MemoryMapper.xml` 的 `resultMap` 注册 `tags` / `related_ids` / `metadata` 三个属性的 typeHandler。
+
+### 验证
+- **编译打包**：`mvn clean package -DskipTests` ➔ 6 模块全部 BUILD SUCCESS。
+- **租户写入不再 500**：`curl -X POST -H "X-Tenant-Id: user_1002" http://127.0.0.1:8318/api/v1/memories -d '{"title":"用户1002的专属技术栈","content":"...","tags":["java","vue3","tenant_1002"]}'` ➔ 正常返回 `mem_e48b3cf1269a4eec` 回执，`tags` 完整回显。
+- **物理隔离实证**：`psql -d mcore_u_user_1002` 中该记录 `tags={java,vue3,tenant_1002}`（触发器同步生效）；`psql -d mcore` 中同 ID 记录数 = **0**，主库仍保有 4646 条，**零污染**。
+- **读路径字段补齐**：租户内检索回显 `projectPath=''`、`tags=['java','vue3','tenant_1002']`、`decayPolicy='review'`、`feedbackScore=0.0`、`injectedCount=0`（修复前分别为 `null`/`[]`/`null`/`null`/`null`）；主库检索回显 `tags=['project:mcore']`、`projectPath='/home/advancer/project/memorycore'`、`injectedCount=16`。
+- **服务健康**：`curl http://127.0.0.1:8318/health` ➔ `{"ok":true}`；PM2 状态持久化。
+
+### 回滚
+`git revert HEAD && mvn -f /workspace/memorycore/mcore-spring/pom.xml clean package -DskipTests && pm2 restart mcore`
+
+## [迭代 245] 2026-09-10 — 打通多租户控制面：物理建库与 sys_tenant_databases 注册表双写闭环
+
+### 目的
+- 补齐多租户体系的关键断点：`TenantDatabaseProvisioner` 此前**只创建物理库、从未写入控制面注册表**，导致 `mcore_system.sys_tenant_databases` 无法枚举租户、配额与密钥表形同虚设、租户无法被审计与回收。
+
+### 变更内容
+1. **控制面专用数据源**：
+   - `application.yml` 新增 `spring.datasource.system-db: ${MCORE_SYSTEM_DB:mcore_system}`；
+   - `DataSourceConfig` 新增 `systemDataSource`（`Hikari-System-Pool`，min 1 / max 3）与 `systemJdbcClient` 两个 Bean，与数据面 `defaultDataSource` / `dynamicDataSource` 完全隔离。
+2. **修复 Bean 注入歧义（根因级缺陷）**：`systemJdbcClient(DataSource)` 与 `dynamicDataSource(DataSource)` 按类型注入时被 `@Primary` 的动态路由数据源抢走，导致控制面查询实际落到 `mcore` 库并报 `relation "sys_tenant_databases" does not exist`；为两处参数显式加上 `@Qualifier` 修复。
+3. **开辟引擎双写闭环**（`TenantDatabaseProvisioner` 重写）：
+   - `provisionTenantDatabase()`：物理 `CREATE DATABASE ... TEMPLATE template_mcore`（幂等，已存在则跳过克隆）+ 控制面 UPSERT；
+   - 注册前先幂等落 `sys_users` 用户行（外键依赖），`password_hash='!'` 为锁定态哨兵值，表示尚未设置密码、不可密码登录；
+   - 同步 `sys_tenant_databases` UPSERT 与 `sys_tenant_quotas` 默认配额（10000 条 / 512MB）；
+   - 新增 `dropTenantDatabase()`：`pg_terminate_backend` 驱逐活跃连接 ➔ `DROP DATABASE` ➔ 级联清理密钥/配额/注册表；
+   - 新增 `listTenants()` 控制面全量枚举；
+   - 新增租户 ID 安全校验（`^[a-zA-Z0-9_-]{1,32}$`）防 SQL 注入。
+4. **REST 端点补齐**：`GET /api/v1/tenant/list`、`DELETE /api/v1/tenant/{tenantId}`。
+5. **权限归一**：`mcore_system` 四张表属主由 `postgres` 移交 `mcore_user`，消除数据面账号的权限阻断。
+
+### 验证
+- **全生命周期实测**（全新租户 `user_2003`）：
+  1. 开辟 ➔ `{"tenantId":"user_2003","dbName":"mcore_u_user_2003","status":"ready"}`；
+  2. 写入 ➔ 返回 `mem_38991ba5d7ae451a`；
+  3. 物理库 `psql -d mcore_u_user_2003` 中 `count(*) = 1`；
+  4. 销毁 ➔ `{"status":"dropped"}`；
+  5. 物理库已消失（`psql -lqt | grep -c` = **0**）；
+  6. 注册表零残留 ➔ 剩余 `['demo', 'user_1002', 'default']`。
+- **控制面枚举**：`GET /api/v1/tenant/list` 正确返回 3 个已登记租户及其 `db_name` / `schema_version` / `status`。
+- **历史孤儿回填**：`user_1002`、`demo` 经幂等 re-provision 成功登记入库。
+- **编译打包**：`mvn clean package -DskipTests` ➔ 6 模块全部 BUILD SUCCESS。
+- **Python 侧全量回归**：`.venv/bin/python -m pytest tests -q` ➔ **626 passed, 2 skipped**（309.75s）。
+
+### 回滚
+`git revert HEAD && mvn -f /workspace/memorycore/mcore-spring/pom.xml clean package -DskipTests && pm2 restart mcore`

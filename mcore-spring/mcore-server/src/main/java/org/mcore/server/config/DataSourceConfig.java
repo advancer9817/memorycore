@@ -3,6 +3,7 @@ package org.mcore.server.config;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.mcore.tenancy.pool.DynamicTenantRoutingDataSource;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -29,6 +30,9 @@ public class DataSourceConfig {
     @Value("${spring.datasource.default-db:mcore}")
     private String defaultDb;
 
+    @Value("${spring.datasource.system-db:mcore_system}")
+    private String systemDb;
+
     @Bean
     public DataSource defaultDataSource() {
         HikariConfig config = new HikariConfig();
@@ -42,9 +46,30 @@ public class DataSourceConfig {
         return new HikariDataSource(config);
     }
 
+    /**
+     * 控制面系统库（租户注册表 / 用户 / 配额 / 密钥）专用数据源
+     */
+    @Bean
+    public DataSource systemDataSource() {
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl(String.format("jdbc:postgresql://%s:%d/%s?sslmode=prefer&ApplicationName=mcore_system", host, port, systemDb));
+        config.setUsername(username);
+        config.setPassword(password);
+        config.setPoolName("Hikari-System-Pool");
+        config.setMinimumIdle(1);
+        config.setMaximumPoolSize(3);
+        config.setIdleTimeout(300000);
+        return new HikariDataSource(config);
+    }
+
+    @Bean
+    public JdbcClient systemJdbcClient(@Qualifier("systemDataSource") DataSource systemDataSource) {
+        return JdbcClient.create(systemDataSource);
+    }
+
     @Bean
     @Primary
-    public DataSource dynamicDataSource(DataSource defaultDataSource) {
+    public DataSource dynamicDataSource(@Qualifier("defaultDataSource") DataSource defaultDataSource) {
         return new DynamicTenantRoutingDataSource(host, port, username, password, defaultDataSource);
     }
 

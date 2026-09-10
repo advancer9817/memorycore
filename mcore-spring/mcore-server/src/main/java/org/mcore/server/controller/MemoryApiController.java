@@ -72,4 +72,15 @@ public class MemoryApiController {
                 "status", "ready"
         ));
     }
+
+    @GetMapping("/tenant/list")
+    public Result<List<Map<String, Object>>> listTenants() {
+        return Result.success(tenantDatabaseProvisioner.listTenants());
+    }
+
+    @DeleteMapping("/tenant/{tenantId}")
+    public Result<Map<String, Object>> dropTenant(@PathVariable String tenantId) {
+        tenantDatabaseProvisioner.dropTenantDatabase(tenantId);
+        return Result.success(Map.of("tenantId", tenantId, "status", "dropped"));
+    }
 }

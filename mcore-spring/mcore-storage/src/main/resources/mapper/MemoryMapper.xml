@@ -29,6 +29,12 @@
         <result property="validUntil" column="valid_until"/>
         <result property="supersededBy" column="superseded_by"/>
         <result property="factLineageRoot" column="fact_lineage_root"/>
+        <result property="tags" column="tags"
+                typeHandler="org.mcore.storage.mybatis.handler.StringArrayTypeHandler"/>
+        <result property="relatedIds" column="related_ids"
+                typeHandler="org.mcore.storage.mybatis.handler.StringArrayTypeHandler"/>
+        <result property="metadata" column="metadata"
+                typeHandler="org.mcore.storage.mybatis.handler.JsonMapTypeHandler"/>
     </resultMap>
 
     <select id="countTotal" resultType="long">
@@ -57,12 +63,29 @@
             confidence, importance, status, decay_policy, feedback_score,
             injected_count, ineffective_count, effectiveness_score,
             valid_from, valid_until, superseded_by, fact_lineage_root,
+            tags_json, metadata_json, related_ids_json,
             created_at, updated_at
         ) VALUES (
-            #{id}, #{type}, #{scope}, #{title}, #{content}, #{source}, #{sourceAgent}, #{projectPath},
-            #{confidence}, #{importance}, #{status}, #{decayPolicy}, #{feedbackScore},
-            #{injectedCount}, #{ineffectiveCount}, #{effectivenessScore},
+            #{id},
+            COALESCE(NULLIF(#{type}, ''), 'project_memory'),
+            COALESCE(NULLIF(#{scope}, ''), 'global'),
+            COALESCE(#{title}, ''),
+            COALESCE(#{content}, ''),
+            COALESCE(NULLIF(#{source}, ''), 'manual'),
+            COALESCE(NULLIF(#{sourceAgent}, ''), 'agent'),
+            COALESCE(NULLIF(#{projectPath}, ''), ''),
+            COALESCE(#{confidence}, 0.70),
+            COALESCE(#{importance}, 0.50),
+            COALESCE(NULLIF(#{status}, ''), 'active'),
+            COALESCE(NULLIF(#{decayPolicy}, ''), 'review'),
+            COALESCE(#{feedbackScore}, 0.0),
+            COALESCE(#{injectedCount}, 0),
+            COALESCE(#{ineffectiveCount}, 0),
+            COALESCE(#{effectivenessScore}, 0.50),
             #{validFrom}, #{validUntil}, #{supersededBy}, #{factLineageRoot},
+            COALESCE(#{tagsJson}, '[]'),
+            COALESCE(#{metadataJson}, '{}'),
+            COALESCE(#{relatedIdsJson}, '[]'),
             clock_timestamp(), clock_timestamp()
         )
     </insert>

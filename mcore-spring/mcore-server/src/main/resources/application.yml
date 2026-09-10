@@ -10,6 +10,7 @@ spring:
     username: ${MCORE_DB_USER:mcore_user}
     password: ${MCORE_DB_PASSWORD:mcore_secure_password_2026}
     default-db: ${MCORE_DEFAULT_DB:mcore}
+    system-db: ${MCORE_SYSTEM_DB:mcore_system}
   sql:
     init:
       mode: never

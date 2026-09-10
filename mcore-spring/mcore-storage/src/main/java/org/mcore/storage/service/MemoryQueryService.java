@@ -217,11 +217,13 @@ public class MemoryQueryService {
         String title = String.valueOf(body.getOrDefault("title", ""));
         String content = body.get("content") != null ? String.valueOf(body.get("content")) : String.valueOf(body.getOrDefault("text", ""));
         if (title.isBlank() && !content.isBlank()) {
-            title = content.lines().findFirst().orElse("Memory").substring(0, Math.min(80, content.length()));
+            String firstLine = content.lines().findFirst().orElse("Memory");
+            title = firstLine.substring(0, Math.min(80, firstLine.length()));
         }
         String scope = String.valueOf(body.getOrDefault("scope", "global"));
         String source = String.valueOf(body.getOrDefault("source", "manual"));
-        String sourceAgent = String.valueOf(body.getOrDefault("source_agent", "ui"));
+        String sourceAgent = String.valueOf(body.getOrDefault("source_agent", body.getOrDefault("agent", "ui")));
+        String projectPath = body.get("project_path") != null ? String.valueOf(body.get("project_path")) : "";
         double importance = parseDouble(body.get("importance"), 0.5);
         double confidence = parseDouble(body.get("confidence"), 0.7);
         String status = String.valueOf(body.getOrDefault("status", "active"));
@@ -234,9 +236,23 @@ public class MemoryQueryService {
         record.setContent(content);
         record.setSource(source);
         record.setSourceAgent(sourceAgent);
+        record.setProjectPath(projectPath);
         record.setImportance(importance);
         record.setConfidence(confidence);
         record.setStatus(status);
+        record.setDecayPolicy("review");
+        record.setFeedbackScore(0.0);
+        record.setInjectedCount(0);
+        record.setIneffectiveCount(0);
+        record.setEffectivenessScore(0.5);
+        record.setTags(parseStringList(body.get("tags")));
+
+        Object metadata = body.get("metadata");
+        if (metadata instanceof Map<?, ?> metaMap) {
+            Map<String, Object> normalized = new LinkedHashMap<>();
+            metaMap.forEach((k, v) -> normalized.put(String.valueOf(k), v));
+            record.setMetadata(normalized);
+        }
 
         memoryMapper.insert(record);
 
@@ -245,6 +261,7 @@ public class MemoryQueryService {
         res.put("title", title);
         res.put("content", content);
         res.put("type", type);
+        res.put("tags", record.getTags());
         res.put("status", status);
         res.put("state", status);
         res.put("app_name", sourceAgent);

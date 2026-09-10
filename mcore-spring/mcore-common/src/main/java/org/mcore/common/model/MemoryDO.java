@@ -127,4 +127,31 @@ public class MemoryDO implements Serializable {
 
     public float[] getEmbedding() { return embedding; }
     public void setEmbedding(float[] embedding) { this.embedding = embedding; }
+
+    // ------------------------------------------------------------------
+    // JSON 投影字段：供 MyBatis 写入 PostgreSQL 原生 _json 列使用
+    // 表内触发器 sync_memories_json_columns 会据此自动同步 tags[] / metadata / related_ids[]
+    // ------------------------------------------------------------------
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON_MAPPER =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
+    private String toJson(Object value, String fallback) {
+        try {
+            return JSON_MAPPER.writeValueAsString(value);
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
+
+    public String getTagsJson() {
+        return toJson(tags != null ? tags : new ArrayList<>(), "[]");
+    }
+
+    public String getMetadataJson() {
+        return toJson(metadata != null ? metadata : new HashMap<>(), "{}");
+    }
+
+    public String getRelatedIdsJson() {
+        return toJson(relatedIds != null ? relatedIds : new ArrayList<>(), "[]");
+    }
 }
