@@ -171,6 +171,80 @@ public class EmbeddingService {
     /**
      * 确定性伪哈希向量生成 (算法与 Python _embed_hashing 100% 字节对齐)
      */
+    /**
+     * 批量嵌入：单次 HTTP 请求提交多个文本，由 ollama 在一次前向传播中处理。
+     *
+     * 为什么需要：逐条调用在 2 核环境下约 1.9s/条（4836 条约需 2.5 小时）；
+     * 批量提交可让模型在一次推理中处理整批，吞吐显著提升。
+     *
+     * @return 与入参顺序一致的向量列表；单条失败时对应位置为 null
+     */
+    public java.util.List<float[]> embedBatch(java.util.List<String> texts) throws Exception {
+        refreshRuntimeConfig();
+        java.util.List<float[]> out = new java.util.ArrayList<>();
+        if (texts == null || texts.isEmpty()) {
+            return out;
+        }
+
+        // 仅在 ollama 通道可用且未配置 OpenAI 端点时走批量路径
+        boolean useOllama = (apiUrl == null || apiUrl.isBlank());
+        if (!useOllama) {
+            for (String t : texts) {
+                out.add(embedText(t));
+            }
+            return out;
+        }
+
+        try {
+            String endpoint = ollamaUrl.replaceAll("/+$", "") + "/api/embed";
+            String payload = objectMapper.writeValueAsString(Map.of("model", modelName, "input", texts));
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(endpoint))
+                    .timeout(Duration.ofSeconds(Math.max(60, 30 * texts.size())))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8))
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() != 200) {
+                throw new RuntimeException("Ollama batch HTTP " + response.statusCode());
+            }
+            JsonNode root = objectMapper.readTree(response.body());
+            JsonNode arr = root.get("embeddings");
+            if (arr == null || !arr.isArray()) {
+                throw new RuntimeException("Ollama 批量响应缺失 embeddings");
+            }
+            for (JsonNode vecNode : arr) {
+                if (vecNode == null || !vecNode.isArray()) {
+                    out.add(null);
+                    continue;
+                }
+                float[] v = new float[dim];
+                int n = Math.min(vecNode.size(), dim);
+                for (int i = 0; i < n; i++) {
+                    v[i] = (float) vecNode.get(i).asDouble();
+                }
+                out.add(v);
+            }
+            realModelOnline = true;
+            // 数量不足时补齐占位，保证与入参对齐
+            while (out.size() < texts.size()) {
+                out.add(null);
+            }
+            return out;
+        } catch (Exception e) {
+            log.warn("批量嵌入失败，回退逐条: {}", e.getMessage());
+            out.clear();
+            for (String t : texts) {
+                try {
+                    out.add(embedText(t));
+                } catch (Exception ex) {
+                    out.add(null);
+                }
+            }
+            return out;
+        }
+    }
+
     public float[] embedHashing(String text, int targetDim) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");

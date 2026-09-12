@@ -319,10 +319,16 @@ public class LlmCuratorExecutor {
         double autoApproveLowRisk = configStore.doubleVal(gov, "auto_approve_low_risk_confidence", 0.7);
         double reviewThreshold = configStore.doubleVal(gov, "review_confidence_threshold", 0.55);
         List<String> manualOnly = asStringList(gov.get("manual_only_actions"));
+        // merge 类动作同属人工审批范围（对齐既定治理策略：merge/split/mark_contradicted 走人工）
+        List<String> mergeActions = asStringList(gov.get("merge_actions"));
 
         List<String> reasons = new ArrayList<>();
         if (manualOnly.contains(action)) {
             reasons.add("动作 " + action + " 属人工专属，强制进入待审");
+            return new PolicyGate("pending", risk, reasons);
+        }
+        if (mergeActions.contains(action)) {
+            reasons.add("动作 " + action + " 属合并类，需人工确认");
             return new PolicyGate("pending", risk, reasons);
         }
         if ("high".equalsIgnoreCase(risk)) {

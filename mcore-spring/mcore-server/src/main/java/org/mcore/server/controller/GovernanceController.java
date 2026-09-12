@@ -10,9 +10,12 @@ import java.util.*;
 public class GovernanceController {
 
     private final GovernanceService governanceService;
+    private final org.mcore.storage.service.VectorBackfillService vectorBackfillService;
 
-    public GovernanceController(GovernanceService governanceService) {
+    public GovernanceController(GovernanceService governanceService,
+                                org.mcore.storage.service.VectorBackfillService vectorBackfillService) {
         this.governanceService = governanceService;
+        this.vectorBackfillService = vectorBackfillService;
     }
 
     @GetMapping({"/api/governance/counts", "/api/v1/governance/counts"})
@@ -56,6 +59,22 @@ public class GovernanceController {
         List<String> ids = body != null && body.get("decision_ids") != null ? (List<String>) body.get("decision_ids") : Collections.emptyList();
         String actor = body != null ? (String) body.getOrDefault("actor", "admin") : "admin";
         return governanceService.batchApply(ids, actor);
+    }
+
+    /** 向量健康检测：判定存量向量是否仍为哈希降级产物 */
+    @GetMapping({"/api/v1/maintenance/vector-status"})
+    public Map<String, Object> vectorStatus(@RequestParam(value = "sample", defaultValue = "200") int sample) {
+        return vectorBackfillService.detect(sample);
+    }
+
+    /** 向量回填：将哈希降级向量重算为真实语义向量（幂等，已语义化的行自动跳过） */
+    @PostMapping({"/api/v1/maintenance/reembed"})
+    public Map<String, Object> reembed(@RequestBody(required = false) Map<String, Object> body) {
+        boolean dryRun = body != null && Boolean.TRUE.equals(body.get("dry_run"));
+        int batchSize = body != null && body.get("batch_size") instanceof Number n ? n.intValue() : 50;
+        int maxRows = body != null && body.get("max_rows") instanceof Number n ? n.intValue() : 500;
+        int offset = body != null && body.get("offset") instanceof Number n ? n.intValue() : 0;
+        return vectorBackfillService.backfill(batchSize, maxRows, dryRun, offset);
     }
 
     @GetMapping({"/api/audit", "/api/v1/audit"})
