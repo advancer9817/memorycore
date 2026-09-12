@@ -37,12 +37,30 @@ public class GovernanceController {
         return governanceService.listDecisions(page, pageSize, status, type);
     }
 
+    /**
+     * 应用决策。返回真实执行明细（实际改动了哪条记忆、影响了多少行、执行台账 id）。
+     * 修复：此前只返回 {success,id,status:"applied"} 而服务层并未改动 memories，
+     * 前端据此显示"已应用"，属静默假成功。
+     */
     @PostMapping({"/api/governance/{id}/apply", "/api/v1/governance/{id}/apply"})
-    public ResponseEntity<Map<String, Object>> applyDecision(
+    public Map<String, Object> applyDecision(
             @PathVariable("id") String id,
             @RequestParam(value = "actor", defaultValue = "admin") String actor) {
-        boolean ok = governanceService.applyDecision(id, actor);
-        return ResponseEntity.ok(Map.of("success", ok, "id", id, "status", "applied"));
+        Map<String, Object> r = governanceService.executeDecision(id, actor);
+        r.put("success", Boolean.TRUE.equals(r.get("ok")));
+        r.put("id", id);
+        return r;
+    }
+
+    /** 依据执行台账的 inverse 链回滚某次决策 */
+    @PostMapping({"/api/governance/{id}/rollback", "/api/v1/governance/{id}/rollback"})
+    public Map<String, Object> rollbackDecision(
+            @PathVariable("id") String id,
+            @RequestParam(value = "actor", defaultValue = "admin") String actor) {
+        Map<String, Object> r = governanceService.rollbackDecision(id, actor);
+        r.put("success", Boolean.TRUE.equals(r.get("ok")));
+        r.put("id", id);
+        return r;
     }
 
     @PostMapping({"/api/governance/{id}/reject", "/api/v1/governance/{id}/reject"})
@@ -74,7 +92,9 @@ public class GovernanceController {
         int batchSize = body != null && body.get("batch_size") instanceof Number n ? n.intValue() : 50;
         int maxRows = body != null && body.get("max_rows") instanceof Number n ? n.intValue() : 500;
         int offset = body != null && body.get("offset") instanceof Number n ? n.intValue() : 0;
-        return vectorBackfillService.backfill(batchSize, maxRows, dryRun, offset);
+        // 可选状态过滤：优先补齐 active 行（检索正确性直接相关）
+        String statusFilter = body != null && body.get("status") != null ? String.valueOf(body.get("status")) : null;
+        return vectorBackfillService.backfill(batchSize, maxRows, dryRun, offset, statusFilter);
     }
 
     @GetMapping({"/api/audit", "/api/v1/audit"})

@@ -54,6 +54,9 @@ class McpProtocolServiceTest {
     @Mock
     private ExtractionService extractionService;
 
+    @Mock
+    private org.mcore.storage.repository.QualityMetricsRepository qualityMetricsRepository;
+
     private ObjectMapper objectMapper;
     private McpProtocolService mcpProtocolService;
 
@@ -69,6 +72,7 @@ class McpProtocolServiceTest {
                 feedbackRepository,
                 transferService,
                 extractionService,
+                qualityMetricsRepository,
                 objectMapper
         );
     }

@@ -17,15 +17,18 @@ public class MemoryQueryService {
     private final EntityMapper entityMapper;
     private final org.springframework.jdbc.core.simple.JdbcClient jdbcClient;
     private final org.mcore.storage.repository.MemoryRepository memoryRepository;
+    private final org.mcore.storage.entity.EntityIndexService entityIndexService;
 
     public MemoryQueryService(MemoryMapper memoryMapper, LinkMapper linkMapper, EntityMapper entityMapper,
                               org.springframework.jdbc.core.simple.JdbcClient jdbcClient,
-                              org.mcore.storage.repository.MemoryRepository memoryRepository) {
+                              org.mcore.storage.repository.MemoryRepository memoryRepository,
+                              org.mcore.storage.entity.EntityIndexService entityIndexService) {
         this.memoryMapper = memoryMapper;
         this.linkMapper = linkMapper;
         this.entityMapper = entityMapper;
         this.jdbcClient = jdbcClient;
         this.memoryRepository = memoryRepository;
+        this.entityIndexService = entityIndexService;
     }
 
     private int parseInt(Object val, int defaultVal) {
@@ -278,6 +281,8 @@ public class MemoryQueryService {
         memoryRepository.redactInPlace(record, "createMemory");
 
         memoryMapper.insert(record);
+        // 实体索引同步（此路径曾绕过 MemoryRepository，需显式补齐）
+        entityIndexService.sync(record);
 
         Map<String, Object> res = new LinkedHashMap<>();
         res.put("id", id);

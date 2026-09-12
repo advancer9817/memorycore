@@ -22,13 +22,16 @@ public class MemoryRepository {
     private final EmbeddingService embeddingService;
     private final ObjectMapper objectMapper;
     private final org.mcore.storage.privacy.RedactionService redactionService;
+    private final org.mcore.storage.entity.EntityIndexService entityIndexService;
 
     public MemoryRepository(MemoryMapper memoryMapper, EmbeddingService embeddingService, ObjectMapper objectMapper,
-                            org.mcore.storage.privacy.RedactionService redactionService) {
+                            org.mcore.storage.privacy.RedactionService redactionService,
+                            org.mcore.storage.entity.EntityIndexService entityIndexService) {
         this.memoryMapper = memoryMapper;
         this.embeddingService = embeddingService;
         this.objectMapper = objectMapper;
         this.redactionService = redactionService;
+        this.entityIndexService = entityIndexService;
     }
 
     public long countActiveMemories() {
@@ -83,6 +86,11 @@ public class MemoryRepository {
         if (vec != null && vec.length > 0) {
             memoryMapper.updateEmbedding(record.getId(), new PGvector(vec));
         }
+
+        // 实体索引同步：对标 Python entities.sync_memory_entities。
+        // Java 迁移后该能力整体缺失 —— memory_entities 自 2026-09-10 起停止增长，
+        // 而 memories 持续写入，索引持续腐化。此处与脱敏同挂写入汇聚点。
+        entityIndexService.sync(record);
     }
 
     /**
@@ -135,6 +143,14 @@ public class MemoryRepository {
             float[] vec = embeddingService.embedText(content);
             memoryMapper.updateEmbedding(id, new PGvector(vec));
         }
+        // 实体索引随内容与状态变更重算：状态转为非 active 时实体行必须清除，
+        // 否则已归档记忆仍会被 entity_search 召回。取完整记录以保证 tags/project_path 准确。
+        if (rows > 0) {
+            MemoryDO full = memoryMapper.selectById(id);
+            if (full != null) {
+                entityIndexService.sync(full);
+            }
+        }
         return rows > 0;
     }
 
@@ -144,7 +160,15 @@ public class MemoryRepository {
         old.setId(oldId);
         old.setStatus("superseded");
         old.setSupersededBy(newRecord.getId());
-        return memoryMapper.update(old) > 0;
+        boolean ok = memoryMapper.update(old) > 0;
+        // 被取代的记忆转为非 active，其实体索引必须清除
+        if (ok) {
+            MemoryDO full = memoryMapper.selectById(oldId);
+            if (full != null) {
+                entityIndexService.sync(full);
+            }
+        }
+        return ok;
     }
 
     /**

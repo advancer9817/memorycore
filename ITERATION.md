@@ -1644,3 +1644,68 @@ JDBC URL 参数注入面 / 无 `@Scheduled` 调度 / `extraction_strategy` 16 �
 新增：`privacy/RedactionService.java`、`privacy/InjectionGuard.java`
 修改：`MemoryRepository.java`、`MemoryMapper.java`、`MemoryMapper.xml`、`MemoryQueryService.java`、`MemoryMapper` 审计写入、`ContextPackBuilder.java`、`ContextPackResponse.java`、`TenantAuthFilter.java`、`CorsConfig.java`、`ConfigService.java`、`ConfigController.java`、`application.yml`
 文档：`docs/2026-09-12-java-migration-parity-audit.md`、`docs/2026-09-12-java-migration-parity-remediation-checklist.md`
+
+## [迭代 263] 2026-09-12 — 第二批止损落地（S5–S7 + S23/S24）：实体索引 / 决策执行 / 真实指标 / 维护链安全
+
+### 目的
+落实 `docs/2026-09-12-java-migration-parity-audit.md` 第二批（止损）与维护链数据危险项。其中 S5 是唯一**正在持续腐化**的回归。
+
+### 变更摘要
+
+**S5 实体索引停更（唯一持续腐化的回归）**
+- 新增 `mcore-storage/.../entity/EntityExtractor.java`：正则抽取（URL/路径/文件/端口/已知实体/标签）+ 别名归一（`memorycore`→`mcore`、`nomic-embed-text`→`ollama`），对标 `memorycore/storage/entities.py`（249 行）
+- 新增 `mcore-storage/.../entity/EntityIndexService.java`：先删后插 + `ON CONFLICT (memory_id, normalized_entity)` 幂等 + 非 active 清除实体行 + 项目实体兜底
+- 重写 `EntityRepository.searchEntities`：由裸 `LIKE` 改为「查询文本抽实体 + 归一后 IN 匹配」+ `status='active'` + `valid_until` + scope/project_path 过滤 + 权重排序 + boost 计算
+- 挂点：`MemoryRepository.insert/update/supersede`、`MemoryQueryService.createMemory`
+
+**S6 治理决策执行器（原为静默假成功）**
+- `GovernanceService.executeDecision()`：按真实 schema（`before_state_json.keep_id/drop_id`）把决策作用到 `memories`
+- 动作白名单：`archive_duplicate`/`archive`/`merge`/`archive_and_merge_duplicate`/`mark_contradicted`；未知动作拒绝
+- 补齐台账：`governance_executions` + `governance_mutation_log`（含 before/after/inverse）
+- `rollbackDecision()`：依 inverse 链恢复 + 双表标记；新增 `/api/v1/governance/{id}/rollback` 端点
+- `apply` 端点由 `{success,id,status}` 改为返回真实执行明细
+- 批量执行逐条落地，不支持的动作如实计入 skipped
+
+**S7 摘除伪造指标**
+- 新增 `QualityMetricsRepository`：真实聚合 `context_quality_events`
+- `McpProtocolService` 的 `hit_rate=0.94` / `average_recall_ms=3.8` → 真实值；无来源的指标返回 null 并标注 `latency_available:false`
+- `ContextLabController` trace 的 `vector_avg_score=0.78`/`cross_retrieval_rate=0.65`/`entity_hits=0` 硬编码 → 按实际命中分数推导；`retrieval_sources` 不再无条件写死
+
+**S23 危险默认动作**
+- `executeMaintenance` 原 default 分支把**任何未知 action（含 merge）**执行为「归档全部 stale」 → 改显式白名单 + 未知即拒绝且零写入
+
+**S24 维护链安全**
+- `plan_token` 由随机 UUID（不落库、不校验）改为 sha256(动作+排序候选id)，落库可校验
+- 执行前校验令牌 + **漂移检测**（候选集变化即拒绝）+ **强制快照**（受影响行 id+原状态）+ **PG advisory lock** + **幂等重放**
+- 候选集谓词与执行谓词统一（原 `clean` 计划的候选集与执行条件不一致）
+
+**附带修复的 schema 缺陷**
+- `memories.valid_from` / `valid_until` 被建为 `TEXT`（邻列均为 TIMESTAMPTZ），导致任何时间比较查询报 `operator does not exist: text > timestamp with time zone`
+- 实测该两列 **4940/4940 全为 NULL**，迁移零风险；已改为 `TIMESTAMPTZ`，同步 `memorycore/storage/schema.sql` 与 5 个库（`mcore`/`mcore_test`/`mcore_u_demo`/`mcore_u_user_1002`/`template_mcore`）
+
+**附带修复的 mapper 缺陷**
+- `EntityMapper.xml` 的 insert 漏写 `aliases_json` 与 `weight`（即便调用也丢别名与权重），且无 `ON CONFLICT`；`EntityIndexService` 改用显式 upsert
+
+**测试适配**
+- `McpProtocolServiceTest` 补 `QualityMetricsRepository` mock（`-DskipTests` 只跳过测试执行、不跳过测试编译）
+
+### 验证（全部实测）
+| 项 | 证据 |
+|---|---|
+| S5 写入 | 探针生成 5 条实体行：`/etc/mcore/config.yaml`(path/1.0)、`config.yaml`(file/0.9)、`11434`(port/0.9)、`memorycore`→`mcore`、`ollama` |
+| S5 检索 | 查询 `memorycore` 命中 `normalized=mcore` 的行；查询 `ollama` 命中 `nomic-embed-text`/`Ollama`（同别名组）；boost=0.30 |
+| S6 执行 | `memories.status` active→archived；`governance_executions` 1 行；`governance_mutation_log` before/after/inverse 完整；决策回写 `execution_id`；归档后实体行清零 |
+| S6 幂等 | 二次 apply → mutation_log 行数 1→1 不变 |
+| S6 回滚 | archived→active；决策 `rolled_back`；变更日志 `rolled_back` |
+| S7 | `hit_rate` 0.94→**0.6613**（53 行真实均值）；`average_recall_ms` 3.8→**null** + `latency_available:false` |
+| S23 | `action=merge` → `unsupported_maintenance_action`，零写入 |
+| S24 | 缺 token/伪造 token 拒绝；漂移检测 `plan_drift`（planned 1→current 0）；幂等重放返回既有结果 |
+
+### 风险与注意事项
+- `valid_until` 类型变更属 schema 迁移；当前该列无数据，且 Java 以 String 读取（PG JDBC 对 timestamptz 的 getString 返回格式化字符串），读写路径兼容
+- 治理动作白名单须与 LLM 策展器产出的 `recommended_action` 保持同步，新增动作需同时更新 `executeDecision` 的 switch
+- 回填接口新增可选 `status` 参数（用于优先补齐 active 行）
+
+### 涉及文件
+新增：`entity/EntityExtractor.java`、`entity/EntityIndexService.java`、`repository/QualityMetricsRepository.java`
+修改：`repository/EntityRepository.java`、`repository/MemoryRepository.java`、`service/MemoryQueryService.java`、`service/GovernanceService.java`、`service/VectorBackfillService.java`、`mcp/service/McpProtocolService.java`、`mcp/service/McpProtocolServiceTest.java`、`controller/GovernanceController.java`、`controller/ContextLabController.java`、`memorycore/storage/schema.sql`

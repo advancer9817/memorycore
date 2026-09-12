@@ -95,6 +95,17 @@ public class VectorBackfillService {
      * @param dryRun    true 时只统计不写库
      */
     public Map<String, Object> backfill(int batchSize, int maxRows, boolean dryRun, int offset) {
+        return backfill(batchSize, maxRows, dryRun, offset, null);
+    }
+
+    /**
+     * 分批回填（可限定状态）。
+     *
+     * @param statusFilter 仅回填该状态的记忆；null/空表示全部。
+     *                     用于优先补齐 active 行（检索正确性直接相关），
+     *                     把 archived/superseded 等非检索行延后。
+     */
+    public Map<String, Object> backfill(int batchSize, int maxRows, boolean dryRun, int offset, String statusFilter) {
         int size = Math.max(1, Math.min(batchSize, 500));
         int cap = Math.max(1, Math.min(maxRows, 10000));
         int off = Math.max(0, offset);
@@ -108,10 +119,16 @@ public class VectorBackfillService {
 
         while (scanned < cap) {
             int take = Math.min(size, cap - scanned);
-            List<Map<String, Object>> rows = jdbcClient.sql(
-                            "SELECT id, title, content, embedding::text AS vec FROM memories " +
-                            "WHERE content IS NOT NULL AND btrim(content) <> '' " +
-                            "ORDER BY id LIMIT :limit OFFSET :offset")
+            boolean filterByStatus = statusFilter != null && !statusFilter.isBlank();
+            String sqlText = "SELECT id, title, content, embedding::text AS vec FROM memories " +
+                    "WHERE content IS NOT NULL AND btrim(content) <> '' " +
+                    (filterByStatus ? "AND status = :status " : "") +
+                    "ORDER BY id LIMIT :limit OFFSET :offset";
+            var spec = jdbcClient.sql(sqlText);
+            if (filterByStatus) {
+                spec = spec.param("status", statusFilter);
+            }
+            List<Map<String, Object>> rows = spec
                     .param("limit", take).param("offset", off + scanned)
                     .query().listOfRows();
             if (rows.isEmpty()) {
@@ -202,6 +219,7 @@ public class VectorBackfillService {
         res.put("dry_run", dryRun);
         res.put("elapsed_s", Math.round((System.currentTimeMillis() - t0) / 100.0) / 10.0);
         res.put("real_model_online", embeddingService.isRealModelOnline());
+        res.put("status_filter", statusFilter == null || statusFilter.isBlank() ? null : statusFilter);
         if (!errors.isEmpty()) {
             res.put("errors", errors);
         }

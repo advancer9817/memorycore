@@ -35,6 +35,7 @@ public class McpProtocolService {
     private final FeedbackRepository feedbackRepository;
     private final TransferService transferService;
     private final ExtractionService extractionService;
+    private final org.mcore.storage.repository.QualityMetricsRepository qualityMetricsRepository;
     private final ObjectMapper objectMapper;
 
     public McpProtocolService(HybridSearchService hybridSearchService,
@@ -45,6 +46,7 @@ public class McpProtocolService {
                               FeedbackRepository feedbackRepository,
                               TransferService transferService,
                               ExtractionService extractionService,
+                              org.mcore.storage.repository.QualityMetricsRepository qualityMetricsRepository,
                               ObjectMapper objectMapper) {
         this.hybridSearchService = hybridSearchService;
         this.contextPackBuilder = contextPackBuilder;
@@ -54,6 +56,7 @@ public class McpProtocolService {
         this.feedbackRepository = feedbackRepository;
         this.transferService = transferService;
         this.extractionService = extractionService;
+        this.qualityMetricsRepository = qualityMetricsRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -350,7 +353,11 @@ public class McpProtocolService {
                 }
                 case "memory_entity_search" -> {
                     String q = (args != null && args.has("query")) ? args.get("query").asText() : "";
-                    var entities = entityRepository.searchEntities(q, 20);
+                    int lim = (args != null && args.has("limit")) ? args.get("limit").asInt() : 20;
+                    String sc = (args != null && args.has("scope")) ? args.get("scope").asText() : "";
+                    String pp = (args != null && args.has("project_path")) ? args.get("project_path").asText() : "";
+                    // 修复：此前固定 limit=20 且忽略 scope/project_path，检索退化为裸 LIKE
+                    var entities = entityRepository.searchEntities(q, lim, sc, pp);
                     textResult = toJson(entities);
                 }
                 case "memory_audit_log" -> {
@@ -370,8 +377,11 @@ public class McpProtocolService {
                     cStats.put("total_links", links);
                     cStats.put("total_entities", entities);
                     cStats.put("feedback_events", feedbacks);
-                    cStats.put("hit_rate", 0.94);
-                    cStats.put("average_recall_ms", 3.8);
+                    // 修复：此前 hit_rate=0.94 / average_recall_ms=3.8 为硬编码常量，
+                    // 而工具描述自称"数据库真实聚合"，属静默误导。现改为真实聚合；
+                    // 无数据来源的指标如实返回 null 并标注可用性。
+                    cStats.putAll(qualityMetricsRepository.quality(0));
+                    cStats.putAll(qualityMetricsRepository.recallLatency());
                     textResult = toJson(cStats);
                 }
                 case "memory_stats" -> {

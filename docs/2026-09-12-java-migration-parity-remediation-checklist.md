@@ -28,9 +28,13 @@
 
 ## 第二批 · 止损（正在腐化）
 
-- [ ] **S5** 实体索引写回：`MemoryRepository.insert/update` 后同步 `memory_entities`；检索补齐别名归一（`canonical_entity`）+ `status='active'` / `valid_until` / scope 过滤 + 权重排序；移除硬编码 `limit=20`
-- [ ] **S6** 治理决策执行器：把 `governance_decisions` 按 `recommended_action` 真正作用到 `memories`（当前只改 review_status，前端假成功）
-- [ ] **S7** 摘除伪造指标：`McpProtocolService:373-374` 的 `hit_rate=0.94` / `average_recall_ms=3.8`、`ContextLabController:41-49` 硬编码 trace；接入真实 `context_quality_events` 采集 + `injected_count` 回写
+- [x] **S5** 实体索引写回：`EntityExtractor`（抽取+别名归一，对标 `entities.py` 249 行）+ `EntityIndexService`（先删后插/ON CONFLICT/非 active 清除/项目兜底）；`EntityRepository.searchEntities` 由裸 LIKE 改为归一 IN + active/valid_until/scope/project_path 过滤 + 权重排序 + boost
+      → **实测**：探针生成 5 条实体行（path 1.0 / file 0.9 / port 0.9 / `memorycore`→`mcore` / `ollama`）；查询 `memorycore` 命中 `normalized=mcore`；boost=0.30
+      → **附带修复**：`EntityMapper.xml` insert 漏写 `aliases_json`+`weight` 且无 ON CONFLICT
+- [x] **S6** 治理决策执行器：`executeDecision()` 真正作用到 `memories` + 台账 `governance_executions`/`governance_mutation_log` + `rollbackDecision()` + rollback 端点
+      → **实测**：status active→archived、台账 before/after/inverse 完整、归档后实体行清零、二次 apply 幂等（1→1）、回滚 archived→active
+- [x] **S7** 摘除伪造指标：新增 `QualityMetricsRepository` 真实聚合；`ContextLabController` trace 按实际命中分数推导
+      → **实测**：`hit_rate` 0.94→**0.6613**；`average_recall_ms` 3.8→**null** + `latency_available:false`（审计表无耗时字段，如实留空）
 
 ## 第三批 · 功能补齐
 
@@ -55,5 +59,7 @@
 
 ## 维护链数据危险项（建议并入 S6/S11 一起修）
 
-- [ ] **S23** `GovernanceService.executeMaintenance:247-248`：`default` 分支把**任何未知 action（含 merge）**执行为「归档全部 stale」；需改为显式 action 白名单 + 未知即拒绝
-- [ ] **S24** 维护执行补：强制备份、跨进程锁、`plan_token` 内容哈希校验与幂等重放（当前 token 为随机 UUID 且执行时不比对）
+- [x] **S23** `executeMaintenance` 的 `default` 分支改为显式白名单，未知动作一律拒绝且零写入
+      → **实测**：`action=merge` → `unsupported_maintenance_action`
+- [x] **S24** 维护执行补：`plan_token`=sha256(动作+排序候选id) 落库可校验 + 漂移检测 + 强制快照 + PG advisory lock + 幂等重放；候选集谓词与执行谓词统一
+      → **实测**：缺/伪造 token 拒绝；漂移 `plan_drift`（planned 1→current 0）；幂等重放返回既有结果
