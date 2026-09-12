@@ -1753,3 +1753,56 @@ JDBC URL 参数注入面 / 无 `@Scheduled` 调度 / `extraction_strategy` 16 �
 
 ### 涉及文件
 修改：`embedding/EmbeddingService.java`、`repository/MemoryRepository.java`、`service/MemoryQueryService.java`、`controller/GovernanceController.java`
+
+## [迭代 265] 2026-09-12 — S8 主体上下文落地：项目归属解析与提取提示词注入
+
+### 目的
+补齐 S8。Python 侧 `memorycore/subject_context.py`（203 行、5 个公开函数）在 Java 迁移后**零覆盖**，
+后果是 76% 的记忆 `project_path` 为空、无法按项目隔离/加权召回，且提取提示词丢失主体约束
+与标题自包含规则。属单项缺口里最大的一块。
+
+### 变更摘要
+
+**新增 `mcore-storage/.../subject/SubjectContextService.java`**（对标 Python 5 函数）
+- `subjectConfig()`：读取 `subject_context` 配置段，`enabled=false` 时返回空
+- `discoverProjects()`：扫描 `discovery_roots` 下的 git 仓库自动注册（显式配置优先）
+- `resolveProject()`：路径精确/前缀匹配 → 名称/别名匹配；无法确定返回 null，**绝不猜测**
+- `inferSubjectFromTitle()`：标题前缀分词，先试首词、再试前两词组合
+- `activeContextBlock()` + `SUBJECT_PROMPT_INSTRUCTION`：注入提取提示词的主体块与规则
+- `~` 与 `$VAR` 在解析期展开，保持配置可移植（不硬编码绝对路径）
+
+**`ExtractionService` 接入**
+- 提取前解析请求的 `project_path` 为规范项目，落入 `resolvedProjectName/Path/Scope`
+- `buildSystemPrompt(name, path, scope)`：项目已知时追加 Active Context 块 + Subject 规则
+- **fact 级主体判定**：优先级为 `subject` 字段 → 标题前缀推断 → 沿用对话主体
+  （对话常跨项目引用，允许单条事实归属到与当前对话不同的项目）
+- 落库写入解析后的 `project_path` 与 `scope`，并打 `project:<name>` 溯源标签
+  （与 Python 约定一致，实体抽取会过滤该前缀）
+
+**其他接入**
+- `ConfigService`：`subject_context` 加入读取面与写入白名单（此前既不可读也不可写）
+- `EntityIndexService.projectEntity()`：由"路径末段"兜底升级为配置驱动的项目解析，
+  解析不到时才回退末段
+
+**配置对齐**
+- `config.yaml` / `config.default.yaml`：`mcore` 项目 `paths` 补入 `/workspace/memorycore`
+  并置于首位（沙箱中已无宿主，`~/project/memorycore` 为失效路径）
+- 说明：按名称命中时规范路径取 `paths` 首项（Python 同样取 `paths[0]`），故顺序即 canonical path
+
+### 验证（实测，非推断）
+| 项 | 证据 |
+|---|---|
+| 配置可见 | `/api/v1/config` 的 `strategy` 含 `subject_context`（enabled=true、projects=[mcore]、auto_discover=true） |
+| 路径前缀解析 | 输入 `/root/project/memorycore/mcore-spring` → 实体归一到规范名 **`mcore`**（非末段 `mcore-spring`） |
+| 提取注入 | 标题前缀规则被模型遵循：产出 `mcore subject_context功能已移植到Java…`、`mcore 规范要求项目归属写入project_path…` |
+| 落库归属 | `project_path=/workspace/memorycore`、`scope=project`、`tags` 含 `project:mcore` |
+| 端到端 | `memory_ingest` 带 `project_path` → added=1、标题带 `mcore ` 前缀、归属字段完整 |
+
+### 风险与注意事项
+- 名称命中的规范路径取 `paths` 首项，**配置顺序决定 canonical path**，调整顺序会改变新增记忆的归属值
+- 存量记忆的 `project_path` 仍为空，需另行回填（`scripts/backfill_subject.py` 存在但为 Python 版）
+- `subject_context` 现可经设置页写入，改动即时生效（配置热读）
+
+### 涉及文件
+新增：`subject/SubjectContextService.java`
+修改：`service/ExtractionService.java`、`entity/EntityIndexService.java`、`service/ConfigService.java`、`test/.../ExtractionServiceTest.java`、`config.yaml`

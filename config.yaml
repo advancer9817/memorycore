@@ -139,6 +139,7 @@ subject_context:
     - MemoryCore
     name: mcore
     paths:
+    - /workspace/memorycore
     - ~/project/memorycore
     scope: project
 temporal:

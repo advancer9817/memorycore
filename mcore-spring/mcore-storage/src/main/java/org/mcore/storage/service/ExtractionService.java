@@ -39,6 +39,7 @@ public class ExtractionService {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final org.mcore.storage.config.ConfigFileStore configStore;
+    private final org.mcore.storage.subject.SubjectContextService subjectContextService;
 
     @Value("${mcore.extraction.base-url:http://127.0.0.1:8317/v1}")
     private String baseUrl;
@@ -79,8 +80,10 @@ public class ExtractionService {
                              HybridSearchService hybridSearchService,
                              MemoryRepository memoryRepository,
                              ObjectMapper objectMapper,
-                             org.mcore.storage.config.ConfigFileStore configStore) {
+                             org.mcore.storage.config.ConfigFileStore configStore,
+                             org.mcore.storage.subject.SubjectContextService subjectContextService) {
         this.configStore = configStore;
+        this.subjectContextService = subjectContextService;
         this.embeddingService = embeddingService;
         this.hybridSearchService = hybridSearchService;
         this.memoryRepository = memoryRepository;
@@ -119,6 +122,29 @@ public class ExtractionService {
         String projectPath = req.projectPath() != null ? req.projectPath() : "";
         String scope = (req.scope() != null && !req.scope().isBlank()) ? req.scope() : "global";
 
+        // 主体解析：把请求的 project_path 归一为配置中的规范项目。
+        // 对标 Python extraction.py 在提取前注入 subject_context 的行为。
+        // Java 迁移后该能力完全缺失，导致 project_path 原样透传、归属无法收敛。
+        String resolvedProjectName = "";
+        String resolvedProjectPath = projectPath;
+        String resolvedScope = scope;
+        try {
+            Map<String, Object> proj = subjectContextService.resolveProject(projectPath, "");
+            if (proj != null) {
+                resolvedProjectName = String.valueOf(proj.getOrDefault("name", ""));
+                Object p = proj.get("path");
+                if (p != null && !String.valueOf(p).isBlank()) {
+                    resolvedProjectPath = String.valueOf(p);
+                }
+                Object s = proj.get("scope");
+                if (s != null && !String.valueOf(s).isBlank()) {
+                    resolvedScope = String.valueOf(s);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("主体解析失败，沿用原始 project_path: {}", e.getMessage());
+        }
+
         StringBuilder transcript = new StringBuilder();
         if (msgs != null && !msgs.isEmpty()) {
             for (Map<String, String> m : msgs) {
@@ -153,7 +179,7 @@ public class ExtractionService {
         int errors = 0;
 
         try {
-            String systemPrompt = buildSystemPrompt();
+            String systemPrompt = buildSystemPrompt(resolvedProjectName, resolvedProjectPath, resolvedScope);
             String endpoint = resolveCompletionsUrl(baseUrl);
 
             Map<String, Object> payload = Map.of(
@@ -226,6 +252,38 @@ public class ExtractionService {
                             continue;
                         }
 
+                        // 主体判定优先级：fact 级 subject 字段 → 标题前缀推断 → 沿用对话主体。
+                        // 对话常跨项目引用，故允许单条事实归属到与当前对话不同的项目。
+                        String factProjectName = resolvedProjectName;
+                        String factProjectPath = resolvedProjectPath;
+                        String factScope = resolvedScope;
+                        try {
+                            String subjectField = factNode.path("subject").asText("").trim();
+                            Map<String, Object> factProj = null;
+                            if (!subjectField.isEmpty()) {
+                                factProj = subjectContextService.resolveProject("", subjectField);
+                            }
+                            if (factProj == null) {
+                                factProj = subjectContextService.inferSubjectFromTitle(title);
+                            }
+                            if (factProj != null) {
+                                String n = String.valueOf(factProj.getOrDefault("name", ""));
+                                if (!n.isBlank()) {
+                                    factProjectName = n;
+                                }
+                                Object fp = factProj.get("path");
+                                if (fp != null && !String.valueOf(fp).isBlank()) {
+                                    factProjectPath = String.valueOf(fp);
+                                }
+                                Object fs = factProj.get("scope");
+                                if (fs != null && !String.valueOf(fs).isBlank()) {
+                                    factScope = String.valueOf(fs);
+                                }
+                            }
+                        } catch (Exception e) {
+                            log.warn("fact 主体判定失败，沿用对话主体: {}", e.getMessage());
+                        }
+
                         List<String> tags = new ArrayList<>();
                         if (factNode.has("tags") && factNode.get("tags").isArray()) {
                             for (JsonNode tagNode : factNode.get("tags")) {
@@ -235,6 +293,11 @@ public class ExtractionService {
                         }
                         if (!tags.contains(type)) tags.add(type);
                         if (!agentId.isBlank() && !tags.contains("agent:" + agentId)) tags.add("agent:" + agentId);
+                        // 项目归属落为溯源标签，与 Python 的 project:<name> 约定一致
+                        // （实体抽取会过滤该前缀，避免把溯源信息当成内容实体）
+                        if (!factProjectName.isBlank() && !tags.contains("project:" + factProjectName)) {
+                            tags.add("project:" + factProjectName);
+                        }
 
                         float[] vec = embeddingService.embedText(title + " " + content);
 
@@ -265,10 +328,12 @@ public class ExtractionService {
                             record.setTitle(title.length() > 100 ? title.substring(0, 97) + "..." : title);
                             record.setContent(content);
                             record.setType(type);
-                            record.setScope(scope);
+                            record.setScope(factScope);
                             record.setSource(src);
                             record.setSourceAgent(agentId);
-                            record.setProjectPath(projectPath);
+                            // 写入解析后的规范项目路径（此前原样透传请求值，是
+                            // 76% 记忆 project_path 为空/不规范的直接原因之一）
+                            record.setProjectPath(factProjectPath);
                             record.setConfidence(confidence);
                             record.setImportance(importance);
                             record.setStatus("active");
@@ -357,7 +422,15 @@ public class ExtractionService {
         return choices.get(0).path("message").path("content").asText("");
     }
 
-    private String buildSystemPrompt() {
+    /**
+     * 构建提取提示词。
+     *
+     * 主体上下文（Active Context + Subject 规则）在项目已知时注入：
+     * 前者告诉模型"当前对话主体是谁"，后者强制每条 fact 输出 subject 字段
+     * 并要求标题带项目名前缀，使事实脱离对话后仍可辨识归属。
+     * 对标 Python `extraction.py` 注入 SUBJECT_PROMPT_INSTRUCTION + active_context_block。
+     */
+    private String buildSystemPrompt(String projectName, String projectPath, String scope) {
         String today = LocalDate.now().toString();
         return """
 你是一个精准的工程对话事实提取器。
@@ -411,7 +484,22 @@ public class ExtractionService {
 - 无值得提取的内容时返回：{"memory": []}
 - 仅返回合法 JSON，严禁 Markdown 代码块包裹，严禁任何额外解释文字。
 - importance < 0.3 的事实不要输出。
-""".formatted(today);
+""".formatted(today) + subjectPrompts(projectName, projectPath, scope);
+    }
+
+    /** 拼接主体上下文块；项目未知时返回空串（不注入、不猜测） */
+    private String subjectPrompts(String projectName, String projectPath, String scope) {
+        try {
+            String block = subjectContextService.activeContextBlock(projectName, projectPath, scope);
+            if (block == null || block.isBlank()) {
+                return "";
+            }
+            return "\n\n" + block + "\n"
+                    + org.mcore.storage.subject.SubjectContextService.SUBJECT_PROMPT_INSTRUCTION;
+        } catch (Exception e) {
+            log.warn("主体提示词构建失败: {}", e.getMessage());
+            return "";
+        }
     }
 
     private String cleanJsonResponse(String raw) {

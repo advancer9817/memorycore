@@ -45,7 +45,12 @@ class ExtractionServiceTest {
         // 不覆盖下方通过反射注入的测试值。
         org.mcore.storage.config.ConfigFileStore configStore =
                 new org.mcore.storage.config.ConfigFileStore("/tmp/mcore-test-config-absent.yaml");
-        extractionService = new ExtractionService(embeddingService, hybridSearchService, memoryRepository, objectMapper, configStore);
+        // 主体上下文服务复用同一（空）配置源：subject_context 未启用时
+        // 解析恒为 null、提示词块为空，不影响既有断言。
+        org.mcore.storage.subject.SubjectContextService subjectContextService =
+                new org.mcore.storage.subject.SubjectContextService(configStore);
+        extractionService = new ExtractionService(embeddingService, hybridSearchService, memoryRepository,
+                objectMapper, configStore, subjectContextService);
         ReflectionTestUtils.setField(extractionService, "baseUrl", "http://127.0.0.1:8317/v1");
         ReflectionTestUtils.setField(extractionService, "apiKey", "test-key");
         ReflectionTestUtils.setField(extractionService, "model", "gemini-3.8-flash");

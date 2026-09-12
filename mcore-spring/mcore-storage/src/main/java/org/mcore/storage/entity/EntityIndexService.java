@@ -29,10 +29,13 @@ public class EntityIndexService {
 
     private final JdbcClient jdbcClient;
     private final EntityExtractor extractor;
+    private final org.mcore.storage.subject.SubjectContextService subjectContextService;
 
-    public EntityIndexService(JdbcClient jdbcClient, EntityExtractor extractor) {
+    public EntityIndexService(JdbcClient jdbcClient, EntityExtractor extractor,
+                              org.mcore.storage.subject.SubjectContextService subjectContextService) {
         this.jdbcClient = jdbcClient;
         this.extractor = extractor;
+        this.subjectContextService = subjectContextService;
     }
 
     /**
@@ -110,13 +113,30 @@ public class EntityIndexService {
      * 确定性行为，避免实体索引继续停更。
      */
     private Map<String, Object> projectEntity(MemoryDO record) {
-        String path = record.getProjectPath();
-        if (path == null || path.isBlank()) {
-            return null;
+        // 优先走配置驱动的项目解析（别名、discovery_roots 自动发现）；
+        // 解析不到时退回路径末段，保证"带项目路径的记忆必然进实体索引"。
+        String name = null;
+        try {
+            Map<String, Object> proj = subjectContextService.resolveProject(
+                    record.getProjectPath(), "");
+            if (proj != null) {
+                Object n = proj.get("name");
+                if (n != null && !String.valueOf(n).isBlank()) {
+                    name = String.valueOf(n);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("项目实体解析失败，退回路径末段: {}", e.getMessage());
         }
-        String trimmed = path.replaceAll("/+$", "");
-        int idx = trimmed.lastIndexOf('/');
-        String name = idx >= 0 ? trimmed.substring(idx + 1) : trimmed;
+        if (name == null) {
+            String path = record.getProjectPath();
+            if (path == null || path.isBlank()) {
+                return null;
+            }
+            String trimmed = path.replaceAll("/+$", "");
+            int idx = trimmed.lastIndexOf('/');
+            name = idx >= 0 ? trimmed.substring(idx + 1) : trimmed;
+        }
         if (name == null || name.isBlank()) {
             return null;
         }

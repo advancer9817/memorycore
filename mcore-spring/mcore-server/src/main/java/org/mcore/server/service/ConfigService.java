@@ -124,6 +124,8 @@ public class ConfigService {
         strategy.put("llm_curator", cfg.getOrDefault("llm_curator", new LinkedHashMap<>()));
         strategy.put("governance", cfg.getOrDefault("governance", new LinkedHashMap<>()));
         strategy.put("extraction_strategy", cfg.getOrDefault("extraction_strategy", new LinkedHashMap<>()));
+        // 主体上下文：此前既不在读取面也不在写入白名单，配置存在却无任何消费者
+        strategy.put("subject_context", cfg.getOrDefault("subject_context", new LinkedHashMap<>()));
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("settings", settings);
@@ -166,7 +168,7 @@ public class ConfigService {
         Object strategyObj = patch.get("strategy");
         if (strategyObj instanceof Map) {
             Map<String, Object> st = (Map<String, Object>) strategyObj;
-            for (String section : new String[]{"rule_curator", "llm_curator", "governance", "extraction_strategy"}) {
+            for (String section : new String[]{"rule_curator", "llm_curator", "governance", "extraction_strategy", "subject_context"}) {
                 Object v = st.get(section);
                 if (v instanceof Map) {
                     cfg.put(section, v);
