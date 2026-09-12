@@ -60,8 +60,10 @@ public class GovernanceController {
 
     @GetMapping({"/api/audit", "/api/v1/audit"})
     public Map<String, Object> getAudit(@RequestParam(value = "page", defaultValue = "1") int page,
-                                        @RequestParam(value = "page_size", defaultValue = "20") int pageSize) {
-        return Map.of("items", List.of(), "total", 0, "page", page, "page_size", pageSize);
+                                        @RequestParam(value = "page_size", defaultValue = "20") int pageSize,
+                                        @RequestParam(value = "event_type", required = false) String eventType) {
+        // 此前硬编码返回空列表，导致审计页永远空白；现接真实 audit_events 表
+        return governanceService.listAuditEvents(page, pageSize, eventType);
     }
 
     @GetMapping({"/api/v1/maintenance/plan", "/api/v1/maintenance/plan/"})

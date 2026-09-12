@@ -194,12 +194,77 @@ public class GovernanceService {
         return plan;
     }
 
-    public Map<String, Object> executeMaintenance(String planToken, String action) {
-        String targetStatus = "clean".equalsIgnoreCase(action) ? "archived" : "stale";
-        // 软更新至已归档或移除
-        String sql = "UPDATE memories SET status = 'archived', updated_at = clock_timestamp() WHERE status = :status";
-        int affected = jdbcClient.sql(sql).param("status", targetStatus).update();
+    /** 审计事件分页查询（真实表 audit_events） */
+    public Map<String, Object> listAuditEvents(int page, int pageSize, String eventType) {
+        int p = Math.max(1, page);
+        int size = Math.max(1, Math.min(pageSize, 200));
+        int offset = (p - 1) * size;
 
-        return Map.of("success", true, "action", action, "affected_rows", affected, "plan_token", planToken);
+        String where = (eventType != null && !eventType.isBlank()) ? " WHERE event_type = :et " : "";
+        Map<String, Object> params = new LinkedHashMap<>();
+        if (!where.isEmpty()) {
+            params.put("et", eventType);
+        }
+
+        Long total = jdbcClient.sql("SELECT COUNT(*) FROM audit_events" + where)
+                .params(params).query(Long.class).single();
+
+        Map<String, Object> qp = new LinkedHashMap<>(params);
+        qp.put("limit", size);
+        qp.put("offset", offset);
+        List<Map<String, Object>> items = org.mcore.storage.util.JsonbRows.rows(jdbcClient.sql(
+                        "SELECT id, event_type, memory_id, agent, detail_json, created_at " +
+                        "FROM audit_events" + where + " ORDER BY created_at DESC NULLS LAST LIMIT :limit OFFSET :offset")
+                .params(qp).query().listOfRows());
+
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("items", items);
+        res.put("total", total);
+        res.put("page", p);
+        res.put("page_size", size);
+        return res;
+    }
+
+    /**
+     * 执行维护动作。
+     *
+     * 修复要点：原实现把 SET 子句写死为 'archived' 而 WHERE 用 targetStatus，
+     * 导致 action=clean 时退化为 `UPDATE ... WHERE status='archived' SET status='archived'` 的空操作。
+     * 现按动作类型给出各自的真实语义，并登记 maintenance_jobs 作业记录。
+     */
+    public Map<String, Object> executeMaintenance(String planToken, String action) {
+        String act = (action == null || action.isBlank()) ? "archive" : action.toLowerCase();
+        String jobId = "mnt_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+
+        String sql;
+        switch (act) {
+            case "clean" -> sql = "UPDATE memories SET status = 'archived', updated_at = clock_timestamp() " +
+                    "WHERE (content IS NULL OR btrim(content) = '' OR title IS NULL OR btrim(title) = '') " +
+                    "AND status <> 'archived'";
+            case "expire" -> sql = "UPDATE memories SET status = 'archived', updated_at = clock_timestamp() " +
+                    "WHERE status IN ('superseded','contradicted') " +
+                    "AND updated_at < now() - interval '90 days'";
+            default -> sql = "UPDATE memories SET status = 'archived', updated_at = clock_timestamp() " +
+                    "WHERE status = 'stale'";
+        }
+
+        int affected = jdbcClient.sql(sql).update();
+
+        jdbcClient.sql("INSERT INTO maintenance_jobs (id, plan_token, kind, status, summary_json, created_at, finished_at) " +
+                        "VALUES (:id, :token, :kind, 'done', :summary::jsonb, clock_timestamp(), clock_timestamp())")
+                .param("id", jobId)
+                .param("token", planToken)
+                .param("kind", act)
+                .param("summary", "{\"updated_count\":" + affected + "}")
+                .update();
+
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("success", true);
+        res.put("job_id", jobId);
+        res.put("action", act);
+        res.put("affected_rows", affected);
+        res.put("updated_count", affected);
+        res.put("plan_token", planToken);
+        return res;
     }
 }

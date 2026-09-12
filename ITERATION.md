@@ -1306,3 +1306,56 @@ cd /workspace/memorycore/mcore-spring && mvn clean package -DskipTests && pm2 re
 - 本迭代仅覆盖配置域；策展/维护类端点仍为桩实现（`CuratorController` 的 status/last-digest/apply/llm、
   `maintenance/candidates` 恒返回空、`GET /api/audit` 硬编码空），下一迭代继续
 
+
+## [迭代 257] 2026-09-12 — 策展/维护/审计端点去桩：从硬编码假数据到真实表驱动
+
+### 目的
+继续「旧版功能迁移未完成」治理。本轮审计确认 `CuratorController` 与 `GET /api/audit` 存在大面积桩实现，
+对用户造成**误导性成功**：
+
+| 端点 | 桩行为（修复前） |
+|---|---|
+| `GET /curator/status` | `last_run_at` 用 `Instant.now()` 伪造「刚刚运行过」；`latest_job.id` 硬编码 `job_init_001` |
+| `GET /curator/last-digest` | 整段硬编码中文文案「系统记忆库当前整体治理良好...」 |
+| `POST /curator/apply` | 不做任何事，固定返回 `applied_count: 0` |
+| `POST /curator/llm` | **不执行 LLM**，直接返回 `status: "succeeded"` + 随机 job_id（前端显示成功，实际什么都没发生） |
+| `GET /maintenance/candidates` | **恒返回空列表**，前端「维护候选」页永远无数据 |
+| `GET /maintenance/latest` | 硬编码 `job_id: "maint_latest"` |
+| `GET /api/audit` | 硬编码 `{"items": [], "total": 0}`，审计页永远空白（而 `audit_events` 表实际有 54 行） |
+
+### 变更摘要
+1. **新增 `mcore-storage/service/CuratorService.java`**：全部改为真实 SQL 驱动
+   - status ← `llm_curator_jobs` + `governance_runs`（无记录时诚实返回 null 与说明，不再伪造时间）
+   - last-digest ← `governance_runs.summary_json`
+   - candidates ← `memories` 按动作类型（clean/archive/expire/dedup）真实筛选，阈值取自 `rule_curator` 配置
+   - llm job 查询 ← `llm_curator_jobs`
+   - maintenance job ← `maintenance_jobs`
+   - `triggerLlmCurator` 只登记真实作业记录（`queued`），**不再谎报 succeeded**
+   - `applyCurator` 复用 `GovernanceService.batchApply` 真实应用待审决策
+2. **重写 `CuratorController`**：端点全部接 CuratorService，新增 `GET /api/v1/maintenance/jobs` 历史列表
+3. **`GovernanceService`**
+   - 新增 `listAuditEvents()` 接真实 `audit_events`（支持 event_type 过滤与分页）
+   - **修复 `executeMaintenance` 逻辑缺陷**：原实现 SET 子句写死 `'archived'` 而 WHERE 用 targetStatus，
+     导致 `action=clean` 退化为 `UPDATE ... WHERE status='archived' SET status='archived'` 的空操作；
+     现按动作给真实语义，并登记 `maintenance_jobs` 作业记录
+4. **新增 `mcore-storage/util/JsonbRows.java`**：修复 JSONB 列序列化泄漏
+   - 修复前：`detail_json` 返回驱动内部结构 `{"type":"jsonb","value":"{...}"}`，前端无法解析
+   - 修复后：解包为真正的 JSON 对象
+
+### 验证（全部实测）
+- 构建 `mvn package` EXIT=0；`mvn test` EXIT=0
+- **审计**：`total=54`（此前恒为 0），detail_json 正确解包为 `{"error":"[Errno 111] Connection refused","fallback":"hashing","provider":"ollama"}`
+- **策展触发**：`POST /curator/llm` → 真实作业 `cur_dca03d80df3d`，status=`queued`（诚实语义）；
+  `GET /curator/llm/latest` 正确返回该作业（此前恒为 `job_init_001`）
+- **策展状态**：`last_run_at` 真实反映作业时间；无作业时返回 null 而非伪造
+- **维护全链路**：plan → execute（生成真实作业 `mnt_*`）→ latest 正确回读 → 按 id 查询 `found: true`
+- **候选查询健全性**：用宽松阈值对照校验查询逻辑本身无缺陷
+  （`archive(30d,<0.9)=182` 证明逻辑正确；`180d` 结果为 0 是真实状态——无活跃记忆超过 180 天）
+- **dedup 候选**：查出 4 条真实重复标题（此前恒为 0）
+- 验证过程产生的测试作业记录已清理
+
+### 风险与后续
+- `POST /curator/llm` 目前仅登记作业，尚无执行器消费 `queued` 作业；
+  完整 LLM 策展（去重/矛盾检测/合并建议）需后续迭代实现执行器
+- 下一迭代：`/api/v1/backup/export|import`（仍 404）、`/apps/{id}/accessed` 语义修复（现复用 filterMemories）
+
