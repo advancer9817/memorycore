@@ -54,8 +54,12 @@ export function useGraphPage() {
       .then((r) => r.json())
       .then((p) => {
         const raw = p.data ?? p;
-        const nodeIds = new Set(raw.nodes.map((n: GraphNode) => n.id));
-        const safeEdges = raw.edges.filter((e: GraphEdge) => nodeIds.has(e.source) && nodeIds.has(e.target));
+        const rawNodes = raw.nodes ?? [];
+        const rawEdges = raw.edges ?? raw.links ?? [];
+        const nodeIds = new Set(rawNodes.map((n: GraphNode) => n.id));
+        const safeEdges = rawEdges
+          .filter((e: any) => e && nodeIds.has(e.source) && nodeIds.has(e.target))
+          .map((e: any) => ({ ...e, relation_type: e.relation_type ?? e.relation ?? "supports" }));
         const edgeTypes = new Set([...KNOWN_EDGE_TYPES, ...safeEdges.map((e: GraphEdge) => e.relation_type)]);
         setData({ nodes: raw.nodes, edges: safeEdges });
         setActiveTypes(new Set(raw.nodes.map((n: GraphNode) => n.type)));

@@ -58,6 +58,7 @@ public class GraphService {
                 link.put("source", r.get("source_id"));
                 link.put("target", r.get("target_id"));
                 link.put("relation", r.get("relation_type"));
+                link.put("relation_type", r.get("relation_type"));
                 link.put("weight", r.get("weight"));
                 links.add(link);
             }
@@ -66,6 +67,7 @@ public class GraphService {
         Map<String, Object> res = new LinkedHashMap<>();
         res.put("nodes", nodes);
         res.put("links", links);
+        res.put("edges", links);
         res.put("total_nodes", nodes.size());
         res.put("total_links", links.size());
         return res;

@@ -1036,4 +1036,30 @@ cd /workspace/memorycore/mcore-spring && mvn clean package -DskipTests && pm2 re
 | `GET /` (看板首页) | 页面 200，无 Error Boundary 报错，四大指标卡正常展示 | ✅ 200 正常渲染 |
 | 跨机访问 API 地址 | 严格走相对路径反代（35.236.134.50:18318） | ✅ 远端直通 |
 
+## [迭代 249] 2026-09-12 — 修复图谱 edges 契约缺失崩溃与用户画像 Schema 完整性补齐
+
+### 目的
+1. 修复图谱页面（`/graph`）报错 `TypeError: Cannot read properties of undefined (reading 'filter')` 导致黑屏崩溃；
+2. 修复用户画像页面（`/profile`）因后端缺少 `enabled` 与 Schema 字段导致显示“画像功能未启用”假象。
+
+### 变更摘要
+1. **图谱（Graph）数据双向兼容对齐**：
+   - `GraphService.java`：返回 payload 同时暴露 `links` 与 `edges`，每条连接同时挂载 `relation` 与 `relation_type`；
+   - `useGraphPage.ts`：增加空值防守 `raw.edges ?? raw.links ?? []` 与字段归一化映射，杜绝空指针。
+2. **用户画像（Profile）契约与真实事实映射落地**：
+   - `UserProfileService.java`：内置 14 项标准 Schema 维度（姓名、技术栈、沟通偏好、模型偏好等），返回完整的 `enabled: true`、`schema_count`、`coverage`、`confidence_groups`；
+   - 自动关联活跃池中的 30 条真实 `user_profile` 事实作为 `sources` 证据链，并自动计算覆盖率；
+   - 彻底解除前端 `!payload.enabled` 错误拦截。
+3. **编译与服务热生效**：
+   - 重新编译 Java 核心工程与 Next.js 前端，平滑重启 PM2 托管的 `mcore` 与 `mcore-ui`。
+
+### 验证
+| 检查项 | 预期 | 实测 |
+|---|---|---|
+| `GET /api/v1/graph` | 同时包含 nodes, links, edges | ✅ edges count == links count |
+| `GET /api/v1/profile` | `enabled: true`, `schema_count: 14`, 14 项完整 attributes | ✅ 返回完整 ProfilePayload |
+| `/graph` 页面渲染 | 3D 画布正常挂载，无 filter 异常 | ✅ 200 正常渲染 |
+| `/profile` 页面渲染 | 顶部四大统计卡与 14 维度属性卡片正常展开 | ✅ 200 正常渲染 |
+
+
 
