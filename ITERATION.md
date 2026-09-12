@@ -1061,5 +1061,31 @@ cd /workspace/memorycore/mcore-spring && mvn clean package -DskipTests && pm2 re
 | `/graph` 页面渲染 | 3D 画布正常挂载，无 filter 异常 | ✅ 200 正常渲染 |
 | `/profile` 页面渲染 | 顶部四大统计卡与 14 维度属性卡片正常展开 | ✅ 200 正常渲染 |
 
+## [迭代 250] 2026-09-12 — 补齐 /api/v1/profile/extract 端点与真实多维度事实自动聚合入库
+
+### 目的
+修复用户画像页面点击“重新提取 (预览)”或“提取并保存”时弹出红底错误提示 `画像提取失败: HTTP 404` 的功能缺漏问题。
+
+### 变更摘要
+1. **ProfileController 补齐 extract 路由**：
+   - 暴露 `POST/GET /api/v1/profile/extract`；
+   - 接收 `{ "apply": boolean }` 参数，支持 dry-run 预览与真实落库双模式。
+2. **UserProfileService 实现画像维度智能聚合引擎**：
+   - 扫描用户历史存量的真实 `user_profile` / `preference` / `persona` 事实；
+   - 自动聚合技术栈、常用工具、工作领域、模型偏好、沟通偏好、输出偏好、当前项目、语言、时间偏好、兴趣关注等 10 项核心画像属性；
+   - 当 `apply: true` 时自动执行 `upsertAttribute` 批量写入 `user_profile_attrs`；
+   - 动态回传刷新后的 `profile` 载荷，覆盖率从 7% 跃升至 71%（10 / 14 维度）。
+3. **服务编译与发布生效**：
+   - 远端构建打包 `mcore-server.jar`；
+   - PM2 重启 `mcore`。
+
+### 验证
+| 检查项 | 预期 | 实测 |
+|---|---|---|
+| `POST /api/v1/profile/extract` (apply: false) | `dry_run: true`，不修改库，返回提取候选 | ✅ 扫描 100 条记忆，返回 10 项候选 |
+| `POST /api/v1/profile/extract` (apply: true) | 真实写入 `user_profile_attrs` 并回传 profile | ✅ `updated: 10`，覆盖率提升至 71% (10/14) |
+| 前端操作点击 | 不再报 HTTP 404，Toast 提示“画像提取成功” | ✅ 200 正常响应，画像卡片实时刷新 |
+
+
 
 

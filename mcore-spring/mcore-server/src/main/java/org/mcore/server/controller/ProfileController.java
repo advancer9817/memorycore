@@ -21,6 +21,17 @@ public class ProfileController {
         return userProfileService.getProfile();
     }
 
+    @PostMapping({"/profile/extract", "/profile/extract/"})
+    public Map<String, Object> extractProfile(@RequestBody(required = false) Map<String, Object> body) {
+        boolean apply = body != null && Boolean.TRUE.equals(body.get("apply"));
+        return userProfileService.extractProfile(apply);
+    }
+
+    @GetMapping({"/profile/extract", "/profile/extract/"})
+    public Map<String, Object> extractProfileGet() {
+        return userProfileService.extractProfile(false);
+    }
+
     @PostMapping("/profile/attrs")
     public ResponseEntity<Map<String, Object>> upsertAttr(@RequestBody Map<String, Object> body) {
         String key = (String) body.get("key");

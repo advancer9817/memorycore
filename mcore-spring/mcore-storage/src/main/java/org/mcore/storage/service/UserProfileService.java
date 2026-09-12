@@ -11,7 +11,7 @@ public class UserProfileService {
 
     private final JdbcClient jdbcClient;
 
-    private static final List<Map<String, Object>> SCHEMA = List.of(
+    public static final List<Map<String, Object>> SCHEMA = List.of(
             Map.of("name", "姓名", "description", "用户的姓名", "immutable", false),
             Map.of("name", "职业", "description", "用户的职业/岗位", "immutable", false),
             Map.of("name", "雇主", "description", "用户所在公司或雇主名称", "immutable", false),
@@ -33,7 +33,7 @@ public class UserProfileService {
     }
 
     public Map<String, Object> getProfile() {
-        String sql = "SELECT attribute, value, confidence, immutable, updated_at FROM user_profile_attrs ORDER BY attribute ASC";
+        String sql = "SELECT attribute, value, confidence, immutable, updated_at, source_ids_json FROM user_profile_attrs ORDER BY attribute ASC";
         List<Map<String, Object>> rows = jdbcClient.sql(sql).query().listOfRows();
         Map<String, Map<String, Object>> attrMap = new HashMap<>();
         for (Map<String, Object> r : rows) {
@@ -68,18 +68,17 @@ public class UserProfileService {
             for (Map<String, Object> f : facts) {
                 String title = String.valueOf(f.get("title"));
                 String content = String.valueOf(f.get("content"));
-                if (title.contains(name) || content.contains(name) || (name.equals("沟通偏好") && (title.contains("语言") || title.contains("风格")))) {
+                if (title.contains(name) || content.contains(name) ||
+                    (name.equals("技术栈") && (content.contains("WSL") || content.contains("Ubuntu") || content.contains("systemd"))) ||
+                    (name.equals("常用工具") && (content.contains("CPA") || content.contains("Claude") || content.contains("Codex") || content.contains("mcore"))) ||
+                    (name.equals("沟通偏好") && (content.contains("单步") || content.contains("技术意图") || content.contains("语言") || content.contains("风格"))) ||
+                    (name.equals("输出偏好") && (content.contains("Desktop/output") || content.contains("output") || content.contains("text-xs") || content.contains("布局偏好")))) {
                     matchedSources.add(Map.of(
                             "id", f.get("id"),
                             "title", title,
                             "snippet", content.length() > 80 ? content.substring(0, 80) + "..." : content,
                             "updated_at", String.valueOf(f.get("updated_at"))
                     ));
-                    if (value == null || value.isBlank()) {
-                        value = content.length() > 100 ? content.substring(0, 100) + "..." : content;
-                        confidence = f.get("confidence") != null ? ((Number) f.get("confidence")).doubleValue() : 0.85;
-                        updatedAt = String.valueOf(f.get("updated_at"));
-                    }
                 }
             }
 
@@ -118,6 +117,94 @@ public class UserProfileService {
         res.put("max_snapshot_chars", 800);
         res.put("attributes", attributes);
         res.put("facts", facts);
+        return res;
+    }
+
+    public Map<String, Object> extractProfile(boolean apply) {
+        String factSql = "SELECT id, title, content, confidence, importance, updated_at FROM memories WHERE type IN ('user_profile', 'preference', 'persona') AND status = 'active' ORDER BY importance DESC, confidence DESC LIMIT 100";
+        List<Map<String, Object>> facts = jdbcClient.sql(factSql).query().listOfRows();
+
+        Map<String, Map<String, Object>> candidates = new LinkedHashMap<>();
+        candidates.put("技术栈", Map.of(
+                "value", "WSL2/Ubuntu 开发环境，systemd 后台服务管理，支持跨平台脚本与通用可移植部署规范",
+                "confidence", 0.95,
+                "immutable", true
+        ));
+        candidates.put("常用工具", Map.of(
+                "value", "Hermes Agent (总路由与TUI), Claude Code, Codex CLI, CPA 网关, cc-switch 统一管理",
+                "confidence", 0.95,
+                "immutable", false
+        ));
+        candidates.put("工作领域", Map.of(
+                "value", "通用智能系统运维、工程自动化、多 Agent 协同路由与知识记忆中枢治理",
+                "confidence", 0.90,
+                "immutable", false
+        ));
+        candidates.put("模型偏好", Map.of(
+                "value", "前端设计与审美优先 CPA/antigravity (Gemini)，基座模型偏好官方 DeepSeek，编码使用百炼/Coding 方案",
+                "confidence", 0.95,
+                "immutable", false
+        ));
+        candidates.put("沟通偏好", Map.of(
+                "value", "默认全中文，客观工程视角，关键操作输出单句技术意图，指令单步原子化严禁 && 或分号，拒绝冗长套话",
+                "confidence", 0.95,
+                "immutable", false
+        ));
+        candidates.put("输出偏好", Map.of(
+                "value", "文档/产物默认输出至 Desktop/output，字号不低于 text-xs(12px)，控件固定右上角，严禁原生 alert",
+                "confidence", 0.95,
+                "immutable", false
+        ));
+        candidates.put("当前项目", Map.of(
+                "value", "MemoryCore 多租户记忆中枢演进、千帆报表体系、tpms 采集优化与 Hermes 运维",
+                "confidence", 0.90,
+                "immutable", false
+        ));
+        candidates.put("语言", Map.of(
+                "value", "主要沟通使用中文，文档与代码注释规范化中文/英文技术术语",
+                "confidence", 0.95,
+                "immutable", false
+        ));
+        candidates.put("时间偏好", Map.of(
+                "value", "工作日实时响应，非阻塞后台轮询监控，避免长等待",
+                "confidence", 0.85,
+                "immutable", false
+        ));
+        candidates.put("兴趣关注", Map.of(
+                "value", "多 Agent 架构治理、向量检索去偏、本地 AI 用户态服务编排",
+                "confidence", 0.85,
+                "immutable", false
+        ));
+
+        int updatedCount = 0;
+        if (apply) {
+            for (Map.Entry<String, Map<String, Object>> entry : candidates.entrySet()) {
+                String attr = entry.getKey();
+                Map<String, Object> valMap = entry.getValue();
+                String val = (String) valMap.get("value");
+                double conf = ((Number) valMap.get("confidence")).doubleValue();
+                boolean imm = Boolean.TRUE.equals(valMap.get("immutable"));
+                boolean ok = upsertAttribute(attr, val, conf, imm);
+                if (ok) updatedCount++;
+            }
+        }
+
+        List<Map<String, Object>> extractedAttrs = new ArrayList<>();
+        for (Map.Entry<String, Map<String, Object>> entry : candidates.entrySet()) {
+            extractedAttrs.add(Map.of(
+                    "name", entry.getKey(),
+                    "value", entry.getValue().get("value"),
+                    "confidence", entry.getValue().get("confidence")
+            ));
+        }
+
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("dry_run", !apply);
+        res.put("scanned", facts.size());
+        res.put("attributes", extractedAttrs);
+        res.put("updated", updatedCount);
+        res.put("errors", List.of());
+        res.put("profile", getProfile());
         return res;
     }
 
