@@ -1,6 +1,7 @@
 # mcore 客户端（mcore-client）详细设计
 
 > **版本**：v1.0 ｜ **迭代**：253 ｜ **上游规划**：`docs/plans/2026-09-12-mcore-server-client-decoupling-architecture-plan.md`  
+> **实现状态**：✅ 已落地（迭代 255）— 代码见 `mcore-client/`，冒烟回归 `node mcore-client/smoke-test.js`（16/16），验收结果见 `ITERATION.md [迭代 255]`  
 > **定位**：将规划中的四大机制（虚拟本地回环、单点配置中心、透明凭据注入、离线 WAL 韧性）落到可执行的工程细节：模块划分、接口契约、数据结构、状态机、并发与容错策略、部署形态与验收标准。
 
 ---

@@ -1206,6 +1206,53 @@ cd /workspace/memorycore/mcore-spring && mvn clean package -DskipTests && pm2 re
 ### 决策变更记录
 - **废止迭代 78 的"Codex 读前注入停用"决策**（用户 2026-09-12 指令："Codex 不要停用"）。Codex 在新客户端架构下恢复 `UserPromptSubmit` 读前注入，与 Claude/Hermes/Gemini/OpenCode 四家对齐为统一的五路注入矩阵。
 
+## [迭代 255] 2026-09-12 — mcore-client 客户端落地实现：五生态 Hook 引擎与离线 WAL 韧性闭环
 
+### 目的
+将迭代 252~254 确立的服务端/客户端解耦架构与详细设计，落地为可运行的客户端实现（T1~T6），并在真实 mcore 服务端上完成 A 系列验收。
 
+### 交付物
+- `mcore-client/mcore-client.js`（单文件，零第三方依赖，约 1550 行）
+- `mcore-client/package.json`、`mcore-client/README.md`
+- `mcore-client/smoke-test.js`（hermetic 冒烟回归，内置 stub 上游，16 项断言）
+- `mcore-client/templates/mcore-client.service`（systemd user unit）
+- `mcore-client/templates/register-task.ps1`（Windows 用户态登录自启，非系统服务）
 
+### 实现要点
+1. **配置子系统**：`~/.mcore/client.yaml` 受限 YAML 子集解析/序列化（无依赖）；多 Profile；**非回环 host 代码级拒绝启动**；权限自动收紧 600；SIGHUP 热重载。
+2. **egress 出站面**：Keep-Alive 连接池 + 透明注入 `X-Tenant-Id`/`X-API-Key`/`X-Client-Info`；瞬时故障（502/503/504、连接错误）有限重试。
+3. **读路径**：`/api/v1/hooks/context` 兼容五生态 payload（claude/hermes/gemini/opencode/codex），5s 硬超时永不阻塞对话；LRU 缓存（64 条 / TTL 300s，命中 < 50ms）；**Codex 泛化短查询噪声护栏**。
+4. **写路径**：`/api/v1/hooks/ingest` 立即 200 + 异步提取入队；五源 transcriptExtractors 口径对齐 `mcore-ingest.py`；**空转录防线**（提取为空直接跳过，杜绝空内容脏数据）。
+5. **WAL 队列状态机**：文件后缀即状态（pending→inflight→done/dead）；崩溃恢复 inflight 回退；指数退避 5s→10m（±20% 抖动）；容量淘汰；死信 `queue replay` 重放。
+6. **CLI**：start/stop/restart/status/switch/config/bind/queue/doctor；`bind` 一键接管五 Agent（Claude HTTP 原生钩子 + 其余超薄传输脚本），幂等且自动备份。
+7. **管理面**：`/_admin/**` 仅回环，含 stats/queue/replay/reload/cache-clear/shutdown。
+
+### 验收结果（真实服务端实测）
+| 编号 | 场景 | 结果 |
+|---|---|---|
+| A1 | 复合健康（client running + upstream connected） | ✅ |
+| A2 | Claude HTTP 钩子上下文注入 | ✅ 真实记忆注入成功 |
+| A2b | Gemini 注入 + 身份落库 | ✅ `source_agent=gemini` |
+| A2c | Codex 读前注入启用 + 泛化短查询不产生噪声 | ✅ 注入成功；"现在TODO还有啥" 返回空注入 |
+| A3 | ingest 即时应答 | ✅ **2.9ms** 返回（对比提炼耗时秒级） |
+| A3b | codex/gemini/hermes/claude 四源回写身份正确 | ✅ 各自 `source_agent` 落库正确 |
+| A4 | 断网写入 → 队列重试 → 恢复补投 | ✅ 断网 2.7ms 应答；切回可用上游后补投落库，**零丢失** |
+| A5 | 重试超限转死信 → 重放 | ✅ `.dead` → `queue replay` → `done` |
+| A6 | switch 热切换不中断监听 | ✅ SIGHUP 后 profile 生效，端口持续监听 |
+| A8 | bind 幂等（连续执行） | ✅ 第二次 0 处变更 |
+| — | 凭据注入端到端 | ✅ 无凭据直连受保护租户 401 → 经客户端自动注入 200 |
+| — | 配置往返一致性 | ✅ 空字符串不再被误序列化为空对象 |
+
+冒烟回归：`node smoke-test.js` → **16/16 通过**（hermetic，内置 stub 上游）。
+
+### 实现期发现并修复的缺陷
+1. **前台/服务模式启动即退出**：`start`（非 daemon）与 `__serve` 在启动完成后返回，被入口的 `process.exit()` 立即杀掉 → 改为常驻不返回（systemd 模板正依赖此路径）。
+2. **缓存命中计数器未自增**：`hook_context_cache_hits` 定义但从未累加 → 补齐。
+3. **死信文件未持久化最终尝试次数**：`.dead` 保留旧 attempts → 落盘后再改名。
+4. **空字符串序列化缺陷**：`api_key: ""` 被写成空值，回读解析为空对象（表现为 `[obj…ect]`）→ 新增 `emitScalar` 统一显式引号化。
+5. **bind 非幂等**：重复执行重复改写 → 全部写入点改为内容比对后再落盘。
+
+### 已知限制
+- OpenCode 依赖其本地 SQLite，无实例环境跳过（逻辑与生产脚本同口径）
+- SQLite 读取优先 `node:sqlite`（Node 22+），回落 `sqlite3` CLI；均不可用时跳过该源
+- 沙箱中 `node:sqlite` 在进程退出期有 core dump 现象，客户端统一以显式 `process.exit()` 规避

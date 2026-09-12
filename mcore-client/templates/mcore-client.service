@@ -1,0 +1,21 @@
+[Unit]
+Description=MemoryCore Local Client (mcore-client sidecar)
+Documentation=https://github.com/advancer9817/memorycore
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 前台运行（服务模式），由 systemd 托管生命周期
+ExecStart=/usr/bin/env node %h/.mcore/mcore-client.js start
+Restart=on-failure
+RestartSec=5
+Environment=HOME=%h
+# 资源上限：客户端是轻量边车，不需要大量内存
+MemoryMax=256M
+# 日志交由 journald
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

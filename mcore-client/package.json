@@ -1,0 +1,30 @@
+{
+  "name": "mcore-client",
+  "version": "1.0.0",
+  "description": "MemoryCore 本地接入边车：冻结所有本地 Agent 的端点配置，统一代理至可切换的上游服务端",
+  "bin": {
+    "mcore-client": "./mcore-client.js"
+  },
+  "main": "./mcore-client.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "mcore-client.js",
+    "README.md",
+    "templates"
+  ],
+  "scripts": {
+    "check": "node --check mcore-client.js",
+    "smoke": "sh ./smoke-test.sh"
+  },
+  "keywords": [
+    "mcore",
+    "memorycore",
+    "mcp",
+    "sidecar",
+    "reverse-proxy"
+  ],
+  "license": "MIT",
+  "private": true
+}
