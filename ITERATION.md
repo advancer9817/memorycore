@@ -1173,6 +1173,22 @@ cd /workspace/memorycore/mcore-spring && mvn clean package -DskipTests && pm2 re
 - **零改动漫游**：无论服务端部署在云端、本地还是 NAS，本地 Claude Code、Hermes、Codex 等 5 大 Agent 永远只需连接 `127.0.0.1:8318`，换环境只需单条命令切换 Profile；
 - **凭据收敛**：避免在各个 Agent 配置文件中散落明文 API Key，由本地客户端统一托管注入。
 
+## [迭代 253] 2026-09-12 — mcore-client 客户端详细设计落盘：模块、契约、状态机与验收标准
+
+### 目的
+将迭代 252 确立的服务端/客户端解耦架构从规划推进到可执行工程级别，完成客户端的全部详细设计，作为后续编码实施的唯一依据。
+
+### 设计产出
+`docs/mcore-client-detailed-design.md`（约 20KB），核心内容：
+1. **技术选型决策**：Node.js ≥ 18 纯 stdlib 单文件实现（零第三方依赖）——任何能跑 Claude Code 的机器必已具备 Node 运行时；监听硬约束回环；NDJSON 文件队列（不引入 SQLite）。
+2. **模块划分**：config / ingress / egress / resilience / hooks / cli 六大子系统，单进程事件循环承载。
+3. **接口契约**：`/mcp` 会话头映射透传（initialize 捕获上游 Mcp-Session-Id）；`/api/v1/hooks/context` 双生态 payload 自适应 + 5s 硬超时（读路径永不阻塞对话）；`/api/v1/hooks/ingest` 202 即应答 + 异步提取（根治 Stop 钩子被 LLM 提炼耗时拖垮的顽疾）。
+4. **韧性设计**：ContextCache（LRU 64 条 / TTL 300s / 写后失效）；WALQueue 状态机（PENDING→INFLIGHT→DONE/DEAD，改名即迁移，崩溃恢复回退 inflight，至少一次投递）；指数退避（5s→10m ±20% 抖动）；空内容防线（提取为空直接 done，杜绝历史脏数据复发路径）。
+5. **CLI 契约**：start/stop/restart/status/switch/config/bind/doctor 八命令；switch 走 SIGHUP 热重载不中断监听；bind 复用 connect_agents.py 写入逻辑且全量备份、幂等。
+6. **安全设计**：配置解析器代码级拒绝非回环 host；client.yaml 权限 600 自动收紧；/_admin 管理面回环隔离；凭据全链路 [REDACTED]。
+7. **验收标准 A1~A10**：涵盖缓存命中延迟、断网队列补投零丢失、死信重放、热切换、幂等 bind、离线不卡对话等硬指标。
+8. **实施切分 T1~T6**：T1 代理核心 → T2/T3 读写路径并行 → T4 CLI → T5 bind/doctor/托管 → T6 全量验收。
+
 
 
 
