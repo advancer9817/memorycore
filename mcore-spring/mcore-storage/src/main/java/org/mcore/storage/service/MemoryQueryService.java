@@ -48,6 +48,19 @@ public class MemoryQueryService {
         return Boolean.parseBoolean(String.valueOf(val).trim());
     }
 
+    private String formatIsoTimestamp(Object raw) {
+        if (raw == null) return "";
+        String str = String.valueOf(raw).trim();
+        if (str.isEmpty()) return "";
+        if (str.contains(" ") && !str.contains("T")) {
+            str = str.replace(" ", "T");
+        }
+        if (!str.endsWith("Z") && !str.contains("+") && str.length() > 10) {
+            str = str + "Z";
+        }
+        return str;
+    }
+
     @SuppressWarnings("unchecked")
     private List<String> parseStringList(Object val) {
         if (val == null) return null;
@@ -140,8 +153,8 @@ public class MemoryQueryService {
             item.put("tags", r.get("type") != null ? List.of(String.valueOf(r.get("type"))) : List.of());
             item.put("metadata_", Map.of());
             item.put("superseded_by", "");
-            item.put("created_at", String.valueOf(r.get("created_at")));
-            item.put("updated_at", String.valueOf(r.get("updated_at")));
+            item.put("created_at", formatIsoTimestamp(r.get("created_at")));
+            item.put("updated_at", formatIsoTimestamp(r.get("updated_at")));
             items.add(item);
         }
 
