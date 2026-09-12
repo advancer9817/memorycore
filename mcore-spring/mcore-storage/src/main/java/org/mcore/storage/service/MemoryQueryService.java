@@ -15,11 +15,14 @@ public class MemoryQueryService {
     private final MemoryMapper memoryMapper;
     private final LinkMapper linkMapper;
     private final EntityMapper entityMapper;
+    private final org.springframework.jdbc.core.simple.JdbcClient jdbcClient;
 
-    public MemoryQueryService(MemoryMapper memoryMapper, LinkMapper linkMapper, EntityMapper entityMapper) {
+    public MemoryQueryService(MemoryMapper memoryMapper, LinkMapper linkMapper, EntityMapper entityMapper,
+                              org.springframework.jdbc.core.simple.JdbcClient jdbcClient) {
         this.memoryMapper = memoryMapper;
         this.linkMapper = linkMapper;
         this.entityMapper = entityMapper;
+        this.jdbcClient = jdbcClient;
     }
 
     private int parseInt(Object val, int defaultVal) {
@@ -295,17 +298,106 @@ public class MemoryQueryService {
         return Map.of("items", items, "total", items.size(), "page", 1, "size", items.size(), "pages", 1);
     }
 
-    public Map<String, Object> getAccessLogs(String memoryId) {
-        MemoryDO mem = memoryMapper.selectById(memoryId);
-        List<Map<String, Object>> logs = new ArrayList<>();
-        if (mem != null) {
-            logs.add(Map.of(
-                    "id", memoryId,
-                    "app_name", mem.getSourceAgent() != null ? mem.getSourceAgent() : "manual",
-                    "accessed_at", String.valueOf(mem.getUpdatedAt())
-            ));
+    /**
+     * 记忆访问日志。
+     *
+     * 修复要点：原实现忽略分页参数，并把 updated_at 冒充 accessed_at **凭空造出一条日志**，
+     * 而表内真实存在的 injected_count / last_accessed_at / last_injected_at 三列完全未被使用。
+     *
+     * 现实现：
+     * - logs   ← audit_events 中该记忆的真实离散事件（分页）
+     * - summary ← memories 上的真实聚合访问元数据
+     */
+    public Map<String, Object> getAccessLogs(String memoryId, int page, int pageSize) {
+        int p = Math.max(1, page);
+        int size = Math.max(1, Math.min(pageSize, 100));
+        int offset = (p - 1) * size;
+
+        Long total = jdbcClient.sql("SELECT COUNT(*) FROM audit_events WHERE memory_id = :id")
+                .param("id", memoryId).query(Long.class).single();
+
+        List<Map<String, Object>> logs = org.mcore.storage.util.JsonbRows.rows(
+                jdbcClient.sql("SELECT id, event_type, agent, detail_json, created_at " +
+                                "FROM audit_events WHERE memory_id = :id " +
+                                "ORDER BY created_at DESC NULLS LAST LIMIT :limit OFFSET :offset")
+                        .param("id", memoryId).param("limit", size).param("offset", offset)
+                        .query().listOfRows());
+
+        List<Map<String, Object>> normalized = new ArrayList<>();
+        for (Map<String, Object> row : logs) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("id", row.get("id"));
+            entry.put("app_name", row.get("agent") != null ? row.get("agent") : "unknown");
+            entry.put("event_type", row.get("event_type"));
+            entry.put("accessed_at", row.get("created_at"));
+            entry.put("detail", row.get("detail_json"));
+            normalized.add(entry);
         }
-        return Map.of("total", logs.size(), "page", 1, "page_size", 10, "logs", logs);
+
+        // 真实聚合访问元数据（此前完全未暴露）
+        Map<String, Object> summary = new LinkedHashMap<>();
+        Map<String, Object> memRow = jdbcClient.sql(
+                        "SELECT injected_count, last_accessed_at, last_injected_at FROM memories WHERE id = :id")
+                .param("id", memoryId).query().listOfRows().stream().findFirst().orElse(null);
+        if (memRow != null) {
+            summary.put("injected_count", memRow.get("injected_count"));
+            summary.put("last_accessed_at", memRow.get("last_accessed_at"));
+            summary.put("last_injected_at", memRow.get("last_injected_at"));
+        }
+
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("total", total);
+        res.put("page", p);
+        res.put("page_size", size);
+        res.put("logs", normalized);
+        res.put("summary", summary);
+        return res;
+    }
+
+    /** 兼容旧签名 */
+    public Map<String, Object> getAccessLogs(String memoryId) {
+        return getAccessLogs(memoryId, 1, 10);
+    }
+
+    /**
+     * 「被访问过的记忆」列表。
+     *
+     * 修复要点：此前 apps/{id}/accessed 直接复用 filterMemories，返回的是该 app 的**全部**记忆，
+     * 与"访问过"这一语义无关。现按真实访问时间排序，并过滤掉从未被访问的记录。
+     */
+    public Map<String, Object> listAccessedMemories(List<String> appIds, int page, int pageSize) {
+        int p = Math.max(1, page);
+        int size = Math.max(1, Math.min(pageSize, 200));
+        int offset = (p - 1) * size;
+        List<String> ids = (appIds == null || appIds.isEmpty()) ? List.of("") : appIds;
+
+        StringBuilder ph = new StringBuilder();
+        Map<String, Object> params = new LinkedHashMap<>();
+        for (int i = 0; i < ids.size(); i++) {
+            if (i > 0) ph.append(",");
+            ph.append(":sid").append(i);
+            params.put("sid" + i, ids.get(i));
+        }
+
+        String where = " WHERE source_agent IN (" + ph + ") AND last_accessed_at IS NOT NULL";
+        Long total = jdbcClient.sql("SELECT COUNT(*) FROM memories" + where)
+                .params(params).query(Long.class).single();
+
+        Map<String, Object> qp = new LinkedHashMap<>(params);
+        qp.put("limit", size);
+        qp.put("offset", offset);
+        List<Map<String, Object>> items = org.mcore.storage.util.JsonbRows.rows(jdbcClient.sql(
+                        "SELECT id, title, source_agent, status, importance, injected_count, " +
+                                "last_accessed_at, last_injected_at, created_at FROM memories" + where +
+                                " ORDER BY last_accessed_at DESC LIMIT :limit OFFSET :offset")
+                .params(qp).query().listOfRows());
+
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("items", items);
+        res.put("total", total);
+        res.put("page", p);
+        res.put("page_size", size);
+        return res;
     }
 
     public Map<String, Object> getLineage(String memoryId) {

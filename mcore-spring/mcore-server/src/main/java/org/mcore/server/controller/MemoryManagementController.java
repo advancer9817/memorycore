@@ -118,8 +118,10 @@ public class MemoryManagementController {
     }
 
     @GetMapping({"/api/v1/memories/{id}/access-log", "/api/v1/memories/{id}/access-log/"})
-    public Map<String, Object> getAccessLog(@PathVariable("id") String id) {
-        return memoryQueryService.getAccessLogs(id);
+    public Map<String, Object> getAccessLog(@PathVariable("id") String id,
+                                            @RequestParam(value = "page", defaultValue = "1") int page,
+                                            @RequestParam(value = "page_size", defaultValue = "10") int pageSize) {
+        return memoryQueryService.getAccessLogs(id, page, pageSize);
     }
 
     @GetMapping({"/api/v1/memories/{id}/related", "/api/v1/memories/{id}/related/"})

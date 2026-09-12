@@ -1359,3 +1359,45 @@ cd /workspace/memorycore/mcore-spring && mvn clean package -DskipTests && pm2 re
   完整 LLM 策展（去重/矛盾检测/合并建议）需后续迭代实现执行器
 - 下一迭代：`/api/v1/backup/export|import`（仍 404）、`/apps/{id}/accessed` 语义修复（现复用 filterMemories）
 
+
+## [迭代 258] 2026-09-12 — 健康语义/指标/访问日志/备份通道去桩收口
+
+### 目的
+收口上一轮审计定位到的剩余「假实现」。这些问题共同特征是：接口返回 200 与看似合理的数据，
+但数值或语义与真实系统状态不符，属于比 404 更隐蔽的功能缺陷。
+
+### 变更摘要
+
+| # | 位置 | 修复前 | 修复后 |
+|---|---|---|---|
+| 1 | `HealthController` `/health` | `total_memories` 填的是 `countActiveMemories()`（活跃数），与全量差 2700+ 条 | `total_memories`=全量 4787，新增 `active_memories`=2033，与 `/api/v1/stats` 一致 |
+| 2 | `HealthController` `/metrics` | `active_tenants` 硬编码 1 | 读控制面 `listTenants()` 真实值 3；控制面不可达时返回 -1 而非伪造 |
+| 3 | `AppsController` 应用详情 | 对不存在的 app **伪造** `{status:"idle", total_memories_created:0}` | 返回 **404** `{error:"app_not_found", ...}` |
+| 4 | `AppsController` `/apps/{id}/accessed` | 复用 `filterMemories`，返回该 app **全部**记忆，与"访问过"语义无关 | 新增 `listAccessedMemories()`，按真实 `last_accessed_at` 排序并过滤从未访问记录（hermes 实测 1010 条） |
+| 5 | `MemoryQueryService.getAccessLogs` | 忽略分页参数，用 `updated_at` 冒充 `accessed_at` **凭空造日志**；真实存在的 `injected_count`/`last_accessed_at`/`last_injected_at` 三列完全未用 | 分页接真实 `audit_events`；新增 `summary` 暴露真实聚合访问元数据（实测 injected_count=328） |
+| 6 | `POST /api/v1/backup/export` | **404，功能完全缺失** | 导出为 zip 附件（`memories_export.json` + `manifest.json`） |
+| 7 | `POST /api/v1/backup/import` | **404，功能完全缺失** | multipart 导入，兼容 zip 与裸 JSON |
+
+### 附带修复
+- **multipart 上传上限**：Spring Boot 默认 1MB 会让任何真实备份导入失败（实测 **HTTP 413**，当前备份 1.7MB）。
+  已配置 `max-file-size/max-request-size = ${MCORE_MAX_UPLOAD:200MB}` 并支持环境变量覆盖
+- **`TransferService` 硬编码备份路径** `/workspace/memorycore/backups` → 改为可配置 `mcore.backup-dir`（默认相对路径），符合项目可移植性要求
+- 新增 `GET /api/v1/backup/export-json`、`POST /api/v1/backup/run` 便于脚本化与排障
+
+### 验证（全部实测）
+- 构建 `mvn package` EXIT=0；`mvn test` EXIT=0
+- `/health` → `{total_memories: 4787, active_memories: 2033}`，与 `/api/v1/stats` 的 4787 一致
+- `/metrics` → `{active_tenants: 3}`（真实注册表数量）
+- 不存在的 app → **HTTP 404**
+- `/apps/hermes/accessed` → total=1010，按 `last_accessed_at` 降序
+- `/memories/{id}/access-log` → 分页生效，summary 含真实 `injected_count: 328`
+- 备份闭环：导出 1,788,989 字节 zip → **导入回环**（`conflict_policy=skip` 跳过 4787 条已存在）
+  → 再以单条新记录验证**真实写入路径**（`imported_memories: 1`，库中确认后清理探针）
+- 全端点回归：26 个端点全部 200，无回归
+
+### 风险与后续
+- access-log 的 `logs` 数组依赖 `audit_events` 的写入量。当前全库仅 8 条带 memory_id 的事件，
+  故多数记忆的 logs 为空；真实访问量由 `summary` 的三个聚合字段承载。
+  若需完整离散访问流水，应在注入路径补写 `audit_events`（建议后续迭代）
+- `POST /curator/llm` 仍只登记作业，无执行器消费（迭代 257 遗留）
+

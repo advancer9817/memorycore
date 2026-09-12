@@ -24,6 +24,10 @@ import java.util.*;
 public class TransferService {
     private static final Logger log = LoggerFactory.getLogger(TransferService.class);
 
+    /** 服务端备份目录：可通过 MCORE_BACKUP_DIR 覆盖，默认相对工作目录，避免硬编码绝对路径 */
+    @org.springframework.beans.factory.annotation.Value("${mcore.backup-dir:./backups}")
+    private String backupDir;
+
     private final JdbcClient jdbcClient;
     private final MemoryRepository memoryRepository;
     private final ObjectMapper objectMapper;
@@ -88,7 +92,7 @@ public class TransferService {
             if (customPath != null && !customPath.isBlank()) {
                 destPath = Paths.get(customPath);
             } else {
-                destPath = Paths.get("/workspace/memorycore/backups", "memory-" + stamp + ".json");
+                destPath = Paths.get(backupDir, "memory-" + stamp + ".json");
             }
 
             if (destPath.getParent() != null) {

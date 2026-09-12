@@ -14,6 +14,12 @@ spring:
   sql:
     init:
       mode: never
+  servlet:
+    multipart:
+      # 备份导入通道：默认 1MB 上限会让任何真实备份（当前约 1.7MB）导入失败并返回 413，
+      # 此处按记忆库规模放宽，可用环境变量覆盖。
+      max-file-size: ${MCORE_MAX_UPLOAD:200MB}
+      max-request-size: ${MCORE_MAX_UPLOAD:200MB}
 
 mybatis:
   mapper-locations: classpath*:mapper/**/*.xml
