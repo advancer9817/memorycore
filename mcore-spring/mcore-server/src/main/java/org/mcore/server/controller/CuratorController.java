@@ -5,6 +5,7 @@ import org.mcore.storage.service.LlmCuratorExecutor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -19,7 +20,11 @@ public class CuratorController {
     private final CuratorService curatorService;
     private final LlmCuratorExecutor llmCuratorExecutor;
 
-    public CuratorController(CuratorService curatorService, LlmCuratorExecutor llmCuratorExecutor) {
+    private final org.mcore.storage.service.RuleCuratorService ruleCuratorService;
+
+    public CuratorController(CuratorService curatorService, LlmCuratorExecutor llmCuratorExecutor,
+                             org.mcore.storage.service.RuleCuratorService ruleCuratorService) {
+        this.ruleCuratorService = ruleCuratorService;
         this.curatorService = curatorService;
         this.llmCuratorExecutor = llmCuratorExecutor;
     }
@@ -42,6 +47,60 @@ public class CuratorController {
     @PostMapping({"/api/curator/apply", "/api/v1/curator/apply"})
     public Map<String, Object> applyCurator(@RequestBody(required = false) Map<String, Object> body) {
         return curatorService.applyCurator();
+    }
+
+    /**
+     * 规则策展报告（默认 dry-run，只报告不改动）。
+     * 对标 Python `curator_report`；`rule_curator` 的 25 个参数由此真实消费。
+     */
+    @GetMapping({"/api/v1/curator/rules", "/api/curator/rules"})
+    public Map<String, Object> ruleCuratorReport(
+            @RequestParam(value = "dry_run", defaultValue = "true") boolean dryRun,
+            @RequestParam(value = "limit", defaultValue = "500") int limit,
+            @RequestParam(value = "stale_after_days", defaultValue = "365") int staleAfterDays,
+            @RequestParam(value = "archive_after_days", defaultValue = "730") int archiveAfterDays,
+            @RequestParam(value = "allow_actions", required = false) String allowActions,
+            @RequestParam(value = "deny_actions", required = false) String denyActions) {
+        return ruleCuratorService.report(dryRun, limit, staleAfterDays, archiveAfterDays,
+                splitCsv(allowActions), splitCsv(denyActions));
+    }
+
+    /** 规则策展执行（真实改库；默认传入 dry_run=false 才生效） */
+    @PostMapping({"/api/v1/curator/rules/apply", "/api/curator/rules/apply"})
+    public Map<String, Object> applyRuleCurator(@RequestBody(required = false) Map<String, Object> body) {
+        boolean dryRun = body == null || !Boolean.FALSE.equals(body.get("dry_run"));
+        int limit = body != null && body.get("limit") instanceof Number n ? n.intValue() : 500;
+        int staleDays = body != null && body.get("stale_after_days") instanceof Number n ? n.intValue() : 365;
+        int archiveDays = body != null && body.get("archive_after_days") instanceof Number n ? n.intValue() : 730;
+        List<String> allow = body != null ? asList(body.get("allow_actions")) : List.of();
+        List<String> deny = body != null ? asList(body.get("deny_actions")) : List.of();
+        return ruleCuratorService.report(dryRun, limit, staleDays, archiveDays, allow, deny);
+    }
+
+    private java.util.List<String> splitCsv(String v) {
+        if (v == null || v.isBlank()) {
+            return java.util.List.of();
+        }
+        java.util.List<String> out = new java.util.ArrayList<>();
+        for (String s : v.split(",")) {
+            if (!s.isBlank()) {
+                out.add(s.trim());
+            }
+        }
+        return out;
+    }
+
+    @SuppressWarnings("unchecked")
+    private java.util.List<String> asList(Object v) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        if (v instanceof java.util.List<?> list) {
+            for (Object o : list) {
+                if (o != null && !String.valueOf(o).isBlank()) {
+                    out.add(String.valueOf(o).trim());
+                }
+            }
+        }
+        return out;
     }
 
     @PostMapping({"/api/curator/llm", "/api/v1/curator/llm"})

@@ -62,6 +62,29 @@ public final class JsonbRows {
             }
             return pg.getValue();
         }
+        // 数组列（如 tags / related_ids 为 text[]）经驱动返回 java.sql.Array，
+        // 若原样透传，Jackson 会 introspect 出驱动内部结构
+        // （resultSet → statement → connection → parameterStatuses …），
+        // 既泄漏连接信息，也会产出非法 JSON 使整个响应无法解析。
+        if (v instanceof java.sql.Array arr) {
+            try {
+                Object a = arr.getArray();
+                if (a instanceof Object[] objs) {
+                    List<Object> list = new ArrayList<>(objs.length);
+                    for (Object o : objs) {
+                        list.add(o);
+                    }
+                    return list;
+                }
+                return a == null ? null : String.valueOf(a);
+            } catch (Exception e) {
+                return null;
+            }
+        }
+        // 兜底：任何驱动自有类型都不许被 introspect，转为字符串
+        if (v != null && v.getClass().getName().startsWith("org.postgresql.")) {
+            return String.valueOf(v);
+        }
         return v;
     }
 }

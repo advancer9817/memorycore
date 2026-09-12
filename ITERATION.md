@@ -1806,3 +1806,64 @@ JDBC URL 参数注入面 / 无 `@Scheduled` 调度 / `extraction_strategy` 16 �
 ### 涉及文件
 新增：`subject/SubjectContextService.java`
 修改：`service/ExtractionService.java`、`entity/EntityIndexService.java`、`service/ConfigService.java`、`test/.../ExtractionServiceTest.java`、`config.yaml`
+
+## [迭代 266] 2026-09-12 — S9 规则策展引擎落地：生命周期规则 + 置信度衰减
+
+### 目的
+补齐 S9。Python `memorycore/storage/curator.py`（427 行）在 Java 迁移后**整体缺失**，
+后果是 `rule_curator` 的 **25 个配置参数中有 22 个从未被任何代码消费** ——
+属"配置文件看起来在工作、实际不起作用"的静默失效。
+
+### 变更摘要
+
+**新增 `RuleCuratorService.java`**（对标 `curator_report`）
+- 保留策略 v3（证据驱动生命周期）全量移植：
+  - 高价值类型（user_profile / environment_fact / decision / project_memory / skill_candidate）
+    **永不自动 stale**，除非 feedback < -2.0 且 importance < 0.3
+  - candidate 窗口分层：episodic 7 天 / precious 30 天 / 其他 7 天
+  - candidate → active 晋升：importance ≥ 0.75 且 feedback ≥ 0，或 injected_count ≥ 3
+  - stale → active 复活：近 7 天被注入且有效性 ≥ 0.5 且无负反馈
+  - contradicted 自动归档：90 天未访问
+  - `decay_policy`：review 慢衰减 / stable 不衰减 / freeze 完全跳过
+- 候选类别 15 类：low_feedback、auto_decay、episodic_stale/archive、dead_candidate（三级）、
+  never_accessed、stale、precious_stale、archive、contradicted_archive、revival、
+  promote、skill_promotion、unused_active、unused_fragment
+- 动作计划带**优先级与首命中胜出**（revive → promote → mark_stale×4 → archive×4 → unused×2 → contradicted）
+- 真实执行：置信度衰减（`confidence - decay_step`，下限 `decay_min_confidence`）+
+  历史事件清理（context_quality_events 90 天 / audit_events 180 天）+
+  批量状态迁移（`status <> :s` 幂等）。
+  **状态变更后同步实体索引**（非 active 记忆不应再被 entity_search 召回）
+- 写 `curator_apply` 审计事件（stale/archived/promoted/revived/auto_decay/total_actions）
+
+**`CuratorController` 新增端点**
+- `GET /api/v1/curator/rules`（默认 dry-run，支持 limit / stale_after_days / archive_after_days / allow_actions / deny_actions）
+- `POST /api/v1/curator/rules/apply`（`dry_run=false` 才真实改库）
+
+**修复 `JsonbRows`（顺带发现的真实缺陷）**
+- 首次联调时策展报告返回的 JSON **非法且无法解析**：`tags`（text[]）经驱动返回
+  `java.sql.Array`，未经规范化直接序列化，Jackson introspect 出驱动内部结构
+  （`resultSet → statement → connection → parameterStatuses …`），既泄漏连接信息
+  （含 `session_authorization` 等）又产出畸形 JSON
+- `JsonbRows.value()` 补齐 `java.sql.Array` 解析与 `org.postgresql.*` 兜底转字符串
+- `RuleCuratorService` 加载行后统一规范化，并剔除 `embedding`（1024 维向量对调用方无意义且体积巨大）
+
+### 验证（实测，含真实写入）
+| 项 | 证据 |
+|---|---|
+| 报告可用 | 全量 4963 条 → duplicates 86、unused_fragment 40、planned_actions 41；响应 **79.7KB 合法 JSON** |
+| JSON 修复 | 修复前 char 11366 处解析失败；修复后完整解析成功 |
+| promote 规则 | 构造 `candidate + importance 0.8 + feedback 0.1` 探针 → dry-run 命中 → apply 后 **candidate → active** |
+| 置信度衰减 | 构造 `review + 久未访问 + effectiveness 0.1 + injected 5 + confidence 0.80` 探针 → apply 后 **0.80 → 0.75**（衰减 0.05 = `decay_step`） |
+| allow_actions 过滤 | 传 `allow_actions=["promote"]` → 仅执行 1 条 promote，40 条 fragment 的 mark_stale 被正确排除 |
+| 真实数据零影响 | fragment active 数 275 → 275 不变 |
+| 审计 | `curator_apply \| rule_curator \| {"stale":0,"applied":1,"promoted":1,"auto_decay":1,"total_actions":1}` |
+
+### 风险与注意事项
+- `apply` 端点会**真实改动生产记忆状态**；默认 `dry_run=true`，调用方必须显式传 `dry_run=false`
+- 当前全量扫描显示 40 条 unused_fragment 待 stale 化，属真实待办，需按运维节奏执行
+- `normalize_title_key` 去重按标题词元归一，中文标题同样适用
+- 报告剔除 `embedding` 字段（与 Python 返回全列的差异点），理由是体积与用途
+
+### 涉及文件
+新增：`service/RuleCuratorService.java`
+修改：`controller/CuratorController.java`、`util/JsonbRows.java`

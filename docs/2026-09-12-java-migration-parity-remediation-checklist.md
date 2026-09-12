@@ -41,7 +41,9 @@
 - [x] **S8** 主体上下文（subject_context）：新增 `SubjectContextService`（5 函数 + SUBJECT_PROMPT_INSTRUCTION，对标 `subject_context.py` 203 行）；提取前解析项目归属；提示词注入 Active Context + Subject 规则；fact 级主体判定；落库规范 `project_path`/`scope` + `project:<name>` 标签；`subject_context` 纳入配置读写白名单
       → **实测**：标题前缀规则被遵循（产出 `mcore …` 开头的事实）；`project_path` 由原始输入 `/workspace/memorycore/mcore-spring` 归一为 `/workspace/memorycore`；`scope=project`；tags 含 `project:mcore`
       → **注意**：名称命中时规范路径取 `paths` 首项（与 Python 一致），配置顺序即 canonical path；存量记忆仍待回填
-- [ ] **S9** 规则策展引擎：promote / revive / mark_stale / archive + **置信度衰减执行**；打通 `rule_curator` 剩余 21 个参数（当前 24 个只消费 3 个）
+- [x] **S9** 规则策展引擎：新增 `RuleCuratorService`（Python 427 行全量移植，15 类候选 + 优先级动作计划 + 置信度衰减 + 历史清理 + 审计）；`rule_curator` 25 个参数**全部真实消费**；新增 `/api/v1/curator/rules`（dry-run）与 `/rules/apply` 端点
+      → **实测**：全量 4963 条 → duplicates 86 / unused_fragment 40 / planned_actions 41；promote 使探针 candidate→active；衰减使 confidence 0.80→0.75；`allow_actions` 过滤生效且真实数据零影响；`curator_apply` 审计已写入
+      → **附带修复**：`JsonbRows` 未处理 `java.sql.Array`，`tags`(text[]) 被 Jackson introspect 出驱动连接内部结构，导致响应为**非法 JSON** 且泄漏连接信息
 - [ ] **S10** 向量缓存 `vector_cache`：内容哈希键 `(sha256(title+space+content), model)`，读路径短路 + 批量回写；顺带修正 `embedBatch` 缺 `normalize()` 的不一致
 - [ ] **S11** 治理台账 + undo：`governance_executions` / `governance_mutation_log` 写入 + inverse 链 + 回滚端点（当前 `rollback_json` 是死字段）
 - [ ] **S12** 原子化拆分 + split 动作：`should_atomize` / `plan_child_facts` / `fact_hash` 幂等键 / `part_of`+`supports` 双链 / uuid5 确定性 child_id
