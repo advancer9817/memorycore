@@ -50,8 +50,8 @@ mcore-client.js（单进程，单事件循环）
 │   └─ RetryScheduler           # 指数退避调度器（5s→10min，±20% 抖动）
 │
 ├── hooks/                      # ── 本地 Hook 业务逻辑（替代 mcore-context.sh / mcore-ingest.py）──
-│   ├─ payloadAdapter           # Claude Code / Hermes 双格式 Hook Payload 解析（§4.2.1）
-│   └─ transcriptExtractors     # claude(.jsonl) / hermes(state.db 只读) / codex(.jsonl) 转录提取（§4.3.1）
+│   ├─ payloadAdapter           # 五生态 Hook Payload 解析（claude/hermes/gemini/opencode/codex，§4.2.1）
+│   └─ transcriptExtractors     # 五源转录提取 claude(.jsonl)/hermes(state.db)/codex(.jsonl)/gemini(.jsonl)/opencode(sqlite)（§4.3.1）
 │
 └── cli/                        # ── 命令行（node mcore-client.js <cmd>）──
     └─ start|stop|restart|status|switch|config|bind|doctor（§7）
@@ -124,15 +124,26 @@ mcore-client.js（单进程，单事件循环）
 
 #### 4.2.1 入参自适应（payloadAdapter）
 
-同一路径兼容两种 Hook 生态的 payload：
+同一路径兼容五种 Agent 生态的 payload：
 
-| 来源 | 请求体特征 | prompt 提取字段 | agent 推断 |
+| 来源 | 钩子事件与配置位置 | prompt 提取字段 | agent 推断 |
 |---|---|---|---|
-| Claude Code `UserPromptSubmit` | `hook_event_name: "UserPromptSubmit"` | `tool_input.prompt` → `prompt` → `user_prompt` → `message`（依次回落） | 固定 `claude`（或 `X-Agent-Id` 头覆盖） |
-| Hermes pre_llm_call | 顶层 `user_message` 字段 | `user_message` | 固定 `hermes` |
-| 通用 | 任意 | `prompt` 字段 | `X-Agent-Id` 头或 `generic` |
+| Claude Code | `UserPromptSubmit`（`~/.claude/settings.json`，HTTP 原生钩子） | `tool_input.prompt` → `prompt` → `user_prompt` → `message`（依次回落） | 固定 `claude`（或 `X-Agent-Id` 头覆盖） |
+| Hermes | `pre_llm_call`（mcore-memory 插件） | `user_message` | 固定 `hermes` |
+| Gemini CLI | `BeforeAgent`（`~/.gemini/settings.json`，脚本钩子转调本端点） | `prompt` / `message` / `user_prompt` 回落链 | 固定 `gemini` |
+| OpenCode | `chat.message` / 自定义插件（`opencode.json`，脚本钩子转调本端点） | `message` / `prompt` 回落链 | 固定 `opencode` |
+| Codex | **无读前注入**（迭代 78 既定决策：读走 AGENTS.md 显式调用，避免可见钩子输出污染对话） | — | `codex` 仅出现在写路径 |
 
 另提取 `project_path`（`cwd` / `working_directory` / `extra.cwd` 回落链），透传给 `memory_context` 以保住 subject 解析。
+
+**Agent 接入的双模式适配（关键设计）**：各 Agent 的钩子能力面不一致，客户端提供两种接入形态，`bind` 时按 Agent 自动选择：
+
+| 模式 | 适用 Agent | 形态 |
+|---|---|---|
+| **HTTP 原生** | Claude Code | `{"type":"http","url":"http://127.0.0.1:8318/api/v1/hooks/..."}` 直接进客户端，零脚本、零进程开销 |
+| **超薄脚本适配** | Codex、Gemini CLI、OpenCode（三者钩子系统仅支持 command 型，不支持 HTTP 型） | 客户端分发两个单行脚本 `mcore-hook-context.sh` / `mcore-hook-ingest.sh` 至 `~/.mcore/bin/`（已加入 PATH 注入建议），脚本内容仅为 `curl -s --max-time 4 -X POST http://127.0.0.1:8318/api/v1/hooks/<x> -d @-`，**不含任何业务逻辑与路径判断**；Codex/Gemini/OpenCode 的钩子注册指向这两个脚本（以 `MCORE_AGENT_ID=<agent>` 环境变量前缀区分身份） |
+
+超薄脚本与旧 `mcore-context.sh`/`mcore-ingest.py`（600+ 行、依赖仓库路径）的本质区别：业务逻辑全部下沉客户端进程内（payloadAdapter / transcriptExtractors），脚本退化为纯传输层，永不因端点变更而修改。
 
 #### 4.2.2 处理流程与响应
 
@@ -149,9 +160,15 @@ mcore-client.js（单进程，单事件循环）
 
 #### 4.3.1 处理流程
 
-1. 收到 Stop/SessionEnd payload（Claude Code 含 `transcript_path`；Hermes 含 `session_id`；兼容 `CLAUDE_SESSION_FILE` 等环境变量兜底）；
+1. 收到 Stop/SessionEnd payload（Claude Code 含 `transcript_path`；Hermes 含 `session_id`；Codex/Gemini/OpenCode 的钩子 payload 透传原文；兼容 `CLAUDE_SESSION_FILE` 等环境变量兜底）；
 2. **立即** `202 Accepted {"queued": true, "batch_id": "000126"}`（Agent 的 Stop 钩子 30s 超时再也不会被 LLM 提炼耗时拖垮）；
-3. 异步：transcriptExtractors 按来源提取 `[{"role","content"}]`（claude=解析 `~/.claude/projects/**/*.jsonl` 最近 500 条 user/assistant；hermes=只读打开 `~/.hermes/state.db` 按 session_id 取，无 id 则取最新活跃会话；codex=解析 `~/.codex/sessions/**/*.jsonl`）；
+3. 异步：transcriptExtractors 按来源提取 `[{"role","content"}]`：
+   - **claude** = 解析 `~/.claude/projects/**/*.jsonl`（优先 payload 的 `transcript_path`）最近 500 条 user/assistant；
+   - **hermes** = 只读打开 `~/.hermes/state.db` 按 session_id 取 `messages`，无 id 则取最新活跃会话（无 session 时回落逻辑已实证有效）；
+   - **codex** = 解析 `~/.codex/sessions/**/*.jsonl`（`event_msg` 的 `user_message`/`agent_message` 优先，`response_item.message` 兜底——与既有 `_extract_codex` 双层结构完全同口径）；
+   - **gemini** = 按已知 transcript 定位规则解析 `~/.gemini/tmp/<hash>/checkpoint-*.jsonl`；
+   - **opencode** = 只读打开 opencode 本地 SQLite（`message` + `part` 表 JOIN，提取 `user`/`assistant` part 文本——与既有 `_extract_opencode_from_db` 同口径）；
+   - 提取器实现口径与 `scripts/hooks/mcore-ingest.py` 的五个 `_extract_*` 函数逐一等价（该脚本的提取逻辑已在生产验证多轮），客户端以 Node 内置 `node:sqlite`（Node 22+，无原生编译依赖）读取 SQLite 转录，旧机器 Node 18/20 则回落提示升级（不破坏其余功能）；
 4. 提取结果（截断每条 2000 字符、总 500 条上限，与原脚本口径一致）写入 WAL `.pending` 文件；
 5. RetryScheduler 拾取 → egress 调上游 `/mcp` `memory_ingest`（`messages`/`agent_id`/`project_path`）→ 成功则文件改 `.done` 并 60s 后物理删除；失败走状态机。
 
@@ -238,13 +255,21 @@ mcore-client.js（单进程，单事件循环）
 
 | 组件 | 配置项 | 值（跨环境永久冻结） |
 |---|---|---|
-| Claude Code | `~/.claude.json → mcpServers.memorycore.url` | `http://127.0.0.1:8318/mcp` |
+| Claude Code | `~/.claude.json → mcpServers.memorycore.url` | `http://127.0.0.1:8318/mcp`（头 `X-Agent-Id: claude` 保留） |
 | Claude Code | `settings.json → hooks.UserPromptSubmit` | `{"type":"http","url":"http://127.0.0.1:8318/api/v1/hooks/context","timeout":5}` |
 | Claude Code | `settings.json → hooks.Stop` | `{"type":"http","url":"http://127.0.0.1:8318/api/v1/hooks/ingest","timeout":10}` |
-| Hermes | `config.yaml → mcp_servers.memorycore.url` | `http://127.0.0.1:8318/mcp` |
+| Hermes | `config.yaml → mcp_servers.memorycore.url` | `http://127.0.0.1:8318/mcp`（头 `X-Agent-Id: hermes` 保留） |
 | Hermes | 插件 `MCORE_URL` 常量 | `http://127.0.0.1:8318/mcp`（服务端同机部署场景无需改动插件） |
-| Codex | `~/.codex/config.toml → mcp_servers` | `http://127.0.0.1:8318/mcp` |
+| Codex | `~/.codex/config.toml → mcp_servers` | `http://127.0.0.1:8318/mcp`（头 `X-Agent-Id: codex`） |
+| Codex | `hooks.json → SessionStart / Stop` | `MCORE_AGENT_ID=codex bash ~/.mcore/bin/mcore-hook-ingest.sh`（**读前注入保持停用**，遵循迭代 78 决策） |
+| Gemini CLI | `~/.gemini/settings.json → mcpServers` | `http://127.0.0.1:8318/mcp`（头 `X-Agent-Id: gemini`） |
+| Gemini CLI | `hooks → BeforeAgent / AfterAgent / SessionEnd` | 超薄脚本 `~/.mcore/bin/mcore-hook-{context,ingest}.sh`（`MCORE_AGENT_ID=gemini` 前缀） |
+| OpenCode | `opencode.json → mcp` | `http://127.0.0.1:8318/mcp` |
+| OpenCode | `hooks → session_start / session_end` | 超薄脚本（`MCORE_AGENT_ID=opencode` 前缀）；既有 mcore 插件条目改为指向客户端端点 |
 | 本地 Web UI | API 基地址 | `http://127.0.0.1:8318`（透传） |
+| Windows 侧 Claude（可选） | `~/.claude/settings.json`（`/mnt/c/Users/<u>/...`） | 同 Claude Code 行（bind 自动扫描 Windows 用户目录，同现有 connect_agents.py 的 `windows_user_dirs()` 口径） |
+
+**身份识别一致性**：`X-Agent-Id` 请求头（MCP 直连路径）与 `MCORE_AGENT_ID` 环境变量（钩子脚本路径）双通道统一映射到服务端 `source_agent`，与 commit 7ea97ad 建立的嗅探机制完全兼容；四主体收敛决策（hermes/claude/codex/mcore）不受影响——gemini/opencode 作为合法外部来源照常落库。
 
 环境迁移示例（从公司网切到公网云）：远程机器上仅执行 `mcore-client switch cloud`，1 秒内全机 Agent 完成漫游，任何 Agent 配置文件零改动。
 
@@ -266,7 +291,10 @@ mcore-client.js（单进程，单事件循环）
 |---|---|---|
 | A1 | 全新纯净目录 `node mcore-client.js start`，`switch cloud` 指向真实服务端 | `/health` 返回 client=running, upstream=connected |
 | A2 | Claude Code（hooks 为 HTTP 形态）提问 | 自动注入 `# mcore context` 附加上下文，耗时 < 1.5s（命中缓存 < 50ms） |
+| A2b | Gemini CLI（BeforeAgent 超薄脚本）提问 | 注入成功，`source_agent=gemini` 正确落库身份 |
+| A2c | Codex 提问 | **无读前注入**（符合迭代 78 决策），AGENTS.md 显式 memory_context 经客户端透传正常返回 |
 | A3 | Stop 钩子触发会话回写 | `202` 即返回；60s 内上游 `memory_ingest` 成功，记忆列表出现新事实 |
+| A3b | Codex/Gemini/OpenCode 会话结束回写 | 三者转录各自正确提取（codex=.jsonl 双层结构、opencode=sqlite JOIN），`source_agent` 分别为 codex/gemini/opencode |
 | A4 | 回写期间断上游（iptables/停服模拟） | 队列出现 `.pending` 重试；恢复上游后自动补投，记忆最终落库，零丢失 |
 | A5 | 重试超限 | 转入 `.dead`；`queue replay` 手工重放成功 |
 | A6 | `switch` 热切换 profile | 不中断监听；缓存清空；后续请求走新上游（日志可证） |

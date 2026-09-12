@@ -1189,6 +1189,20 @@ cd /workspace/memorycore/mcore-spring && mvn clean package -DskipTests && pm2 re
 7. **验收标准 A1~A10**：涵盖缓存命中延迟、断网队列补投零丢失、死信重放、热切换、幂等 bind、离线不卡对话等硬指标。
 8. **实施切分 T1~T6**：T1 代理核心 → T2/T3 读写路径并行 → T4 CLI → T5 bind/doctor/托管 → T6 全量验收。
 
+## [迭代 254] 2026-09-12 — mcore-client 详细设计扩展为五 Agent 生态全量覆盖（claude/hermes/codex/gemini/opencode）
+
+### 目的
+用户纠正：客户端设计不能只覆盖 Claude Code 与 Hermes，Codex 与其他 Agent（Gemini CLI、OpenCode）必须同等纳入。
+
+### 设计修订（docs/mcore-client-detailed-design.md）
+1. **payloadAdapter 扩为五生态**：Claude Code（UserPromptSubmit/HTTP 原生）、Hermes（pre_llm_call 插件）、Gemini CLI（BeforeAgent）、OpenCode（chat.message/插件）四路读前注入 + Codex 明确**保持无读前注入**（遵循迭代 78 既定决策：读走 AGENTS.md 显式调用，避免钩子输出污染对话）。
+2. **双模式接入设计（关键）**：
+   - HTTP 原生模式仅 Claude Code 钩子系统支持；
+   - Codex/Gemini/OpenCode 钩子系统只支持 command 型 → 客户端分发**超薄传输脚本**（`~/.mcore/bin/mcore-hook-{context,ingest}.sh`，单行 curl，`MCORE_AGENT_ID` 前缀区分身份），业务逻辑全部下沉客户端进程内，脚本永不因端点变更而修改。
+3. **transcriptExtractors 扩为五源**：claude(.jsonl，优先 transcript_path)/hermes(state.db 回环反查)/codex(.jsonl 双层 event_msg+response_item)/gemini(checkpoint .jsonl)/opencode(sqlite message+part JOIN)，口径与生产脚本 `mcore-ingest.py` 五个 `_extract_*` 逐一等价；SQLite 读取用 Node 22+ 内置 `node:sqlite`（无原生编译依赖）。
+4. **bind 目标矩阵扩全**：新增 Codex hooks.json、Gemini settings.json 钩子、OpenCode opencode.json 钩子与 MCP 条目、Windows 侧 Claude 目录扫描；`X-Agent-Id`（MCP 路径）与 `MCORE_AGENT_ID`（钩子路径）双通道统一映射 source_agent，兼容 commit 7ea97ad 嗅探机制。
+5. **验收标准扩为 A1~A13**：新增 A2b（Gemini 注入+身份落库）、A2c（Codex 无注入但显式调用透传正常）、A3b（Codex/Gemini/OpenCode 三源回写与 source_agent 正确性）。
+
 
 
 
