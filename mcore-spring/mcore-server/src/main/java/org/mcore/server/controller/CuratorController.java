@@ -8,14 +8,26 @@ import java.util.*;
 @RestController
 public class CuratorController {
 
+    private final org.mcore.storage.service.StatsService statsService;
+
+    public CuratorController(org.mcore.storage.service.StatsService statsService) {
+        this.statsService = statsService;
+    }
+
     @GetMapping({"/api/curator/status", "/api/v1/curator/status", "/api/curator/status/", "/api/v1/curator/status/"})
     public Map<String, Object> getStatus() {
-        return Map.of(
-                "status", "healthy",
-                "running", false,
-                "curator_mode", "rule_and_llm",
-                "last_run_at", Instant.now().toString(),
-                "llm_curator", Map.of(
+        Map<String, Object> memStats = statsService.getMemoryStats();
+        Map<String, Object> statsPayload = new LinkedHashMap<>();
+        statsPayload.put("total", memStats.get("total_memories"));
+        statsPayload.put("by_status", memStats.get("by_status"));
+
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("status", "healthy");
+        res.put("running", false);
+        res.put("curator_mode", "rule_and_llm");
+        res.put("last_run_at", Instant.now().toString());
+        res.put("stats", statsPayload);
+        res.put("llm_curator", Map.of(
                         "status", "idle",
                         "last_result", "succeeded",
                         "latest_job", Map.of(
@@ -25,6 +37,7 @@ public class CuratorController {
                         )
                 )
         );
+        return res;
     }
 
     @GetMapping({"/api/curator/last-digest", "/api/v1/curator/last-digest"})

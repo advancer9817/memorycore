@@ -175,7 +175,7 @@ export function MemoryOperationsView({
       ? contraDecisions
       : rawDecisions;
 
-  const byStatus = status?.stats.by_status || {};
+  const byStatus = status?.stats?.by_status || {};
   const lastRunIso =
     status?.schedules?.rule_curator?.last_run_at ||
     status?.service?.ExecMainExitTimestamp ||
@@ -197,7 +197,7 @@ export function MemoryOperationsView({
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold tracking-tight text-white">
-              {status?.stats.total ?? "—"}
+              {status?.stats?.total ?? "—"}
             </div>
             <p className="mt-1 text-[11px] text-zinc-500">已沉淀持久事实</p>
           </CardContent>

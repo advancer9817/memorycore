@@ -1014,3 +1014,26 @@ git revert HEAD
 cd /workspace/memorycore/mcore-spring && mvn clean package -DskipTests && pm2 restart mcore mcore-ui
 ```
 
+## [迭代 248] 2026-09-12 — 修复看板 Curator 状态缺漏与 MemoryOperationsView 空指针崩溃
+
+### 目的
+修复前端看板页面崩溃抛出 `TypeError: Cannot read properties of undefined (reading 'by_status')` 导致全局 Error Boundary 拦截（Something went wrong）的致命缺陷。
+
+### 变更摘要
+1. **CuratorController 补齐状态指标透传**：
+   - 注入 `StatsService`；
+   - 在 `getStatus()` 中调用 `statsService.getMemoryStats()`，组装包含 `total` 与 `by_status` 的完整 `stats` 载荷返回前端。
+2. **前端防御性渲染加固**：
+   - `MemoryOperationsView.tsx` 中将 `status?.stats.by_status` 升级为 `status?.stats?.by_status`，将 `status?.stats.total` 升级为 `status?.stats?.total`，杜绝任何未定义的空指针击穿。
+3. **彻底完成全量编译重构**：
+   - 远端执行 `mvn clean package -DskipTests` 与 `pnpm run build`，生成全新 Build ID 与哈希分块；
+   - 重启 `mcore` 与 `mcore-ui`。
+
+### 验证
+| 检查项 | 预期 | 实测 |
+|---|---|---|
+| `GET /api/v1/curator/status` | 包含 stats 节点（total 4655, by_status 真实分布） | ✅ 正常返回 stats.total 与 by_status |
+| `GET /` (看板首页) | 页面 200，无 Error Boundary 报错，四大指标卡正常展示 | ✅ 200 正常渲染 |
+| 跨机访问 API 地址 | 严格走相对路径反代（35.236.134.50:18318） | ✅ 远端直通 |
+
+
