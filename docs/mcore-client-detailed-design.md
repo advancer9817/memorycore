@@ -132,7 +132,7 @@ mcore-client.js（单进程，单事件循环）
 | Hermes | `pre_llm_call`（mcore-memory 插件） | `user_message` | 固定 `hermes` |
 | Gemini CLI | `BeforeAgent`（`~/.gemini/settings.json`，脚本钩子转调本端点） | `prompt` / `message` / `user_prompt` 回落链 | 固定 `gemini` |
 | OpenCode | `chat.message` / 自定义插件（`opencode.json`，脚本钩子转调本端点） | `message` / `prompt` 回落链 | 固定 `opencode` |
-| Codex | **无读前注入**（迭代 78 既定决策：读走 AGENTS.md 显式调用，避免可见钩子输出污染对话） | — | `codex` 仅出现在写路径 |
+| Codex | `UserPromptSubmit`（`~/.codex/hooks.json`，脚本钩子转调本端点；**迭代 78 的停用决策已按用户 2026-09-12 指令废止**） | `prompt` / `user_prompt` / `message` 回落链 | 固定 `codex` |
 
 另提取 `project_path`（`cwd` / `working_directory` / `extra.cwd` 回落链），透传给 `memory_context` 以保住 subject 解析。
 
@@ -142,6 +142,11 @@ mcore-client.js（单进程，单事件循环）
 |---|---|---|
 | **HTTP 原生** | Claude Code | `{"type":"http","url":"http://127.0.0.1:8318/api/v1/hooks/..."}` 直接进客户端，零脚本、零进程开销 |
 | **超薄脚本适配** | Codex、Gemini CLI、OpenCode（三者钩子系统仅支持 command 型，不支持 HTTP 型） | 客户端分发两个单行脚本 `mcore-hook-context.sh` / `mcore-hook-ingest.sh` 至 `~/.mcore/bin/`（已加入 PATH 注入建议），脚本内容仅为 `curl -s --max-time 4 -X POST http://127.0.0.1:8318/api/v1/hooks/<x> -d @-`，**不含任何业务逻辑与路径判断**；Codex/Gemini/OpenCode 的钩子注册指向这两个脚本（以 `MCORE_AGENT_ID=<agent>` 环境变量前缀区分身份） |
+
+**Codex 读前注入的噪声治理（历史教训吸收）**：此前 Codex 停用读前注入的原因之一是召回内容与提问不相关（"现在TODO还有啥"时注入了无关记忆）。客户端针对 Codex 生态默认启用注入，但通过以下机制根治不相关问题：
+- 相关性阈值：客户端在 prompt 解析后对过短/疑问型泛化查询（< 8 字符或命中 TODO/帮助类泛词）跳过召回，直接空注入；
+- 上游 `memory_context` 的 Slim 信封 + subject 归属过滤已经上线，注入内容按项目/语义收敛；
+- `mcore-client config set codex.context_injection off` 保留单 Agent 粒度的关闭开关（不波及其他 Agent）。
 
 超薄脚本与旧 `mcore-context.sh`/`mcore-ingest.py`（600+ 行、依赖仓库路径）的本质区别：业务逻辑全部下沉客户端进程内（payloadAdapter / transcriptExtractors），脚本退化为纯传输层，永不因端点变更而修改。
 
@@ -261,7 +266,7 @@ mcore-client.js（单进程，单事件循环）
 | Hermes | `config.yaml → mcp_servers.memorycore.url` | `http://127.0.0.1:8318/mcp`（头 `X-Agent-Id: hermes` 保留） |
 | Hermes | 插件 `MCORE_URL` 常量 | `http://127.0.0.1:8318/mcp`（服务端同机部署场景无需改动插件） |
 | Codex | `~/.codex/config.toml → mcp_servers` | `http://127.0.0.1:8318/mcp`（头 `X-Agent-Id: codex`） |
-| Codex | `hooks.json → SessionStart / Stop` | `MCORE_AGENT_ID=codex bash ~/.mcore/bin/mcore-hook-ingest.sh`（**读前注入保持停用**，遵循迭代 78 决策） |
+| Codex | `hooks.json → SessionStart / UserPromptSubmit / Stop` | `MCORE_AGENT_ID=codex bash ~/.mcore/bin/mcore-hook-{context,ingest}.sh`（**读前注入启用**，迭代 78 停用决策已废止） |
 | Gemini CLI | `~/.gemini/settings.json → mcpServers` | `http://127.0.0.1:8318/mcp`（头 `X-Agent-Id: gemini`） |
 | Gemini CLI | `hooks → BeforeAgent / AfterAgent / SessionEnd` | 超薄脚本 `~/.mcore/bin/mcore-hook-{context,ingest}.sh`（`MCORE_AGENT_ID=gemini` 前缀） |
 | OpenCode | `opencode.json → mcp` | `http://127.0.0.1:8318/mcp` |
@@ -292,7 +297,7 @@ mcore-client.js（单进程，单事件循环）
 | A1 | 全新纯净目录 `node mcore-client.js start`，`switch cloud` 指向真实服务端 | `/health` 返回 client=running, upstream=connected |
 | A2 | Claude Code（hooks 为 HTTP 形态）提问 | 自动注入 `# mcore context` 附加上下文，耗时 < 1.5s（命中缓存 < 50ms） |
 | A2b | Gemini CLI（BeforeAgent 超薄脚本）提问 | 注入成功，`source_agent=gemini` 正确落库身份 |
-| A2c | Codex 提问 | **无读前注入**（符合迭代 78 决策），AGENTS.md 显式 memory_context 经客户端透传正常返回 |
+| A2c | Codex（UserPromptSubmit 超薄脚本）提问 | **读前注入启用**：注入成功且 `source_agent=codex`；泛化短查询（如"现在TODO还有啥"）跳过注入不产生噪声 |
 | A3 | Stop 钩子触发会话回写 | `202` 即返回；60s 内上游 `memory_ingest` 成功，记忆列表出现新事实 |
 | A3b | Codex/Gemini/OpenCode 会话结束回写 | 三者转录各自正确提取（codex=.jsonl 双层结构、opencode=sqlite JOIN），`source_agent` 分别为 codex/gemini/opencode |
 | A4 | 回写期间断上游（iptables/停服模拟） | 队列出现 `.pending` 重试；恢复上游后自动补投，记忆最终落库，零丢失 |
