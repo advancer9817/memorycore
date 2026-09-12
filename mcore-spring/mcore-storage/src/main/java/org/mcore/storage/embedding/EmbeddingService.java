@@ -46,8 +46,31 @@ public class EmbeddingService {
 
     private volatile boolean realModelOnline = false;
 
+    /**
+     * 单条嵌入的超时秒数。
+     *
+     * 修复：原先硬编码 3 秒，而 config.yaml 中 `embedding.timeout: 30` 从未被消费。
+     * bge-m3 在受限 CPU 上单条嵌入需 1–2 秒，回填或并发时更容易超过 3 秒 ——
+     * 超时即静默降级为哈希向量，使新写入的记忆悄悄失去语义检索能力。
+     */
+    @Value("${mcore.embedding.timeout:30}")
+    private int timeoutSeconds = 30;
+
+    /** 降级计数器与最近一次失败原因（可观测性：此前降级完全无迹可循） */
+    private final java.util.concurrent.atomic.AtomicLong degradationCount =
+            new java.util.concurrent.atomic.AtomicLong(0);
+    private volatile String lastFallbackReason = null;
+
     public boolean isRealModelOnline() {
         return realModelOnline;
+    }
+
+    public long getDegradationCount() {
+        return degradationCount.get();
+    }
+
+    public String getLastFallbackReason() {
+        return lastFallbackReason;
     }
 
     public EmbeddingService(ObjectMapper objectMapper,
@@ -74,6 +97,11 @@ public class EmbeddingService {
             this.modelName = configStore.str(s, "model", this.modelName);
             this.apiUrl = configStore.str(s, "api_url", this.apiUrl);
             this.apiKey = configStore.str(s, "api_key", this.apiKey);
+            // 消费 config.yaml 的 embedding.timeout（原先该配置项被硬编码 3 秒完全覆盖）
+            Object t = s.get("timeout");
+            if (t instanceof Number n && n.intValue() > 0) {
+                this.timeoutSeconds = n.intValue();
+            }
         } catch (Exception e) {
             log.warn("读取运行期嵌入配置失败，沿用启动配置: {}", e.getMessage());
         }
@@ -102,8 +130,13 @@ public class EmbeddingService {
             realModelOnline = true;
             return vec;
         } catch (Exception e) {
-            // 记录日志并静默降级为确定性哈希
+            // 降级为确定性哈希 —— 但必须留痕：此前既无日志也无审计，
+            // 导致"新写入记忆被静默降级"这一事实长期不可观测。
             realModelOnline = false;
+            degradationCount.incrementAndGet();
+            lastFallbackReason = e.getMessage();
+            log.warn("Ollama embedding 失败，降级为哈希向量（第 {} 次）: endpoint={} model={} err={}",
+                    degradationCount.get(), ollamaUrl, modelName, e.getMessage());
             return embedHashing(text, dim);
         }
     }
@@ -114,7 +147,7 @@ public class EmbeddingService {
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(endpoint))
-                .timeout(Duration.ofSeconds(3))
+                .timeout(Duration.ofSeconds(Math.max(5, timeoutSeconds)))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(payload))
                 .build();
@@ -129,9 +162,13 @@ public class EmbeddingService {
         if (vecNode == null || !vecNode.isArray()) {
             throw new RuntimeException("Ollama 响应缺失 embedding 数组");
         }
+        // 维度不符时明确报错，不再静默补零（补零会产出语义错误的向量且无从察觉）
+        if (vecNode.size() != dim) {
+            throw new RuntimeException("嵌入维度不符: 模型返回 " + vecNode.size() + "，期望 " + dim);
+        }
 
         float[] result = new float[dim];
-        for (int i = 0; i < Math.min(dim, vecNode.size()); i++) {
+        for (int i = 0; i < dim; i++) {
             result[i] = (float) vecNode.get(i).asDouble();
         }
         return normalize(result);

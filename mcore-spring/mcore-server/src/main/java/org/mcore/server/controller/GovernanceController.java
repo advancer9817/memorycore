@@ -11,11 +11,14 @@ public class GovernanceController {
 
     private final GovernanceService governanceService;
     private final org.mcore.storage.service.VectorBackfillService vectorBackfillService;
+    private final org.mcore.storage.embedding.EmbeddingService embeddingService;
 
     public GovernanceController(GovernanceService governanceService,
-                                org.mcore.storage.service.VectorBackfillService vectorBackfillService) {
+                                org.mcore.storage.service.VectorBackfillService vectorBackfillService,
+                                org.mcore.storage.embedding.EmbeddingService embeddingService) {
         this.governanceService = governanceService;
         this.vectorBackfillService = vectorBackfillService;
+        this.embeddingService = embeddingService;
     }
 
     @GetMapping({"/api/governance/counts", "/api/v1/governance/counts"})
@@ -79,10 +82,18 @@ public class GovernanceController {
         return governanceService.batchApply(ids, actor);
     }
 
-    /** 向量健康检测：判定存量向量是否仍为哈希降级产物 */
+    /**
+     * 向量健康检测：判定存量向量是否仍为哈希降级产物。
+     * 附带嵌入降级可观测指标 —— `real_model_online=false` 或 `degradation_count`
+     * 增长，意味着新写入的记忆正被静默降级为哈希向量（语义检索失效）。
+     */
     @GetMapping({"/api/v1/maintenance/vector-status"})
     public Map<String, Object> vectorStatus(@RequestParam(value = "sample", defaultValue = "200") int sample) {
-        return vectorBackfillService.detect(sample);
+        Map<String, Object> res = new LinkedHashMap<>(vectorBackfillService.detect(sample));
+        res.put("real_model_online", embeddingService.isRealModelOnline());
+        res.put("degradation_count", embeddingService.getDegradationCount());
+        res.put("last_fallback_reason", embeddingService.getLastFallbackReason());
+        return res;
     }
 
     /** 向量回填：将哈希降级向量重算为真实语义向量（幂等，已语义化的行自动跳过） */

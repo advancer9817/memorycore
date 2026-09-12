@@ -80,6 +80,20 @@ public class MemoryRepository {
         if (vec == null || vec.length == 0) {
             vec = embeddingService.embedText(record.getTitle() + " " + record.getContent());
             record.setEmbedding(vec);
+            // 降级可观测：embedText 在 Ollama 不可用/超时时静默回退哈希向量，
+            // 此前不留任何痕迹，导致"新写入记忆悄悄失去语义检索"长期无法发现。
+            if (!embeddingService.isRealModelOnline()) {
+                try {
+                    memoryMapper.insertAuditEvent(
+                            "a_" + UUID.randomUUID().toString().replace("-", "").substring(0, 16),
+                            "embedding_degraded", record.getId(), "system",
+                            "{\"phase\":\"insert\",\"reason\":\"" +
+                                    String.valueOf(embeddingService.getLastFallbackReason()).replace("\"", "'") +
+                                    "\",\"degradation_count\":" + embeddingService.getDegradationCount() + "}");
+                } catch (Exception ignored) {
+                    // 审计写入失败不应阻断记忆写入
+                }
+            }
         }
 
         memoryMapper.insert(record);

@@ -4,6 +4,8 @@ import org.mcore.common.model.MemoryDO;
 import org.mcore.storage.mapper.EntityMapper;
 import org.mcore.storage.mapper.LinkMapper;
 import org.mcore.storage.mapper.MemoryMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -12,23 +14,28 @@ import java.util.*;
 @Service
 public class MemoryQueryService {
 
+    private static final Logger log = LoggerFactory.getLogger(MemoryQueryService.class);
+
     private final MemoryMapper memoryMapper;
     private final LinkMapper linkMapper;
     private final EntityMapper entityMapper;
     private final org.springframework.jdbc.core.simple.JdbcClient jdbcClient;
     private final org.mcore.storage.repository.MemoryRepository memoryRepository;
     private final org.mcore.storage.entity.EntityIndexService entityIndexService;
+    private final org.mcore.storage.embedding.EmbeddingService embeddingService;
 
     public MemoryQueryService(MemoryMapper memoryMapper, LinkMapper linkMapper, EntityMapper entityMapper,
                               org.springframework.jdbc.core.simple.JdbcClient jdbcClient,
                               org.mcore.storage.repository.MemoryRepository memoryRepository,
-                              org.mcore.storage.entity.EntityIndexService entityIndexService) {
+                              org.mcore.storage.entity.EntityIndexService entityIndexService,
+                              org.mcore.storage.embedding.EmbeddingService embeddingService) {
         this.memoryMapper = memoryMapper;
         this.linkMapper = linkMapper;
         this.entityMapper = entityMapper;
         this.jdbcClient = jdbcClient;
         this.memoryRepository = memoryRepository;
         this.entityIndexService = entityIndexService;
+        this.embeddingService = embeddingService;
     }
 
     private int parseInt(Object val, int defaultVal) {
@@ -280,7 +287,28 @@ public class MemoryQueryService {
         // 导致脱敏失效（实测存储内容未脱敏）。现统一走同一守卫。
         memoryRepository.redactInPlace(record, "createMemory");
 
+        // 生成特征向量：此前该路径完全不计算 embedding，导致经 REST 创建的记忆
+        // 在回填介入前无法被语义检索命中（embedding 恒为 NULL）。
+        try {
+            float[] vec = embeddingService.embedText(
+                    (record.getTitle() == null ? "" : record.getTitle()) + " " +
+                    (record.getContent() == null ? "" : record.getContent()));
+            if (vec != null && vec.length > 0) {
+                record.setEmbedding(vec);
+            }
+        } catch (Exception e) {
+            log.warn("createMemory 向量生成失败，该记忆将等待回填补齐: id={} err={}", id, e.getMessage());
+        }
+
         memoryMapper.insert(record);
+        if (record.getEmbedding() != null && record.getEmbedding().length > 0) {
+            try {
+                memoryMapper.updateEmbedding(record.getId(),
+                        new com.pgvector.PGvector(record.getEmbedding()));
+            } catch (Exception e) {
+                log.warn("createMemory 向量写入失败: id={} err={}", id, e.getMessage());
+            }
+        }
         // 实体索引同步（此路径曾绕过 MemoryRepository，需显式补齐）
         entityIndexService.sync(record);
 

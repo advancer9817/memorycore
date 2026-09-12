@@ -1709,3 +1709,47 @@ JDBC URL 参数注入面 / 无 `@Scheduled` 调度 / `extraction_strategy` 16 �
 ### 涉及文件
 新增：`entity/EntityExtractor.java`、`entity/EntityIndexService.java`、`repository/QualityMetricsRepository.java`
 修改：`repository/EntityRepository.java`、`repository/MemoryRepository.java`、`service/MemoryQueryService.java`、`service/GovernanceService.java`、`service/VectorBackfillService.java`、`mcp/service/McpProtocolService.java`、`mcp/service/McpProtocolServiceTest.java`、`controller/GovernanceController.java`、`controller/ContextLabController.java`、`memorycore/storage/schema.sql`
+
+## [迭代 264] 2026-09-12 — 嵌入链路修复：超时被硬编码覆盖 / 静默降级不可观测 / 创建路径不生成向量
+
+### 目的
+在回填过程中发现嵌入链路存在三个相互叠加的缺陷，会导致**新写入的记忆悄悄失去语义检索能力**且完全不可观测。均为"功能正常运行但结果错误"型缺陷，比直接报错更危险。
+
+### 变更摘要
+
+**1. `embedding.timeout` 配置从未生效（硬编码 3 秒）**
+- `EmbeddingService.refreshRuntimeConfig()` 只热读 `ollama_url`/`model`/`api_url`/`api_key`，**不读 `timeout`**
+- `embedOllama()` 硬编码 `.timeout(Duration.ofSeconds(3))`，而 `config.yaml` 写的是 `embedding.timeout: 30`
+- 后果：bge-m3 在受限 CPU 上单条嵌入需 1–2 秒，回填/并发时更易超过 3 秒 → 超时即降级
+- 修复：新增 `timeoutSeconds` 字段（默认 30），热读配置，实际请求用 `max(5, timeoutSeconds)`
+
+**2. 降级为哈希向量时静默无痕**
+- 原 `embedText` 的 catch 分支注释写着"记录日志"，**实际没有任何 log 调用**；也不写审计
+- Java 侧全库无任何代码写 `embedding_degraded` 审计（现有 46 条止于 2026-09-10，为 Python 时代遗留）
+- 后果：语义检索退化后无从察觉
+- 修复：降级时 `log.warn` + `degradationCount` 计数 + `lastFallbackReason`；`MemoryRepository.insert` 检测到降级即写 `embedding_degraded` 审计事件；`/api/v1/maintenance/vector-status` 暴露 `real_model_online`/`degradation_count`/`last_fallback_reason`
+
+**3. 向量维度不符时静默补零**
+- 原实现 `for (i < min(dim, vecNode.size()))`，模型返回维度少于期望时**静默补零**，产出语义错误的向量且无从察觉
+- 修复：维度不符直接抛错（宁可降级留痕，不要静默错误）
+
+**4. REST 创建路径完全不生成向量**
+- `MemoryQueryService.createMemory` 从头到尾**没有调用 `embedText`**，创建的记录 `embedding` 恒为 NULL
+- 后果：经 REST 创建的记忆**在回填介入前无法被语义检索命中**，是 `total_null_embedding` 高企的重要成因
+- 修复：创建时生成向量并写库；失败仅告警不阻断（留待回填补齐）
+
+### 验证（实测）
+| 项 | 证据 |
+|---|---|
+| 创建即向量 | 新建记忆 `vector_dims=1024`、`has_vec=t`（修复前为 NULL） |
+| 模型在线 | 写入后 `real_model_online=true`、`degradation_count=0` |
+| 可观测性 | `vector-status` 返回 `real_model_online`/`degradation_count`/`last_fallback_reason` 三字段 |
+| 采样健康 | `hashing_derived=0, semantic=50, verdict=semantic` |
+
+### 风险与注意事项
+- 单条嵌入超时放宽至 30 秒意味着故障时写入变慢（而非静默降级）；这是有意的权衡——宁可慢，不要悄悄降级
+- 新增 `embedding_degraded` 审计事件可作为告警信号：`degradation_count` 持续增长即说明 Ollama 通道不稳
+- 回填使用 `embedBatch`（失败即抛错、无哈希回退），故回填写入不受此缺陷影响
+
+### 涉及文件
+修改：`embedding/EmbeddingService.java`、`repository/MemoryRepository.java`、`service/MemoryQueryService.java`、`controller/GovernanceController.java`
