@@ -61,9 +61,13 @@ public class ConfigController {
         return res;
     }
 
-    /** 原始配置全文（排障用） */
+    /**
+     * 原始配置全文（排障用）。
+     * 修复：此前原样返回，包含 extraction.api_key 与 database.password（明文口令），
+     * 且该路径属数据面 → 默认租户免鉴权即可读取。现统一脱敏为 [REDACTED]。
+     */
     @GetMapping("/config/raw")
     public Map<String, Object> getRawConfig() {
-        return configService.raw();
+        return configService.maskedRaw();
     }
 }

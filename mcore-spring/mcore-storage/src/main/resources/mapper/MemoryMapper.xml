@@ -226,4 +226,10 @@
         VALUES (#{id}, #{memoryId}, #{action}, #{operator}, #{details}, clock_timestamp())
     </insert>
 
+    <!-- 真实审计表；detailJson 为 JSON 字符串，由调用方保证合法 -->
+    <insert id="insertAuditEvent">
+        INSERT INTO audit_events (id, event_type, memory_id, agent, detail_json, created_at)
+        VALUES (#{id}, #{eventType}, #{memoryId}, #{agent}, CAST(#{detailJson} AS jsonb), clock_timestamp())
+    </insert>
+
 </mapper>

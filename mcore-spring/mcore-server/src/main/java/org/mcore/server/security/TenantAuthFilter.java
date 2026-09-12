@@ -88,8 +88,19 @@ public class TenantAuthFilter extends OncePerRequestFilter {
                         writeError(response, ErrorCode.CLIENT_UNAUTHORIZED, "租户管理接口仅限本机运维访问，或需提供有效 API Key");
                         return;
                     }
+                    // 修复：此前只校验"key 有效"，不比对 key 归属与操作目标租户，
+                    // 导致持有 A 租户任意 key 即可跨租户开辟/销毁数据库、签发/吊销他人密钥。
+                    String targetTenant = extractAdminTargetTenant(request);
+                    String denyReason = authorizeAdminTarget(adminPrincipal.get(), targetTenant);
+                    if (denyReason != null) {
+                        log.warn("拒绝越权租户管理操作: key归属={} 目标租户={} path={} 原因={}",
+                                adminPrincipal.get().tenantId(), targetTenant, request.getRequestURI(), denyReason);
+                        writeError(response, ErrorCode.CLIENT_FORBIDDEN, denyReason);
+                        return;
+                    }
                     request.setAttribute("tenant_scopes", adminPrincipal.get().scopes());
                     request.setAttribute("api_key_id", adminPrincipal.get().keyId());
+                    request.setAttribute("admin_target_tenant", targetTenant);
                 }
 
                 // 2.2 数据面：非 default 租户必须持有效且归属一致的密钥
@@ -168,6 +179,66 @@ public class TenantAuthFilter extends OncePerRequestFilter {
                 || "0:0:0:0:0:0:0:1".equals(remote);
     }
 
+    /**
+     * 从管理面请求中解析操作目标租户。
+     * - `/api/v1/tenant/provision?tenantId=X` → X
+     * - `/api/v1/tenant/{id}` 或 `/api/v1/tenant/{id}/keys...` → id
+     * - `/api/v1/tenant/list`（枚举全部租户，无单一目标）→ null
+     */
+    private String extractAdminTargetTenant(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        if (path == null) {
+            return null;
+        }
+        // provision 的目标租户来自查询参数
+        String paramTenant = request.getParameter("tenantId");
+        if (paramTenant != null && !paramTenant.isBlank()) {
+            return paramTenant.trim();
+        }
+        String prefix = ADMIN_PREFIX + "/";
+        if (!path.startsWith(prefix)) {
+            return null;
+        }
+        String rest = path.substring(prefix.length());
+        if (rest.isBlank()) {
+            return null;
+        }
+        int slash = rest.indexOf('/');
+        String first = slash >= 0 ? rest.substring(0, slash) : rest;
+        // list 是全局枚举，非针对某一租户
+        if ("list".equals(first) || "provision".equals(first)) {
+            return null;
+        }
+        return first;
+    }
+
+    /**
+     * 管理面授权判定。返回 null 表示允许，否则返回拒绝原因。
+     *
+     * 规则：
+     * - 目标租户为空（如 /tenant/list 全局枚举）→ 需 `admin` scope
+     * - key 归属 == 目标租户 → 允许（自助管理自己的租户）
+     * - 否则需 `admin` scope
+     */
+    private String authorizeAdminTarget(TenantApiKeyService.TenantPrincipal principal, String targetTenant) {
+        java.util.Set<String> scopes = principal.scopes() == null ? java.util.Set.of() : principal.scopes();
+        boolean isAdmin = scopes.contains("admin") || scopes.contains("*");
+
+        if (targetTenant == null || targetTenant.isBlank()) {
+            if (isAdmin) {
+                return null;
+            }
+            return "枚举租户列表需要 admin 权限的 API Key";
+        }
+        if (targetTenant.equals(principal.tenantId())) {
+            return null;
+        }
+        if (isAdmin) {
+            return null;
+        }
+        return "该密钥归属租户 [" + principal.tenantId() + "]，无权管理租户 [" + targetTenant + "]";
+    }
+
     private boolean isPublicPath(HttpServletRequest request) {
         String path = request.getRequestURI();
         if (path == null) {
@@ -181,12 +252,35 @@ public class TenantAuthFilter extends OncePerRequestFilter {
         return false;
     }
 
+    /**
+     * 按 ErrorCode 映射 HTTP 状态。
+     * 修复：此前恒定 401，即使传入 CLIENT_FORBIDDEN（跨租户越权），
+     * 与 `docs/mcore-multi-tenant-security-model.md` 宣称的 403 语义不符，
+     * 调用方无法区分"未携带凭证"与"越权"。
+     */
     private void writeError(HttpServletResponse response, ErrorCode errorCode, String message) throws IOException {
-        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        response.setStatus(httpStatusFor(errorCode));
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         Result<Void> body = Result.failure(errorCode.getCode(), message);
         response.getWriter().write(MAPPER.writeValueAsString(body));
+    }
+
+    private int httpStatusFor(ErrorCode errorCode) {
+        if (errorCode == null || errorCode.getCode() == null) {
+            return HttpServletResponse.SC_UNAUTHORIZED;
+        }
+        String name = errorCode.name();
+        if (name.contains("FORBIDDEN")) {
+            return HttpServletResponse.SC_FORBIDDEN;
+        }
+        if (name.contains("PARAM")) {
+            return HttpServletResponse.SC_BAD_REQUEST;
+        }
+        if (name.contains("NOT_FOUND")) {
+            return HttpServletResponse.SC_NOT_FOUND;
+        }
+        return HttpServletResponse.SC_UNAUTHORIZED;
     }
 
     private String inferCallerAgent(String userAgent, String clientInfo) {

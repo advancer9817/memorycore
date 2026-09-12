@@ -16,13 +16,16 @@ public class MemoryQueryService {
     private final LinkMapper linkMapper;
     private final EntityMapper entityMapper;
     private final org.springframework.jdbc.core.simple.JdbcClient jdbcClient;
+    private final org.mcore.storage.repository.MemoryRepository memoryRepository;
 
     public MemoryQueryService(MemoryMapper memoryMapper, LinkMapper linkMapper, EntityMapper entityMapper,
-                              org.springframework.jdbc.core.simple.JdbcClient jdbcClient) {
+                              org.springframework.jdbc.core.simple.JdbcClient jdbcClient,
+                              org.mcore.storage.repository.MemoryRepository memoryRepository) {
         this.memoryMapper = memoryMapper;
         this.linkMapper = linkMapper;
         this.entityMapper = entityMapper;
         this.jdbcClient = jdbcClient;
+        this.memoryRepository = memoryRepository;
     }
 
     private int parseInt(Object val, int defaultVal) {
@@ -270,12 +273,16 @@ public class MemoryQueryService {
             record.setMetadata(normalized);
         }
 
+        // 写入端强制脱敏：此路径曾直接调用 mapper.insert 绕过 MemoryRepository，
+        // 导致脱敏失效（实测存储内容未脱敏）。现统一走同一守卫。
+        memoryRepository.redactInPlace(record, "createMemory");
+
         memoryMapper.insert(record);
 
         Map<String, Object> res = new LinkedHashMap<>();
         res.put("id", id);
-        res.put("title", title);
-        res.put("content", content);
+        res.put("title", record.getTitle());
+        res.put("content", record.getContent());
         res.put("type", type);
         res.put("tags", record.getTags());
         res.put("status", status);

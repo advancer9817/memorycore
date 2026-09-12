@@ -1596,3 +1596,51 @@ JDBC URL 参数注入面 / 无 `@Scheduled` 调度 / `extraction_strategy` 16 �
 ### 备注
 审计全程只读，未干扰正在进行的向量回填（迭代 260，bge-m3 / 1024 维）。
 
+
+## [迭代 262] 2026-09-12 — 安全批落地（S1–S4）：隐私脱敏 / 注入防护 / 鉴权收紧 / 配置脱敏
+
+### 目的
+落实 `docs/2026-09-12-java-migration-parity-audit.md` 第一批安全项 —— 均为 Python 侧已有、Java 迁移后缺失的能力，不做则持续扩大暴露面。
+
+### 变更摘要
+**S1 写入端隐私脱敏**
+- 新增 `mcore-storage/.../privacy/RedactionService.java`（214 行）：8 类规则（openai_key / github_token / aws_access_key / aws_secret / bearer_token / pem_private_key / connection_string / env_assignment）+ Shannon 熵≥4.5 检测，对标 `memorycore/privacy.py`
+- 新增 `MemoryMapper.insertAuditEvent` + XML：写入**真实存在**的 `audit_events` 表
+  - 发现原 `insertAuditLog` 指向 **不存在的 `memory_audit_logs` 表**，属从未被调用的死代码；Java 侧此前**没有任何** audit_events 写入路径
+- 脱敏挂点统一至 `MemoryRepository.redactInPlace()`，并在 `MemoryQueryService.createMemory` 补齐（该路径直连 mapper 绕过仓储）
+
+**S2 上下文注入防护**
+- 新增 `mcore-storage/.../privacy/InjectionGuard.java`（8 条注入正则，对标 `memorycore/injection_guard.py`）
+- `ContextPackBuilder` 接线：`safety:` 边界声明 + `## 强制护栏` + 命中项从正文剔除并在「因安全原因未展示」披露
+- `ContextPackResponse` 增加 `warnings` / `filteredCount` 字段（向后兼容）
+
+**S3 鉴权收紧**
+- S3.1 `TenantAuthFilter` 新增 `extractAdminTargetTenant()` / `authorizeAdminTarget()`：管理面按 key 归属比对目标租户，跨租户与全局枚举需 `admin` scope（此前任意有效 key 可跨租户开辟/销毁库、签发/吊销他人密钥）
+- S3.2 `application.yml` 增加 `server.address: ${MCORE_BIND:127.0.0.1}`
+- S3.3 `CorsConfig` 由 `allowedOriginPatterns("*")` 收敛为显式白名单（`mcore.cors.allowed-origins`）
+- S3.4 `writeError` 按 ErrorCode 映射 401/403（原恒 401）
+
+**S4 配置脱敏**
+- `ConfigService.maskedRaw()` / `maskValue()`；`ConfigController` 的 `/config/raw` 改用脱敏版本
+- 写入侧 `putIfPresent` 忽略 `[REDACTED]` 哨兵，防止设置页保存把真实密钥覆写
+
+### 验证（全部为实测，非推断）
+| 项 | 证据 |
+|---|---|
+| S1 | 写入含伪造密钥记忆 → 存储长度 96→81、含 `[REDACTED`、审计事件 `{"count":2,"labels":["openai_key","connection_string"]}` |
+| S2 | 注入探针经 `memory_context` 召回后从正文剔除，正文不含 `ignore all previous instructions`，过滤清单披露「因安全原因未展示」 |
+| S3.1/S3.4 | demo 密钥（scopes=[read,write]）+ `X-Forwarded-For` 模拟远端：`/tenant/list` 403、`/tenant/user_1002/keys` 403、`DELETE /tenant/user_1002` 403、`/tenant/demo/keys` 200 |
+| S3.2 | 监听由 `*:8318` → `[::ffff:127.0.0.1]:8318` |
+| S3.3 | `Origin: https://evil.example.com` 无 ACAO 头；合法来源放行 |
+| S4 | `/config/raw` 返回 `[REDACTED]`；空值保持空以区分「未设置」 |
+
+### 风险与注意事项
+- 本地回环直连仍视为运维通道（预期设计）；隧道/代理来源必须携带有效密钥
+- 新增 `mcore.cors.allowed-origins` 与 `MCORE_BIND` 两个可覆盖环境变量
+- 测试用租户密钥已吊销、测试探针记忆已删除、临时密钥文件已 `shred`
+- 遗留：向量回填因分片策略缺陷（NULL 向量行按 id 排序位于中段，`OFFSET 0` 扫描够不到）未完成，已改用全表分片扫描脚本续跑
+
+### 涉及文件
+新增：`privacy/RedactionService.java`、`privacy/InjectionGuard.java`
+修改：`MemoryRepository.java`、`MemoryMapper.java`、`MemoryMapper.xml`、`MemoryQueryService.java`、`MemoryMapper` 审计写入、`ContextPackBuilder.java`、`ContextPackResponse.java`、`TenantAuthFilter.java`、`CorsConfig.java`、`ConfigService.java`、`ConfigController.java`、`application.yml`
+文档：`docs/2026-09-12-java-migration-parity-audit.md`、`docs/2026-09-12-java-migration-parity-remediation-checklist.md`

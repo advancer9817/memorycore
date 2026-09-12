@@ -31,8 +31,50 @@ public class ConfigService {
         return configPath;
     }
 
+    /** 脱敏哨兵：前端回显时用它替代真实密钥；写回时该值被忽略，不会覆盖真实密钥 */
+    public static final String REDACTED = "[REDACTED]";
+
     public Map<String, Object> raw() {
         return store.raw();
+    }
+
+    /**
+     * 脱敏后的原始配置，供 `/api/v1/config/raw` 与设置页回显。
+     *
+     * 修复：此前该接口原样返回 config.yaml 全文，包含 extraction.api_key 与
+     * database.password（明文口令），且属数据面路径 → 默认租户免鉴权即可读取。
+     */
+    public Map<String, Object> maskedRaw() {
+        Map<String, Object> cfg = store.raw();
+        maskSection(cfg, "extraction", "api_key");
+        maskSection(cfg, "embedding", "api_key");
+        maskSection(cfg, "database", "password");
+        return cfg;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void maskSection(Map<String, Object> cfg, String section, String field) {
+        Object sec = cfg.get(section);
+        if (sec instanceof Map) {
+            Map<String, Object> m = (Map<String, Object>) sec;
+            Object v = m.get(field);
+            if (v != null && !String.valueOf(v).isBlank()) {
+                m.put(field, REDACTED);
+            }
+        }
+    }
+
+    /** 判断是否为需要跳过的脱敏哨兵值 */
+    private boolean isRedacted(Object v) {
+        return v != null && REDACTED.equals(String.valueOf(v).trim());
+    }
+
+    /** 回显时用哨兵替换非空密钥，空值保持为空以便前端区分"未设置" */
+    private Object maskValue(Object v) {
+        if (v == null || String.valueOf(v).isBlank()) {
+            return v;
+        }
+        return REDACTED;
     }
 
     // ==================== 读 ====================
@@ -52,7 +94,7 @@ public class ConfigService {
         llmConfig.put("model", extraction.get("model"));
         llmConfig.put("temperature", extraction.get("temperature"));
         llmConfig.put("max_tokens", extraction.get("max_tokens"));
-        llmConfig.put("api_key", extraction.get("api_key"));
+        llmConfig.put("api_key", maskValue(extraction.get("api_key")));
         String llmProvider = inferProvider(extraction);
         if ("ollama".equals(llmProvider)) {
             llmConfig.put("ollama_base_url", extraction.get("base_url"));
@@ -65,7 +107,7 @@ public class ConfigService {
         Map<String, Object> embedding = store.section("embedding");
         Map<String, Object> embedderConfig = new LinkedHashMap<>();
         embedderConfig.put("model", embedding.get("model"));
-        embedderConfig.put("api_key", embedding.get("api_key"));
+        embedderConfig.put("api_key", maskValue(embedding.get("api_key")));
         embedderConfig.put("ollama_base_url", embedding.get("ollama_url"));
         embedderConfig.put("dim", embedding.get("dim"));
         Map<String, Object> embedderBlock = new LinkedHashMap<>();
@@ -222,9 +264,14 @@ public class ConfigService {
     }
 
     private void putIfPresent(Map<String, Object> target, String key, Object value) {
-        if (value != null) {
-            target.put(key, value);
+        if (value == null) {
+            return;
         }
+        // 脱敏哨兵不得写回：前端回显的是 [REDACTED]，若按原值落盘会把真实密钥覆盖掉
+        if ("api_key".equals(key) && isRedacted(value)) {
+            return;
+        }
+        target.put(key, value);
     }
 
     private String inferProvider(Map<String, Object> section) {

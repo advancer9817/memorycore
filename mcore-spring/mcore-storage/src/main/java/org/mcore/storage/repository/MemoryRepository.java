@@ -21,11 +21,14 @@ public class MemoryRepository {
     private final MemoryMapper memoryMapper;
     private final EmbeddingService embeddingService;
     private final ObjectMapper objectMapper;
+    private final org.mcore.storage.privacy.RedactionService redactionService;
 
-    public MemoryRepository(MemoryMapper memoryMapper, EmbeddingService embeddingService, ObjectMapper objectMapper) {
+    public MemoryRepository(MemoryMapper memoryMapper, EmbeddingService embeddingService, ObjectMapper objectMapper,
+                            org.mcore.storage.privacy.RedactionService redactionService) {
         this.memoryMapper = memoryMapper;
         this.embeddingService = embeddingService;
         this.objectMapper = objectMapper;
+        this.redactionService = redactionService;
     }
 
     public long countActiveMemories() {
@@ -65,7 +68,11 @@ public class MemoryRepository {
             record.setId(UUID.randomUUID().toString());
         }
 
-        // 自动计算 768 维特征向量 (Ollama / OpenAI / 确定性伪哈希)
+        // 写入端强制脱敏：所有落库路径的唯一汇聚点，覆盖 MCP memory_add / 提取服务 / 导入 / 取代。
+        // 移植自 Python privacy.py —— Java 迁移期间该能力整体丢失，曾导致密钥明文入库。
+        redactInPlace(record, "insert");
+
+        // 自动计算特征向量 (Ollama / OpenAI / 确定性伪哈希)
         float[] vec = record.getEmbedding();
         if (vec == null || vec.length == 0) {
             vec = embeddingService.embedText(record.getTitle() + " " + record.getContent());
@@ -78,6 +85,40 @@ public class MemoryRepository {
         }
     }
 
+    /**
+     * 就地对 title / content 脱敏，命中时记录审计事件。
+     * 只脱敏不拒收：保留上下文语义，仅替换密钥本体为占位符。
+     */
+    public void redactInPlace(MemoryDO record, String phase) {
+        try {
+            var res = redactionService.redactRecord(record.getTitle(), record.getContent());
+            if (res.changed()) {
+                record.setTitle(res.title());
+                record.setContent(res.content());
+                log.warn("记忆写入脱敏命中 [{}] id={} 规则={} 替换数={}",
+                        phase, record.getId(), res.allLabels(), res.totalCount());
+                try {
+                    String detail = objectMapper.writeValueAsString(Map.of(
+                            "phase", phase,
+                            "labels", res.allLabels(),
+                            "count", res.totalCount()));
+                    memoryMapper.insertAuditEvent(
+                            java.util.UUID.randomUUID().toString(),
+                            "secret_redacted",
+                            record.getId(),
+                            record.getSourceAgent() != null ? record.getSourceAgent() : "system",
+                            detail);
+                } catch (Exception e) {
+                    // 审计失败不得阻断记忆写入
+                    log.debug("脱敏审计写入失败: {}", e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            // 脱敏自身异常时继续写入，但需显著记录（不可静默）
+            log.error("写入端脱敏执行失败，按原文写入 id={}: {}", record.getId(), e.getMessage());
+        }
+    }
+
     public boolean update(String id, String content, String title, Double importance, String status) {
         MemoryDO record = new MemoryDO();
         record.setId(id);
@@ -85,6 +126,9 @@ public class MemoryRepository {
         record.setContent(content);
         record.setImportance(importance);
         record.setStatus(status);
+
+        // 更新路径同样强制脱敏
+        redactInPlace(record, "update");
 
         int rows = memoryMapper.update(record);
         if (content != null && !content.isBlank()) {

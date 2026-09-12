@@ -40,9 +40,21 @@ public interface MemoryMapper {
 
     List<Map<String, Object>> selectAuditLogs(@Param("limit") int limit);
 
+    /**
+     * @deprecated 指向不存在的表 `memory_audit_logs`（实测 to_regclass = null），
+     * 调用必然失败，因此从未被使用。审计应写入真实表 `audit_events`，请用 {@link #insertAuditEvent}。
+     */
+    @Deprecated
     int insertAuditLog(@Param("id") String id,
                        @Param("action") String action,
                        @Param("memoryId") String memoryId,
                        @Param("operator") String operator,
                        @Param("details") String details);
+
+    /** 写入真实审计表 audit_events */
+    int insertAuditEvent(@Param("id") String id,
+                         @Param("eventType") String eventType,
+                         @Param("memoryId") String memoryId,
+                         @Param("agent") String agent,
+                         @Param("detailJson") String detailJson);
 }

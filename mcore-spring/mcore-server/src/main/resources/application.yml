@@ -1,5 +1,9 @@
 server:
   port: ${SERVER_PORT:8318}
+  # 修复：此前未设 address，Spring Boot 默认监听 0.0.0.0 —— 配合"default 租户免鉴权"
+  # 等于把默认库匿名读写暴露到网络。Python 侧有 validate_frontend_bind 拒绝非回环绑定，
+  # Java 缺失该护栏。此处默认仅回环；如需对外（如 Cloudflare Tunnel 已在本机回源）无需放开。
+  address: ${MCORE_BIND:127.0.0.1}
 
 spring:
   application:

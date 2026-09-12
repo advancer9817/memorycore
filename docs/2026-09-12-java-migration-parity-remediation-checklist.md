@@ -5,14 +5,26 @@
 
 ## 第一批 · 安全（最紧急）
 
-- [ ] **S1** 写入端隐私脱敏：移植 `privacy.py` 八类规则（openai_key/github_token/aws_access_key/aws_secret/bearer_token/pem_private_key/connection_string/env_assignment）+ Shannon 熵≥4.5 检测；接入 `memory_add` / `memory_update` / `ExtractionService` 写库前
-- [ ] **S2** 上下文注入防护：`BOUNDARY_NOTICE` + 强制护栏 + 注入正则过滤 + `warnings` 信封（当前 Java 直接丢弃 warnings）
-- [ ] **S3** 鉴权收紧
-  - [ ] S3.1 管理面 `/api/v1/tenant/**` 校验 key 归属与目标租户一致 + scope 校验（当前任意有效 key 可跨租户开辟/销毁库、签发/吊销密钥）
-  - [ ] S3.2 `application.yml` 增加 `server.address: ${MCORE_BIND:127.0.0.1}`，非回环且无 token 则拒绝启动（对标 Python `validate_frontend_bind`）
-  - [ ] S3.3 CORS 从 `allowedOriginPatterns("*")` 收敛为显式白名单
-  - [ ] S3.4 `writeError` 按 ErrorCode 映射 401/403（当前恒 401，与文档宣称的 403 不符）
-- [ ] **S4** `/api/v1/config/raw` 与 `/api/v1/config` 对 `api_key` / `database.password` 脱敏为 `[REDACTED]`
+- [x] **S1** 写入端隐私脱敏：移植 `privacy.py` 八类规则（openai_key/github_token/aws_access_key/aws_secret/bearer_token/pem_private_key/connection_string/env_assignment）+ Shannon 熵≥4.5 检测；接入 `memory_add` / `memory_update` / `ExtractionService` 写库前
+      → `RedactionService.java`（214 行）+ `MemoryRepository.redactInPlace()` 统一守卫 + `memoryMapper.insertAuditEvent()` 真实审计写入（原 `insertAuditLog` 指向不存在的 `memory_audit_logs` 表，是死代码）
+      → **实测**：长度 96→81、含 `[REDACTED`、审计 `{"count":2,"labels":["openai_key","connection_string"]}`
+      → **踩坑**：`MemoryQueryService.createMemory:273` 直接调 `memoryMapper.insert` **绕过** `MemoryRepository`，导致首轮修复失效（`redacted_pos=0`）；已补齐该路径
+- [x] **S2** 上下文注入防护：`BOUNDARY_NOTICE` + 强制护栏 + 注入正则过滤
+      → `InjectionGuard.java`（8 条正则，对标 `injection_guard.py`）+ `ContextPackBuilder` 接线 + `ContextPackResponse.warnings/filteredCount` 字段
+      → **实测**：注入探针被召回后从正文剔除、正文不含 `ignore all previous instructions`、过滤清单披露「因安全原因未展示」
+- [x] **S3** 鉴权收紧
+  - [x] S3.1 管理面 `/api/v1/tenant/**` 校验 key 归属与目标租户一致 + scope 校验
+        → `TenantAuthFilter.extractAdminTargetTenant()` + `authorizeAdminTarget()`；`admin` scope 才可跨租户/枚举
+        → **实测**（demo 密钥 scopes=[read,write] 模拟远端）：`/tenant/list` **403**、`/tenant/user_1002/keys` **403**、`DELETE /tenant/user_1002` **403**、`/tenant/demo/keys` **200**
+  - [x] S3.2 `server.address: ${MCORE_BIND:127.0.0.1}`
+        → **实测**：监听由 `*:8318` 变为 `[::ffff:127.0.0.1]:8318`
+  - [x] S3.3 CORS 收敛为显式白名单（`mcore.cors.allowed-origins`，默认本地 UI 18318）
+        → **实测**：`Origin: https://evil.example.com` 无 ACAO 头；`http://127.0.0.1:18318` 正常放行
+  - [x] S3.4 `writeError` 按 ErrorCode 映射 401/403
+        → **实测**：越权返回 **403**（原恒 401）
+- [x] **S4** `/api/v1/config/raw` 与 `/api/v1/config` 对 `api_key` / `database.password` 脱敏为 `[REDACTED]`
+      → `ConfigService.maskedRaw()` + `maskValue()` + 写入侧 `putIfPresent` 忽略哨兵（防设置页保存把真 key 覆写成 `[REDACTED]`）
+      → **实测**：`config/raw` 返回 `extraction.api_key=[REDACTED]`、`database.password=[REDACTED]`；`embedding.api_key` 空值保持空（区分"未设置"）
 
 ## 第二批 · 止损（正在腐化）
 
