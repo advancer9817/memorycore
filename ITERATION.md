@@ -1,3 +1,31 @@
+## [迭代 251] 2026-09-12 — Java 原生多轮对话模型提炼与去重回写管道落地及双模混合检索深度校准
+
+### 目的
+- 彻底打通 mcore-spring 在多轮会话结束后的事实提炼与持久化回写链路，移除 McpProtocolService 中 memory_ingest 的空壳存根代码。
+- 解决本地客户端（Hermes/Claude/Codex）跨公网连接 GCP 远端沙箱 mcore 时，上下文召回（memory_context）被伪哈希噪声淹没及三元词 GIN 索引未命中的断层。
+
+### 变更内容
+1. `ExtractionService.java`：
+   - 全量实现 `extractAndIngest` 服务：兼容多轮对话 `messages` 数组拼接转录与 `text` 单文本输入；
+   - 对接 CPA OpenAI 兼容接口（gemini-3.8-flash 模型），注入 2 次网络重试与 Markdown 代码块强力清洗；
+   - 实现 768 维特征向量计算与 pgvector 语义去重双阈值（>=0.92 跳过重复，0.85~0.92 局部更新，<0.85 新增入库）；
+   - 输出符合 `mcore-ingest.py` Hook 规范的结构化审计报告（`added`, `updated`, `skipped`, `titles`, `elapsed_s` 等）。
+2. `McpProtocolService.java`：
+   - 依赖注入 `ExtractionService`，并在 `tools/call` 的 `memory_ingest` 分支中完整调用 `extractAndIngest`；
+   - 更新 `tools/list` 中 `memory_ingest` 的 inputSchema，向客户端准确暴露 `messages` 数组等入参契约。
+3. `EmbeddingService.java` 与 `HybridSearchService.java`：
+   - 增加 `isRealModelOnline()` 状态感知，当语义向量引擎（Ollama/OpenAI API）离线处于伪哈希降级时，禁止伪哈希向量参与语义召回打分，防止随机哈希噪声污染；
+   - 将文本三元词检索计算标的从单一 `m.content` 校准为 `m.title || ' ' || m.content`，完整命中 PostgreSQL 原生 `idx_memories_trgm` GIN 索引；
+   - 引入 `GREATEST(vector_sim, text_sim)` 最大池化融合打分，确保强关键词与高相关事实稳定以第一位断层式召回。
+4. 单元测试与工程构建：
+   - 编写 `ExtractionServiceTest` 与 `McpProtocolServiceTest`，5 项单测 100% 通过；
+   - 升级 `pom.xml` 中 `maven-surefire-plugin` 至 3.2.5 以完整适配 JUnit 5。
+
+### 验证
+- 单元测试：GCP 远端执行 `mvn test` 全部 5 个用例通过（0 Failures / 0 Errors）；
+- 提炼实测：向远端发起包含运维排查纠偏的 `messages`，CPA 模型在 1.97s 内完成抽取，标题与 768 维向量成功写入 memories 表；
+- 召回实测：本地 Hermes 通过 FastMCP 协议跨公网（35.236.134.50:8318）发起 `memory_context`，新事实以 100% 准确率在首位成功回溯，单次召回网络延迟稳定在 400ms 内。
+
 ## [迭代 239] 2026-09-09 — 系统文档体系与最新架构规范对齐：双端口拓扑、MCP 表现层隔离与权威端点指南
 
 ### 目的

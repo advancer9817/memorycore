@@ -12,6 +12,7 @@ import org.mcore.storage.repository.FeedbackRepository;
 import org.mcore.storage.repository.LinkRepository;
 import org.mcore.storage.repository.MemoryRepository;
 import org.mcore.storage.search.HybridSearchService;
+import org.mcore.storage.service.ExtractionService;
 import org.mcore.storage.transfer.TransferService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,6 +34,7 @@ public class McpProtocolService {
     private final EntityRepository entityRepository;
     private final FeedbackRepository feedbackRepository;
     private final TransferService transferService;
+    private final ExtractionService extractionService;
     private final ObjectMapper objectMapper;
 
     public McpProtocolService(HybridSearchService hybridSearchService,
@@ -42,6 +44,7 @@ public class McpProtocolService {
                               EntityRepository entityRepository,
                               FeedbackRepository feedbackRepository,
                               TransferService transferService,
+                              ExtractionService extractionService,
                               ObjectMapper objectMapper) {
         this.hybridSearchService = hybridSearchService;
         this.contextPackBuilder = contextPackBuilder;
@@ -50,6 +53,7 @@ public class McpProtocolService {
         this.entityRepository = entityRepository;
         this.feedbackRepository = feedbackRepository;
         this.transferService = transferService;
+        this.extractionService = extractionService;
         this.objectMapper = objectMapper;
     }
 
@@ -193,11 +197,14 @@ public class McpProtocolService {
                         "conflict_policy", Map.of("type", "string", "description", "冲突策略 (skip, replace)")
                 ), List.of("payload")));
 
-        tools.add(buildTool("memory_ingest", "从文本或会话片段提炼事实并写入私有记忆库 (自动计算向量)",
+        tools.add(buildTool("memory_ingest", "从文本或多轮会话提炼事实并写入私有记忆库 (自动计算向量与语义去重)",
                 Map.of(
-                        "text", Map.of("type", "string", "description", "原始输入文本"),
-                        "source", Map.of("type", "string", "description", "来源标签")
-                ), List.of("text")));
+                        "messages", Map.of("type", "array", "description", "多轮会话消息列表 [{\"role\": \"user\"|\"assistant\", \"content\": \"...\"}]"),
+                        "text", Map.of("type", "string", "description", "单段文本或补充描述 (可选)"),
+                        "agent_id", Map.of("type", "string", "description", "调用方 Agent 标识 (可选)"),
+                        "project_path", Map.of("type", "string", "description", "当前工程绝对路径 (可选)"),
+                        "scope", Map.of("type", "string", "description", "作用域 (global / project)")
+                ), Collections.emptyList()));
 
         return new JsonRpcResponse(id, Map.of("tools", tools));
     }
@@ -397,17 +404,25 @@ public class McpProtocolService {
                     }
                 }
                 case "memory_ingest" -> {
+                    List<Map<String, String>> messages = new ArrayList<>();
+                    if (args != null && args.has("messages") && args.get("messages").isArray()) {
+                        for (JsonNode mNode : args.get("messages")) {
+                            if (mNode != null && mNode.isObject()) {
+                                String role = mNode.path("role").asText("user");
+                                String content = mNode.path("content").asText("");
+                                messages.add(Map.of("role", role, "content", content));
+                            }
+                        }
+                    }
                     String text = (args != null && args.has("text")) ? args.get("text").asText() : "";
                     String src = (args != null && args.has("source")) ? args.get("source").asText() : "ingest";
-                    MemoryDO record = new MemoryDO();
-                    record.setId("mem_" + UUID.randomUUID().toString().replace("-", "").substring(0, 16));
-                    record.setTitle(text.length() > 30 ? text.substring(0, 30) + "..." : text);
-                    record.setContent(text);
-                    record.setType("ingested_fact");
-                    record.setSource(src);
-                    record.setSourceAgent(callerAgent != null ? callerAgent : "mcp");
-                    memoryRepository.insert(record);
-                    textResult = "{\"ok\": true, \"id\": \"" + record.getId() + "\"}";
+                    String agentId = (args != null && args.has("agent_id")) ? args.get("agent_id").asText() : (callerAgent != null ? callerAgent : "agent");
+                    String projectPath = (args != null && args.has("project_path")) ? args.get("project_path").asText() : "";
+                    String scope = (args != null && args.has("scope")) ? args.get("scope").asText() : "global";
+
+                    var req = new ExtractionService.IngestRequest(messages, text, src, agentId, projectPath, scope);
+                    var res = extractionService.extractAndIngest(req);
+                    textResult = toJson(res);
                 }
                 default -> {
                     return new JsonRpcResponse(id, new JsonRpcResponse.JsonRpcError(-32601, "Unknown tool: " + toolName, null));

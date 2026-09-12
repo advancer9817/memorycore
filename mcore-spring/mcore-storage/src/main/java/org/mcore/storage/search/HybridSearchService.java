@@ -30,8 +30,13 @@ public class HybridSearchService {
      * 自动向量化并执行混合检索
      */
     public List<SearchHit> hybridSearch(String query, String type, int limit) {
-        float[] queryVec = embeddingService.embedText(query);
-        return hybridSearch(query, queryVec, type, limit);
+        if (embeddingService.isRealModelOnline()) {
+            float[] queryVec = embeddingService.embedText(query);
+            return hybridSearch(query, queryVec, type, limit);
+        } else {
+            // 语义模型离线处于伪哈希降级时，直接走纯文本三元词检索，避免随机哈希噪声污染
+            return hybridSearch(query, null, type, limit);
+        }
     }
 
     /**
@@ -39,6 +44,16 @@ public class HybridSearchService {
      */
     public List<SearchHit> pureVectorSearch(String query, int limit) {
         float[] queryVec = embeddingService.embedText(query);
+        return pureVectorSearch(queryVec, limit);
+    }
+
+    /**
+     * 基于已计算的特征向量执行纯向量余弦距离检索
+     */
+    public List<SearchHit> pureVectorSearch(float[] queryVec, int limit) {
+        if (queryVec == null || queryVec.length == 0) {
+            return List.of();
+        }
         PGvector vec = new PGvector(queryVec);
         int fetchLimit = limit > 0 ? limit : 10;
 
@@ -70,18 +85,21 @@ public class HybridSearchService {
             String sql = """
                 SELECT m.*,
                     (CASE WHEN m.embedding IS NOT NULL THEN (1.0 - (m.embedding <=> :vec)) ELSE 0.0 END) AS vector_sim,
-                    similarity(m.content, :query) AS text_sim,
+                    similarity(m.title || ' ' || m.content, :query) AS text_sim,
                     (
-                        (CASE WHEN m.embedding IS NOT NULL THEN (1.0 - (m.embedding <=> :vec)) * 0.65 ELSE 0.0 END) +
-                        (similarity(m.content, :query) * (CASE WHEN m.embedding IS NOT NULL THEN 0.25 ELSE 0.85 END)) +
-                        (COALESCE(m.importance, 0.5) * 0.10)
+                        (GREATEST(
+                            (CASE WHEN m.embedding IS NOT NULL THEN (1.0 - (m.embedding <=> :vec)) ELSE 0.0 END),
+                            similarity(m.title || ' ' || m.content, :query)
+                        ) * 0.70) +
+                        (similarity(m.title || ' ' || m.content, :query) * 0.15) +
+                        (COALESCE(m.importance, 0.5) * 0.15)
                     ) AS final_score
                 FROM memories m
                 WHERE m.status = 'active'
             """ + (t != null ? " AND m.type = :type " : "") + """
                   AND (
                       (m.embedding IS NOT NULL AND (m.embedding <=> :vec) < 0.60) OR
-                      (similarity(m.content, :query) > 0.08) OR
+                      (similarity(m.title || ' ' || m.content, :query) > 0.03) OR
                       (:query = '')
                   )
                 ORDER BY final_score DESC
@@ -100,16 +118,16 @@ public class HybridSearchService {
             String sql = """
                 SELECT m.*,
                     0.0 AS vector_sim,
-                    similarity(m.content, :query) AS text_sim,
+                    similarity(m.title || ' ' || m.content, :query) AS text_sim,
                     (
-                        (similarity(m.content, :query) * 0.85) +
+                        (similarity(m.title || ' ' || m.content, :query) * 0.85) +
                         (COALESCE(m.importance, 0.5) * 0.15)
                     ) AS final_score
                 FROM memories m
                 WHERE m.status = 'active'
             """ + (t != null ? " AND m.type = :type " : "") + """
                   AND (
-                      (similarity(m.content, :query) > 0.05) OR
+                      (similarity(m.title || ' ' || m.content, :query) > 0.03) OR
                       (:query = '')
                   )
                 ORDER BY final_score DESC

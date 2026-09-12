@@ -43,6 +43,12 @@ public class EmbeddingService {
     @Value("${mcore.embedding.dim:768}")
     private int dim;
 
+    private volatile boolean realModelOnline = false;
+
+    public boolean isRealModelOnline() {
+        return realModelOnline;
+    }
+
     public EmbeddingService(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
@@ -58,7 +64,9 @@ public class EmbeddingService {
         // 1. 若配置了 OpenAI API 端点
         if (apiUrl != null && !apiUrl.isBlank()) {
             try {
-                return embedOpenAi(text);
+                float[] vec = embedOpenAi(text);
+                realModelOnline = true;
+                return vec;
             } catch (Exception e) {
                 log.warn("OpenAI-compatible embedding 失败 ({}), 尝试 Ollama", e.getMessage());
             }
@@ -66,9 +74,12 @@ public class EmbeddingService {
 
         // 2. 尝试本地 Ollama 端点
         try {
-            return embedOllama(text);
+            float[] vec = embedOllama(text);
+            realModelOnline = true;
+            return vec;
         } catch (Exception e) {
             // 记录日志并静默降级为确定性哈希
+            realModelOnline = false;
             return embedHashing(text, dim);
         }
     }

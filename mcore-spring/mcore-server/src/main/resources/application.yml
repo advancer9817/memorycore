@@ -37,3 +37,14 @@ mcore:
     enabled: ${MCORE_SECURITY_ENABLED:true}
     # 共享默认租户，免密钥访问以兼容本地 Agent 钩子
     default-tenant: ${MCORE_DEFAULT_TENANT:default}
+  extraction:
+    base-url: ${MCORE_EXTRACTION_BASE_URL:http://127.0.0.1:8317/v1}
+    api-key: ${MCORE_EXTRACTION_API_KEY:sk}
+    model: ${MCORE_EXTRACTION_MODEL:gemini-3.8-flash}
+    timeout: ${MCORE_EXTRACTION_TIMEOUT:90}
+  embedding:
+    ollama-url: ${MCORE_EMBEDDING_OLLAMA_URL:http://127.0.0.1:11434}
+    model: ${MCORE_EMBEDDING_MODEL:nomic-embed-text}
+    api-url: ${MCORE_EMBEDDING_API_URL:}
+    api-key: ${MCORE_EMBEDDING_API_KEY:sk}
+    dim: ${MCORE_EMBEDDING_DIM:768}
