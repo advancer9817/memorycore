@@ -25,7 +25,7 @@ public class TransferService {
     private static final Logger log = LoggerFactory.getLogger(TransferService.class);
 
     /** 服务端备份目录：可通过 MCORE_BACKUP_DIR 覆盖，默认相对工作目录，避免硬编码绝对路径 */
-    @org.springframework.beans.factory.annotation.Value("${mcore.backup-dir:./backups}")
+    @org.springframework.beans.factory.annotation.Value("${mcore.backup-dir:../memory-sync}")
     private String backupDir;
 
     private final JdbcClient jdbcClient;
