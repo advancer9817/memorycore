@@ -170,21 +170,25 @@ def _curl_post(payload: dict, session_id: str = "", timeout: float = 10.0) -> tu
     ]
     if session_id:
         cmd.extend(["-H", f"Mcp-Session-Id: {session_id}"])
-    cmd.extend(["-d", json.dumps(payload, ensure_ascii=False)])
+    cmd.extend(["-d", "@-"])
 
+    payload_bytes = json.dumps(payload, ensure_ascii=False)
     proc = subprocess.run(
         cmd,
+        input=payload_bytes,
         capture_output=True,
         text=True,
-        timeout=timeout + 2,
+        timeout=timeout + 5,
     )
     if proc.returncode != 0:
         _log(f"curl_failed rc={proc.returncode} stderr={proc.stderr.strip()[:300]}")
         return {}, ""
 
     raw = proc.stdout.replace("\r\n", "\n")
-    if "\n\n" in raw:
-        header_text, body = raw.split("\n\n", 1)
+    parts = raw.split("\n\n")
+    if len(parts) >= 2:
+        body = parts[-1]
+        header_text = "\n\n".join(parts[:-1])
     else:
         header_text, body = raw, ""
     headers: dict[str, str] = {}
@@ -372,6 +376,14 @@ def _extract_hermes_from_state_db(session_id: str) -> list[dict[str, str]]:
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
         conn.row_factory = sqlite3.Row
+        if not session_id:
+            row = conn.execute(
+                "SELECT id FROM sessions ORDER BY COALESCE(last_activity_at, started_at) DESC LIMIT 1"
+            ).fetchone()
+            if row:
+                session_id = str(row["id"])
+        if not session_id:
+            return []
         rows = conn.execute(
             """
             SELECT role, content
@@ -619,7 +631,12 @@ def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:
         _log(f"ingest_done agent={agent_id} messages={len(messages)} response={preview}")
         try:
             from datetime import datetime
-            resp = json.loads(body)
+            raw = body.strip()
+            for line in body.splitlines():
+                if line.startswith("data:"):
+                    raw = line[5:].strip()
+                    break
+            resp = json.loads(raw)
             tool_res = resp.get("result", {})
             content_list = tool_res.get("content", [])
             text_val = content_list[0].get("text", "{}") if content_list else "{}"
@@ -664,9 +681,10 @@ def _ingest(messages: list[dict[str, str]], agent_id: str) -> None:
 
 
 def _messages_for_agent(agent: str) -> list[dict[str, str]]:
+    payload = _hook_payload()
     if agent == "hermes":
-        session_id = _payload_session_id(_hook_payload())
-        return _extract_hermes(session_id) if session_id else []
+        session_id = _payload_session_id(payload)
+        return _extract_hermes(session_id)
 
     if agent == "codex":
         path = _find_transcript(Path.home() / ".codex" / "sessions", "CODEX_SESSION_FILE", "**/*.jsonl")
@@ -678,7 +696,9 @@ def _messages_for_agent(agent: str) -> list[dict[str, str]]:
         return []
 
     if agent == "claude":
-        path = _find_transcript(_claude_roots(), "CLAUDE_SESSION_FILE", "*/*.jsonl")
+        path = _payload_transcript_path(payload)
+        if not path:
+            path = _find_transcript(_claude_roots(), "CLAUDE_SESSION_FILE", "*/*.jsonl")
         return _extract_claude(path) if path else []
 
     if agent == "opencode":

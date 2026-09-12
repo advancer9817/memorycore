@@ -1114,6 +1114,47 @@ cd /workspace/memorycore/mcore-spring && mvn clean package -DskipTests && pm2 re
 | `POST /api/v1/profile/extract` (apply: true) | 真实写入 `user_profile_attrs` 并回传 profile | ✅ `updated: 10`，覆盖率提升至 71% (10/14) |
 | 前端操作点击 | 不再报 HTTP 404，Toast 提示“画像提取成功” | ✅ 200 正常响应，画像卡片实时刷新 |
 
+## [迭代 251] 2026-09-12 — 彻底修复 mcore 会话记忆自动回写链路断裂与多 Agent 协议解析兼容
+
+### 目的
+修复用户指出的“mcore 会话记忆回写还没修好”阻断级问题：在经历全栈重构到 Java 17 + Spring Boot 3 后，因 MCP 响应格式由流式 SSE 变更为纯 JSON，导致 Hermes 插件全盘失效，且会话回写脚本在长会话下触发内核级参数过长异常。
+
+### 根因深度剖析
+1. **Hermes 插件纯 SSE 强依赖断层（首恶）**：
+   `~/.hermes/plugins/mcore-memory/__init__.py` 中的 `_mcp_call()` 仅检索以 `data:` 开头的 SSE 行。Java 后端以标准 `application/json` 响应时，解析直接返回 `{}`，导致记忆上下文召回与异步回写双向静默失效。
+2. **异步回写 5 秒硬超时掐断**：
+   插件中 `_mcp_call` 全局写死 `TIMEOUT = 5` 秒。`memory_ingest` 涉及 LLM 大模型推理事实提炼与 pgvector 向量计算，实际耗时在 3~8 秒左右，频繁遭遇套接字超时。
+3. **Linux 内核级命令行参数过长溢出 (Errno 7 Argument list too long)**：
+   `mcore-ingest.py` 使用 `curl -d <payload>` 将几百轮会话的 JSON 字符串作为命令行参数传递，超出操作系统 `ARG_MAX` 限制，导致子进程直接崩溃报错 `OSError: [Errno 7]`。
+4. **会话 ID 缺失导致静默放弃**：
+   当 `session_id` 为空时，Hermes 转录提取逻辑未做 fallback 自动拉取最近活跃会话，直接跳过。
+5. **Claude Stop Hook 路径优先级缺陷**：
+   `_messages_for_agent("claude")` 机械扫描目录寻找最新 mtime 文件，忽略了 Hook 传入的权威 `transcript_path`。
+
+### 变更摘要
+1. **`~/.hermes/plugins/mcore-memory/__init__.py` 协议自适应与超时解绑**：
+   - 重构 `_mcp_call()`：增加 `timeout` 参数，兼顾轻量检索与长耗时 ingest（设置 60s）；
+   - 兼容解析：优先检测并剥离 `data:` SSE 前缀，若为标准 JSON 对象则直接解析，彻底打通与 Java Spring Boot 3 FastMCP 的通讯；
+   - 补齐 `_on_session_end` 兜底路径自动探测。
+2. **`scripts/hooks/mcore-ingest.py` 管道重构与健壮性提升**：
+   - 彻底修复参数溢出：改为 `curl -d @-` 配合 `subprocess.run(input=...)` 走标准输入流管道传输巨型对话历史，支持任意长度会话；
+   - 增加 HTTP 分块标头过滤，防止多块状态码干扰；
+   - `_extract_hermes_from_state_db` 增加无 session_id 时自动反查最新活跃会话的保底逻辑；
+   - 优先消费 Claude 传入的 `transcript_path`。
+3. **三端脚本与配置强制同步 (Pitfall 30)**：
+   - 同步至 `~/.hermes/agent-hooks/`、`hermes-local-agent-configs`；
+   - 重启 `hermes-serve` 热载入插件。
+4. **数据库脏数据清理**：
+   - 清除此前因异常写入的 6 条空内容占位脏数据。
+
+### 验证
+| 检查项 | 预期 | 实测 |
+|---|---|---|
+| Hermes 提示词提交前上下文注入 | `# mcore context (slim)` 自动注入 | ✅ 本轮对话开头已实时自动注入召回上下文 |
+| Hermes 会话结束自动提炼回写 | 从 `state.db` 提取并自动写入 mcore | ✅ 实测提取 5 条全新架构与配置事实，自动落库 |
+| 记忆事实落库校验 | PostgreSQL 包含完整 title, content, 768维向量 | ✅ `mem_482cee...` 等 5 条记录入库，打标 `agent:hermes` |
+| 参数过长异常根治 | 370 轮会话历史平滑回写 | ✅ 零溢出错误，HTTP 200 成功回执 |
+
 
 
 
