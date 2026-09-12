@@ -27,6 +27,7 @@ public class EmbeddingService {
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
+    private final org.mcore.storage.config.ConfigFileStore configStore;
 
     @Value("${mcore.embedding.ollama-url:http://127.0.0.1:11434}")
     private String ollamaUrl;
@@ -49,14 +50,37 @@ public class EmbeddingService {
         return realModelOnline;
     }
 
-    public EmbeddingService(ObjectMapper objectMapper) {
+    public EmbeddingService(ObjectMapper objectMapper,
+                            org.mcore.storage.config.ConfigFileStore configStore) {
+        this.configStore = configStore;
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(2))
                 .build();
     }
 
+    /**
+     * 从磁盘配置热刷新嵌入参数（设置页改动即时生效）。
+     * 注意：不热更新 dim —— 向量列维度固定为 768，运行期变更会导致写入失败，
+     * 维度调整必须伴随数据重建，属运维操作而非在线配置。
+     */
+    private void refreshRuntimeConfig() {
+        try {
+            Map<String, Object> s = configStore.embeddingSettings();
+            if (s.isEmpty()) {
+                return;
+            }
+            this.ollamaUrl = configStore.str(s, "ollama_url", this.ollamaUrl);
+            this.modelName = configStore.str(s, "model", this.modelName);
+            this.apiUrl = configStore.str(s, "api_url", this.apiUrl);
+            this.apiKey = configStore.str(s, "api_key", this.apiKey);
+        } catch (Exception e) {
+            log.warn("读取运行期嵌入配置失败，沿用启动配置: {}", e.getMessage());
+        }
+    }
+
     public float[] embedText(String text) {
+        refreshRuntimeConfig();
         if (text == null || text.isBlank()) {
             return new float[dim];
         }

@@ -42,3 +42,6 @@ logs/
 # subject-context backfill backups (65MB+ per run)
 memory-backup-before-subject-*.sqlite3
 core.*
+
+# 配置中心基线快照（含密钥，不入库）
+config.default.yaml

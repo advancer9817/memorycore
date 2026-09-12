@@ -1256,3 +1256,53 @@ cd /workspace/memorycore/mcore-spring && mvn clean package -DskipTests && pm2 re
 - OpenCode 依赖其本地 SQLite，无实例环境跳过（逻辑与生产脚本同口径）
 - SQLite 读取优先 `node:sqlite`（Node 22+），回落 `sqlite3` CLI；均不可用时跳过该源
 - 沙箱中 `node:sqlite` 在进程退出期有 core dump 现象，客户端统一以显式 `process.exit()` 规避
+
+## [迭代 256] 2026-09-12 — 配置中心真实现：消灭内存桩，配置改动即时生效
+
+### 目的
+旧版（Python）的功能迁移到新架构（Java 17 + Spring Boot）后，设置页存在严重「假实现」：
+`ConfigController` 的所有配置值硬编码在构造器里，`PUT` 只改进程内 HashMap，
+既不持久化、也不影响任何真实服务；提取/嵌入服务则只用 `@Value` 读 `application.yml`，
+配置在进程启动时即被冻结。结果是：**用户在设置页改配置，看着保存成功，实际毫无作用。**
+
+### 变更摘要
+1. **新增 `mcore-storage/config/ConfigFileStore.java`**
+   - 以磁盘 `config.yaml` 为唯一事实源，mtime+size 缓存（未变更零解析开销）
+   - 原子写入（同目录临时文件 + `ATOMIC_MOVE`），权限收紧 600
+   - 对外提供 `extractionSettings()` / `embeddingSettings()` / `raw()` / `write()`
+2. **重写 `mcore-server/controller/ConfigController.java`**：删除内存桩，改为真实读写
+3. **新增 `mcore-server/service/ConfigService.java`**：磁盘 YAML ↔ 前端三层契约映射
+   - `{settings, llm:{llm,embedder}, strategy:{rule_curator,llm_curator,governance,extraction_strategy}}`
+   - strategy 四段与 YAML 段名 1:1 透传，不做有损转换
+4. **补齐缺失端点**（此前 404）
+   - `PUT /api/v1/config/llm/extraction`
+   - `PUT /api/v1/config/llm/embedding`
+   - `POST/GET/PUT /api/v1/config/reset`
+   - `GET /api/v1/config/llm/{section}`、`GET /api/v1/config/raw`（排障）
+5. **运行时热生效**（关键）
+   - `ExtractionService#refreshRuntimeConfig()` 每次调用前从 config.yaml 刷新 base_url/api_key/model/timeout
+   - `EmbeddingService#refreshRuntimeConfig()` 同理刷新 ollama_url/model/api_url/api_key
+   - 均保留 `@Value` 作为兜底；**刻意不热更新 `dim`** —— 向量列维度固定 768，
+     运行期变更会导致写入失败，维度调整必须伴随数据重建，属运维操作
+6. `reset` 采用基线快照：首次调用把当前配置固化为 `config.default.yaml`（已加入 .gitignore，含密钥不入库）
+7. `mcore-storage/pom.xml` 显式声明 snakeyaml（版本由 Spring Boot BOM 管理）
+
+### 验证
+- 构建：`mvn clean package` EXIT=0；`mvn test` EXIT=0
+- **契约**：GET 返回真实 config.yaml 值，三层结构正确
+  （settings.output_language=zh；llm.llm.model=gemini-3.8-flash；strategy 四段齐全）
+- **落盘**：PUT 改 temperature → 磁盘同步变更
+- **持久化**：重启后仍为新值
+- **回滚**：篡改 model=BROKEN-MODEL/temperature=9.9 → `POST /config/reset` → 恢复 gemini-3.8-flash/1
+- **热生效 A/B 对照**（未重启，决定性证据）
+  | 场景 | errors | degraded | extraction_elapsed_s |
+  |---|---|---|---|
+  | base_url 指向不可达 8399 | 1 | true | 0.008（瞬间连接失败） |
+  | 改回 8317 | 0 | false | 1.671（真实 LLM 调用成功） |
+- 生产配置已还原至版本库原状（测试期间的写入全部回退），仅保留语义等价的 YAML 缩进规范化
+
+### 风险与后续
+- `EmbeddingService.dim` 不热更新，如需改维度必须走运维流程重建向量列
+- 本迭代仅覆盖配置域；策展/维护类端点仍为桩实现（`CuratorController` 的 status/last-digest/apply/llm、
+  `maintenance/candidates` 恒返回空、`GET /api/audit` 硬编码空），下一迭代继续
+

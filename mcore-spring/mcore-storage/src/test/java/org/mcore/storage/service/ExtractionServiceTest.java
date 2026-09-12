@@ -41,7 +41,11 @@ class ExtractionServiceTest {
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
-        extractionService = new ExtractionService(embeddingService, hybridSearchService, memoryRepository, objectMapper);
+        // 测试用配置源指向不存在的路径：refreshRuntimeConfig 读到空配置后直接返回，
+        // 不覆盖下方通过反射注入的测试值。
+        org.mcore.storage.config.ConfigFileStore configStore =
+                new org.mcore.storage.config.ConfigFileStore("/tmp/mcore-test-config-absent.yaml");
+        extractionService = new ExtractionService(embeddingService, hybridSearchService, memoryRepository, objectMapper, configStore);
         ReflectionTestUtils.setField(extractionService, "baseUrl", "http://127.0.0.1:8317/v1");
         ReflectionTestUtils.setField(extractionService, "apiKey", "test-key");
         ReflectionTestUtils.setField(extractionService, "model", "gemini-3.8-flash");

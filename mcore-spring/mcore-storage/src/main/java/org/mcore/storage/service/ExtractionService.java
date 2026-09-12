@@ -38,6 +38,7 @@ public class ExtractionService {
     private final MemoryRepository memoryRepository;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
+    private final org.mcore.storage.config.ConfigFileStore configStore;
 
     @Value("${mcore.extraction.base-url:http://127.0.0.1:8317/v1}")
     private String baseUrl;
@@ -77,7 +78,9 @@ public class ExtractionService {
     public ExtractionService(EmbeddingService embeddingService,
                              HybridSearchService hybridSearchService,
                              MemoryRepository memoryRepository,
-                             ObjectMapper objectMapper) {
+                             ObjectMapper objectMapper,
+                             org.mcore.storage.config.ConfigFileStore configStore) {
+        this.configStore = configStore;
         this.embeddingService = embeddingService;
         this.hybridSearchService = hybridSearchService;
         this.memoryRepository = memoryRepository;
@@ -87,8 +90,28 @@ public class ExtractionService {
                 .build();
     }
 
+    /**
+     * 从磁盘配置热刷新提取参数。设置页改动即时生效，无需重启。
+     * config.yaml 中存在非空值则覆盖启动配置，否则沿用 @Value 兜底。
+     */
+    private void refreshRuntimeConfig() {
+        try {
+            Map<String, Object> s = configStore.extractionSettings();
+            if (s.isEmpty()) {
+                return;
+            }
+            this.baseUrl = configStore.str(s, "base_url", this.baseUrl);
+            this.apiKey = configStore.str(s, "api_key", this.apiKey);
+            this.model = configStore.str(s, "model", this.model);
+            this.timeoutSeconds = configStore.intVal(s, "timeout", this.timeoutSeconds);
+        } catch (Exception e) {
+            log.warn("读取运行期提取配置失败，沿用启动配置: {}", e.getMessage());
+        }
+    }
+
     public IngestResult extractAndIngest(IngestRequest req) {
         long tStart = System.currentTimeMillis();
+        refreshRuntimeConfig();
         List<Map<String, String>> msgs = req.messages();
         String text = req.text();
         String agentId = (req.agentId() != null && !req.agentId().isBlank()) ? req.agentId() : "agent";
