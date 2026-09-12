@@ -1155,6 +1155,24 @@ cd /workspace/memorycore/mcore-spring && mvn clean package -DskipTests && pm2 re
 | 记忆事实落库校验 | PostgreSQL 包含完整 title, content, 768维向量 | ✅ `mem_482cee...` 等 5 条记录入库，打标 `agent:hermes` |
 | 参数过长异常根治 | 370 轮会话历史平滑回写 | ✅ 零溢出错误，HTTP 200 成功回执 |
 
+## [迭代 252] 2026-09-12 — 确立 mcore 服务端与客户端解耦架构演进方案与反向代理规范
+
+### 目的
+响应用户关于“远程电脑连接本地 mcore 服务太不方便，组件 hook 都要改写 URL 太过繁琐，改一下架构分为服务端与客户端，所有请求统一打到本地客户端上，客户端配置服务端 URL”的重大决策要求。彻底终结多端 Agent 与 Hook 配置分散、环境迁移处处改 URL 的痛点。
+
+### 核心设计与方案输出
+1. **架构实施方案落盘** (`docs/plans/2026-09-12-mcore-server-client-decoupling-architecture-plan.md`)：
+   - 确立四大核心工程机制：虚拟本地回环（Virtual Local Loopback）、单点配置中心（Single Point of Truth）、透明凭据注入网关、离线韧性与 WAL 异步回写队列；
+   - 制定四阶段演进路线：Phase 1 客户端配置中心与轻量代理核心 ➔ Phase 2 CLI 工具与多 Agent 一键接管 ➔ Phase 3 原生 HTTP Hook 端点与离线重放 ➔ Phase 4 服务端鉴权适配与生产割接。
+2. **反向代理与客户端规范落盘** (`docs/mcore-client-architecture-and-proxy-specification.md`)：
+   - 明确协议接口规范：FastMCP 透明转发（`:8318/mcp`）、原生 HTTP Hook 端点（`/api/v1/hooks/**`）、REST 与探针透传（`/health`）；
+   - 规范 `~/.mcore/client.yaml` 统一事实源配置结构，支持 cloud / local / home_server 多 Profile 一键无缝切换；
+   - 规范跨平台 CLI `mcore-client`（start/stop/status/switch/config/bind）交互契约。
+
+### 收益与影响
+- **零改动漫游**：无论服务端部署在云端、本地还是 NAS，本地 Claude Code、Hermes、Codex 等 5 大 Agent 永远只需连接 `127.0.0.1:8318`，换环境只需单条命令切换 Profile；
+- **凭据收敛**：避免在各个 Agent 配置文件中散落明文 API Key，由本地客户端统一托管注入。
+
 
 
 
