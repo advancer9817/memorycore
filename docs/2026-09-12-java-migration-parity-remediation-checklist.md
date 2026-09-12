@@ -38,7 +38,9 @@
 
 ## 第三批 · 功能补齐
 
-- [ ] **S8** 主体上下文（subject_context）：`resolve_project` / `infer_subject_from_title` / `discover_projects` / `active_context_block`；提取 prompt 注入 subject 字段与标题前缀规则；打通 `config.yaml:129-143`（当前 76% 记忆 project_path 为空）
+- [x] **S8** 主体上下文（subject_context）：新增 `SubjectContextService`（5 函数 + SUBJECT_PROMPT_INSTRUCTION，对标 `subject_context.py` 203 行）；提取前解析项目归属；提示词注入 Active Context + Subject 规则；fact 级主体判定；落库规范 `project_path`/`scope` + `project:<name>` 标签；`subject_context` 纳入配置读写白名单
+      → **实测**：标题前缀规则被遵循（产出 `mcore …` 开头的事实）；`project_path` 由原始输入 `/workspace/memorycore/mcore-spring` 归一为 `/workspace/memorycore`；`scope=project`；tags 含 `project:mcore`
+      → **注意**：名称命中时规范路径取 `paths` 首项（与 Python 一致），配置顺序即 canonical path；存量记忆仍待回填
 - [ ] **S9** 规则策展引擎：promote / revive / mark_stale / archive + **置信度衰减执行**；打通 `rule_curator` 剩余 21 个参数（当前 24 个只消费 3 个）
 - [ ] **S10** 向量缓存 `vector_cache`：内容哈希键 `(sha256(title+space+content), model)`，读路径短路 + 批量回写；顺带修正 `embedBatch` 缺 `normalize()` 的不一致
 - [ ] **S11** 治理台账 + undo：`governance_executions` / `governance_mutation_log` 写入 + inverse 链 + 回滚端点（当前 `rollback_json` 是死字段）
