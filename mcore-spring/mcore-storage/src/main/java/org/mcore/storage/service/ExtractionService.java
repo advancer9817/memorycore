@@ -296,6 +296,67 @@ public class ExtractionService {
         return new IngestResult(added, updated, skipped, errors, addedTitles, updatedTitles, skippedDetails, totalS, extractionElapsedS, false, null);
     }
 
+    /**
+     * 通用 LLM 补全调用（供策展判官等复用）。
+     *
+     * 复用与提取流程相同的运行期配置（base_url/api_key/model/timeout），
+     * 因此设置页对提取模型的修改同样作用于策展判官。
+     *
+     * @return 模型回复正文；调用失败抛出异常，由调用方决定降级策略
+     */
+    public String chatComplete(String systemPrompt, String userPrompt, double temperature, int maxTokens) throws Exception {
+        refreshRuntimeConfig();
+        String endpoint = resolveCompletionsUrl(baseUrl);
+
+        Map<String, Object> payload = Map.of(
+                "model", model,
+                "messages", List.of(
+                        Map.of("role", "system", "content", systemPrompt),
+                        Map.of("role", "user", "content", userPrompt)
+                ),
+                "temperature", temperature,
+                "max_tokens", maxTokens,
+                "response_format", Map.of("type", "json_object")
+        );
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(endpoint))
+                .timeout(Duration.ofSeconds(timeoutSeconds))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + apiKey)
+                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload), StandardCharsets.UTF_8))
+                .build();
+
+        HttpResponse<String> response = null;
+        Exception lastEx = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                if (response.statusCode() == 200) {
+                    lastEx = null;
+                    break;
+                }
+                log.warn("策展 LLM 第 {} 次调用返回非200: HTTP {}", attempt + 1, response.statusCode());
+            } catch (Exception ex) {
+                lastEx = ex;
+                log.warn("策展 LLM 第 {} 次调用异常: {}", attempt + 1, ex.getMessage());
+            }
+        }
+        if (lastEx != null) {
+            throw lastEx;
+        }
+        if (response == null || response.statusCode() != 200) {
+            throw new IllegalStateException("策展 LLM 调用失败, HTTP " + (response == null ? "null" : response.statusCode()));
+        }
+
+        com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(response.body());
+        com.fasterxml.jackson.databind.JsonNode choices = root.path("choices");
+        if (!choices.isArray() || choices.isEmpty()) {
+            throw new IllegalStateException("策展 LLM 响应缺少 choices");
+        }
+        return choices.get(0).path("message").path("content").asText("");
+    }
+
     private String buildSystemPrompt() {
         String today = LocalDate.now().toString();
         return """

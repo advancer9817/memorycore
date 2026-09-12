@@ -1401,3 +1401,73 @@ cd /workspace/memorycore/mcore-spring && mvn clean package -DskipTests && pm2 re
   若需完整离散访问流水，应在注入路径补写 `audit_events`（建议后续迭代）
 - `POST /curator/llm` 仍只登记作业，无执行器消费（迭代 257 遗留）
 
+
+## [迭代 259] 2026-09-12 — LLM 策展执行器落地：向量召回 → LLM 判定 → 确定性策略门 → 决策落库
+
+### 目的
+填补迭代 257 遗留：`POST /curator/llm` 此前只登记 queued 作业，**没有任何执行器消费**，
+前端触发后永远停留在排队状态，治理自动化目标（自动分类 / 自动应用高置信度低风险决策 / undo logs）无法落地。
+
+### 变更摘要
+1. **新增 `mcore-storage/service/LlmCuratorExecutor.java`**（dedup 阶段完整闭环）
+   - **候选记忆**：active、内容非空、排除 `reviewed_ids_max_age_seconds` 内已审（`curator_review_log`）
+   - **向量召回**：向每条候选生成查询向量，pgvector 近邻 top_k=6，阈值 = `sim_threshold × 0.8`，
+     按相似度降序、`frozenset` 语义去重（与旧版 Python `_find_candidate_pairs` 同构）
+   - **LLM 判官**：按 `batch_size` 分批，返回结构化 JSON（`index`/`is_duplicate`/`keep`/`merge_info`/`confidence`/`risk`）
+   - **确定性策略门**：LLM 只提供置信度与风险，采纳与否由规则裁决
+     - 动作命中 `manual_only_actions` → 强制 pending
+     - risk=high → pending
+     - confidence ≥ `auto_approve_confidence` 且 low → **auto_approved**
+     - confidence ≥ `review_confidence_threshold` → pending
+     - 否则 → rejected
+   - **落库**：写 `governance_decisions`（含 before/after/**rollback_json** 回滚信息、`candidate_hash` 幂等键、
+     `curator_job_id`/`curator_batch_id` 溯源、`judge_model`/`decision_version`），并登记 `llm_curator_batches`
+2. **`ExtractionService` 新增 `chatComplete()`**：复用提取流程的运行期配置与重试逻辑，供判官调用
+   （因此设置页对提取模型的修改同样作用于策展判官）
+3. **`CuratorController` 新增执行入口**
+   - `POST /api/v1/curator/execute` 消费一条排队作业
+   - `POST /api/v1/curator/execute/{id}` 执行指定作业
+   - `POST /api/v1/curator/llm` 支持 `run=true` 同步执行
+
+### 实现期发现并修复的真实缺陷
+1. **候选选择非确定性（重要）**：候选查询原为 `ORDER BY importance DESC LIMIT :limit`，
+   而实测有 **70 条记忆并列 `importance=1`**，导致同为并列第一的记忆被任意丢弃、
+   入选者每次运行不同、高价值记忆被系统性饿死。
+   修复：补 `updated_at DESC NULLS LAST, id ASC` 确定性排序。
+2. **`error_json` 违反 NOT NULL 约束**：`llm_curator_batches.error_json` / `llm_curator_jobs.error_json`
+   均为 NOT NULL（默认 `'{}'::jsonb`），原实现在无错误时写 NULL 导致批次更新失败
+   （`markJobFinished` 存在同源隐患，只是首次运行恰好有错误才未触发）。修复：无错误时写 `{}`。
+3. **风险等级未归一化**：LLM 可能返回 `risk: "none"`（实测确实出现），原逻辑仅认 `low`，
+   会把本可自动采纳的决策挡在待审队列。修复：归一化 none/nil/safe/minimal→low、critical/severe→high。
+
+### 验证（全部实测，真实 LLM 调用）
+- 构建 `mvn package` EXIT=0；`mvn test` EXIT=0
+- **全链路**：40 候选 → 3 对 → 1 批次 → LLM 判定 3 条重复 → **策略门自动采纳** 3 条
+  ```
+  dec_95c543a6399b4816 | dedup | archive_duplicate | conf=1.000 | risk=low | auto_approved
+  ```
+- **决策字段完整性**：`source_ids=[dupverify_aaa, dupverify_bbb]`、`finding={keep_id,drop_id,similarity:1.0,reason}`、
+  `before/after/rollback`（`{"action":"restore_status","target_id":...}`）、`candidate_hash`(SHA-256)、
+  `curator_job_id`/`curator_batch_id`、`judge_model=gemini-3.8-flash`
+- **幂等性**：保留决策后重跑，同样召回 3 对但 `decision_count: 0`，决策总数稳定为 3（`candidate_hash` 生效）
+- 作业状态流转正常：`queued` → `running` → `succeeded`，`error_json={}`
+- 测试数据已全部清理（决策/作业/批次/记忆归零），`llm_curator` 配置已还原为 0.8/10/2000/60
+
+### ⚠️ 重大环境发现（需决策，非本次变更引入）
+**整个语义检索层当前处于降级状态。** ollama（`127.0.0.1:11434`）不可达，嵌入自 Python 时代起
+即降级为 SHA-256 伪哈希向量。实测证据：
+- 全库向量两两平均相似度 ≈ **-0.0007**、最大仅 0.4961（真实语义向量应显著高于此）
+- 用 Python `_embed_hashing` 重算 `title + " " + content` 与库中存储向量余弦相似度 = **1.0**（完全吻合）
+
+后果：向量的余弦距离**不携带语义信息**，仅对"文本完全相同"敏感。因此
+**语义召回、相似度去重、矛盾检测的召回质量均受限**——策展 dedup 只能发现近乎逐字相同的记忆。
+Java 与 Python 的哈希实现经实测字节对齐（同文本 → 同向量），不存在跨实现不兼容问题。
+
+### 风险与后续
+- `LlmCuratorExecutor` 仅实现 **dedup** 阶段；`contradiction` / `split` / `link` / `importance`
+  已在作业摘要中如实列为 `pending_stages`，未实现前不会谎报完成
+- 决策默认进入策略门裁决，但**自动应用（把 auto_approved 落到 memories）尚未接线**，
+  即决策不会自动修改记忆状态；应用需走 `GovernanceService.applyDecision`。建议下一迭代补上自动应用通道与 undo 执行
+- 恢复语义能力需启动 ollama 或改配可用的 OpenAI 兼容嵌入端点（`embedding.api_url`）；
+  若长期依赖哈希降级，向量检索与语义策展的价值将大幅缩水
+

@@ -1,6 +1,7 @@
 package org.mcore.server.controller;
 
 import org.mcore.storage.service.CuratorService;
+import org.mcore.storage.service.LlmCuratorExecutor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
@@ -16,9 +17,11 @@ import java.util.Map;
 public class CuratorController {
 
     private final CuratorService curatorService;
+    private final LlmCuratorExecutor llmCuratorExecutor;
 
-    public CuratorController(CuratorService curatorService) {
+    public CuratorController(CuratorService curatorService, LlmCuratorExecutor llmCuratorExecutor) {
         this.curatorService = curatorService;
+        this.llmCuratorExecutor = llmCuratorExecutor;
     }
 
     // ==================== 状态 ====================
@@ -43,7 +46,32 @@ public class CuratorController {
 
     @PostMapping({"/api/curator/llm", "/api/v1/curator/llm"})
     public Map<String, Object> triggerLlmCurator(@RequestBody(required = false) Map<String, Object> body) {
-        return curatorService.triggerLlmCurator(body);
+        Map<String, Object> job = curatorService.triggerLlmCurator(body);
+        // run=true 时同步执行（默认只登记，交由 /curator/execute 或调度器消费）
+        boolean run = body != null && Boolean.TRUE.equals(body.get("run"));
+        if (run && job.get("job_id") != null) {
+            Map<String, Object> result = llmCuratorExecutor.execute(String.valueOf(job.get("job_id")));
+            Map<String, Object> merged = new LinkedHashMap<>(job);
+            merged.put("status", "executed");
+            merged.put("execution", result);
+            return merged;
+        }
+        return job;
+    }
+
+    /** 消费一条排队中的策展作业（真实执行） */
+    @PostMapping({"/api/curator/execute", "/api/v1/curator/execute"})
+    public Map<String, Object> executeQueued() {
+        return llmCuratorExecutor.consumeOne();
+    }
+
+    /** 执行指定策展作业 */
+    @PostMapping({"/api/curator/execute/{id}", "/api/v1/curator/execute/{id}"})
+    public Map<String, Object> executeJob(@PathVariable("id") String id) {
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("job_id", id);
+        res.put("result", llmCuratorExecutor.execute(id));
+        return res;
     }
 
     // ==================== LLM 策展作业 ====================
