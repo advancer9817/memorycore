@@ -1544,3 +1544,55 @@ Java 与 Python 的哈希实现经实测字节对齐（同文本 → 同向量�
   `sim_threshold`(0.8) 与 `floor = sim_threshold × 0.8` 需基于新分布复核，否则候选召回可能过严
 - 2750 条归档记忆一并回填后，全库将首次实现"向量全覆盖"
 
+
+## [迭代 261] 2026-09-12 — 架构迁移功能对齐审计：六域代码级差距普查与修复路线图落档
+
+### 目的
+用户指出「旧功能与注意事项丢失严重」。以 `docs/iteration-number-map-2026-09-02.md`（208 条冻结迭代）为历史基线，
+对 Python → Java 迁移做**逐模块函数级对照**审计，产出一份可执行的差距清单。
+
+### 方法
+- Python 旧实现 `memorycore/`（44 模块 / 19,197 行）↔ Java 新实现 `mcore-spring/`（61 个 main 源文件）
+- 按六个功能域拆分并行深挖：记忆加工与主体归属 / 向量基础设施 / 治理执行与维护链路 / Agent 协作与隐私 / 画像与召回质量 / 运维合规基线
+- **每项判定必须有 `grep`/`read`/`psql` 证据**（文件路径 + 行号），禁止臆测；全程只读
+
+### 结论：确认 26 项差距（P0 五项 / P1 十项 / P2 十一项）
+
+**P0（正在造成实际损害）**
+1. **实体索引停止增长并持续腐化** —— `memory_entities` 止于 2026-09-10 而 `memories` 更新至 09-12；
+   `EntityMapper.insert` 全库零调用者，`MemoryRepository.insert` 不触碰该表，DB 无触发器。
+   检索同时退化为裸 `LIKE`，丢弃别名归一（Python `canonical_entity` 把 `local-memory-mcp`→`mcore`）
+2. **治理决策不落地** —— `batchApply` 只 `UPDATE governance_decisions SET review_status`，
+   从不触碰 `memories`；而 `getCounts` 的 applied 计数照涨 → 前端「已应用 N 条」而记忆零变化
+3. **写入端隐私脱敏零实现**（安全）—— Python 有八类密钥正则 + 熵检测并强制在写库前脱敏；Java 明文落库
+4. **上下文注入防护零实现**（安全）—— Python 有 `BOUNDARY_NOTICE` + 8 条注入正则；Java 无，记忆正文裸注入
+5. **召回指标被伪造** —— `hit_rate=0.94` / `average_recall_ms=3.8` 硬编码，工具描述却自称「数据库真实聚合」
+
+**P1（功能整块缺失）**：主体上下文（用户点名，76% 记忆 project_path 为空）/ 规则策展引擎（`rule_curator` 24 参数只消费 3 个）/
+原子化拆分 / episodic 汇总 / split 动作 / 治理台账与 undo（`rollback_json` 为死字段）/
+向量缓存（迭代 171 降本增效核心 141ms→0.3ms）/ 向量同步队列 / 画像学习环（`extractProfile` 用 10 条硬编码常量冒充抽取）/ 上下文包构建（仅剩 token 截断）
+
+**P2（工程与安全）**：测试覆盖（61 个 main 类仅 2 个测试类、5 个用例，三模块无测试依赖）/
+管理面越权（任意租户 key 可跨租户开辟销毁库、签发吊销密钥）/ default 租户免鉴权且监听全网卡 /
+CORS 全开放 / `config/raw` 回吐密钥 / 连接池 128 > PG `max_connections` 100 /
+JDBC URL 参数注入面 / 无 `@Scheduled` 调度 / `extraction_strategy` 16 参数零消费 / MCP `dim=768` 硬编码 / 三处静默吞异常
+
+### 两项判定纠正（避免后续重复误判）
+1. **MCP 工具面 22 = 22，零差异** —— 初始怀疑的 `memory_lineage`/`profile_*`/`agent_*` 均为 Python 内部函数，从未注册为工具
+2. **Agent 三张表不是新丢失** —— Python 侧已按 `docs/plans/2026-08-24-governance-slimming.md:117-137`（I9.3）主动拆除，
+   三表实测均 0 行；但 `scripts/hooks/session-start.sh:133-134` 与 `session-end.sh:40` 仍调用已下架工具，
+   返回 `-32601` 被 `|| true` 静默吞掉 → 真问题是**悬空契约**，而非功能回补
+
+### 交付物
+- `docs/2026-09-12-java-migration-parity-audit.md`（23KB）—— 完整审计报告：方法论、判定纠正、26 项差距含证据、修复路线图、可复现命令、数据快照
+- `docs/2026-09-12-java-migration-parity-remediation-checklist.md` —— 可勾选修复跟踪清单（S1~S24）
+
+### 修复优先级
+1. **安全批**：隐私脱敏 → 注入防护 → 鉴权收紧（管理面越权/绑定/CORS）→ 配置脱敏
+2. **止损批**：实体索引写回 → 决策执行器 → 摘除伪造指标
+3. **功能批**：主体上下文 → 规则策展引擎 → 向量缓存 → 台账 undo → 原子化 → 画像 → 上下文包 → rollup → 同步队列
+4. **工程批**：测试补网 → 连接池收敛 → 库名派生收敛 → 定时调度 → 参数接入 → 清理悬空 hook
+
+### 备注
+审计全程只读，未干扰正在进行的向量回填（迭代 260，bge-m3 / 1024 维）。
+
