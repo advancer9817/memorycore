@@ -978,3 +978,39 @@
 ### 回滚
 `git revert HEAD && mvn -f /workspace/memorycore/mcore-spring/pom.xml clean package -DskipTests && pm2 restart mcore`
 （应急开关：`MCORE_SECURITY_ENABLED=false` 可临时退回鉴权关闭态）
+
+## [迭代 247] 2026-09-12 — 修复前端跨机加载失败：移除全局 TypeHandler 泛型污染与修正前端相对路径反代
+
+### 目的
+彻底解决外部公网浏览器访问 GCP 远程 mcore 前端（`:18318`）时出现的两处核心故障：
+1. 后端数据全 null：MyBatis 扫描全局 TypeHandler 污染 `Map.class` 反序列化导致列表与分类返回全空；
+2. 前端请求指向 127.0.0.1：编译产物内硬编码 `http://127.0.0.1:8318` 导致客户端浏览器向本地回环发请求失败。
+
+### 变更摘要
+1. **移除 MyBatis 全局 TypeHandler 自动扫描**：
+   - 在 `mcore-spring/mcore-server/src/main/resources/application.yml` 中注释掉 `type-handlers-package: org.mcore.storage.mybatis.handler`；
+   - 避免 `JsonMapTypeHandler extends BaseTypeHandler<Map<String, Object>>` 被自动挂载为全局 `Map.class` 的默认 TypeHandler；
+   - `MemoryMapper.xml` 中需要该处理器的字段（`metadata`、`tags`）已通过全限定类名显式指定，不受影响。
+2. **规范前端相对路径代理与请求 URL**：
+   - 修正 `ui/hooks/useAppsApi.ts` 中 `/api/v1/apps/?` 为 `/api/v1/apps?`，避免 Next.js 308 301 重定向开销；
+   - 远端构建产物静态 JS 中的硬编码 `http://127.0.0.1:8318` 统一修补为空字符串（纯相对路径），使浏览器请求一律走同源反向代理（由 Next.js `rewrites` 内部转回服务本机 `8318`）。
+3. **远端环境维护与验证**：
+   - 远端编译工具链对齐（安装 Maven 3.9.12 与 pnpm 12.4.1）；
+   - 执行 `mvn clean package -DskipTests` 重新打出 `mcore-server.jar`；
+   - PM2 热重启 `mcore` 与 `mcore-ui`。
+
+### 验证
+| 检查项 | 预期 | 实测 |
+|---|---|---|
+| `GET /api/v1/memories?size=1` (8318) | 字段包含真实标题、内容与 ID | ✅ 正常返回真实字段与 2,060 统计 |
+| `GET /api/v1/memories/categories` | 返回 10 个有效分类对象及条数 | ✅ 正常返回 `project_memory` 等统计 |
+| `GET /api/v1/tags` | 返回 10 个有效标签字符串 | ✅ `project_memory`, `environment_fact`... |
+| `GET /api/v1/apps` (18318 反代) | 返回 18 个应用协同指标 | ✅ 200 返回全量 Apps 数组 |
+| `GET /api/v1/memories?size=2` (18318 反代) | 返回格式完整、无 null 字符串 | ✅ 200 返回真实记录 |
+
+### 回滚
+```bash
+git revert HEAD
+cd /workspace/memorycore/mcore-spring && mvn clean package -DskipTests && pm2 restart mcore mcore-ui
+```
+

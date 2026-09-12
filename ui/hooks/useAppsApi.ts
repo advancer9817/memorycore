@@ -115,7 +115,7 @@ export const useAppsApi = (): UseAppsApiReturn => {
       if (sort_direction) queryParams.append('sort_direction', sort_direction);
 
       const response = await axios.get<ApiResponse>(
-        `${getApiBaseUrl()}/api/v1/apps/?${queryParams.toString()}`
+        `${getApiBaseUrl()}/api/v1/apps?${queryParams.toString()}`
       );
 
       setIsLoading(false);
@@ -220,7 +220,7 @@ export const useAppsApi = (): UseAppsApiReturn => {
       );
       dispatch(setAppsSuccess(
         (await axios.get<ApiResponse>(
-          `${getApiBaseUrl()}/api/v1/apps/?page_size=100`
+          `${getApiBaseUrl()}/api/v1/apps?page_size=100`
         )).data.apps
       ));
       setIsLoading(false);
